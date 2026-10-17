@@ -4672,7 +4672,39 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 116. Ketahanan Impor Excel CEISA 4.0 (Deduplikasi Pungutan & Komponen Biaya, Fallback Fault-Tolerance Transaksi Header & Barang)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [import_excel.php](file:///c:/dp/g-ceisa/import_excel.php), [api_import_excel.php](file:///c:/dp/g-ceisa/api_import_excel.php), [www/CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/www/CeisaXlsxImporter.php), [www/import_excel.php](file:///c:/dp/g-ceisa/www/import_excel.php)
+
+### A. Masalah & Analisis
+1. **Galat Duplikasi Primary Key pada Sheet PUNGUTAN**:
+   - Saat pengguna mengimpor file Excel dari portal CEISA 4.0 (misalnya dokumen mingguan seperti `03-08-2026 - 09-08-2026.xlsx` atau `07-09-2026 - 13-09-2026.xlsx`), proses impor gagal total dengan pesan:
+     `Duplicate entry '080167772504400-201039B738A640408202600788-PPN-1' for key 'bc_ceisa_pungutan.PRIMARY'`
+   - **Penyebab**: Format berkas Excel CEISA 4.0 pada sheet `PUNGUTAN` dapat memuat beberapa baris pungutan dengan jenis pajak dan fasilitas yang sama (misalnya PPN fasilitas 1) dalam satu nomor AJU yang sama. Karena tabel `bc_ceisa_pungutan` memiliki composite primary key `(cmp_id, nomor_aju, kode_jenis_pungutan, kode_fasilitas_tarif)`, operasi batch insert biasa tanpa deduplikasi / ON DUPLICATE KEY UPDATE menolak baris duplikat tersebut.
+2. **Kebutuhan Pengguna**:
+   - *"ada error saat import excel. bisa fix ga? selama header dan barang aman.. tetep masuk tersimpan"*
+   - Pengguna mensyaratkan bahwa data inti dokumen (`HEADER` dan `BARANG`) harus dipastikan selalu tersimpan dan transaksi di-commit ke basis data secara aman, meskipun sheet pelengkap/auxiliary mengalami peringatan atau duplikasi data.
+
+### B. Solusi & Implementasi
+1. **Deduplikasi Cerdas & Akumulasi Nilai (`CeisaXlsxImporter.php`)**:
+   - Untuk sheet `PUNGUTAN` (`bc_ceisa_pungutan`): Sistem mendeteksi baris dengan kunci `(cmp_id, nomor_aju, kode_jenis_pungutan, kode_fasilitas_tarif)` yang identik, lalu menjumlahkan akumulasi `nilai_pungutan` serta melengkapi `npwp_billing`.
+   - Untuk sheet `KOMPONENBIAYA` (`bc_ceisa_komponenbiaya`): Sistem menjumlahkan akumulasi kolom `nilai` jika kode komponen biaya sama.
+   - Pada metode `insertBatch()`: Ditambahkan klausul `ON DUPLICATE KEY UPDATE` dinamis untuk kolom data non-identitas (`c = VALUES(c)`) atau fallback `INSERT IGNORE INTO`.
+2. **Resilience & Fault-Tolerance Transaksi Per-Sheet**:
+   - Pembagian level kritis:
+     - **Sheet Kritis (`HEADER` & `BARANG`)**: Kegagalan pada sheet ini akan membatalkan transaksi (`rollback`) karena merupakan struktur utama dokumen kepabeanan.
+     - **Sheet Pelengkap (`PUNGUTAN`, `KONTAINER`, `KEMASAN`, `KOMPONENBIAYA`, dll.)**: Kegagalan pada salah satu sheet pelengkap ditangkap secara aman (`try-catch` per-sheet), dicatat ke dalam daftar peringatan (`$importWarnings`), dan tidak membatalkan transaksi.
+   - Transaksi database di-commit secara penuh selama sheet inti `HEADER` (dan `BARANG` bila tersedia) berhasil tersimpan.
+3. **Peningkatan UX & Visual Feedback Antrean Impor (`import_excel.php`)**:
+   - Antarmuka antrean impor kini menampilkan status sukses dengan catatan jika ada sheet pelengkap yang dilewati, sehingga pengguna memperoleh transparansi data yang jelas.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke direktori `www/` dan di-deploy ke server Alibaba Cloud `/source/public/` dan `/source/public/www/`.
+   - Linting `php -l` lolos 0 errors. Pengujian impor riil dan simulasi deduplikasi berjalan sempurna dengan status `OK`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 

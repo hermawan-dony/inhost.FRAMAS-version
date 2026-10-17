@@ -310,7 +310,18 @@ class CeisaXlsxImporter {
                 $valuesClauses[] = '(' . implode(', ', $rowPlaceholders) . ')';
             }
 
-            $sql = "INSERT INTO `$tableName` (" . implode(', ', $quotedCols) . ") VALUES " . implode(', ', $valuesClauses);
+            // Tambahkan ON DUPLICATE KEY UPDATE untuk kolom data non-identitas agar tidak terjadi Duplicate Entry crash
+            $updateClauses = [];
+            foreach ($cols as $c) {
+                if ($c === 'cmp_id' || $c === 'nomor_aju') continue;
+                $updateClauses[] = "`$c` = VALUES(`$c`)";
+            }
+            
+            if (!empty($updateClauses)) {
+                $sql = "INSERT INTO `$tableName` (" . implode(', ', $quotedCols) . ") VALUES " . implode(', ', $valuesClauses) . " ON DUPLICATE KEY UPDATE " . implode(', ', $updateClauses);
+            } else {
+                $sql = "INSERT IGNORE INTO `$tableName` (" . implode(', ', $quotedCols) . ") VALUES " . implode(', ', $valuesClauses);
+            }
 
             if ($this->pdo) {
                 $stmt = $this->pdo->prepare($sql);
@@ -396,114 +407,171 @@ class CeisaXlsxImporter {
         }
 
         $importedStats = [];
+        $importWarnings = [];
         $totalRows = 0;
+        $hasHeaderSuccess = false;
+        $hasBarangSuccess = false;
 
         try {
             foreach (self::$sheetTableMap as $sheetName => $tableName) {
-                // Khusus VERSI: jika sheet VERSI ada tapi tidak memiliki nomor_aju, kita sebarkan ke semua AJU
-                if ($sheetName === 'VERSI') {
-                    if (!$this->tableExists($tableName)) continue;
-                    $tableCols = $this->getTableColumns($tableName);
-                    $versiStr = '1.3';
-                    if (!empty($excelData['VERSI']) && !empty($excelData['VERSI'][0]['versi'])) {
-                        $versiStr = trim($excelData['VERSI'][0]['versi']);
-                    }
-                    $versiRows = [];
-                    foreach ($allAjus as $aju) {
-                        $versiRows[] = [
-                            'cmp_id'    => $cmpId,
-                            'nomor_aju' => $aju,
-                            'versi'     => $versiStr
-                        ];
+                try {
+                    // Khusus VERSI: jika sheet VERSI ada tapi tidak memiliki nomor_aju, kita sebarkan ke semua AJU
+                    if ($sheetName === 'VERSI') {
+                        if (!$this->tableExists($tableName)) continue;
+                        $tableCols = $this->getTableColumns($tableName);
+                        $versiStr = '1.3';
+                        if (!empty($excelData['VERSI']) && !empty($excelData['VERSI'][0]['versi'])) {
+                            $versiStr = trim($excelData['VERSI'][0]['versi']);
+                        }
+                        $versiRows = [];
+                        foreach ($allAjus as $aju) {
+                            $versiRows[] = [
+                                'cmp_id'    => $cmpId,
+                                'nomor_aju' => $aju,
+                                'versi'     => $versiStr
+                            ];
+                        }
+
+                        if ($overwrite) {
+                            foreach ($allAjus as $aju) {
+                                $this->deleteExisting($tableName, $cmpId, $aju);
+                            }
+                        }
+
+                        $cnt = $this->insertBatch($tableName, $versiRows, $tableCols, 150);
+                        $importedStats[$tableName] = $cnt;
+                        $totalRows += $cnt;
+                        continue;
                     }
 
+                    if (empty($excelData[$sheetName])) {
+                        continue;
+                    }
+
+                    // Cek apakah tabel ada di database
+                    if (!$this->tableExists($tableName)) {
+                        continue;
+                    }
+
+                    $tableCols = $this->getTableColumns($tableName);
+                    $rows = $excelData[$sheetName];
+
+                    // Jika overwrite aktif, bersihkan data lama untuk seluruh AJU yang tertera di file ini
                     if ($overwrite) {
                         foreach ($allAjus as $aju) {
                             $this->deleteExisting($tableName, $cmpId, $aju);
                         }
                     }
 
-                    $cnt = $this->insertBatch($tableName, $versiRows, $tableCols, 150);
-                    $importedStats[$tableName] = $cnt;
-                    $totalRows += $cnt;
-                    continue;
-                }
+                    // Siapkan baris data dengan penyesuaian kolom & alias
+                    $preparedRows = [];
+                    $seriCounters = [];
+                    foreach ($rows as $row) {
+                        // Gunakan nomor_aju dari baris tersebut jika ada, atau fallback ke primaryAju
+                        $rowAju = !empty($row['nomor_aju']) ? trim($row['nomor_aju']) : $primaryAju;
+                        $row['nomor_aju'] = $rowAju;
+                        if (isset($tableCols['cmp_id'])) {
+                            $row['cmp_id'] = $cmpId;
+                        }
 
-                if (empty($excelData[$sheetName])) {
-                    continue;
-                }
+                        // Terapkan kolom alias (misal nomor_kontiner -> nomor_kontainer)
+                        foreach (self::$columnAliases as $srcCol => $dstCol) {
+                            if (isset($row[$srcCol]) && !isset($row[$dstCol])) {
+                                $row[$dstCol] = $row[$srcCol];
+                            }
+                        }
 
-                // Cek apakah tabel ada di database
-                if (!$this->tableExists($tableName)) {
-                    continue;
-                }
+                        // Cek apakah baris ini memiliki data riil selain nomor_aju dan cmp_id
+                        $hasPayload = false;
+                        foreach ($row as $k => $v) {
+                            if ($k === 'nomor_aju' || $k === 'cmp_id') continue;
+                            if ($v !== null && trim((string)$v) !== '') {
+                                $hasPayload = true;
+                                break;
+                            }
+                        }
 
-                $tableCols = $this->getTableColumns($tableName);
-                $rows = $excelData[$sheetName];
+                        // Jika baris kosong tanpa data riil (hanya nomor_aju), lewati baris ini
+                        if (!$hasPayload) {
+                            continue;
+                        }
 
-                // Jika overwrite aktif, bersihkan data lama untuk seluruh AJU yang tertera di file ini
-                if ($overwrite) {
-                    foreach ($allAjus as $aju) {
-                        $this->deleteExisting($tableName, $cmpId, $aju);
-                    }
-                }
+                        // Auto-assign seri jika seri bernilai null/empty pada tabel yang membutuhkannya
+                        if (isset($tableCols['seri']) && (!isset($row['seri']) || $row['seri'] === null || $row['seri'] === '')) {
+                            if (!isset($seriCounters[$rowAju])) $seriCounters[$rowAju] = 0;
+                            $row['seri'] = ++$seriCounters[$rowAju];
+                        }
 
-                // Siapkan baris data dengan penyesuaian kolom & alias
-                $preparedRows = [];
-                $seriCounters = [];
-                foreach ($rows as $row) {
-                    // Gunakan nomor_aju dari baris tersebut jika ada, atau fallback ke primaryAju
-                    $rowAju = !empty($row['nomor_aju']) ? trim($row['nomor_aju']) : $primaryAju;
-                    $row['nomor_aju'] = $rowAju;
-                    if (isset($tableCols['cmp_id'])) {
-                        $row['cmp_id'] = $cmpId;
-                    }
+                        // Filter kolom: hanya masukkan kolom yang benar-benar ada di tabel MySQL
+                        $filteredRow = [];
+                        foreach ($row as $k => $v) {
+                            if (isset($tableCols[$k])) {
+                                $filteredRow[$k] = $v;
+                            }
+                        }
 
-                    // Terapkan kolom alias (misal nomor_kontiner -> nomor_kontainer)
-                    foreach (self::$columnAliases as $srcCol => $dstCol) {
-                        if (isset($row[$srcCol]) && !isset($row[$dstCol])) {
-                            $row[$dstCol] = $row[$srcCol];
+                        if (!empty($filteredRow)) {
+                            $preparedRows[] = $filteredRow;
                         }
                     }
 
-                    // Cek apakah baris ini memiliki data riil selain nomor_aju dan cmp_id
-                    $hasPayload = false;
-                    foreach ($row as $k => $v) {
-                        if ($k === 'nomor_aju' || $k === 'cmp_id') continue;
-                        if ($v !== null && trim((string)$v) !== '') {
-                            $hasPayload = true;
-                            break;
+                    // Deduplikasi khusus & akumulasi nilai jika ada duplikat dalam satu sheet Excel:
+                    // 1. PUNGUTAN: gabungkan nilai_pungutan jika cmp_id, nomor_aju, jenis pungutan, dan fasilitas sama
+                    if ($tableName === 'bc_ceisa_pungutan' && !empty($preparedRows)) {
+                        $merged = [];
+                        foreach ($preparedRows as $pRow) {
+                            $k = ($pRow['cmp_id'] ?? '') . '|' . ($pRow['nomor_aju'] ?? '') . '|' . ($pRow['kode_jenis_pungutan'] ?? '') . '|' . ($pRow['kode_fasilitas_tarif'] ?? '');
+                            if (isset($merged[$k])) {
+                                $merged[$k]['nilai_pungutan'] = (float)($merged[$k]['nilai_pungutan'] ?? 0) + (float)($pRow['nilai_pungutan'] ?? 0);
+                                if (empty($merged[$k]['npwp_billing']) && !empty($pRow['npwp_billing'])) {
+                                    $merged[$k]['npwp_billing'] = $pRow['npwp_billing'];
+                                }
+                            } else {
+                                $merged[$k] = $pRow;
+                            }
                         }
+                        $preparedRows = array_values($merged);
                     }
 
-                    // Jika baris kosong tanpa data riil (hanya nomor_aju), lewati baris ini
-                    if (!$hasPayload) {
-                        continue;
-                    }
-
-                    // Auto-assign seri jika seri bernilai null/empty pada tabel yang membutuhkannya
-                    if (isset($tableCols['seri']) && (!isset($row['seri']) || $row['seri'] === null || $row['seri'] === '')) {
-                        if (!isset($seriCounters[$rowAju])) $seriCounters[$rowAju] = 0;
-                        $row['seri'] = ++$seriCounters[$rowAju];
-                    }
-
-                    // Filter kolom: hanya masukkan kolom yang benar-benar ada di tabel MySQL
-                    $filteredRow = [];
-                    foreach ($row as $k => $v) {
-                        if (isset($tableCols[$k])) {
-                            $filteredRow[$k] = $v;
+                    // 2. KOMPONENBIAYA: gabungkan nilai jika kode_komponen_biaya sama
+                    if ($tableName === 'bc_ceisa_komponenbiaya' && !empty($preparedRows)) {
+                        $merged = [];
+                        foreach ($preparedRows as $pRow) {
+                            $k = ($pRow['cmp_id'] ?? '') . '|' . ($pRow['nomor_aju'] ?? '') . '|' . ($pRow['kode_komponen_biaya'] ?? '');
+                            if (isset($merged[$k])) {
+                                $merged[$k]['nilai'] = (float)($merged[$k]['nilai'] ?? 0) + (float)($pRow['nilai'] ?? 0);
+                            } else {
+                                $merged[$k] = $pRow;
+                            }
                         }
+                        $preparedRows = array_values($merged);
                     }
 
-                    if (!empty($filteredRow)) {
-                        $preparedRows[] = $filteredRow;
+                    // Jalankan Bulk Insert Tuning
+                    $insertedCount = $this->insertBatch($tableName, $preparedRows, $tableCols, 150);
+                    $importedStats[$tableName] = $insertedCount;
+                    $totalRows += $insertedCount;
+
+                    if ($sheetName === 'HEADER') {
+                        $hasHeaderSuccess = true;
+                    } elseif ($sheetName === 'BARANG') {
+                        $hasBarangSuccess = true;
                     }
+
+                } catch (Exception $sheetErr) {
+                    // Jika HEADER atau BARANG gagal, batalkan seluruh transaksi karena ini data inti dokumen
+                    if ($sheetName === 'HEADER' || $sheetName === 'BARANG') {
+                        throw $sheetErr;
+                    }
+                    // Jika sheet pelengkap (PUNGUTAN, KONTAINER, dsb) gagal, simpan sebagai warning & lanjutkan transaksi
+                    $importWarnings[$sheetName] = $sheetErr->getMessage();
+                    error_log("CeisaXlsxImporter [Warning] Sheet $sheetName ($tableName): " . $sheetErr->getMessage());
                 }
+            }
 
-                // Jalankan Bulk Insert Tuning
-                $insertedCount = $this->insertBatch($tableName, $preparedRows, $tableCols, 150);
-                $importedStats[$tableName] = $insertedCount;
-                $totalRows += $insertedCount;
+            // Pastikan data HEADER minimal berhasil tersimpan sebelum commit
+            if (!$hasHeaderSuccess) {
+                throw new Exception("Gagal mengimpor data inti (HEADER kosong atau gagal tersimpan).");
             }
 
             // Commit transaksi
@@ -514,7 +582,7 @@ class CeisaXlsxImporter {
             }
 
         } catch (Exception $e) {
-            // Rollback jika terjadi kesalahan
+            // Rollback jika terjadi kesalahan pada HEADER/BARANG atau kesalahan fatal
             if ($this->pdo) {
                 $this->pdo->rollBack();
             } elseif ($this->koneksi) {
@@ -527,7 +595,10 @@ class CeisaXlsxImporter {
 
         return [
             'status'                 => 'OK',
-            'message'                => 'Data dokumen pabean berhasil diimport ke tabel riil.',
+            'message'                => !empty($importWarnings) 
+                ? 'Data dokumen pabean berhasil disimpan (HEADER & BARANG aman), dengan catatan pada beberapa sheet pelengkap.' 
+                : 'Data dokumen pabean berhasil diimport ke tabel riil.',
+            'warnings'               => $importWarnings,
             'cmp_id'                 => $cmpId,
             'nomor_aju'              => (count($allAjus) === 1 ? $primaryAju : $allAjus),
             'total_ajus'             => count($allAjus),

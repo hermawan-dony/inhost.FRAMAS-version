@@ -991,10 +991,15 @@ $isEmbedded = (!empty($_GET['embedded']) && $_GET['embedded'] == '1') || (isset(
             } else if (item.status === 'processing') {
                 statusBadgeHtml = `<span class="status-badge badge-processing"><span class="spinner-sm"></span> Memproses...</span>`;
             } else if (item.status === 'success') {
+                const warnKeys = item.result?.warnings ? Object.keys(item.result.warnings) : [];
+                const warnHtml = warnKeys.length > 0 
+                    ? `<div style="font-size:9.5px; color:#d97706; margin-top:2px;">⚠️ Catatan: Sheet <strong>${escapeHtml(warnKeys.join(', '))}</strong> memiliki peringatan tapi data Header & Barang aman tersimpan.</div>` 
+                    : '';
                 statusBadgeHtml = `
                     <span class="status-badge badge-success">✓ Berhasil</span>
                     <div class="success-detail-box">
                         AJU: <strong>${escapeHtml(item.result?.nomor_aju || '-')}</strong> (BC ${item.result?.kode_dokumen || '-'}) • <strong>${item.result?.total_rows_imported || 0} baris</strong> tersimpan
+                        ${warnHtml}
                     </div>
                 `;
             } else if (item.status === 'error') {
