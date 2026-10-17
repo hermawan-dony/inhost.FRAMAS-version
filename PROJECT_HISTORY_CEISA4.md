@@ -4617,6 +4617,33 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 114. Penggantian Card "Total Item Barang" dengan Card Interaktif "Belum Masuk IT Inv" dan Pemfilteran Berbasis Klik Card
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Kebutuhan Pengguna
+1. Menjelaskan maksud metrik **"Total Item Barang"**: sebelumnya merupakan akumulasi baris komoditas barang (`jml_barang`) dari seluruh dokumen. Pengguna meminta metrik ini digantikan.
+2. Menggantikannya dengan tombol/card **"Belum Masuk IT Inv"** yang memuat jumlah dokumen pabean yang belum masuk ke IT Inventory (`bc_1ab2`), **hanya jika** konfigurasi perusahaan `IS_INV = 1`.
+3. Jika konfigurasi perusahaan **`IS_INV = 0`**, tombol/card "Belum Masuk IT Inv" dihapus/disembunyikan sepenuhnya dari layar.
+4. Membuat seluruh card KPI (`Total Dokumen AJU`, `Belum Selesai`, `Selesai Proses`, `Belum Masuk IT Inv`) dapat diklik untuk langsung memfilter daftar dokumen pabean yang tampil di tabel secara instan (client-side) tanpa perlu reload halaman. Mengklik card yang aktif kembali akan menonaktifkan filter (toggle off ke semua dokumen).
+
+### B. Solusi & Implementasi
+1. **Desain & Interaktivitas Chip KPI (`.kpi-chip`)**:
+   - Menambahkan cursor pointer, hover visual state, dan active state dengan aksen warna masing-masing:
+     - `kpiChipTotal`: Aksen biru (`--primary`)
+     - `kpiChipUnposted`: Aksen oranye warning (`#fa8c16` / `#fff7e6`)
+     - `kpiChipPosted`: Aksen hijau success (`#52c41a` / `#f6ffed`)
+     - `kpiChipNotInv`: Aksen merah danger (`#ff4d4f` / `#fff1f0`)
+2. **Logika JavaScript (`filterByCard` & `filterClientTable`)**:
+   - Menyediakan fungsi `filterByCard(type)` yang mengatur `currentCardFilter` ('all', 'unposted', 'posted', 'not_inv') dengan kemampuan toggle off.
+   - Pada `filterClientTable()`, data tabel disaring secara instan berdasarkan card filter yang aktif.
+   - Pengecekan flag `isInvEnabled` dilakukan secara dinamis: jika `IS_INV = 1`, card "Belum Masuk IT Inv" ditampilkan (`display: inline-flex`) dengan angka dokumen yang belum masuk `bc_1ab2`. Jika `IS_INV = 0`, card otomatis disembunyikan (`display: none`).
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/daftar_dokumen.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

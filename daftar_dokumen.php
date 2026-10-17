@@ -607,6 +607,54 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             align-items: center;
             gap: 5px;
             font-size: 9.5px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+        }
+        .kpi-chip:hover {
+            border-color: var(--primary);
+            background: rgba(24, 144, 255, 0.04);
+            transform: translateY(-1px);
+        }
+        .kpi-chip.active {
+            border-color: var(--primary);
+            background: #e6f7ff;
+            box-shadow: 0 0 0 1px var(--primary);
+        }
+        body[data-theme="dark"] .kpi-chip.active {
+            background: #111d2c;
+            border-color: #177ddc;
+            box-shadow: 0 0 0 1px #177ddc;
+        }
+        .kpi-chip.active#kpiChipUnposted {
+            border-color: #fa8c16;
+            background: #fff7e6;
+            box-shadow: 0 0 0 1px #fa8c16;
+        }
+        body[data-theme="dark"] .kpi-chip.active#kpiChipUnposted {
+            background: #2b1d11;
+            border-color: #d46b08;
+            box-shadow: 0 0 0 1px #d46b08;
+        }
+        .kpi-chip.active#kpiChipPosted {
+            border-color: #52c41a;
+            background: #f6ffed;
+            box-shadow: 0 0 0 1px #52c41a;
+        }
+        body[data-theme="dark"] .kpi-chip.active#kpiChipPosted {
+            background: #112a15;
+            border-color: #389e0d;
+            box-shadow: 0 0 0 1px #389e0d;
+        }
+        .kpi-chip.active#kpiChipNotInv {
+            border-color: #ff4d4f;
+            background: #fff1f0;
+            box-shadow: 0 0 0 1px #ff4d4f;
+        }
+        body[data-theme="dark"] .kpi-chip.active#kpiChipNotInv {
+            background: #2a1215;
+            border-color: #a61d24;
+            box-shadow: 0 0 0 1px #a61d24;
         }
         .kpi-label {
             color: var(--text-muted);
@@ -622,6 +670,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .kpi-val-warning { color: #fa8c16; }
         .kpi-val-success { color: #52c41a; }
         .kpi-val-primary { color: var(--primary); }
+        .kpi-val-danger { color: #ff4d4f; }
+        .kpi-label-danger { color: #ff4d4f; }
 
         /* -------------------------------------------------------------
            FILTER PANEL (.filter-panel)
@@ -1307,21 +1357,21 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="ant-card-body">
             <!-- Compact Metrics Strip -->
             <div class="kpi-strip">
-                <div class="kpi-chip">
+                <div class="kpi-chip active" id="kpiChipTotal" onclick="filterByCard('all')" title="Klik untuk menampilkan semua dokumen AJU">
                     <span class="kpi-label">Total Dokumen AJU</span>
                     <strong class="kpi-val kpi-val-default" id="kpiTotal">0</strong>
                 </div>
-                <div class="kpi-chip">
+                <div class="kpi-chip" id="kpiChipUnposted" onclick="filterByCard('unposted')" title="Klik untuk memfilter hanya dokumen yang belum selesai">
                     <span class="kpi-label kpi-label-warning">Belum Selesai</span>
                     <strong class="kpi-val kpi-val-warning" id="kpiUnposted">0</strong>
                 </div>
-                <div class="kpi-chip">
+                <div class="kpi-chip" id="kpiChipPosted" onclick="filterByCard('posted')" title="Klik untuk memfilter hanya dokumen yang selesai proses">
                     <span class="kpi-label kpi-label-success">Selesai Proses</span>
                     <strong class="kpi-val kpi-val-success" id="kpiPosted">0</strong>
                 </div>
-                <div class="kpi-chip">
-                    <span class="kpi-label kpi-label-primary">Total Item Barang</span>
-                    <strong class="kpi-val kpi-val-primary" id="kpiBarang">0</strong>
+                <div class="kpi-chip" id="kpiChipNotInv" onclick="filterByCard('not_inv')" title="Klik untuk memfilter hanya dokumen yang belum masuk IT Inventory (bc_1ab2)" style="display:none;">
+                    <span class="kpi-label kpi-label-danger">Belum Masuk IT Inv</span>
+                    <strong class="kpi-val kpi-val-danger" id="kpiNotInv">0</strong>
                 </div>
             </div>
 
@@ -1924,6 +1974,40 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (tblCont) tblCont.scrollTop = 0;
         }
 
+        let currentCardFilter = 'all'; // 'all', 'unposted', 'posted', 'not_inv'
+
+        function filterByCard(type) {
+            if (document.getElementById('filterStatus')) {
+                document.getElementById('filterStatus').value = '';
+            }
+            if (currentCardFilter === type) {
+                if (type !== 'all') {
+                    currentCardFilter = 'all';
+                }
+            } else {
+                currentCardFilter = type;
+            }
+            updateCardFilterUI();
+            currentPage = 1;
+            filterClientTable();
+        }
+
+        function updateCardFilterUI() {
+            const chips = {
+                'all': 'kpiChipTotal',
+                'unposted': 'kpiChipUnposted',
+                'posted': 'kpiChipPosted',
+                'not_inv': 'kpiChipNotInv'
+            };
+            Object.values(chips).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('active');
+            });
+            const activeId = chips[currentCardFilter] || 'kpiChipTotal';
+            const activeEl = document.getElementById(activeId);
+            if (activeEl) activeEl.classList.add('active');
+        }
+
         function filterClientTable() {
             const fBc = (document.getElementById('tblFilterBc')?.value || '').toLowerCase().trim();
             const fAju = (document.getElementById('tblFilterAju')?.value || '').toLowerCase().trim();
@@ -1934,6 +2018,21 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const fKantor = (document.getElementById('tblFilterKantor')?.value || '').toLowerCase().trim();
 
             filteredData = ajuData.filter(r => {
+                // Card Filter (Total, Belum Selesai, Selesai Proses, Belum Masuk IT Inv)
+                if (currentCardFilter === 'unposted') {
+                    const np = (r.namaProses || '').toLowerCase();
+                    const isSelesai = np.includes('selesai') || parseInt(r.posted) > 0;
+                    if (isSelesai) return false;
+                } else if (currentCardFilter === 'posted') {
+                    const np = (r.namaProses || '').toLowerCase();
+                    const isSelesai = np.includes('selesai') || parseInt(r.posted) > 0;
+                    if (!isSelesai) return false;
+                } else if (currentCardFilter === 'not_inv') {
+                    const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
+                    const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
+                    if (isInv !== 1 || inItInv) return false;
+                }
+
                 if (fBc && !('bc ' + r.bc).toLowerCase().includes(fBc)) return false;
                 if (fAju && !r.nomor_aju.toLowerCase().includes(fAju)) return false;
                 if (fDaftar && !(r.nomor_daftar || '').toLowerCase().includes(fDaftar)) return false;
@@ -1944,23 +2043,46 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return true;
             });
 
-            // Update KPI metrics
-            let unposted = 0, posted = 0, barang = 0;
+            // Update KPI metrics (selalu dihitung dari seluruh data ajuData)
+            let unposted = 0, posted = 0, notInv = 0;
+            let isInvEnabled = false;
             ajuData.forEach(r => {
                 const np = (r.namaProses || '').toLowerCase();
                 if (np.includes('selesai') || parseInt(r.posted) > 0) posted++; else unposted++;
-                barang += parseInt(r.jml_barang || r.totalCount || 0);
+                const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
+                if (isInv === 1) {
+                    isInvEnabled = true;
+                    if (parseInt(r.in_it_inv || 0, 10) === 0) {
+                        notInv++;
+                    }
+                }
             });
+
             if (document.getElementById('kpiTotal')) document.getElementById('kpiTotal').innerText = ajuData.length;
             if (document.getElementById('kpiUnposted')) document.getElementById('kpiUnposted').innerText = unposted;
             if (document.getElementById('kpiPosted')) document.getElementById('kpiPosted').innerText = posted;
-            if (document.getElementById('kpiBarang')) document.getElementById('kpiBarang').innerText = barang;
+
+            const chipNotInv = document.getElementById('kpiChipNotInv');
+            if (chipNotInv) {
+                if (isInvEnabled) {
+                    chipNotInv.style.display = 'inline-flex';
+                    if (document.getElementById('kpiNotInv')) document.getElementById('kpiNotInv').innerText = notInv;
+                } else {
+                    chipNotInv.style.display = 'none';
+                    if (currentCardFilter === 'not_inv') {
+                        currentCardFilter = 'all';
+                        updateCardFilterUI();
+                    }
+                }
+            }
 
             currentPage = 1;
             renderTable();
         }
 
         function resetFilters() {
+            currentCardFilter = 'all';
+            updateCardFilterUI();
             if (document.getElementById('filterBc')) document.getElementById('filterBc').value = '';
             if (document.getElementById('filterStatus')) document.getElementById('filterStatus').value = '';
             if (document.getElementById('filterSearch')) document.getElementById('filterSearch').value = '';
