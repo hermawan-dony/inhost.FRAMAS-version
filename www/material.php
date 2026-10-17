@@ -42,20 +42,29 @@ if (!empty($sessionCmpId)) {
 // Cek data bc_1ab2 yang KLAS-nya bermasalah (kosong, '-', atau tidak ada di bc_tipe)
 $cntInvalidKlas = 0;
 $cmpFilter1ab2 = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
-$qInv = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE (KLAS IS NULL OR TRIM(KLAS) = '' OR TRIM(KLAS) = '-' OR KLAS NOT IN (SELECT tipe FROM bc_tipe))$cmpFilter1ab2");
-if ($qInv) {
-    $cntInvalidKlas = (int)($qInv->fetch_row()[0] ?? 0);
+try {
+    $qInv = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE (KLAS IS NULL OR TRIM(KLAS) = '' OR TRIM(KLAS) = '-' OR KLAS NOT IN (SELECT tipe FROM bc_tipe))$cmpFilter1ab2");
+    if ($qInv && $rInv = $qInv->fetch_row()) {
+        $cntInvalidKlas = (int)($rInv[0] ?? 0);
+    }
+} catch (\Throwable $e) {
+    $cntInvalidKlas = 0;
 }
 
 // Cek data transaksi bc_1ab2 yang satuannya berbeda dari bc_material
 $cntDiffSatuan = 0;
-$qDiffSat = $koneksi->query("SELECT COUNT(DISTINCT m.KODE_BARANG) 
-                             FROM bc_material m
-                             JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
-                             WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
-                             $cmpFilter1ab2");
-if ($qDiffSat && $rD = $qDiffSat->fetch_row()) {
-    $cntDiffSatuan = (int)($rD[0] ?? 0);
+$cmpFilterDiffSat = !empty($sessionCmpId) ? " AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '') AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
+try {
+    $qDiffSat = $koneksi->query("SELECT COUNT(DISTINCT m.KODE_BARANG) 
+                                 FROM bc_material m
+                                 JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
+                                 WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
+                                 $cmpFilterDiffSat");
+    if ($qDiffSat && $rD = $qDiffSat->fetch_row()) {
+        $cntDiffSatuan = (int)($rD[0] ?? 0);
+    }
+} catch (\Throwable $e) {
+    $cntDiffSatuan = 0;
 }
 
 $action = $_REQUEST['action'] ?? $_POST['action'] ?? $_GET['action'] ?? '';
