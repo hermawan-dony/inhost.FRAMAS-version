@@ -44,21 +44,23 @@ if ($action === 'login') {
             $_SESSION['allowed_menus'] = ['*'];
             $_SESSION['allowed_docs']  = ['*'];
 
-            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
             if ($cRes && $cr = $cRes->fetch_assoc()) {
-                $_SESSION['company_cmp_id']    = $cr['cmp_id'];
-                $_SESSION['company_name']      = $cr['cmp_name'];
-                $_SESSION['company_npwp']      = $cr['npwp'];
-                $_SESSION['is_inv']            = (int)$cr['IS_INV'];
-                $_SESSION['company_logo']      = $cr['logo'] ?? '';
-                $_SESSION['company_subdomain'] = $cr['subdomain'] ?? '';
+                $_SESSION['company_cmp_id']     = $cr['cmp_id'];
+                $_SESSION['company_name']       = $cr['cmp_name'];
+                $_SESSION['company_npwp']       = $cr['npwp'];
+                $_SESSION['is_inv']             = (int)$cr['IS_INV'];
+                $_SESSION['company_logo']       = $cr['logo'] ?? '';
+                $_SESSION['company_subdomain']  = $cr['subdomain'] ?? '';
+                $_SESSION['company_card_color'] = $cr['card_color'] ?? '';
             } else {
-                $_SESSION['company_cmp_id']    = '010816064431000';
-                $_SESSION['company_name']      = 'FRAMAS INDO';
-                $_SESSION['company_npwp']      = '010816064431000';
-                $_SESSION['is_inv']            = 1;
-                $_SESSION['company_logo']      = '';
-                $_SESSION['company_subdomain'] = 'framas';
+                $_SESSION['company_cmp_id']     = '010816064431000';
+                $_SESSION['company_name']       = 'FRAMAS INDO';
+                $_SESSION['company_npwp']       = '010816064431000';
+                $_SESSION['is_inv']             = 1;
+                $_SESSION['company_logo']       = '';
+                $_SESSION['company_subdomain']  = 'framas';
+                $_SESSION['company_card_color'] = '';
             }
 
             echo json_encode(['status' => 'OK', 'is_admin' => true, 'message' => 'Login Administrator berhasil!']);
@@ -70,7 +72,7 @@ if ($action === 'login') {
     }
 
     // B. Login Khusus Akun PERUSAHAAN (Master atau User Spesifik)
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $cmp_id, $cmp_id);
         $stmt->execute();
@@ -103,6 +105,7 @@ if ($action === 'login') {
                         $_SESSION['is_inv']            = (int)$comp['IS_INV'];
                         $_SESSION['company_logo']      = $comp['logo'] ?? '';
                         $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
+                        $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
 
                         if ($userRole === 'bc') {
                             $_SESSION['allowed_menus'] = ['it_inventory'];
@@ -134,6 +137,7 @@ if ($action === 'login') {
                     $_SESSION['is_inv']            = (int)$comp['IS_INV'];
                     $_SESSION['company_logo']      = $comp['logo'] ?? '';
                     $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
+                    $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
                     $_SESSION['allowed_menus']     = ['*'];
                     $_SESSION['allowed_docs']      = ['*'];
                     echo json_encode(['status' => 'OK', 'is_admin' => false, 'message' => 'Login Master Perusahaan berhasil!']);
@@ -167,27 +171,29 @@ if ($action === 'switch_company') {
         exit;
     }
 
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $targetCmp, $targetCmp);
         $stmt->execute();
         $res = $stmt->get_result();
         if ($res && $comp = $res->fetch_assoc()) {
-            $_SESSION['company_cmp_id']    = $comp['cmp_id'];
-            $_SESSION['company_name']      = $comp['cmp_name'];
-            $_SESSION['company_npwp']      = $comp['npwp'];
-            $_SESSION['is_inv']            = (int)$comp['IS_INV'];
-            $_SESSION['company_logo']      = $comp['logo'] ?? '';
-            $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
+            $_SESSION['company_cmp_id']     = $comp['cmp_id'];
+            $_SESSION['company_name']       = $comp['cmp_name'];
+            $_SESSION['company_npwp']       = $comp['npwp'];
+            $_SESSION['is_inv']             = (int)$comp['IS_INV'];
+            $_SESSION['company_logo']       = $comp['logo'] ?? '';
+            $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
+            $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
             echo json_encode([
-                'status'    => 'OK',
-                'cmp_id'    => $comp['cmp_id'],
-                'cmp_name'  => $comp['cmp_name'],
-                'npwp'      => $comp['npwp'],
-                'logo'      => $comp['logo'] ?? '',
-                'subdomain' => $comp['subdomain'] ?? '',
-                'is_inv'    => (int)$comp['IS_INV'],
-                'message'   => "Berhasil beralih ke perusahaan [{$comp['cmp_id']}] {$comp['cmp_name']}!"
+                'status'     => 'OK',
+                'cmp_id'     => $comp['cmp_id'],
+                'cmp_name'   => $comp['cmp_name'],
+                'npwp'       => $comp['npwp'],
+                'logo'       => $comp['logo'] ?? '',
+                'card_color' => $comp['card_color'] ?? '',
+                'subdomain'  => $comp['subdomain'] ?? '',
+                'is_inv'     => (int)$comp['IS_INV'],
+                'message'    => "Berhasil beralih ke perusahaan [{$comp['cmp_id']}] {$comp['cmp_name']}!"
             ]);
         } else {
             echo json_encode(['status' => 'ERROR', 'message' => "Perusahaan '$targetCmp' tidak ditemukan."]);
@@ -208,7 +214,7 @@ if ($action === 'get_companies') {
         echo json_encode(['status' => 'ERROR', 'message' => 'Akses terbatas untuk Administrator.']);
         exit;
     }
-    $res = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $res = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, IFNULL(card_color, '') as card_color FROM bc_ceisa_company ORDER BY cmp_name ASC");
     $list = [];
     if ($res) {
         while ($r = $res->fetch_assoc()) {
@@ -336,7 +342,7 @@ if (isset($_GET['subdomain'])) {
 }
 
 if (!empty($detectedSubdomain) && isset($koneksi) && $koneksi) {
-    $subStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE LOWER(subdomain) = ? AND is_active = 1 LIMIT 1");
+    $subStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE LOWER(subdomain) = ? AND is_active = 1 LIMIT 1");
     if ($subStmt) {
         $subStmt->bind_param("s", $detectedSubdomain);
         $subStmt->execute();
@@ -348,27 +354,58 @@ if (!empty($detectedSubdomain) && isset($koneksi) && $koneksi) {
     }
 }
 
-$isLoggedIn     = !empty($_SESSION['company_cmp_id']);
-$isAdmin        = !empty($_SESSION['is_admin']);
-$sessionCmpId   = $_SESSION['company_cmp_id'] ?? '';
-$sessionCmpName = $_SESSION['company_name'] ?? '';
-$sessionNpwp    = $_SESSION['company_npwp'] ?? '';
-$sessionLogo    = $_SESSION['company_logo'] ?? '';
+$isLoggedIn       = !empty($_SESSION['company_cmp_id']);
+$isAdmin          = !empty($_SESSION['is_admin']);
+$sessionCmpId     = $_SESSION['company_cmp_id'] ?? '';
+$sessionCmpName   = $_SESSION['company_name'] ?? '';
+$sessionNpwp      = $_SESSION['company_npwp'] ?? '';
+$sessionLogo      = $_SESSION['company_logo'] ?? '';
 $sessionSubdomain = $_SESSION['company_subdomain'] ?? '';
+$sessionCardColor = $_SESSION['company_card_color'] ?? '';
 
-// Ambil status IS_INV & logo langsung dari database untuk perusahaan aktif
+// Ambil status IS_INV, logo & card_color langsung dari database untuk perusahaan aktif
 $sessionIsInv = 1;
 if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
-    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
+    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain, IFNULL(card_color, '') as card_color FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
     if ($qInv && $rInv = $qInv->fetch_assoc()) {
         $sessionIsInv = (int)$rInv['IS_INV'];
         $_SESSION['is_inv'] = $sessionIsInv;
         $sessionLogo = $rInv['logo'] ?? '';
         $sessionSubdomain = $rInv['subdomain'] ?? '';
+        $sessionCardColor = $rInv['card_color'] ?? '';
         $_SESSION['company_logo'] = $sessionLogo;
         $_SESSION['company_subdomain'] = $sessionSubdomain;
+        $_SESSION['company_card_color'] = $sessionCardColor;
     } elseif (isset($_SESSION['is_inv'])) {
         $sessionIsInv = (int)$_SESSION['is_inv'];
+    }
+}
+
+/**
+ * Helper menghitung style inline dan variabel CSS untuk card perusahaan di sidebar
+ */
+function getSidebarCompanyCardStyle($color) {
+    if (empty($color) || $color === 'default') {
+        return '';
+    }
+    $color = trim($color);
+    $isDark = true;
+    if (strpos($color, 'gradient') === false && preg_match('/^#([a-f0-9]{3}|[a-f0-9]{6})$/i', $color)) {
+        $hex = ltrim($color, '#');
+        if (strlen($hex) === 3) {
+            $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+        }
+        $r = hexdec(substr($hex, 0, 2));
+        $g = hexdec(substr($hex, 2, 2));
+        $b = hexdec(substr($hex, 4, 2));
+        $lum = (0.299 * $r + 0.587 * $g + 0.114 * $b);
+        $isDark = ($lum < 165);
+    }
+    
+    if ($isDark) {
+        return "background: {$color} !important; border-color: rgba(255,255,255,0.2) !important; color: #ffffff !important; --card-title-color: #ffffff; --card-sub-color: rgba(255,255,255,0.75); --card-btn-bg: rgba(255,255,255,0.2); --card-btn-color: #ffffff; --card-btn-border: rgba(255,255,255,0.35);";
+    } else {
+        return "background: {$color} !important; border-color: rgba(0,0,0,0.12) !important; color: #1f1f1f !important; --card-title-color: #1f1f1f; --card-sub-color: #595959; --card-btn-bg: rgba(0,0,0,0.06); --card-btn-color: #1890ff; --card-btn-border: rgba(0,0,0,0.1);";
     }
 }
 
@@ -735,10 +772,14 @@ if ($initialTab === 'editor') {
         .sidebar-company-card.is-admin-clickable {
             cursor: pointer;
         }
-        .sidebar-company-card.is-admin-clickable:hover {
+        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover {
             background: var(--primary-light);
             border-color: var(--primary);
             box-shadow: 0 2px 6px rgba(24, 144, 255, 0.12);
+        }
+        .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover {
+            filter: brightness(1.08);
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22);
         }
         .sidebar-company-icon {
             font-size: 14px;
@@ -756,19 +797,19 @@ if ($initialTab === 'editor') {
         .sidebar-company-name {
             font-size: 11px;
             font-weight: 700;
-            color: var(--text-main);
+            color: var(--card-title-color, var(--text-main));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
             line-height: 1.25;
         }
-        .sidebar-company-card.is-admin-clickable:hover .sidebar-company-name {
+        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-name {
             color: var(--primary);
         }
         .sidebar-company-sub {
             font-size: 9px;
             font-family: monospace;
-            color: var(--text-muted);
+            color: var(--card-sub-color, var(--text-muted));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
@@ -786,17 +827,20 @@ if ($initialTab === 'editor') {
             justify-content: center;
             padding: 2px 6px;
             border-radius: 4px;
-            background: var(--primary-light);
-            color: var(--primary);
-            border: 1px solid transparent;
+            background: var(--card-btn-bg, var(--primary-light));
+            color: var(--card-btn-color, var(--primary));
+            border: 1px solid var(--card-btn-border, transparent);
             font-size: 9px;
             font-weight: 600;
             transition: all 0.2s;
             gap: 2px;
         }
-        .sidebar-company-card.is-admin-clickable:hover .sidebar-company-btn {
+        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-btn {
             background: var(--primary);
             color: #fff;
+        }
+        .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover .sidebar-company-btn {
+            filter: brightness(1.15);
         }
 
         /* Sidebar Search Box (Matches CEISA 4.0 .Menu_searchWrapper__1Kj_Z) */
@@ -2185,7 +2229,7 @@ if ($initialTab === 'editor') {
             </div>
 
             <!-- Active Company Card (Khusus Admin bisa ganti perusahaan) -->
-            <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>">
+            <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>" <?= !empty($sessionCardColor) ? 'style="' . htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) . '" data-custom-color="true"' : '' ?>>
                 <div class="sidebar-company-icon" id="sidebarCompanyLogoBox">
                     <?php if (!empty($sessionLogo)): ?>
                         <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
@@ -3522,6 +3566,9 @@ if ($initialTab === 'editor') {
                         <div style="font-weight:600; font-size:12px; color:${isActive ? '#1890ff' : 'var(--text-main)'}; display:flex; align-items:center; gap:6px;">
                             <span>🏢</span>
                             <span>${escapeHtml(c.cmp_name)}</span>
+                            ${c.card_color ? `
+                                <span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${escapeHtml(c.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(c.card_color)}"></span>
+                            ` : ''}
                             ${isActive ? '<span style="font-size:9.5px; font-weight:700; color:#1890ff; background:#fff; border:1px solid #1890ff; padding:1px 5px; border-radius:3px;">✓ AKTIF</span>' : ''}
                         </div>
                         <div style="font-size:10.5px; color:#8c8c8c; display:flex; gap:10px;">
@@ -3537,6 +3584,56 @@ if ($initialTab === 'editor') {
                 `;
                 container.appendChild(div);
             });
+        }
+
+        function applySidebarCompanyCardColor(color) {
+            const card = document.getElementById('sidebarCompanyCard');
+            if (!card) return;
+
+            const clean = (color || '').trim();
+            if (!clean || clean === 'default') {
+                card.removeAttribute('style');
+                card.removeAttribute('data-custom-color');
+                card.style.removeProperty('--card-title-color');
+                card.style.removeProperty('--card-sub-color');
+                card.style.removeProperty('--card-btn-bg');
+                card.style.removeProperty('--card-btn-color');
+                card.style.removeProperty('--card-btn-border');
+                return;
+            }
+
+            let isDark = true;
+            if (!clean.includes('gradient') && clean.startsWith('#')) {
+                let hex = clean.slice(1);
+                if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+                if (hex.length === 6) {
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+                    isDark = (lum < 165);
+                }
+            }
+
+            card.setAttribute('data-custom-color', 'true');
+            card.style.setProperty('background', clean, 'important');
+            if (isDark) {
+                card.style.setProperty('border-color', 'rgba(255, 255, 255, 0.2)', 'important');
+                card.style.setProperty('color', '#ffffff', 'important');
+                card.style.setProperty('--card-title-color', '#ffffff');
+                card.style.setProperty('--card-sub-color', 'rgba(255, 255, 255, 0.75)');
+                card.style.setProperty('--card-btn-bg', 'rgba(255, 255, 255, 0.2)');
+                card.style.setProperty('--card-btn-color', '#ffffff');
+                card.style.setProperty('--card-btn-border', 'rgba(255, 255, 255, 0.35)');
+            } else {
+                card.style.setProperty('border-color', 'rgba(0, 0, 0, 0.12)', 'important');
+                card.style.setProperty('color', '#1f1f1f', 'important');
+                card.style.setProperty('--card-title-color', '#1f1f1f');
+                card.style.setProperty('--card-sub-color', '#595959');
+                card.style.setProperty('--card-btn-bg', 'rgba(0, 0, 0, 0.06)');
+                card.style.setProperty('--card-btn-color', '#1890ff');
+                card.style.setProperty('--card-btn-border', 'rgba(0, 0, 0, 0.1)');
+            }
         }
 
         function filterCompanySearch() {
@@ -3573,6 +3670,9 @@ if ($initialTab === 'editor') {
                     currentCmpId = json.cmp_id;
                     if (json.is_inv !== undefined) {
                         setItInventoryVisibility(json.is_inv);
+                    }
+                    if (json.card_color !== undefined) {
+                        applySidebarCompanyCardColor(json.card_color);
                     }
 
                     const userGreeting = document.querySelector('.kt-header__topbar-username');
@@ -3914,6 +4014,9 @@ if ($initialTab === 'editor') {
                     if (topBadge && !isBcRole && e.data.logo) {
                         topBadge.innerHTML = `<img src="${escapeHtml(e.data.logo)}" alt="Avatar" style="width:100%; height:100%; object-fit:contain; border-radius:50%; background:#fff;">`;
                     }
+                }
+                if (e.data.card_color !== undefined) {
+                    applySidebarCompanyCardColor(e.data.card_color);
                 }
             } else if (e.data.type === 'APP_SETTINGS_UPDATED') {
                 const s = e.data.settings;

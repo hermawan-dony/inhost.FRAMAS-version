@@ -162,6 +162,7 @@ if ($action === 'save') {
     $alert_it_inv_unposted = isset($_POST['alert_it_inv_unposted']) ? (int)$_POST['alert_it_inv_unposted'] : 0;
     $subdomain      = strtolower(preg_replace('/[^a-zA-Z0-9_-]/', '', trim($_POST['subdomain'] ?? '')));
     $logo           = trim($_POST['logo'] ?? '');
+    $card_color     = trim($_POST['card_color'] ?? '');
 
     // Handle Upload File Logo jika ada
     if (!empty($_FILES['logo_file']['name']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
@@ -225,12 +226,12 @@ if ($action === 'save') {
         $checkStmt->close();
         
         $sql = "INSERT INTO bc_ceisa_company (
-            cmp_id, cmp_name, logo, subdomain, app_password, npwp, nib, alamat,
+            cmp_id, cmp_name, logo, card_color, subdomain, app_password, npwp, nib, alamat,
             kode_kantor, kode_jenis_tpb, nomor_skep, tanggal_skep,
             username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, is_final,
             token_ceisa, api_key_ceisa, ERP_Name, ERP_User, ERP_Password, ERP_Constring,
             AI_Name, AI_API_Key, is_active, IS_INV, allow_lowercase_code, alert_it_inv_unposted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $koneksi->prepare($sql);
         if (!$stmt) {
@@ -239,8 +240,8 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssssssssssiiii",
-            $cmp_id, $cmp_name, $logo, $subdomain, $app_password, $npwp, $nib, $alamat,
+            "ssssssssssssssssssssssssssiiii",
+            $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $erp_name, $erp_user, $erp_password, $erp_constring,
@@ -257,7 +258,7 @@ if ($action === 'save') {
     } else {
         // MODE EDIT (UPDATE)
         $sql = "UPDATE bc_ceisa_company SET 
-            cmp_name = ?, logo = ?, subdomain = ?, app_password = ?, npwp = ?, nib = ?, alamat = ?,
+            cmp_name = ?, logo = ?, card_color = ?, subdomain = ?, app_password = ?, npwp = ?, nib = ?, alamat = ?,
             kode_kantor = ?, kode_jenis_tpb = ?, nomor_skep = ?, tanggal_skep = ?,
             username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, id_user_ceisa = ?, is_final = ?,
             token_ceisa = ?, api_key_ceisa = ?, ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
@@ -271,8 +272,8 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssssssssssiiiis",
-            $cmp_name, $logo, $subdomain, $app_password, $npwp, $nib, $alamat,
+            "sssssssssssssssssssssssssiiiis",
+            $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $erp_name, $erp_user, $erp_password, $erp_constring,
@@ -291,6 +292,7 @@ if ($action === 'save') {
                 $_SESSION['alert_it_inv_unposted']   = $alert_it_inv_unposted;
                 $_SESSION['company_logo']            = $logo;
                 $_SESSION['company_subdomain']       = $subdomain;
+                $_SESSION['company_card_color']      = $card_color;
             }
             echo json_encode(['status' => 'OK', 'message' => "Data perusahaan '$cmp_name' berhasil diperbarui!"]);
         } else {
@@ -425,7 +427,7 @@ if ($action === 'set_active') {
         exit;
     }
     
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, IFNULL(IS_INV, 1) as IS_INV, IFNULL(allow_lowercase_code, 0) as allow_lowercase_code, IFNULL(alert_it_inv_unposted, 0) as alert_it_inv_unposted FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(allow_lowercase_code, 0) as allow_lowercase_code, IFNULL(alert_it_inv_unposted, 0) as alert_it_inv_unposted FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("s", $cmp_id);
         $stmt->execute();
@@ -440,11 +442,16 @@ if ($action === 'set_active') {
             $_SESSION['allow_lowercase_code']    = (int)$comp['allow_lowercase_code'];
             $_SESSION['company_alert_it_inv_unposted'] = (int)$comp['alert_it_inv_unposted'];
             $_SESSION['alert_it_inv_unposted']   = (int)$comp['alert_it_inv_unposted'];
+            $_SESSION['company_logo']            = $comp['logo'] ?? '';
+            $_SESSION['company_subdomain']       = $comp['subdomain'] ?? '';
+            $_SESSION['company_card_color']      = $comp['card_color'] ?? '';
             
             echo json_encode([
                 'status'   => 'OK',
                 'cmp_id'   => $comp['cmp_id'],
                 'cmp_name' => $comp['cmp_name'],
+                'logo'     => $comp['logo'] ?? '',
+                'card_color' => $comp['card_color'] ?? '',
                 'is_inv'   => (int)$comp['IS_INV'],
                 'allow_lowercase_code' => (int)$comp['allow_lowercase_code'],
                 'alert_it_inv_unposted' => (int)$comp['alert_it_inv_unposted'],
@@ -1690,6 +1697,45 @@ $theme = $_GET['theme'] ?? 'light';
             background: rgba(24, 144, 255, 0.08);
             border-color: var(--primary);
         }
+
+        /* Color Palette & Card Preview Styles */
+        .color-palette-presets {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+        .color-palette-item {
+            width: 24px;
+            height: 24px;
+            border-radius: 6px;
+            border: 2px solid transparent;
+            cursor: pointer;
+            transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+            position: relative;
+            padding: 0;
+            outline: none;
+        }
+        .color-palette-item:hover {
+            transform: scale(1.2);
+            z-index: 2;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
+        .color-palette-item.selected {
+            border-color: #1890ff !important;
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.45) !important;
+            transform: scale(1.15);
+        }
+        .color-palette-item.is-default {
+            background: var(--bg-card);
+            border: 1px dashed var(--border-color);
+            color: var(--text-muted);
+        }
     </style>
 </head>
 <body>
@@ -1927,6 +1973,91 @@ $theme = $_GET['theme'] ?? 'light';
                                 </div>
                                 <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">
                                     Contoh: jika diisi <code>framas</code>, akses via <code>https://framas.inhost.web.id</code> akan otomatis menampilkan login untuk perusahaan ini.
+                                </div>
+                            </div>
+
+                            <!-- Konfigurasi Warna Card Sidebar (Brand Theme) -->
+                            <div class="form-group full-width" style="margin-bottom:6px; padding:12px 14px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:6px;">
+                                <label class="form-label" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <span>🎨 Warna Card Sidebar (Brand Theme)</span>
+                                        <span class="form-hint">Kustomisasi latar kartu identitas perusahaan di sidebar portal</span>
+                                    </div>
+                                    <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="resetCardColor()" style="font-size:10px; padding:2px 8px; height:24px;">
+                                        <span>↺</span> Reset Default
+                                    </button>
+                                </label>
+
+                                <div style="display:grid; grid-template-columns: 1fr 270px; gap:16px; align-items:start;">
+                                    <!-- Left: Palet Warna & Input -->
+                                    <div>
+                                        <div style="font-size:10.5px; font-weight:600; color:var(--text-heading); margin-bottom:6px;">
+                                            Pilih dari Palet Populer:
+                                        </div>
+                                        <div class="color-palette-presets" id="colorPaletteContainer">
+                                            <button type="button" class="color-palette-item is-default" onclick="selectPresetColor('')" data-color="" title="Default (Standar Tema)">⚪</button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#002c6a')" data-color="#002c6a" style="background:#002c6a;" title="CEISA Navy (#002c6a)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#0f172a')" data-color="#0f172a" style="background:#0f172a;" title="Slate Dark (#0f172a)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#1e3a8a')" data-color="#1e3a8a" style="background:#1e3a8a;" title="Royal Blue (#1e3a8a)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#1677ff')" data-color="#1677ff" style="background:#1677ff;" title="Ant Design Blue (#1677ff)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#0284c7')" data-color="#0284c7" style="background:#0284c7;" title="Sky Blue (#0284c7)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#0d9488')" data-color="#0d9488" style="background:#0d9488;" title="Teal Cyan (#0d9488)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#065f46')" data-color="#065f46" style="background:#065f46;" title="Forest Emerald (#065f46)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#16a34a')" data-color="#16a34a" style="background:#16a34a;" title="Vivid Green (#16a34a)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#b45309')" data-color="#b45309" style="background:#b45309;" title="Amber Gold (#b45309)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#dc2626')" data-color="#dc2626" style="background:#dc2626;" title="Crimson Red (#dc2626)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#701a75')" data-color="#701a75" style="background:#701a75;" title="Berry Magenta (#701a75)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#581c87')" data-color="#581c87" style="background:#581c87;" title="Deep Purple (#581c87)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#1e293b')" data-color="#1e293b" style="background:#1e293b;" title="Charcoal (#1e293b)"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #002c6a, #0050b3)')" data-color="linear-gradient(135deg, #002c6a, #0050b3)" style="background:linear-gradient(135deg, #002c6a, #0050b3);" title="Gradient CEISA"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #1e3a8a, #0284c7)')" data-color="linear-gradient(135deg, #1e3a8a, #0284c7)" style="background:linear-gradient(135deg, #1e3a8a, #0284c7);" title="Gradient Oceanic"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #064e3b, #059669)')" data-color="linear-gradient(135deg, #064e3b, #059669)" style="background:linear-gradient(135deg, #064e3b, #059669);" title="Gradient Emerald"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #4c1d95, #7c3aed)')" data-color="linear-gradient(135deg, #4c1d95, #7c3aed)" style="background:linear-gradient(135deg, #4c1d95, #7c3aed);" title="Gradient Violet"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #831843, #db2777)')" data-color="linear-gradient(135deg, #831843, #db2777)" style="background:linear-gradient(135deg, #831843, #db2777);" title="Gradient Ruby"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('linear-gradient(135deg, #1f2937, #111827)')" data-color="linear-gradient(135deg, #1f2937, #111827)" style="background:linear-gradient(135deg, #1f2937, #111827);" title="Gradient Midnight"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#e6f4ff')" data-color="#e6f4ff" style="background:#e6f4ff; border:1px solid #91d5ff;" title="Soft Pastel Blue"></button>
+                                            <button type="button" class="color-palette-item" onclick="selectPresetColor('#f6ffed')" data-color="#f6ffed" style="background:#f6ffed; border:1px solid #b7eb8f;" title="Soft Pastel Mint"></button>
+                                        </div>
+
+                                        <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+                                            <div style="position:relative; width:34px; height:28px; border-radius:4px; overflow:hidden; border:1px solid var(--border-input); cursor:pointer; flex-shrink:0;">
+                                                <input type="color" id="f_card_color_picker" style="position:absolute; top:-10px; left:-10px; width:60px; height:60px; cursor:pointer; border:none; padding:0;" onchange="onCardColorPickerChange(this.value)">
+                                            </div>
+                                            <div style="flex:1;">
+                                                <input type="text" id="f_card_color" name="card_color" class="form-control" style="font-family:monospace; font-size:11px;" placeholder="Kode HEX (misal: #002c6a) atau CSS Gradient" oninput="updateCardColorPreview(this.value)">
+                                            </div>
+                                        </div>
+                                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                                            Dukungan: Kode HEX (<code>#002c6a</code>), RGB, atau CSS Gradient (<code>linear-gradient(...)</code>).
+                                        </div>
+                                    </div>
+
+                                    <!-- Right: Live Preview Box mirroring index.php sidebar card -->
+                                    <div>
+                                        <div style="font-size:10.5px; font-weight:600; color:var(--text-heading); margin-bottom:6px;">
+                                            Live Preview di Sidebar:
+                                        </div>
+                                        <div id="cardColorPreviewBox" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-base); display:flex; align-items:center; gap:8px; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.05); user-select:none;">
+                                            <div id="previewCardLogo" style="font-size:14px; line-height:1; flex-shrink:0;">🏢</div>
+                                            <div style="flex:1 1 auto; min-width:0; overflow:hidden; display:flex; flex-direction:column; justify-content:center;">
+                                                <div id="previewCardName" style="font-size:11px; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.25;">
+                                                    PT. CONTOH PERUSAHAAN
+                                                </div>
+                                                <div id="previewCardSub" style="font-size:9px; font-family:monospace; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; margin-top:1px;">
+                                                    [010816064431000]
+                                                </div>
+                                            </div>
+                                            <div style="flex-shrink:0; display:flex; align-items:center;">
+                                                <span id="previewCardBtn" style="display:inline-flex; align-items:center; justify-content:center; padding:2px 6px; border-radius:4px; background:var(--primary-light); color:var(--primary); font-size:9px; font-weight:600; gap:2px; border:1px solid transparent;">
+                                                    <span>↪</span>
+                                                    <span>Ganti</span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div id="previewCardContrastHint" style="font-size:9px; color:var(--text-muted); margin-top:4px; text-align:right;">
+                                            Standar tema sistem
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2398,6 +2529,22 @@ $theme = $_GET['theme'] ?? 'light';
                 } catch(e) {}
             }
 
+            // Input listener live update untuk card preview
+            const nameInp = document.getElementById('f_cmp_name');
+            if (nameInp) {
+                nameInp.addEventListener('input', function() {
+                    const el = document.getElementById('previewCardName');
+                    if (el) el.innerText = this.value.trim() || 'PT. CONTOH PERUSAHAAN';
+                });
+            }
+            const idInp = document.getElementById('f_cmp_id');
+            if (idInp) {
+                idInp.addEventListener('input', function() {
+                    const el = document.getElementById('previewCardSub');
+                    if (el) el.innerText = '[' + (this.value.trim() || '010816064431000') + ']';
+                });
+            }
+
             loadCompanyList();
         });
 
@@ -2509,7 +2656,12 @@ $theme = $_GET['theme'] ?? 'light';
                                 </div>
                             `}
                             <div>
-                                <div style="font-weight:600; font-size:12px; color:var(--text-heading);">${escapeHtml(row.cmp_name)}</div>
+                                <div style="font-weight:600; font-size:12px; color:var(--text-heading); display:flex; align-items:center; gap:5px;">
+                                    <span>${escapeHtml(row.cmp_name)}</span>
+                                    ${row.card_color ? `
+                                        <span style="display:inline-block; width:11px; height:11px; border-radius:3px; background:${escapeHtml(row.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(row.card_color)}"></span>
+                                    ` : ''}
+                                </div>
                                 ${row.subdomain ? `
                                     <div style="margin-top:2px;">
                                         <a href="https://${escapeHtml(row.subdomain)}.inhost.web.id" target="_blank" style="color:#1890ff; text-decoration:none; font-size:10px; font-family:monospace; display:inline-flex; align-items:center; gap:3px; background:rgba(24,144,255,0.08); padding:1px 6px; border-radius:3px; border:1px solid rgba(24,144,255,0.2);">
@@ -2772,6 +2924,10 @@ $theme = $_GET['theme'] ?? 'light';
                     img.style.display = 'block';
                     if (placeholder) placeholder.style.display = 'none';
                     if (btnRemove) btnRemove.style.display = 'inline-flex';
+                    const previewLogoEl = document.getElementById('previewCardLogo');
+                    if (previewLogoEl) {
+                        previewLogoEl.innerHTML = `<img src="${e.target.result}" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);">`;
+                    }
                 };
                 reader.readAsDataURL(file);
             }
@@ -2787,6 +2943,8 @@ $theme = $_GET['theme'] ?? 'light';
             img.style.display = 'none';
             if (placeholder) placeholder.style.display = 'block';
             if (btnRemove) btnRemove.style.display = 'none';
+            const previewLogoEl = document.getElementById('previewCardLogo');
+            if (previewLogoEl) previewLogoEl.innerHTML = `🏢`;
         }
 
         function setLogoPreview(logoUrl) {
@@ -2794,6 +2952,7 @@ $theme = $_GET['theme'] ?? 'light';
             const placeholder = document.getElementById('logoPreviewPlaceholder');
             const btnRemove = document.getElementById('btnRemoveLogo');
             const fLogo = document.getElementById('f_logo');
+            const previewLogoEl = document.getElementById('previewCardLogo');
             
             if (logoUrl) {
                 img.src = logoUrl;
@@ -2801,12 +2960,117 @@ $theme = $_GET['theme'] ?? 'light';
                 if (placeholder) placeholder.style.display = 'none';
                 if (btnRemove) btnRemove.style.display = 'inline-flex';
                 fLogo.value = logoUrl;
+                if (previewLogoEl) {
+                    previewLogoEl.innerHTML = `<img src="${escapeHtml(logoUrl)}" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);">`;
+                }
             } else {
                 img.src = '';
                 img.style.display = 'none';
                 if (placeholder) placeholder.style.display = 'block';
                 if (btnRemove) btnRemove.style.display = 'none';
                 fLogo.value = '';
+                if (previewLogoEl) previewLogoEl.innerHTML = `🏢`;
+            }
+        }
+
+        // =============================================================
+        // CARD COLOR PICKER & PREVIEW LOGIC
+        // =============================================================
+        function selectPresetColor(color) {
+            const input = document.getElementById('f_card_color');
+            if (input) input.value = color;
+            updateCardColorPreview(color);
+        }
+
+        function onCardColorPickerChange(val) {
+            const input = document.getElementById('f_card_color');
+            if (input) input.value = val;
+            updateCardColorPreview(val);
+        }
+
+        function resetCardColor() {
+            selectPresetColor('');
+        }
+
+        function calculateLuminance(color) {
+            if (!color) return 255;
+            if (color.includes('gradient')) return 50;
+            let hex = color.trim();
+            if (hex.startsWith('#')) {
+                hex = hex.slice(1);
+                if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+                if (hex.length === 6) {
+                    const r = parseInt(hex.substring(0, 2), 16);
+                    const g = parseInt(hex.substring(2, 4), 16);
+                    const b = parseInt(hex.substring(4, 6), 16);
+                    return (0.299 * r + 0.587 * g + 0.114 * b);
+                }
+            }
+            return 120;
+        }
+
+        function updateCardColorPreview(color) {
+            const box = document.getElementById('cardColorPreviewBox');
+            const nameEl = document.getElementById('previewCardName');
+            const subEl = document.getElementById('previewCardSub');
+            const btnEl = document.getElementById('previewCardBtn');
+            const hintEl = document.getElementById('previewCardContrastHint');
+            const picker = document.getElementById('f_card_color_picker');
+            if (!box || !nameEl || !subEl || !btnEl) return;
+
+            const nameInput = document.getElementById('f_cmp_name');
+            const idInput = document.getElementById('f_cmp_id');
+            if (nameInput) nameEl.innerText = nameInput.value.trim() || 'PT. CONTOH PERUSAHAAN';
+            if (idInput) subEl.innerText = '[' + (idInput.value.trim() || '010816064431000') + ']';
+
+            const clean = (color || '').trim();
+            if (clean.startsWith('#') && (clean.length === 7 || clean.length === 4) && picker) {
+                try { picker.value = clean.length === 4 ? '#' + clean[1] + clean[1] + clean[2] + clean[2] + clean[3] + clean[3] : clean; } catch(e) {}
+            }
+
+            document.querySelectorAll('.color-palette-item').forEach(btn => {
+                if ((btn.getAttribute('data-color') || '') === clean) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+
+            if (!clean || clean === 'default') {
+                box.style.background = 'var(--bg-base)';
+                box.style.borderColor = 'var(--border-color)';
+                box.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                nameEl.style.color = 'var(--text-main)';
+                subEl.style.color = 'var(--text-muted)';
+                btnEl.style.background = 'var(--primary-light)';
+                btnEl.style.color = 'var(--primary)';
+                btnEl.style.borderColor = 'transparent';
+                if (hintEl) hintEl.innerText = 'Standar tema sistem';
+                return;
+            }
+
+            const lum = calculateLuminance(clean);
+            const isDark = (lum < 165);
+
+            box.style.background = clean;
+            if (isDark) {
+                box.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+                box.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                nameEl.style.color = '#ffffff';
+                subEl.style.color = 'rgba(255, 255, 255, 0.75)';
+                btnEl.style.background = 'rgba(255, 255, 255, 0.2)';
+                btnEl.style.color = '#ffffff';
+                btnEl.style.borderColor = 'rgba(255, 255, 255, 0.35)';
+                if (hintEl) hintEl.innerText = 'Kontras: Teks Putih (Dark Theme)';
+            } else {
+                box.style.borderColor = 'rgba(0, 0, 0, 0.12)';
+                box.style.boxShadow = '0 1px 4px rgba(0,0,0,0.08)';
+                nameEl.style.color = '#1f1f1f';
+                subEl.style.color = '#595959';
+                btnEl.style.background = 'rgba(0, 0, 0, 0.06)';
+                btnEl.style.color = '#1890ff';
+                btnEl.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                if (hintEl) hintEl.innerText = 'Kontras: Teks Gelap (Light Theme)';
             }
         }
 
@@ -2836,6 +3100,8 @@ $theme = $_GET['theme'] ?? 'light';
             setLogoPreview('');
             document.getElementById('f_subdomain').value = '';
             document.getElementById('f_logo_file').value = '';
+            document.getElementById('f_card_color').value = '';
+            updateCardColorPreview('');
 
             switchModalTab('tab-profil');
             document.getElementById('companyModal').classList.add('active');
@@ -2868,6 +3134,8 @@ $theme = $_GET['theme'] ?? 'light';
                         setLogoPreview(d.logo || '');
                         document.getElementById('f_subdomain').value = d.subdomain || '';
                         document.getElementById('f_logo_file').value = '';
+                        document.getElementById('f_card_color').value = d.card_color || '';
+                        updateCardColorPreview(d.card_color || '');
 
                         document.getElementById('f_cmp_name').value = d.cmp_name || '';
                         document.getElementById('f_npwp').value = d.npwp || '';
@@ -3026,6 +3294,19 @@ $theme = $_GET['theme'] ?? 'light';
                     loadCompanyList();
                     if (window.parent && window.parent.postMessage) {
                         window.parent.postMessage({ type: 'UPDATE_IS_INV', is_inv: isInvVal, cmp_id: cmpIdVal }, '*');
+                        const cardColorVal = document.getElementById('f_card_color') ? document.getElementById('f_card_color').value.trim() : '';
+                        const cmpNameVal = document.getElementById('f_cmp_name') ? document.getElementById('f_cmp_name').value.trim() : '';
+                        const logoVal = document.getElementById('f_logo') ? document.getElementById('f_logo').value.trim() : '';
+                        if (sessionActiveCmp === cmpIdVal) {
+                            window.parent.postMessage({
+                                type: 'COMPANY_CHANGED',
+                                cmp_id: cmpIdVal,
+                                cmp_name: cmpNameVal,
+                                logo: logoVal,
+                                card_color: cardColorVal,
+                                is_inv: isInvVal
+                            }, '*');
+                        }
                     }
                 } else {
                     Swal.fire({
@@ -3209,6 +3490,8 @@ $theme = $_GET['theme'] ?? 'light';
                                         type: 'COMPANY_CHANGED',
                                         cmp_id: res.cmp_id || cmpId,
                                         cmp_name: res.cmp_name || cmpName,
+                                        logo: res.logo || '',
+                                        card_color: res.card_color || '',
                                         is_inv: res.is_inv
                                     }, '*');
                                 }

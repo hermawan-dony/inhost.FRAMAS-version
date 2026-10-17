@@ -3980,4 +3980,61 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
 
 ---
+
+## 98. Fitur Kustomisasi Warna Card Perusahaan di Sidebar Portal dari Menu Kelola Perusahaan
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**: "buat warna card perusahaan ini bisa dikonfigurasi, bisa diganti dari menu Kelola Perusahaan" (dengan screenshot yang merujuk langsung ke elemen `.sidebar-company-card` di sidebar `index.php` yang menampilkan identitas perusahaan aktif, logo, ID, dan tombol switch perusahaan).
+- **Tujuan**:
+  - Memberikan identitas visual brand (*corporate branding*) yang unik untuk setiap perusahaan/entitas TPB pada portal multi-tenant CEISA 4.0.
+  - Memudahkan pembedaan perusahaan aktif secara seketika melalui warna tema kartu identitas di sidebar kiri.
+  - Menyediakan kontrol konfigurasi yang fleksibel dari antarmuka Administrator di menu Kelola Perusahaan (`company.php`), lengkap dengan palet warna populer, pemilih warna (*color picker*), dan *live preview* interaktif.
+  - Menghasilkan kontras teks otomatis (teks putih untuk warna gelap/gradient dan teks gelap untuk warna soft/pastel).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **Migrasi Skema Basis Data Alibaba Cloud RDS MySQL (`ceisa0400db`)**:
+   - Menambahkan kolom `card_color` ke tabel profil perusahaan:
+     ```sql
+     ALTER TABLE bc_ceisa_company ADD COLUMN card_color VARCHAR(100) DEFAULT '' AFTER logo;
+     ```
+2. **Modul Kelola Perusahaan ([`company.php`](file:///c:/dp/g-ceisa/company.php) & [`www/company.php`](file:///c:/dp/g-ceisa/www/company.php))**:
+   - **Backend CRUD API**:
+     - Memperbarui `action === 'save'` (INSERT & UPDATE) untuk memproses `card_color` (30 parameter prepared statement).
+     - Memperbarui sesi `$_SESSION['company_card_color']` saat perusahaan yang sedang aktif diperbarui.
+     - Memperbarui `action === 'set_active'` untuk mengembalikan `card_color` dan menyimpannya di session aktif admin.
+   - **Antarmuka Form Modal (Tab 1: Profil Perusahaan)**:
+     - Menyematkan kartu konfigurasi **Warna Card Sidebar (Brand Theme)** lengkap dengan:
+       - 22 palet warna swatch populer (CEISA Navy `#002c6a`, Slate Dark `#0f172a`, Royal Blue `#1e3a8a`, Ant Design `#1677ff`, Forest Emerald `#065f46`, Amber Gold `#b45309`, Crimson Red `#dc2626`, Gradients CEISA, Oceanic, Emerald, Violet, Midnight, dan Soft Pastels).
+       - Native color picker `<input type="color">` dan text input untuk kode HEX/RGB/CSS Gradient kustom.
+       - Tombol "Reset Default" untuk mengembalikan ke tampilan standar tema sistem.
+     - **Live Interactive Preview Box**:
+       - Kotak pratinjau yang merefleksikan 1:1 tampilan `#sidebarCompanyCard` pada sidebar utama `index.php` secara *real-time* saat memilih palet, mengubah warna, mengganti logo, atau mengetikkan nama/ID perusahaan.
+       - Formula cerdas kalkulasi luminansi `(0.299*R + 0.587*G + 0.114*B)` untuk menentukan keterbacaan teks dan tombol secara otomatis.
+   - **Tabel Master Perusahaan**:
+     - Menampilkan indikator chip/swatch warna card di samping nama perusahaan pada daftar grid.
+   - **Sinkronisasi Otomatis Antar Jendela**:
+     - Mengirimkan event `postMessage({ type: 'COMPANY_CHANGED', ..., card_color: ... })` ke jendela induk saat perusahaan aktif diedit atau diaktifkan.
+3. **Portal Utama Navigasi ([`index.php`](file:///c:/dp/g-ceisa/index.php) & [`www/index.php`](file:///c:/dp/g-ceisa/www/index.php))**:
+   - Menambahkan `card_color` pada query login admin, login perusahaan, deteksi subdomain, dan pembacaan sesi database.
+   - Membuat fungsi pembantu `getSidebarCompanyCardStyle($color)` untuk menginjeksi background, border, dan CSS custom properties (`--card-title-color`, `--card-sub-color`, `--card-btn-bg`, `--card-btn-color`, `--card-btn-border`) pada kartu `#sidebarCompanyCard`.
+   - Mengadaptasi CSS `.sidebar-company-card` dengan dukungan `data-custom-color="true"` dan efek hover soft brightness filter.
+   - Menambahkan fungsi JavaScript `applySidebarCompanyCardColor(color)` yang dipanggil saat beralih perusahaan (`selectCompany`) maupun melalui listener pesan `window.addEventListener('message')`.
+   - Menampilkan chip swatch warna pada dialog modal beralih perusahaan (*company switcher*).
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/company.php` ➔ **No syntax errors detected**.
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/company.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/index.php` ➔ **No syntax errors detected**.
+2. **Uji API & Basis Data**:
+   - Memanggil `http://127.0.0.1/company.php?action=list&is_admin=1` via cURL ➔ Response JSON mengembalikan atribut `card_color` dengan valid.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
