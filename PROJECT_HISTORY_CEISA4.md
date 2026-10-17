@@ -4551,6 +4551,29 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 111. Perbaikan Error `escapeJs is not defined` dan Penghapusan Badge "👑 Khusus Administrator" pada Modul Kelola Perusahaan
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Masalah & Analisis
+1. **Error Rendering Tabel (`escapeJs is not defined`)**:
+   - Pada halaman **Kelola Perusahaan** (`company.php`), antarmuka tabel menampilkan error visual: `⚠️ Terjadi Kesalahan Koneksi: escapeJs is not defined`.
+   - **Penyebab**: Fungsi `renderTable()` memanggil helper JavaScript `escapeJs(row.cmp_id)` dan `escapeJs(row.cmp_name)` pada tombol aksi dan badge status (`onclick`), namun deklarasi fungsi `escapeJs()` belum ada pada berkas `company.php`.
+2. **Permintaan Penghapusan Badge**:
+   - Pengguna meminta menghapus badge teks `👑 Khusus Administrator` di samping judul header "Master Konfigurasi Perusahaan".
+
+### B. Solusi & Implementasi
+1. **Pendefinisian Fungsi `escapeJs`**:
+   - Menambahkan fungsi helper `escapeJs(str)` pada blok script [company.php](file:///c:/dp/g-ceisa/company.php) untuk meng-escape karakter backslash, kutip tunggal, kutip ganda, dan karakter baris baru secara aman.
+   - Tabel kini merender ketiga data perusahaan (FRAMAS, HANBIT, RODA MAJU BAHAGIA) secara mulus dan interaktif tanpa error.
+2. **Pembersihan Header**:
+   - Menghapus elemen `<span class="ant-badge ant-badge-gold">👑 Khusus Administrator</span>` dari judul kartu header.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/company.php` dan server remote `/source/public/company.php`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

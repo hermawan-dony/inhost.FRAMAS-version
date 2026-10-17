@@ -1766,7 +1766,6 @@ $theme = $_GET['theme'] ?? 'light';
                 <div>
                     <h2 class="header-title">
                         Master Konfigurasi Perusahaan
-                        <span class="ant-badge ant-badge-gold">👑 Khusus Administrator</span>
                     </h2>
                     <div class="header-subtitle">
                         Kelola data profil perusahaan, akun CEISA 4.0, TOTP MFA, pengaturan IT Inventory, serta koneksi ERP & AI.
@@ -4366,6 +4365,16 @@ $theme = $_GET['theme'] ?? 'light';
             if (el) {
                 el.type = (el.type === 'password') ? 'text' : 'password';
             }
+        }
+
+        function escapeJs(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
         }
 
         function escapeHtml(str) {
