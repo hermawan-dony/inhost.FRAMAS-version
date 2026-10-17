@@ -3831,4 +3831,55 @@ Delapan (8) tabel yang distandardisasi:
    - Seluruh berkas telah disinkronkan ke remote di `/source/public/www/` dan `/source/public/` dengan ownership `www-data:www-data`.
 
 ---
+---
+
+## 95. Dashboard Tracking Respon Dokumen Pabean (CEISA 4.0) & Perbaikan Integrasi
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Menu sidebar **Tracking Respon Pabean** pada portal utama (`index.php`) mengarah ke endpoint `statusaju.php`.
+   - Sebelumnya, jika dibuka langsung dari sidebar tanpa nomor AJU, halaman hanya mencetak teks mentah error: `Nomor AJU tidak boleh kosong!`.
+   - Operator pabean membutuhkan dashboard komprehensif untuk memantau perjalanan status seluruh dokumen pabean (BC 2.0, BC 2.3, BC 2.5, BC 2.7, BC 3.0, BC 4.0, dll), mengetahui status terkini (Validasi, Penjaluran, Gate In/Out, Pembongkaran, hingga Selesai), memeriksa respon resmi Bea Cukai (SPPB, NPE, Billing, Reject), serta mengunduh dokumen PDF resmi.
+2. **Kebutuhan**:
+   - Mengubah `statusaju.php` menjadi dashboard pelacakan interaktif modern (gaya Ant Design, mendukung tema Terang & Gelap).
+   - Mempertahankan backward compatibility 100% untuk panggilan API legacy dari modul lain (seperti `transfer.php` via `statusaju.php?aju=...`).
+   - Menyediakan fitur live sync single AJU dan live sync massal per perusahaan via NPWP OpenAPI CEISA 4.0.
+   - Menyediakan modal visual timeline stepper alur dokumen (Perekaman ➔ Pengiriman LNSW ➔ Validasi Pabean ➔ Penjaluran/Billing ➔ SPPB/NPE).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`statusaju.php`](file:///c:/dp/g-ceisa/statusaju.php) & [`www/statusaju.php`](file:///c:/dp/g-ceisa/www/statusaju.php)**:
+   - **Dual Routing Architecture**:
+     - *Mode Legacy API*: Jika parameter `aju` diberikan tanpa request UI/action, mengeksekusi sinkronisasi live ke CEISA 4.0 dan mengembalikan string `OK` persis seperti ekspektasi `transfer.php`.
+     - *Mode UI Dashboard*: Merender halaman interaktif lengkap dengan kartu KPI, filter pencarian, dan tabel riwayat.
+     - *Mode AJAX API*:
+       - `action=get_data`: Mengambil daftar gabungan status dan respon dokumen terkini untuk perusahaan aktif, menghitung KPI summary, dan mengelompokkan kategori (Selesai/SPPB/NPE, Dalam Proses, Billing, Reject).
+       - `action=get_timeline`: Mengambil seluruh riwayat status kronologis (`bc_ceisa_status`), riwayat respon resmi (`bc_ceisa_respons`), data header, dan log payload JSON mentah (`bc_ceisa_respon_logs`).
+       - `action=sync_single`: Sinkronisasi langsung 1 nomor AJU ke endpoint `https://apis-gw.beacukai.go.id/openapi/status/{nomorAju}`.
+       - `action=sync_company`: Sinkronisasi massal seluruh dokumen aktif perusahaan ke endpoint `https://apis-gw.beacukai.go.id/openapi/status?idPerusahaan={npwp}`.
+   - **Descriptive Status & Response Formatters**:
+     - Menambahkan fungsi pemetaan kode respon dan kode proses ke label deskriptif berbahasa Indonesia (misal: `2303` ➔ *"SPPB (Persetujuan Pengeluaran)"*, `3003` ➔ *"NPE (Nota Pelayanan Ekspor)"*, `3015` ➔ *"Pemeriksaan Fisik Ekspor"*, `501` ➔ *"Gate Out TPS"*, dll).
+   - **Visual Stepper & Timeline Progress**:
+     - Modal interaktif dengan stepper visual 5 tahap pabean, tab riwayat status proses, tab respon resmi, serta penampil JSON payload mentah dengan tombol salin cepat.
+2. **[`pdf.php`](file:///c:/dp/g-ceisa/pdf.php)**:
+   - Menambahkan pengecekan tabel `bc_ceisa_respons` pada fallback pencarian path file PDF resmi sehingga link unduhan PDF pada respon SPPB/NPE dapat diunduh langsung tanpa hambatan.
+3. **Penyelarasan Kolom Database**:
+   - Memastikan query insert dan select pada `bc_ceisa_respons` dan `bc_ceisa_respon_logs` sesuai dengan skema aktual basis data (menghilangkan referensi kolom `waktu_respon` dan `waktu_log` yang tidak ada di skema).
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/statusaju.php` ➔ **No syntax errors detected**.
+   - `/source/public/pdf.php` ➔ **No syntax errors detected**.
+2. **Uji Endpoint REST & AJAX**:
+   - `curl -s 'http://127.0.0.1/statusaju.php?aju=00002303006520261014297970'` ➔ Mengembalikan `OK` (Backward compatibility lulus 100%).
+   - `curl -s 'http://127.0.0.1/statusaju.php?action=get_data&cmp_id=010816064431000'` ➔ Mengembalikan 51 dokumen terlacak beserta metrik KPI (Selesai: 42, Proses: 9, Reject: 0).
+   - `curl -s 'http://127.0.0.1/statusaju.php?action=get_timeline&aju=...'` ➔ Mengembalikan visual timeline tahapan dan riwayat kronologis secara akurat.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
