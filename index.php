@@ -462,6 +462,17 @@ if ($userRole === 'bc') {
 }
 $initialAju = trim($_GET['nomor_aju'] ?? '');
 
+// Hitung jumlah pengajuan kode barang pending untuk badge menu Master Barang
+$cntPendingApproval = 0;
+try {
+    $escIndexCmp = !empty($sessionCmpId) ? $koneksi->real_escape_string($sessionCmpId) : '';
+    $cmpFilterIndex = !empty($escIndexCmp) ? "AND (cmp_id = '$escIndexCmp' OR cmp_id = '')" : "";
+    $qApprIndex = $koneksi->query("SELECT COUNT(1) FROM bc_material_approval WHERE status = 'PENDING' $cmpFilterIndex");
+    if ($qApprIndex && $rAI = $qApprIndex->fetch_row()) {
+        $cntPendingApproval = (int)$rAI[0];
+    }
+} catch (\Throwable $e) { $cntPendingApproval = 0; }
+
 $breadcrumbTitlesPhp = [
     'daftar_dokumen'  => 'Dashboard Ceisa 4.0',
     'transfer'        => 'Data Host to Host',
@@ -2486,9 +2497,14 @@ if ($initialTab === 'editor') {
                         <div class="kt-menu__sub" id="master_submenu">
                             <?php if (isMenuAllowed('inv_material')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_material') ? 'active' : '' ?>" id="nav-item-inv_material" onclick="switchMainTab('inv_material')">
-                                <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🏷️</span>
-                                    <span class="kt-menu__link-text">Master Data Barang</span>
+                                <a class="kt-menu__link" style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="display:inline-flex; align-items:center;">
+                                        <span class="kt-menu__link-icon">🏷️</span>
+                                        <span class="kt-menu__link-text">Master Data Barang</span>
+                                    </span>
+                                    <?php if ($cntPendingApproval > 0): ?>
+                                        <span class="badge badge-warning" style="font-size:9px; padding:1px 5px; border-radius:10px; background:#faad14; color:#fff; font-weight:700;" title="<?= $cntPendingApproval ?> pengajuan kode menunggu approval"><?= $cntPendingApproval ?></span>
+                                    <?php endif; ?>
                                 </a>
                             </div>
                             <?php endif; ?>

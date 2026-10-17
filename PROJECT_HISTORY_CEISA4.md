@@ -4140,6 +4140,66 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
 
 ---
+
+## 101. Implementasi Solusi Validasi Kode Barang Incoming: Auto-Mapping Part Supplier (`bc_material.KODE_BARANG2`), Resolusi Kode Interaktif, dan Workflow Approval Pengajuan Kode Barang Baru di Modul Admin Inventory (`material.php`, `rekap/bc27in.php`, `rekap/post_bc27in.php`, `warehouse_incoming.php`, `index.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**:
+  1. *"aku butuh solusi, ini kan jadinya ga bisa diimport ya? atau ada fitur modifikasi dulu? lalu baru bisa ditarik? atau fitur tambah ke tabel bc_material otomatis?? tapi perlu approval admin -- biar ga asal dikit dikit main import kode baru. padahal aslinya sudah ada hanya beda kode saat dikirim dari supplier"*
+  2. *"di tabel bc_material, ada kolom 'KODE_BARANG2' itu bisa dipakai untuk mapping kode supplier sehingga saat ditarik sudah otomatis berubah menjadi kode internal perusahaan"*
+  3. *"alternatif lainnya adalah mengganti kodenya manual, tapi bisa memilih dari master barang bc_material"*
+  4. *"harus VALIDASI tidak asal membuat kode baru tanpa approval admin Inventory"*
+  5. *"Tambahkan Approval pengajuan Kode Barang ini di modul 'admin Inventory'"*
+
+- **Akar Permasalahan (Root Cause)**:
+  - Saat menarik dokumen BC 2.7 IN (atau pemasukan lainnya), kode barang yang dicantumkan supplier pada dokumen pabean sering kali merupakan nomor part supplier (*supplier part number*) yang tidak sama dengan penamaan kode barang internal perusahaan.
+  - Sebelumnya, validasi pada `post_bc27in.php` hanya mencocokkan secara kaku ke kolom `bc_material.KODE_BARANG = ?`. Jika tidak cocok, seluruh dokumen langsung ditolak (*hard-reject*) dengan tabel pesan kesalahan statis tanpa adanya opsi bagi operator untuk memetakan atau memodifikasi kode.
+  - Jika barang dibiarkan diinsert otomatis tanpa kontrol, master data barang akan tercemar duplikasi kode ganda yang merusak akurasi stock opname dan pelaporan IT Inventory.
+
+---
+
+### B. Arsitektur & Implementasi Solusi
+
+1. **Pembuatan Tabel Antrian Persetujuan (`bc_material_approval`) & Indeks `KODE_BARANG2`**:
+   - Dibuat tabel baru `bc_material_approval` pada database RDS MySQL `ceisa0400db` untuk mencatat seluruh usulan pendaftaran kode baru maupun riwayat mapping:
+     - `id, cmp_id, tipe_pengajuan ['MAPPING_SUPPLIER', 'KODE_BARU'], nomor_aju, kode_supplier, kode_internal, uraian, model, pos_tarif, satuan, klas, alasan, status ['PENDING', 'APPROVED', 'REJECTED'], requested_by, requested_at, approved_by, approved_at, approval_notes`.
+   - Menambahkan indeks performa `idx_material_kodebarang2` pada kolom `bc_material.KODE_BARANG2` untuk pencarian berkecepatan tinggi.
+
+2. **Auto-Mapping Cerdas via `bc_material.KODE_BARANG2` (`rekap/post_bc27in.php` & `warehouse_incoming.php`)**:
+   - Mekanisme pencarian master barang dioptimalkan untuk memeriksa kolom utama `KODE_BARANG` sekaligus kolom mapping `KODE_BARANG2`:
+     `WHERE (cmp_id = ? OR cmp_id = '') AND (KODE_BARANG = ? OR KODE_BARANG2 = ?) ORDER BY (KODE_BARANG = ?) DESC LIMIT 1`.
+   - **Hasil**: Jika kode supplier sudah pernah didaftarkan pada `KODE_BARANG2`, sistem otomatis mengenalinya dan mengganti kodenya menjadi `KODE_BARANG` internal resmi perusahaan saat dibukukan ke tabel IT Inventory (`bc_1ab2`), lengkap dengan klasifikasi (`KLAS`) dan uraian master.
+
+3. **Modal Penyelarasan Kode Interaktif & Solutif (`rekap/bc27in.php`)**:
+   - Menggantikan tabel error statis dengan modal komprehensif **`🏷️ Penyelarasan Kode Barang Dokumen`** (`#modalResolver`):
+     - **Opsi 1 - Hubungkan (Mapping) ke Master Existing**: Operator dapat mencari barang master internal via autocomplete/live search, memilih barang yang sesuai, dan mencentang opsi simpan ke `KODE_BARANG2`. Kode supplier langsung terpetakan dan status baris berubah menjadi hijau `✓ Siap Diolah`.
+     - **Opsi 2 - Ajukan Kode Barang Baru ke Admin**: Operator mengisi formulir pengajuan kode baru (usulan kode internal, uraian, klasifikasi referensi `bc_tipe`, satuan, HS code, alasan). Data tersimpan ke `bc_material_approval` dengan status `PENDING`.
+     - **Tombol 'Olah ke IT Inventory Sekarang'**: Memungkinkan operator langsung membukukan dokumen seketika setelah semua item terselesaikan tanpa perlu reload halaman.
+
+4. **Modul Approval Pengajuan Kode Barang di Admin Inventory (`material.php`)**:
+   - **Indikator & Notifikasi Visual**:
+     - Ditambahkan banner peringatan oranye di bagian atas `material.php`: *"Persetujuan Dibutuhkan: Terdapat X pengajuan Kode Barang Baru / Mapping Supplier dari Dokumen Incoming yang menunggu Approval Admin Inventory."*
+     - Tombol toolbar khusus **`Approval Kode Barang`** dengan badge dinamis merah penunjuk jumlah antrian pending.
+     - Badge notifikasi penanda antrian pending juga disematkan pada menu sidebar kiri `index.php` di samping menu **Master Data Barang**.
+   - **Fitur Aksi Persetujuan Admin**:
+     - **Setujui & Daftarkan ke Master Data (`approval_approve`)**: Admin memverifikasi kode internal usulan, uraian, dan klasifikasi. Saat disetujui, item resmi di-insert ke tabel `bc_material` dengan kolom `KODE_BARANG2` otomatis terisi kode supplier, dan status pengajuan diubah menjadi `APPROVED`.
+     - **Alihkan ke Master Existing (`approval_map_existing`)**: Jika Admin melihat barang tersebut sebenarnya sudah ada di sistem dan tidak perlu membuat kode baru, Admin dapat mencari master existing dan memetakan kode supplier ke `KODE_BARANG2` barang existing tersebut.
+     - **Tolak Pengajuan (`approval_reject`)**: Admin dapat menolak pengajuan dengan mencantumkan alasan penolakan.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**:
+   - `/source/public/rekap/post_bc27in.php` ➔ **No syntax errors detected**.
+   - `/source/public/rekap/bc27in.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/material.php` ➔ **No syntax errors detected**.
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - Seluruh salinan berkas pada direktori `/source/public/www/` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Berkas lokal dan remote server Alibaba Cloud telah disinkronkan secara penuh.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

@@ -23,6 +23,27 @@ $aju_filter  = trim($_GET['aju'] ?? '');
 $tarik_filter = $_GET['tarik'] ?? '';
 $it_filter   = $_GET['it'] ?? '';
 
+// Referensi Klasifikasi dari bc_tipe untuk modal pengajuan kode baru
+$klasList = [];
+$qTipe = $koneksi->query("SELECT * FROM bc_tipe WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx");
+if ($qTipe) {
+    while ($t = $qTipe->fetch_assoc()) {
+        if ($t['tipe'] !== '-- SEMUA KLAS --') {
+            $klasList[] = $t['tipe'];
+        }
+    }
+}
+
+// Cek Pengajuan Approval Pending
+$cntPendingApproval = 0;
+$cleanCmpId   = $koneksi->real_escape_string($cmp_id ?? '');
+try {
+    $qAppr = $koneksi->query("SELECT COUNT(1) FROM bc_material_approval WHERE status = 'PENDING' AND (cmp_id = '$cleanCmpId' OR cmp_id = '')");
+    if ($qAppr && $rA = $qAppr->fetch_row()) {
+        $cntPendingApproval = (int)($rA[0] ?? 0);
+    }
+} catch (\Throwable $e) { $cntPendingApproval = 0; }
+
 $cleanNamaPrs = $koneksi->real_escape_string($namaperusahaan ?? 'FRAMAS');
 $cleanCmpId   = $koneksi->real_escape_string($cmp_id ?? '');
 $whereCmp     = !empty($cleanCmpId) ? "AND (a.cmp_id = '$cleanCmpId' OR a.cmp_id = '' OR a.cmp_id IS NULL)" : "";
@@ -369,17 +390,204 @@ $total = $belumTarik + $sudahTarik;
   </div>
 </div>
 
-<!-- Modal Validasi / Error Log -->
-<div id="modalNotice" class="modal fade" tabindex="-1" role="dialog">
-  <div class="modal-dialog modal-lg" role="document">
+<!-- Modal Validasi / Resolver Kode Barang -->
+<div id="modalResolver" class="modal fade" tabindex="-1" role="dialog" data-backdrop="static">
+  <div class="modal-dialog modal-xl" role="document">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title font-weight-bold" id="noticeTitle">Pemberitahuan Sistem</h5>
+      <div class="modal-header bg-light py-2">
+        <h6 class="modal-title font-weight-bold text-dark mb-0">
+          <i class="fas fa-boxes text-warning mr-1"></i> Penyelarasan Kode Barang Dokumen
+          <span class="badge badge-primary ml-2 font-weight-normal text-monospace" id="resAjuBadge" style="font-size:12px;"></span>
+        </h6>
         <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
       </div>
-      <div class="modal-body" id="noticeBody"></div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary btn-custom" data-dismiss="modal">Tutup</button>
+      <div class="modal-body">
+        <div class="alert alert-warning d-flex align-items-start mb-3 py-2 px-3" style="font-size:11px; gap:10px;">
+          <i class="fas fa-exclamation-triangle fa-2x mt-1 text-warning"></i>
+          <div>
+            <strong>Validasi Master Barang Belum Sesuai!</strong><br>
+            Dokumen ini memuat <strong id="resCountText" class="text-danger">0</strong> baris barang dari supplier yang kodenya belum terdaftar atau belum sesuai di Master Data Barang (<code>bc_material</code>).<br>
+            <strong>Solusi yang tersedia:</strong>
+            <ul class="mb-0 pl-3 mt-1">
+              <li><strong>Hubungkan (Mapping) ke Master Existing:</strong> Jika barang ini sebenarnya ada di Master internal (hanya beda kode saat dikirim supplier). Kode supplier akan disimpan ke kolom <code>KODE_BARANG2</code> agar penarikan seterusnya otomatis berubah ke kode internal.</li>
+              <li><strong>Ajukan Kode Barang Baru:</strong> Jika barang ini benar-benar item baru. Pengajuan akan dikirim ke antrian <strong>Approval Admin Inventory</strong> untuk diverifikasi sebelum barang dapat diolah.</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm" style="font-size:11px;">
+            <thead class="thead-light">
+              <tr>
+                <th style="width:40px;" class="text-center">Seri</th>
+                <th style="width:160px;">Kode Dokumen (Supplier)</th>
+                <th>Uraian Barang</th>
+                <th style="width:65px;" class="text-center">Satuan</th>
+                <th style="width:85px;" class="text-center">HS Code</th>
+                <th style="width:230px;">Status / Alasan</th>
+                <th style="width:230px;" class="text-center">Tindakan Penyelarasan</th>
+              </tr>
+            </thead>
+            <tbody id="resTableBody">
+              <!-- Item rows populated dynamically -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer justify-content-between py-2">
+        <div>
+          <span class="text-muted" style="font-size:11px;">
+            <i class="fas fa-info-circle mr-1"></i> Setelah seluruh item terpetakan atau disetujui, klik <b>Olah ke IT Inventory Sekarang</b>.
+          </span>
+        </div>
+        <div class="d-flex" style="gap:6px;">
+          <button type="button" class="btn btn-secondary btn-custom" data-dismiss="modal">Tutup</button>
+          <button type="button" id="btnRetryPost" class="btn btn-success btn-custom font-weight-bold" onclick="retryPostCurrentDoc()">
+            <i class="fas fa-check-circle mr-1"></i> Olah ke IT Inventory Sekarang
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Hubungkan Kode Supplier ke Master Barang Existing (Mapping) -->
+<div id="modalMapSupplier" class="modal fade" tabindex="-1" role="dialog" data-backdrop="static">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white py-2">
+        <h6 class="modal-title font-weight-bold mb-0">
+          <i class="fas fa-link mr-1"></i> Pemetaan Kode Supplier ke Master Barang Existing
+        </h6>
+        <button type="button" class="close text-white" onclick="$('#modalMapSupplier').modal('hide')"><span>&times;</span></button>
+      </div>
+      <div class="modal-body" style="font-size:11px;">
+        <input type="hidden" id="mapTargetSeri">
+        <div class="row">
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Kode Barang Dokumen (Supplier):</label>
+            <input type="text" id="mapSuppCode" class="form-control form-control-sm font-weight-bold text-danger text-monospace" readonly>
+          </div>
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Uraian Dokumen (Supplier):</label>
+            <input type="text" id="mapSuppUraian" class="form-control form-control-sm" readonly>
+          </div>
+        </div>
+
+        <div class="form-group mb-2 pt-2 border-top">
+          <label class="font-weight-bold mb-1 text-primary">
+            <i class="fas fa-search mr-1"></i> Cari Master Barang Internal (bc_material):
+          </label>
+          <input type="text" id="mapSearchInput" class="form-control form-control-sm" placeholder="Ketik Kode Barang, Part No, atau Uraian Barang internal..." oninput="debounceSearchMaster(this.value)">
+          <small class="text-muted">Pilih barang internal yang bersesuaian dari hasil pencarian di bawah:</small>
+        </div>
+
+        <!-- Hasil Pencarian List -->
+        <div id="mapSearchResultsContainer" style="max-height: 180px; overflow-y: auto; border: 1px solid #ced4da; border-radius: 3px; background:#fafafa; margin-bottom:10px;">
+          <div class="p-3 text-center text-muted" id="mapSearchEmpty">Ketik kata kunci untuk mencari master data barang...</div>
+          <div id="mapSearchResultsList" class="list-group list-group-flush" style="display:none;"></div>
+        </div>
+
+        <!-- Box Konfirmasi Barang Terpilih -->
+        <div id="mapSelectedBox" class="p-2 border rounded mb-2" style="display:none; background:#f6ffed; border-color:#b7eb8f !important;">
+          <div class="font-weight-bold text-success mb-1"><i class="fas fa-check-circle mr-1"></i> Master Barang Internal Terpilih:</div>
+          <div class="row">
+            <div class="col-md-4">
+              <strong>Kode Internal:</strong> <span id="mapSelectedKode" class="font-weight-bold text-monospace text-primary"></span>
+            </div>
+            <div class="col-md-4">
+              <strong>Klasifikasi:</strong> <span id="mapSelectedKlas" class="badge badge-info"></span>
+            </div>
+            <div class="col-md-4">
+              <strong>Satuan:</strong> <span id="mapSelectedSatuan" class="font-weight-bold"></span>
+            </div>
+            <div class="col-12 mt-1">
+              <strong>Uraian:</strong> <span id="mapSelectedUraian"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="custom-control custom-checkbox mt-2">
+          <input type="checkbox" class="custom-control-input" id="mapSaveK2" checked>
+          <label class="custom-control-label font-weight-bold text-dark" for="mapSaveK2">
+            Simpan kode supplier ini ke kolom Part No / Kode 2 (<code>KODE_BARANG2</code>) master barang.
+          </label>
+          <div class="text-muted ml-4" style="font-size:10px;">
+            Centang ini agar seluruh dokumen pabean berikutnya dari supplier dengan kode ini otomatis terpetakan tanpa perlu konfirmasi ulang.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-custom" onclick="$('#modalMapSupplier').modal('hide')">Batal</button>
+        <button type="button" id="btnSubmitMapping" class="btn btn-primary btn-custom font-weight-bold" onclick="submitMapping()" disabled>
+          <i class="fas fa-save mr-1"></i> Simpan Pemetaan & Terapkan
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Pengajuan Kode Barang Baru ke Admin Inventory -->
+<div id="modalRequestCode" class="modal fade" tabindex="-1" role="dialog" data-backdrop="static">
+  <div class="modal-dialog modal-md" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-warning text-dark py-2">
+        <h6 class="modal-title font-weight-bold mb-0">
+          <i class="fas fa-plus-circle mr-1"></i> Pengajuan Kode Barang Baru ke Admin Inventory
+        </h6>
+        <button type="button" class="close" onclick="$('#modalRequestCode').modal('hide')"><span>&times;</span></button>
+      </div>
+      <div class="modal-body" style="font-size:11px;">
+        <div class="alert alert-info py-2 px-3 mb-2" style="font-size:10.5px;">
+          <i class="fas fa-info-circle mr-1"></i> Sesuai SOP, penambahan kode baru pada Master Data Barang wajib melalui validasi & persetujuan (Approval) Admin Inventory.
+        </div>
+
+        <input type="hidden" id="reqSeri">
+        <div class="form-group mb-2">
+          <label class="font-weight-bold mb-1">Nomor AJU Dokumen:</label>
+          <input type="text" id="reqAju" class="form-control form-control-sm text-monospace" readonly>
+        </div>
+        <div class="form-group mb-2">
+          <label class="font-weight-bold mb-1">Kode Barang Supplier (Dokumen):</label>
+          <input type="text" id="reqSuppCode" class="form-control form-control-sm font-weight-bold text-danger text-monospace" readonly>
+        </div>
+        <div class="form-group mb-2">
+          <label class="font-weight-bold mb-1 text-primary">Usulan Kode Barang Internal:*</label>
+          <input type="text" id="reqIntCode" class="form-control form-control-sm font-weight-bold" placeholder="Contoh: RM-FABRIC-001 / KODE PERUSAHAAN">
+          <small class="text-muted">Dapat diisi kode yang disarankan perusahaan, atau kode supplier jika disepakati sama.</small>
+        </div>
+        <div class="form-group mb-2">
+          <label class="font-weight-bold mb-1">Uraian / Deskripsi Barang:*</label>
+          <input type="text" id="reqUraian" class="form-control form-control-sm">
+        </div>
+        <div class="row">
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Klasifikasi Kategori:*</label>
+            <select id="reqKlas" class="form-control form-control-sm">
+              <!-- populated from window.klasList -->
+            </select>
+          </div>
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Satuan Utama:*</label>
+            <input type="text" id="reqSatuan" class="form-control form-control-sm" value="PCE">
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Pos Tarif / HS Code:</label>
+            <input type="text" id="reqHs" class="form-control form-control-sm" placeholder="8 digit">
+          </div>
+          <div class="col-md-6 form-group mb-2">
+            <label class="font-weight-bold mb-1">Alasan Pengajuan:</label>
+            <input type="text" id="reqAlasan" class="form-control form-control-sm" placeholder="Contoh: Barang baru dari supplier">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button type="button" class="btn btn-secondary btn-custom" onclick="$('#modalRequestCode').modal('hide')">Batal</button>
+        <button type="button" id="btnSubmitRequestCode" class="btn btn-warning btn-custom font-weight-bold" onclick="submitRequestNewCode()">
+          <i class="fas fa-paper-plane mr-1"></i> Kirim Pengajuan ke Admin
+        </button>
       </div>
     </div>
   </div>
@@ -390,6 +598,14 @@ $total = $belumTarik + $sudahTarik;
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.4/xlsx.full.min.js"></script>
 <script>
 const activeCmpId = '<?= htmlspecialchars($cmp_id) ?>';
+window.klasList = <?= json_encode($klasList) ?>;
+
+// State resolver aktif
+let currentResolverAju = '';
+let currentResolverIdx = null;
+let currentInvalidItems = [];
+let selectedMasterItem = null;
+let searchDebounceTimer = null;
 
 async function tarikSingle(aju, kantor, idx) {
   const btnCell = $(`#action-cell-${idx}`);
@@ -439,43 +655,13 @@ async function postToIt(aju, idx, isRepost = false) {
           🔄 Re-Post
         </button>
       `);
+      $('#modalResolver').modal('hide');
       alert("✅ " + res.message);
     } else {
       btnCell.html(oldHtml);
-      // Tampilkan modal alasan jika ada invalid items
+      // Jika ada item invalid, buka modal penyelarasan interaktif
       if (res.invalid_items && res.invalid_items.length > 0) {
-        let errHtml = `
-          <div class="alert alert-danger">
-            <strong>❌ Gagal Olah Masuk IT Inventory!</strong><br>
-            ${res.message}<br><br>
-            <em>Catatan: Sesuai ketentuan IT Inventory, seluruh kode barang harus telah terdaftar pada Master Data Barang dan kolom Klasifikasi sudah diset.</em>
-          </div>
-          <table class="table table-bordered table-sm" style="font-size:11px;">
-            <thead class="thead-light">
-              <tr>
-                <th style="width:40px;">Seri</th>
-                <th>Kode Barang Dokumen</th>
-                <th>Uraian Barang</th>
-                <th>Alasan / Masalah</th>
-              </tr>
-            </thead>
-            <tbody>
-        `;
-        res.invalid_items.forEach(it => {
-          errHtml += `
-            <tr>
-              <td class="text-center font-weight-bold">${it.seri}</td>
-              <td class="font-weight-bold text-danger text-monospace">${escapeHtml(it.kode)}</td>
-              <td>${escapeHtml(it.uraian)}</td>
-              <td class="text-danger font-weight-bold">${escapeHtml(it.alasan)}</td>
-            </tr>
-          `;
-        });
-        errHtml += '</tbody></table>';
-
-        $('#noticeTitle').html('⚠️ Validasi Master Barang Belum Lengkap');
-        $('#noticeBody').html(errHtml);
-        $('#modalNotice').modal('show');
+        openResolverModal(aju, idx, res.invalid_items);
       } else {
         alert("Gagal: " + res.message);
       }
@@ -484,6 +670,295 @@ async function postToIt(aju, idx, isRepost = false) {
     btnCell.html(oldHtml);
     alert("Koneksi gagal: " + err.message);
   }
+}
+
+function openResolverModal(aju, idx, invalidItems) {
+  currentResolverAju = aju;
+  currentResolverIdx = idx;
+  currentInvalidItems = invalidItems;
+
+  $('#resAjuBadge').text(aju);
+  $('#resCountText').text(invalidItems.length);
+
+  renderResolverRows();
+  $('#modalResolver').modal('show');
+}
+
+function renderResolverRows() {
+  let html = '';
+  currentInvalidItems.forEach((it, i) => {
+    let statusBadge = '';
+    let actionBtn = '';
+
+    if (it.has_pending) {
+      statusBadge = `
+        <span class="badge badge-warning" style="font-size:10.5px; padding:3px 6px;">
+          <i class="fas fa-clock mr-1"></i> Menunggu Approval Admin
+        </span>
+        <div style="font-size:9.5px; color:#fa8c16; margin-top:2px;">
+          Usulan: <strong>${escapeHtml(it.pending_kode)}</strong> (ID #${it.pending_id})
+        </div>
+      `;
+      actionBtn = `
+        <a href="../material.php?cmp_id=${encodeURIComponent(activeCmpId)}" target="_blank" class="btn btn-outline-warning btn-sm py-0 px-2 font-weight-bold" style="font-size:10px;">
+          <i class="fas fa-external-link-alt mr-1"></i> Buka Modul Admin
+        </a>
+      `;
+    } else if (it.is_resolved) {
+      statusBadge = `
+        <span class="badge badge-success" style="font-size:10.5px; padding:3px 6px;">
+          <i class="fas fa-check-circle mr-1"></i> Berhasil Dimapping
+        </span>
+        <div style="font-size:9.5px; color:#52c41a; margin-top:2px;">
+          Internal: <strong>${escapeHtml(it.resolved_internal_code)}</strong>
+        </div>
+      `;
+      actionBtn = `
+        <span class="text-success font-weight-bold"><i class="fas fa-check"></i> Siap Diolah</span>
+      `;
+    } else {
+      statusBadge = `
+        <span class="badge badge-danger" style="font-size:10px; padding:3px 6px;">
+          ${escapeHtml(it.alasan)}
+        </span>
+      `;
+      actionBtn = `
+        <div class="btn-group btn-group-sm">
+          <button type="button" class="btn btn-primary btn-sm py-0 px-2 font-weight-bold" style="font-size:10px;" onclick="openMappingModal(${i})">
+            <i class="fas fa-link mr-1"></i> Hubungkan
+          </button>
+          <button type="button" class="btn btn-warning btn-sm py-0 px-2 font-weight-bold text-dark" style="font-size:10px;" onclick="openNewCodeModal(${i})">
+            <i class="fas fa-plus mr-1"></i> Ajukan Kode
+          </button>
+        </div>
+      `;
+    }
+
+    html += `
+      <tr id="res-row-${i}">
+        <td class="text-center font-weight-bold text-muted">${it.seri}</td>
+        <td class="font-weight-bold text-danger text-monospace">${escapeHtml(it.kode)}</td>
+        <td>${escapeHtml(it.uraian)}</td>
+        <td class="text-center">${escapeHtml(it.satuan)}</td>
+        <td class="text-center">${escapeHtml(it.hs)}</td>
+        <td>${statusBadge}</td>
+        <td class="text-center">${actionBtn}</td>
+      </tr>
+    `;
+  });
+
+  $('#resTableBody').html(html);
+}
+
+// -------------------------------------------------------------
+// LOGIKA PEMETAAN (MAPPING) SUPPLIER -> MASTER EXISTING
+// -------------------------------------------------------------
+function openMappingModal(itemIndex) {
+  const it = currentInvalidItems[itemIndex];
+  if (!it) return;
+
+  $('#mapTargetSeri').val(itemIndex);
+  $('#mapSuppCode').val(it.kode);
+  $('#mapSuppUraian').val(it.uraian);
+  $('#mapSearchInput').val('');
+  $('#mapSearchResultsList').empty().hide();
+  $('#mapSearchEmpty').text('Ketik kata kunci untuk mencari master data barang...').show();
+  $('#mapSelectedBox').hide();
+  $('#btnSubmitMapping').prop('disabled', true);
+  selectedMasterItem = null;
+
+  $('#modalMapSupplier').modal('show');
+  setTimeout(() => $('#mapSearchInput').focus(), 400);
+}
+
+function debounceSearchMaster(keyword) {
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = setTimeout(() => searchMasterMaterials(keyword), 300);
+}
+
+async function searchMasterMaterials(query) {
+  query = query.trim();
+  if (query.length < 1) {
+    $('#mapSearchResultsList').empty().hide();
+    $('#mapSearchEmpty').text('Ketik kata kunci untuk mencari master data barang...').show();
+    return;
+  }
+
+  $('#mapSearchEmpty').html('<span class="spinner-border spinner-border-sm text-primary"></span> Mencari data master barang...').show();
+  $('#mapSearchResultsList').hide();
+
+  try {
+    const res = await fetch(`post_bc27in.php?action=search_material&cmp_id=${encodeURIComponent(activeCmpId)}&q=${encodeURIComponent(query)}`).then(r => r.json());
+    if (res.status && res.items && res.items.length > 0) {
+      let listHtml = '';
+      res.items.forEach(m => {
+        const p2 = m.kode2 ? ` | Part No: <span class="text-info">${escapeHtml(m.kode2)}</span>` : '';
+        listHtml += `
+          <button type="button" class="list-group-item list-group-item-action py-1 px-2" onclick="selectMasterForMapping('${escapeHtml(m.kode)}', '${escapeHtml(m.uraian)}', '${escapeHtml(m.klas)}', '${escapeHtml(m.satuan)}', '${escapeHtml(m.pos_tarif)}')">
+            <div class="d-flex justify-content-between align-items-center">
+              <strong class="text-monospace text-primary">${escapeHtml(m.kode)}</strong>
+              <span class="badge badge-secondary">${escapeHtml(m.klas)}</span>
+            </div>
+            <div class="text-truncate" style="font-size:10.5px;">${escapeHtml(m.uraian)}</div>
+            <div style="font-size:9.5px; color:#8c8c8c;">Satuan: ${escapeHtml(m.satuan)}${p2}</div>
+          </button>
+        `;
+      });
+      $('#mapSearchResultsList').html(listHtml).show();
+      $('#mapSearchEmpty').hide();
+    } else {
+      $('#mapSearchResultsList').hide();
+      $('#mapSearchEmpty').html(`<span class="text-danger">Tidak ditemukan master barang dengan kata kunci '${escapeHtml(query)}'.</span>`).show();
+    }
+  } catch (err) {
+    $('#mapSearchEmpty').text("Gagal mencari data: " + err.message).show();
+  }
+}
+
+function selectMasterForMapping(kode, uraian, klas, satuan, pos_tarif) {
+  selectedMasterItem = { kode, uraian, klas, satuan, pos_tarif };
+
+  $('#mapSelectedKode').text(kode);
+  $('#mapSelectedUraian').text(uraian);
+  $('#mapSelectedKlas').text(klas);
+  $('#mapSelectedSatuan').text(satuan);
+  $('#mapSelectedBox').slideDown();
+
+  $('#btnSubmitMapping').prop('disabled', false);
+}
+
+async function submitMapping() {
+  if (!selectedMasterItem) return;
+
+  const idx = parseInt($('#mapTargetSeri').val());
+  const suppCode = $('#mapSuppCode').val();
+  const saveMapping = $('#mapSaveK2').is(':checked') ? 1 : 0;
+
+  const btn = $('#btnSubmitMapping');
+  const oldText = btn.html();
+  btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> Menyimpan...');
+
+  const fd = new FormData();
+  fd.append('action', 'map_supplier');
+  fd.append('cmp_id', activeCmpId);
+  fd.append('nomor_aju', currentResolverAju);
+  fd.append('kode_supplier', suppCode);
+  fd.append('kode_internal', selectedMasterItem.kode);
+  fd.append('save_mapping', saveMapping);
+
+  try {
+    const res = await fetch('post_bc27in.php', { method: 'POST', body: fd }).then(r => r.json());
+    if (res.status) {
+      $('#modalMapSupplier').modal('hide');
+      
+      // Update item state pada list invalid
+      if (currentInvalidItems[idx]) {
+        currentInvalidItems[idx].is_resolved = true;
+        currentInvalidItems[idx].resolved_internal_code = selectedMasterItem.kode;
+      }
+      renderResolverRows();
+
+      alert("✅ " + res.message);
+    } else {
+      alert("Gagal: " + res.message);
+    }
+  } catch (e) {
+    alert("Koneksi gagal: " + e.message);
+  } finally {
+    btn.prop('disabled', false).html(oldText);
+  }
+}
+
+// -------------------------------------------------------------
+// LOGIKA PENGAJUAN KODE BARU KE ADMIN INVENTORY
+// -------------------------------------------------------------
+function openNewCodeModal(itemIndex) {
+  const it = currentInvalidItems[itemIndex];
+  if (!it) return;
+
+  $('#reqSeri').val(itemIndex);
+  $('#reqAju').val(currentResolverAju);
+  $('#reqSuppCode').val(it.kode);
+  $('#reqIntCode').val(it.kode !== '(KOSONG)' ? it.kode : '');
+  $('#reqUraian').val(it.uraian);
+  $('#reqSatuan').val(it.satuan || 'PCE');
+  $('#reqHs').val(it.hs || '');
+  $('#reqAlasan').val('Barang baru dari supplier pada dokumen masuk AJU ' + currentResolverAju);
+
+  // Populate Klasifikasi dropdown
+  let optHtml = '';
+  (window.klasList || []).forEach(k => {
+    optHtml += `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`;
+  });
+  $('#reqKlas').html(optHtml);
+
+  $('#modalRequestCode').modal('show');
+  setTimeout(() => $('#reqIntCode').focus(), 400);
+}
+
+async function submitRequestNewCode() {
+  const idx      = parseInt($('#reqSeri').val());
+  const suppCode = $('#reqSuppCode').val();
+  const intCode  = $('#reqIntCode').val().trim();
+  const uraian   = $('#reqUraian').val().trim();
+  const klas     = $('#reqKlas').val();
+  const satuan   = $('#reqSatuan').val().trim();
+  const hs       = $('#reqHs').val().trim();
+  const alasan   = $('#reqAlasan').val().trim();
+
+  if (!intCode) {
+    alert("Usulan Kode Barang Internal wajib diisi!");
+    $('#reqIntCode').focus();
+    return;
+  }
+  if (!uraian) {
+    alert("Uraian Barang wajib diisi!");
+    $('#reqUraian').focus();
+    return;
+  }
+
+  const btn = $('#btnSubmitRequestCode');
+  const oldText = btn.html();
+  btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> Mengirim...');
+
+  const fd = new FormData();
+  fd.append('action', 'request_new_code');
+  fd.append('cmp_id', activeCmpId);
+  fd.append('nomor_aju', currentResolverAju);
+  fd.append('kode_supplier', suppCode);
+  fd.append('kode_internal', intCode);
+  fd.append('uraian', uraian);
+  fd.append('klas', klas);
+  fd.append('satuan', satuan);
+  fd.append('pos_tarif', hs);
+  fd.append('alasan', alasan);
+
+  try {
+    const res = await fetch('post_bc27in.php', { method: 'POST', body: fd }).then(r => r.json());
+    if (res.status) {
+      $('#modalRequestCode').modal('hide');
+
+      if (currentInvalidItems[idx]) {
+        currentInvalidItems[idx].has_pending = true;
+        currentInvalidItems[idx].pending_kode = intCode;
+        currentInvalidItems[idx].pending_id = res.approval_id || 0;
+      }
+      renderResolverRows();
+
+      alert("✅ " + res.message);
+    } else {
+      alert("Gagal: " + res.message);
+    }
+  } catch (e) {
+    alert("Koneksi gagal: " + e.message);
+  } finally {
+    btn.prop('disabled', false).html(oldText);
+  }
+}
+
+function retryPostCurrentDoc() {
+  if (!currentResolverAju || currentResolverIdx === null) return;
+  postToIt(currentResolverAju, currentResolverIdx);
 }
 
 async function tarikSemua() {
@@ -569,3 +1044,4 @@ function exportExcel() {
 </script>
 </body>
 </html>
+

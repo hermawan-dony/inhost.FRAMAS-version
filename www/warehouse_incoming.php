@@ -168,7 +168,8 @@ if ($action === 'detail_barang') {
         IFNULL(b.harga_penyerahan, 0) AS harga_penyerahan,
         IFNULL(b.cif, 0) AS cif,
         IFNULL(b.netto, 0) AS netto,
-        IFNULL((SELECT klas FROM bc_material m WHERE m.KODE_BARANG = b.kode_barang AND (m.cmp_id = '$escCmp' OR m.cmp_id = '') LIMIT 1), IFNULL(b.tipe, 'Raw Materials')) AS klas,
+        IFNULL((SELECT klas FROM bc_material m WHERE (m.KODE_BARANG = b.kode_barang OR m.KODE_BARANG2 = b.kode_barang) AND (m.cmp_id = '$escCmp' OR m.cmp_id = '') ORDER BY (m.KODE_BARANG = b.kode_barang) DESC LIMIT 1), IFNULL(b.tipe, 'Raw Materials')) AS klas,
+        IFNULL((SELECT KODE_BARANG FROM bc_material m WHERE (m.KODE_BARANG = b.kode_barang OR m.KODE_BARANG2 = b.kode_barang) AND (m.cmp_id = '$escCmp' OR m.cmp_id = '') ORDER BY (m.KODE_BARANG = b.kode_barang) DESC LIMIT 1), b.kode_barang) AS kode_internal,
         inv.SESUAI AS inv_sesuai,
         inv.QTY_AKTUAL AS inv_qty_aktual,
         inv.MEMO AS inv_memo
@@ -329,9 +330,11 @@ if ($action === 'confirm_post') {
                 throw new Exception("Baris #$seri (Kode: {$b['kode_barang']}) memiliki selisih fisik ({$qtyAkt} vs {$qtyDok}), kolom MEMO wajib diisi alasan selisih!");
             }
 
-            // Ambil klasifikasi material
+            // Ambil klasifikasi & kode internal material (mendukung auto-mapping via KODE_BARANG2)
             $escKode = $koneksi->real_escape_string($b['kode_barang']);
-            $klas = $koneksi->query("SELECT KLAS FROM bc_material WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$docCmp' OR cmp_id = '') LIMIT 1")->fetch_assoc()['KLAS'] ?? ($b['tipe'] ?: 'Raw Materials');
+            $matRow = $koneksi->query("SELECT KODE_BARANG, KLAS FROM bc_material WHERE (KODE_BARANG = '$escKode' OR KODE_BARANG2 = '$escKode') AND (cmp_id = '$docCmp' OR cmp_id = '') ORDER BY (KODE_BARANG = '$escKode') DESC LIMIT 1")->fetch_assoc();
+            $finalKodeBarang = !empty($matRow['KODE_BARANG']) ? $matRow['KODE_BARANG'] : $b['kode_barang'];
+            $klas = $matRow['KLAS'] ?? ($b['tipe'] ?: 'Raw Materials');
 
             $hs = $b['pos_tarif'] ?: ($b['hs'] ?? '');
             $satuan = $b['kode_satuan'] ?: 'PCE';
@@ -348,7 +351,7 @@ if ($action === 'confirm_post') {
             $stmtInsert->bind_param(
                 "ssssssssssssdsssssssiddssssssss",
                 $docCmp, $kodeBc, $noDaftar, $tglDaftar, $noBukti, $tglBukti, $supplier,
-                $b['kode_barang'], $hs, $b['uraian'], $klas, $satuan, $qtyDok, $valuta, $nilai, $ab, $nomor_aju,
+                $finalKodeBarang, $hs, $b['uraian'], $klas, $satuan, $qtyDok, $valuta, $nilai, $ab, $nomor_aju,
                 $sj, $invoice, $faktur, $nomor_aju, $seri, $hargaPenyerahan, $cif, $netto,
                 $sesuai, $qtyAkt, $memo, $dok, $tgl_proses, $currentUser
             );

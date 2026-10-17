@@ -67,6 +67,18 @@ try {
     $cntDiffSatuan = 0;
 }
 
+// Cek Pengajuan Approval Kode Barang Baru / Mapping Supplier yang masih PENDING
+$cntPendingApproval = 0;
+$cmpFilterAppr = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
+try {
+    $qAppr = $koneksi->query("SELECT COUNT(1) FROM bc_material_approval WHERE status = 'PENDING' $cmpFilterAppr");
+    if ($qAppr && $rA = $qAppr->fetch_row()) {
+        $cntPendingApproval = (int)($rA[0] ?? 0);
+    }
+} catch (\Throwable $e) {
+    $cntPendingApproval = 0;
+}
+
 $action = $_REQUEST['action'] ?? $_POST['action'] ?? $_GET['action'] ?? '';
 
 // 1. AJAX: LIST DATA MATERIAL
@@ -1232,6 +1244,254 @@ if ($action === 'sync_satuan') {
         exit;
     }
 }
+
+// 14. AJAX: GET PENDING APPROVALS COUNT
+if ($action === 'get_pending_approvals_count') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cnt = 0;
+    try {
+        $q = $koneksi->query("SELECT COUNT(1) FROM bc_material_approval WHERE status = 'PENDING' $cmpFilterAppr");
+        if ($q && $r = $q->fetch_row()) $cnt = (int)$r[0];
+    } catch (\Throwable $e) {}
+    echo json_encode(['status' => 'OK', 'count' => $cnt]);
+    exit;
+}
+
+// 15. AJAX: LIST DATA PENGAJUAN APPROVAL KODE BARANG
+if ($action === 'approval_list') {
+    header('Content-Type: application/json; charset=utf-8');
+    $statusFilter = trim($_GET['status_filter'] ?? 'PENDING');
+    $search       = trim($_GET['q'] ?? '');
+
+    $where = [];
+    if (!empty($sessionCmpId)) {
+        $where[] = "(cmp_id = '$escSessionCmp' OR cmp_id = '')";
+    }
+    if (!empty($statusFilter) && $statusFilter !== 'ALL') {
+        $where[] = "status = '" . $koneksi->real_escape_string($statusFilter) . "'";
+    }
+    if (!empty($search)) {
+        $s = $koneksi->real_escape_string($search);
+        $where[] = "(kode_supplier LIKE '%$s%' OR kode_internal LIKE '%$s%' OR uraian LIKE '%$s%' OR nomor_aju LIKE '%$s%' OR requested_by LIKE '%$s%')";
+    }
+
+    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+    $sql = "SELECT * FROM bc_material_approval $whereSql ORDER BY (status = 'PENDING') DESC, id DESC LIMIT 150";
+
+    $list = [];
+    $res = $koneksi->query($sql);
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $list[] = $r;
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'data'   => $list,
+        'count'  => count($list)
+    ]);
+    exit;
+}
+
+// 16. AJAX: SEARCH EXISTING MASTER FOR APPROVAL MAPPING
+if ($action === 'approval_search_existing') {
+    header('Content-Type: application/json; charset=utf-8');
+    $q = trim($_GET['q'] ?? '');
+    $escQ = $koneksi->real_escape_string($q);
+    $where = [];
+    if (!empty($sessionCmpId)) {
+        $where[] = "(cmp_id = '$escSessionCmp' OR cmp_id = '')";
+    }
+    if (!empty($escQ)) {
+        $where[] = "(KODE_BARANG LIKE '%$escQ%' OR KODE_BARANG2 LIKE '%$escQ%' OR URAIAN LIKE '%$escQ%' OR POS_TARIF LIKE '%$escQ%')";
+    }
+    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+    $res = $koneksi->query("SELECT KODE_BARANG, KODE_BARANG2, URAIAN, KLAS, KODE_SATUAN, POS_TARIF FROM bc_material $whereSql ORDER BY KODE_BARANG ASC LIMIT 25");
+    $items = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $items[] = $r;
+        }
+    }
+    echo json_encode(['status' => 'OK', 'items' => $items]);
+    exit;
+}
+
+// 17. AJAX: APPROVE PENGAJUAN KODE BARANG
+if ($action === 'approval_approve') {
+    header('Content-Type: application/json; charset=utf-8');
+    $id           = (int)($_POST['id'] ?? 0);
+    $kodeInternal = trim($_POST['kode_internal'] ?? '');
+    $uraian       = trim($_POST['uraian'] ?? '');
+    $klas         = trim($_POST['klas'] ?? '');
+    $satuan       = trim($_POST['satuan'] ?? 'PCE');
+    $posTarif     = trim($_POST['pos_tarif'] ?? '');
+    $model        = trim($_POST['model'] ?? '');
+    $notes        = trim($_POST['notes'] ?? 'Disetujui Admin Inventory');
+    $adminUser    = $_SESSION['username'] ?? ($_SESSION['user_id'] ?? 'ADMIN');
+
+    if ($id <= 0 || empty($kodeInternal) || empty($uraian) || empty($klas)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID, Usulan Kode Internal, Uraian, dan Klasifikasi wajib diisi!']);
+        exit;
+    }
+
+    // Ambil data pengajuan
+    $qReq = $koneksi->query("SELECT * FROM bc_material_approval WHERE id = $id LIMIT 1");
+    $req = $qReq ? $qReq->fetch_assoc() : null;
+    if (!$req) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Data pengajuan tidak ditemukan.']);
+        exit;
+    }
+
+    $escInt = $koneksi->real_escape_string($kodeInternal);
+    $docCmp = !empty($req['cmp_id']) ? $req['cmp_id'] : $sessionCmpId;
+    $escCmp = $koneksi->real_escape_string($docCmp);
+
+    $koneksi->begin_transaction();
+    try {
+        // Cek apakah kode_internal sudah ada di bc_material
+        $chkMat = $koneksi->query("SELECT KODE_BARANG FROM bc_material WHERE KODE_BARANG = '$escInt' AND (cmp_id = '$escCmp' OR cmp_id = '') LIMIT 1");
+        if ($chkMat && $chkMat->num_rows > 0) {
+            // Update mapping KODE_BARANG2 pada master yang sudah ada
+            $upd = $koneksi->prepare("UPDATE bc_material SET KODE_BARANG2 = ?, TGL_UPDATE = NOW() WHERE KODE_BARANG = ? AND (cmp_id = ? OR cmp_id = '')");
+            if ($upd) {
+                $upd->bind_param("sss", $req['kode_supplier'], $kodeInternal, $docCmp);
+                $upd->execute();
+                $upd->close();
+            }
+        } else {
+            // Insert item baru ke bc_material
+            $ins = $koneksi->prepare("
+                INSERT INTO bc_material (
+                    cmp_id, KODE_BARANG, KODE_BARANG2, URAIAN, MODEL, POS_TARIF, KODE_SATUAN, KLAS, AKTIF, TGL_REGISTER, USER_ID
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, 'Y', NOW(), ?
+                )
+            ");
+            if (!$ins) {
+                throw new Exception("Prepare insert bc_material error: " . $koneksi->error);
+            }
+            $ins->bind_param("sssssssss", $docCmp, $kodeInternal, $req['kode_supplier'], $uraian, $model, $posTarif, $satuan, $klas, $adminUser);
+            $ins->execute();
+            $ins->close();
+        }
+
+        // Update status di bc_material_approval
+        $updAppr = $koneksi->prepare("
+            UPDATE bc_material_approval 
+            SET status = 'APPROVED', kode_internal = ?, uraian = ?, klas = ?, satuan = ?, pos_tarif = ?, approval_notes = ?, approved_by = ?, approved_at = NOW()
+            WHERE id = ?
+        ");
+        if ($updAppr) {
+            $updAppr->bind_param("sssssssi", $kodeInternal, $uraian, $klas, $satuan, $posTarif, $notes, $adminUser, $id);
+            $updAppr->execute();
+            $updAppr->close();
+        }
+
+        $koneksi->commit();
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Pengajuan berhasil disetujui! Kode Barang '$kodeInternal' telah resmi didaftarkan ke Master Data Barang dengan Part No supplier '{$req['kode_supplier']}'."
+        ]);
+        exit;
+    } catch (\Throwable $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyetujui pengajuan: ' . $e->getMessage()]);
+        exit;
+    }
+}
+
+// 18. AJAX: MAP EXISTING PADA APPROVAL
+if ($action === 'approval_map_existing') {
+    header('Content-Type: application/json; charset=utf-8');
+    $id         = (int)($_POST['id'] ?? 0);
+    $targetCode = trim($_POST['target_code'] ?? '');
+    $notes      = trim($_POST['notes'] ?? 'Dimapping ke kode master existing oleh Admin');
+    $adminUser  = $_SESSION['username'] ?? ($_SESSION['user_id'] ?? 'ADMIN');
+
+    if ($id <= 0 || empty($targetCode)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID dan Kode Barang Target wajib diisi!']);
+        exit;
+    }
+
+    $qReq = $koneksi->query("SELECT * FROM bc_material_approval WHERE id = $id LIMIT 1");
+    $req = $qReq ? $qReq->fetch_assoc() : null;
+    if (!$req) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Data pengajuan tidak ditemukan.']);
+        exit;
+    }
+
+    $escTarget = $koneksi->real_escape_string($targetCode);
+    $docCmp = !empty($req['cmp_id']) ? $req['cmp_id'] : $sessionCmpId;
+    $escCmp = $koneksi->real_escape_string($docCmp);
+
+    // Pastikan target code ada di bc_material
+    $chkTarget = $koneksi->query("SELECT KODE_BARANG, URAIAN, KLAS FROM bc_material WHERE KODE_BARANG = '$escTarget' AND (cmp_id = '$escCmp' OR cmp_id = '') LIMIT 1")->fetch_assoc();
+    if (!$chkTarget) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Kode Barang Target '$targetCode' tidak ditemukan pada Master Data Barang."]);
+        exit;
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        // Update KODE_BARANG2 di bc_material
+        $upd = $koneksi->prepare("UPDATE bc_material SET KODE_BARANG2 = ?, TGL_UPDATE = NOW() WHERE KODE_BARANG = ? AND (cmp_id = ? OR cmp_id = '')");
+        if ($upd) {
+            $upd->bind_param("sss", $req['kode_supplier'], $targetCode, $docCmp);
+            $upd->execute();
+            $upd->close();
+        }
+
+        // Update status di bc_material_approval
+        $updAppr = $koneksi->prepare("
+            UPDATE bc_material_approval 
+            SET status = 'APPROVED', kode_internal = ?, approval_notes = ?, approved_by = ?, approved_at = NOW()
+            WHERE id = ?
+        ");
+        if ($updAppr) {
+            $fullNotes = "Dimapping ke kode existing [$targetCode]. " . $notes;
+            $updAppr->bind_param("sssi", $targetCode, $fullNotes, $adminUser, $id);
+            $updAppr->execute();
+            $updAppr->close();
+        }
+
+        $koneksi->commit();
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Berhasil memetakan kode supplier '{$req['kode_supplier']}' ke kode existing '$targetCode' ({$chkTarget['URAIAN']})."
+        ]);
+        exit;
+    } catch (\Throwable $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memproses pemetaan: ' . $e->getMessage()]);
+        exit;
+    }
+}
+
+// 19. AJAX: REJECT PENGAJUAN APPROVAL KODE BARANG
+if ($action === 'approval_reject') {
+    header('Content-Type: application/json; charset=utf-8');
+    $id        = (int)($_POST['id'] ?? 0);
+    $notes     = trim($_POST['notes'] ?? 'Ditolak oleh Admin Inventory');
+    $adminUser = $_SESSION['username'] ?? ($_SESSION['user_id'] ?? 'ADMIN');
+
+    if ($id <= 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID pengajuan tidak valid.']);
+        exit;
+    }
+
+    $upd = $koneksi->prepare("UPDATE bc_material_approval SET status = 'REJECTED', approval_notes = ?, approved_by = ?, approved_at = NOW() WHERE id = ?");
+    if ($upd) {
+        $upd->bind_param("ssi", $notes, $adminUser, $id);
+        $upd->execute();
+        $upd->close();
+        echo json_encode(['status' => 'OK', 'message' => 'Pengajuan kode barang telah ditolak.']);
+    } else {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menolak pengajuan: ' . $koneksi->error]);
+    }
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -1431,6 +1691,9 @@ if ($action === 'sync_satuan') {
                 <button type="button" class="ant-btn" style="background:#08979c; color:#fff; border-color:#08979c;" onclick="openFixSatuanModal()" title="Cek laporan perbedaan satuan antara Master Barang dan transaksi IT Inventory / Pengeluaran, lalu selaraskan secara otomatis">
                     <i class="fa-solid fa-scale-balanced"></i> Fix Satuan Beda <span id="badgeDiffSatuan" style="<?= $cntDiffSatuan > 0 ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;"><?= $cntDiffSatuan ?></span>
                 </button>
+                <button type="button" class="ant-btn" style="background:#d46b08; color:#fff; border-color:#d46b08;" onclick="openApprovalModal()" title="Approval Pengajuan Kode Barang Baru & Mapping Supplier dari Dokumen Incoming">
+                    <i class="fa-solid fa-stamp"></i> Approval Kode Barang <span id="badgePendingApproval" style="<?= $cntPendingApproval > 0 ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;"><?= $cntPendingApproval ?></span>
+                </button>
                 <button type="button" class="ant-btn" onclick="exportExcel()">
                     <i class="fa-solid fa-file-export"></i> Ekspor Excel
                 </button>
@@ -1439,6 +1702,20 @@ if ($action === 'sync_satuan') {
                 </button>
             </div>
         </div>
+
+        <?php if ($cntPendingApproval > 0): ?>
+        <div style="background:#fff7e6; border:1px solid #ffd591; border-radius:3px; padding:6px 12px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; font-size:10.5px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <i class="fa-solid fa-stamp" style="color:#d46b08; font-size:14px;"></i>
+                <div>
+                    <strong>Persetujuan Dibutuhkan:</strong> Terdapat <b><?= $cntPendingApproval ?></b> pengajuan Kode Barang Baru / Mapping Supplier dari Dokumen Incoming yang menunggu Approval Admin Inventory.
+                </div>
+            </div>
+            <button type="button" onclick="openApprovalModal()" class="ant-btn ant-btn-sm" style="background:#d46b08; color:#fff; border-color:#d46b08; font-weight:600;">
+                <i class="fa-solid fa-stamp"></i> Buka Antrian Approval (<?= $cntPendingApproval ?>) &raquo;
+            </button>
+        </div>
+        <?php endif; ?>
 
         <?php if ($cntInvalidKlas > 0): ?>
         <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:3px; padding:6px 12px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; font-size:10.5px;">
@@ -2119,6 +2396,171 @@ if ($action === 'sync_satuan') {
                         <i class="fa-solid fa-rotate"></i> Selaraskan SEMUA Satuan ke Master Data
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Approval Pengajuan Kode Barang & Mapping Supplier -->
+    <div class="modal" id="modalApproval">
+        <div class="modal-content" style="max-width: 1200px; width: 95%;">
+            <div class="modal-header" style="background:#d46b08; color:#fff; padding:10px 16px;">
+                <h3 style="font-size:13px; font-weight:700; margin:0; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-stamp"></i> Approval Pengajuan Kode Barang (Master Data Barang &amp; Mapping Supplier)
+                </h3>
+                <span style="cursor:pointer; font-size:18px; color:#fff;" onclick="closeModal('modalApproval')">&times;</span>
+            </div>
+            <div class="modal-body" style="padding:12px 16px;">
+                <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:3px; padding:6px 12px; margin-bottom:10px; font-size:10px; line-height:1.5;">
+                    <i class="fa-solid fa-circle-info" style="color:#d46b08;"></i>
+                    Modul ini memverifikasi seluruh permohonan pendaftaran kode barang baru dan mapping kode supplier dari proses penarikan dokumen pabean incoming.
+                    Item yang disetujui akan resmi dimasukkan ke tabel <code>bc_material</code> dengan kolom <code>KODE_BARANG2</code> terisi kode supplier untuk auto-mapping otomatis di masa mendatang.
+                </div>
+
+                <!-- Filter Controls -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:8px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <label style="font-weight:600; font-size:10px; text-transform:uppercase; color:var(--text-muted);">Status:</label>
+                        <select id="approvalStatusFilter" class="form-control" style="width:180px; height:24px;" onchange="loadApprovalList()">
+                            <option value="PENDING" selected>Menunggu Approval (Pending)</option>
+                            <option value="ALL">Semua Pengajuan (Riwayat)</option>
+                            <option value="APPROVED">Disetujui (Approved)</option>
+                            <option value="REJECTED">Ditolak (Rejected)</option>
+                        </select>
+                        <input type="text" id="approvalSearchInput" class="form-control" style="width:220px; height:24px;" placeholder="Cari Kode, Uraian, No AJU, Pemohon..." onkeyup="if(event.key==='Enter') loadApprovalList()">
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" onclick="loadApprovalList()">
+                            <i class="fa-solid fa-magnifying-glass"></i> Cari
+                        </button>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <button type="button" class="ant-btn ant-btn-sm" onclick="loadApprovalList()">
+                            <i class="fa-solid fa-rotate"></i> Muat Ulang
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Table Approvals -->
+                <div style="max-height: 400px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 3px;">
+                    <table class="ant-table" style="font-size:10px; width:100%;">
+                        <thead>
+                            <tr style="position:sticky; top:0; background:var(--bg-base); z-index:2;">
+                                <th style="width:30px; text-align:center;">#</th>
+                                <th style="width:110px;">Tgl Pengajuan</th>
+                                <th style="width:80px; text-align:center;">Tipe</th>
+                                <th style="width:160px;">No AJU</th>
+                                <th style="width:130px;">Kode Supplier</th>
+                                <th style="width:130px;">Kode Internal Usulan</th>
+                                <th>Uraian Barang</th>
+                                <th style="width:110px;">Klasifikasi</th>
+                                <th style="width:60px; text-align:center;">Satuan</th>
+                                <th style="width:130px;">Pemohon &amp; Alasan</th>
+                                <th style="width:90px; text-align:center;">Status</th>
+                                <th style="width:160px; text-align:center;">Aksi Admin</th>
+                            </tr>
+                        </thead>
+                        <tbody id="approvalTableBody">
+                            <tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat antrian persetujuan...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:8px 16px;">
+                <button type="button" class="ant-btn" onclick="closeModal('modalApproval')">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Review & Final Approve -->
+    <div class="modal" id="modalApprovalReview">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header" style="background:#389e0d; color:#fff; padding:8px 14px;">
+                <h3 style="font-size:12px; font-weight:700; margin:0;"><i class="fa-solid fa-circle-check"></i> Verifikasi &amp; Setujui Kode Barang Baru</h3>
+                <span style="cursor:pointer; font-size:16px; color:#fff;" onclick="closeModal('modalApprovalReview')">&times;</span>
+            </div>
+            <div class="modal-body" style="padding:12px 14px; font-size:10.5px;">
+                <input type="hidden" id="revApprId">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Kode Supplier / Part No Asal:</label>
+                        <input type="text" id="revSuppCode" class="form-control" readonly style="background:#f5f5f5; font-family:monospace; font-weight:700; color:#cf1322;">
+                    </div>
+                    <div class="form-group">
+                        <label>Kode Barang Internal (Disetujui):*</label>
+                        <input type="text" id="revIntCode" class="form-control" style="font-family:monospace; font-weight:700; color:#096dd9;">
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label>Uraian Barang Lengkap:*</label>
+                        <input type="text" id="revUraian" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Klasifikasi Kategori:*</label>
+                        <select id="revKlas" class="form-control">
+                            <?php foreach ($klasList as $k): ?>
+                                <option value="<?= htmlspecialchars($k['tipe']) ?>"><?= htmlspecialchars($k['tipe']) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Satuan CEISA:*</label>
+                        <input type="text" id="revSatuan" class="form-control" value="PCE">
+                    </div>
+                    <div class="form-group">
+                        <label>HS Code (Pos Tarif):</label>
+                        <input type="text" id="revHs" class="form-control">
+                    </div>
+                    <div class="form-group">
+                        <label>Model / Type / Style:</label>
+                        <input type="text" id="revModel" class="form-control">
+                    </div>
+                    <div class="form-group" style="grid-column: 1 / -1;">
+                        <label>Catatan Persetujuan Admin:</label>
+                        <input type="text" id="revNotes" class="form-control" value="Disetujui &amp; diverifikasi Admin Inventory">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:8px 14px;">
+                <button type="button" class="ant-btn" onclick="closeModal('modalApprovalReview')">Batal</button>
+                <button type="button" id="btnSubmitApprove" class="ant-btn ant-btn-success" onclick="submitApproveReview()">
+                    <i class="fa-solid fa-floppy-disk"></i> Setujui &amp; Daftarkan ke Master Data
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Alihkan / Map ke Master Existing -->
+    <div class="modal" id="modalApprovalMap">
+        <div class="modal-content" style="max-width: 650px;">
+            <div class="modal-header" style="background:#096dd9; color:#fff; padding:8px 14px;">
+                <h3 style="font-size:12px; font-weight:700; margin:0;"><i class="fa-solid fa-link"></i> Alihkan ke Master Barang Existing</h3>
+                <span style="cursor:pointer; font-size:16px; color:#fff;" onclick="closeModal('modalApprovalMap')">&times;</span>
+            </div>
+            <div class="modal-body" style="padding:12px 14px; font-size:10.5px;">
+                <input type="hidden" id="mapApprId">
+                <div style="margin-bottom:8px;">
+                    Kode Supplier Dokumen: <strong id="mapApprSuppCode" style="color:#cf1322; font-family:monospace;"></strong>
+                </div>
+                <div class="form-group" style="margin-bottom:8px;">
+                    <label style="font-weight:600;">Cari Barang Master yang Sudah Ada:</label>
+                    <input type="text" id="mapApprSearch" class="form-control" placeholder="Ketik kode atau uraian barang..." oninput="debounceApprSearch(this.value)">
+                </div>
+
+                <div id="mapApprSearchResults" style="max-height: 180px; overflow-y:auto; border:1px solid var(--border-color); border-radius:3px; background:var(--bg-base); margin-bottom:8px; padding:4px;">
+                    <div style="padding:10px; text-align:center; color:var(--text-muted);">Ketik untuk mencari master barang...</div>
+                </div>
+
+                <div id="mapApprSelectedBox" style="display:none; background:#f6ffed; border:1px solid #b7eb8f; border-radius:3px; padding:8px; margin-bottom:8px;">
+                    <strong>Barang Terpilih:</strong> <span id="mapApprSelectedCode" style="font-family:monospace; color:#096dd9; font-weight:700;"></span> - <span id="mapApprSelectedDesc"></span>
+                </div>
+
+                <div class="form-group">
+                    <label>Catatan Pemetaan:</label>
+                    <input type="text" id="mapApprNotes" class="form-control" value="Barang sebenarnya sudah ada di master, dialihkan ke kode existing">
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:8px 14px;">
+                <button type="button" class="ant-btn" onclick="closeModal('modalApprovalMap')">Batal</button>
+                <button type="button" id="btnSubmitApprMap" class="ant-btn ant-btn-primary" onclick="submitApprovalMap()" disabled>
+                    <i class="fa-solid fa-link"></i> Simpan Pemetaan &amp; Setujui
+                </button>
             </div>
         </div>
     </div>
@@ -3601,7 +4043,327 @@ if ($action === 'sync_satuan') {
             }
         }
 
-        window.onload = loadData;
+        // -------------------------------------------------------------
+        // APPROVAL WORKFLOW PENGELOLAAN KODE BARANG & MAPPING SUPPLIER
+        // -------------------------------------------------------------
+        let approvalDataList = [];
+        let selectedApprTarget = null;
+        let searchApprDebounce = null;
+
+        function openApprovalModal() {
+            document.getElementById('modalApproval').style.display = 'flex';
+            loadApprovalList();
+        }
+
+        async function loadApprovalList() {
+            const status = document.getElementById('approvalStatusFilter').value;
+            const q = document.getElementById('approvalSearchInput').value.trim();
+            const tb = document.getElementById('approvalTableBody');
+            tb.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat antrian persetujuan...</td></tr>';
+
+            try {
+                const res = await fetch(`material.php?action=approval_list&status_filter=${encodeURIComponent(status)}&q=${encodeURIComponent(q)}`);
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    approvalDataList = json.data || [];
+                    renderApprovalTable();
+                    updateApprovalBadge();
+                } else {
+                    tb.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:15px; color:#ff4d4f;">Gagal memuat: ${escapeHtml(json.message)}</td></tr>`;
+                }
+            } catch (err) {
+                tb.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:15px; color:#ff4d4f;">Error koneksi: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function renderApprovalTable() {
+            const tb = document.getElementById('approvalTableBody');
+            if (approvalDataList.length === 0) {
+                tb.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:25px; color:var(--text-muted);">Tidak ada permohonan persetujuan kode barang pada filter ini.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            approvalDataList.forEach((it, i) => {
+                let statusBadge = '';
+                if (it.status === 'PENDING') {
+                    statusBadge = '<span class="badge" style="background:#fff7e6; color:#d46b08; border:1px solid #ffd591; padding:2px 6px; border-radius:2px; font-weight:700;"><i class="fa-solid fa-clock"></i> PENDING</span>';
+                } else if (it.status === 'APPROVED') {
+                    statusBadge = '<span class="badge" style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 6px; border-radius:2px; font-weight:700;"><i class="fa-solid fa-check"></i> APPROVED</span>';
+                } else {
+                    statusBadge = '<span class="badge" style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 6px; border-radius:2px; font-weight:700;"><i class="fa-solid fa-xmark"></i> REJECTED</span>';
+                }
+
+                let tipeBadge = it.tipe_pengajuan === 'MAPPING_SUPPLIER'
+                    ? '<span class="badge" style="background:#e6f7ff; color:#096dd9; border:1px solid #91d5ff; padding:1px 5px; font-size:9px;">MAPPING</span>'
+                    : '<span class="badge" style="background:#f9f0ff; color:#722ed1; border:1px solid #d3adf7; padding:1px 5px; font-size:9px;">KODE BARU</span>';
+
+                let actionBtns = '';
+                if (it.status === 'PENDING') {
+                    actionBtns = `
+                        <div style="display:flex; gap:4px; justify-content:center;">
+                            <button type="button" class="ant-btn ant-btn-sm" style="background:#389e0d; color:#fff; border-color:#389e0d; padding:0 6px;" title="Verifikasi & Setujui Kode Baru" onclick="openApproveReview(${it.id})">
+                                <i class="fa-solid fa-check"></i> Setujui
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm" style="background:#096dd9; color:#fff; border-color:#096dd9; padding:0 6px;" title="Alihkan / Map ke Kode Existing" onclick="openMapExistingReview(${it.id})">
+                                <i class="fa-solid fa-link"></i> Map
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm" style="background:#ff4d4f; color:#fff; border-color:#ff4d4f; padding:0 5px;" title="Tolak Pengajuan" onclick="rejectApproval(${it.id})">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    const by = it.approved_by ? `<div style="font-size:9px; color:var(--text-muted); margin-top:2px;">Oleh: ${escapeHtml(it.approved_by)}</div>` : '';
+                    actionBtns = `<span style="font-size:9.5px; color:var(--text-muted);">${escapeHtml(it.approval_notes || '-')}${by}</span>`;
+                }
+
+                html += `
+                    <tr>
+                        <td style="text-align:center; color:var(--text-muted);">${i + 1}</td>
+                        <td style="white-space:nowrap;">${escapeHtml(it.requested_at)}</td>
+                        <td style="text-align:center;">${tipeBadge}</td>
+                        <td style="font-family:monospace;">${escapeHtml(it.nomor_aju || '-')}</td>
+                        <td style="font-family:monospace; font-weight:700; color:#cf1322;">${escapeHtml(it.kode_supplier)}</td>
+                        <td style="font-family:monospace; font-weight:700; color:#096dd9;">${escapeHtml(it.kode_internal)}</td>
+                        <td style="max-width:200px;" class="text-truncate" title="${escapeHtml(it.uraian)}">${escapeHtml(it.uraian)}</td>
+                        <td><span class="badge" style="background:var(--bg-base); border:1px solid var(--border-color); padding:1px 5px;">${escapeHtml(it.klas || '-')}</span></td>
+                        <td style="text-align:center;">${escapeHtml(it.satuan || 'PCE')}</td>
+                        <td>
+                            <div><b>${escapeHtml(it.requested_by || 'PIC')}</b></div>
+                            <div style="font-size:9px; color:var(--text-muted);">${escapeHtml(it.alasan || '-')}</div>
+                        </td>
+                        <td style="text-align:center;">${statusBadge}</td>
+                        <td>${actionBtns}</td>
+                    </tr>
+                `;
+            });
+            tb.innerHTML = html;
+        }
+
+        function openApproveReview(id) {
+            const item = approvalDataList.find(x => parseInt(x.id) === parseInt(id));
+            if (!item) return;
+
+            document.getElementById('revApprId').value = item.id;
+            document.getElementById('revSuppCode').value = item.kode_supplier;
+            document.getElementById('revIntCode').value = item.kode_internal;
+            document.getElementById('revUraian').value = item.uraian;
+            document.getElementById('revKlas').value = item.klas || 'Raw Materials';
+            document.getElementById('revSatuan').value = item.satuan || 'PCE';
+            document.getElementById('revHs').value = item.pos_tarif || '';
+            document.getElementById('revModel').value = item.model || '';
+            document.getElementById('revNotes').value = 'Disetujui & diverifikasi Admin Inventory';
+
+            document.getElementById('modalApprovalReview').style.display = 'flex';
+        }
+
+        async function submitApproveReview() {
+            const id = document.getElementById('revApprId').value;
+            const intCode = document.getElementById('revIntCode').value.trim();
+            const uraian = document.getElementById('revUraian').value.trim();
+            const klas = document.getElementById('revKlas').value;
+            const satuan = document.getElementById('revSatuan').value.trim();
+            const hs = document.getElementById('revHs').value.trim();
+            const model = document.getElementById('revModel').value.trim();
+            const notes = document.getElementById('revNotes').value.trim();
+
+            if (!intCode || !uraian || !klas) {
+                Swal.fire('Data Tidak Lengkap', 'Kode Internal, Uraian Barang, dan Klasifikasi wajib diisi!', 'warning');
+                return;
+            }
+
+            const btn = document.getElementById('btnSubmitApprove');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+
+            const fd = new FormData();
+            fd.append('action', 'approval_approve');
+            fd.append('id', id);
+            fd.append('kode_internal', intCode);
+            fd.append('uraian', uraian);
+            fd.append('klas', klas);
+            fd.append('satuan', satuan);
+            fd.append('pos_tarif', hs);
+            fd.append('model', model);
+            fd.append('notes', notes);
+
+            try {
+                const res = await fetch('material.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    Swal.fire('Persetujuan Berhasil', json.message, 'success');
+                    closeModal('modalApprovalReview');
+                    loadApprovalList();
+                    loadData();
+                } else {
+                    Swal.fire('Gagal Menyetujui', json.message, 'error');
+                }
+            } catch (err) {
+                Swal.fire('Error', err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Setujui &amp; Daftarkan ke Master Data';
+            }
+        }
+
+        function openMapExistingReview(id) {
+            const item = approvalDataList.find(x => parseInt(x.id) === parseInt(id));
+            if (!item) return;
+
+            document.getElementById('mapApprId').value = item.id;
+            document.getElementById('mapApprSuppCode').innerText = item.kode_supplier;
+            document.getElementById('mapApprSearch').value = '';
+            document.getElementById('mapApprSearchResults').innerHTML = '<div style="padding:10px; text-align:center; color:var(--text-muted);">Ketik untuk mencari master barang...</div>';
+            document.getElementById('mapApprSelectedBox').style.display = 'none';
+            document.getElementById('btnSubmitApprMap').disabled = true;
+            selectedApprTarget = null;
+
+            document.getElementById('modalApprovalMap').style.display = 'flex';
+            setTimeout(() => document.getElementById('mapApprSearch').focus(), 300);
+        }
+
+        function debounceApprSearch(val) {
+            clearTimeout(searchApprDebounce);
+            searchApprDebounce = setTimeout(() => searchExistingForApproval(val), 300);
+        }
+
+        async function searchExistingForApproval(keyword) {
+            keyword = keyword.trim();
+            const container = document.getElementById('mapApprSearchResults');
+            if (keyword.length < 1) {
+                container.innerHTML = '<div style="padding:10px; text-align:center; color:var(--text-muted);">Ketik untuk mencari master barang...</div>';
+                return;
+            }
+
+            container.innerHTML = '<div style="padding:10px; text-align:center; color:var(--primary);"><i class="fa-solid fa-spinner fa-spin"></i> Mencari...</div>';
+
+            try {
+                const res = await fetch(`material.php?action=approval_search_existing&q=${encodeURIComponent(keyword)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && json.items && json.items.length > 0) {
+                    let html = '<div style="display:flex; flex-direction:column; gap:4px;">';
+                    json.items.forEach(it => {
+                        html += `
+                            <div style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); border:1px solid var(--border-color); padding:5px 8px; border-radius:3px; cursor:pointer;" onclick="selectTargetForApprovalMap('${escapeHtml(it.KODE_BARANG)}', '${escapeJs(it.URAIAN)}')">
+                                <div>
+                                    <strong style="font-family:monospace; color:#096dd9;">${escapeHtml(it.KODE_BARANG)}</strong>
+                                    <span style="margin-left:6px; color:var(--text-main);">${escapeHtml(it.URAIAN)}</span>
+                                </div>
+                                <div style="display:flex; gap:6px; align-items:center;">
+                                    <span class="badge" style="background:var(--bg-base); font-size:9px;">${escapeHtml(it.KLAS || '-')}</span>
+                                    <button type="button" class="ant-btn ant-btn-sm ant-btn-primary">Pilih</button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = '<div style="padding:10px; text-align:center; color:#ff4d4f;">Tidak ditemukan barang yang sesuai.</div>';
+                }
+            } catch (err) {
+                container.innerHTML = `<div style="padding:10px; text-align:center; color:#ff4d4f;">Error: ${escapeHtml(err.message)}</div>`;
+            }
+        }
+
+        function selectTargetForApprovalMap(code, desc) {
+            selectedApprTarget = { code, desc };
+            document.getElementById('mapApprSelectedCode').innerText = code;
+            document.getElementById('mapApprSelectedDesc').innerText = desc;
+            document.getElementById('mapApprSelectedBox').style.display = 'block';
+            document.getElementById('btnSubmitApprMap').disabled = false;
+        }
+
+        async function submitApprovalMap() {
+            if (!selectedApprTarget) return;
+
+            const id = document.getElementById('mapApprId').value;
+            const notes = document.getElementById('mapApprNotes').value.trim();
+
+            const btn = document.getElementById('btnSubmitApprMap');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
+
+            const fd = new FormData();
+            fd.append('action', 'approval_map_existing');
+            fd.append('id', id);
+            fd.append('target_code', selectedApprTarget.code);
+            fd.append('notes', notes);
+
+            try {
+                const res = await fetch('material.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    Swal.fire('Pemetaan Berhasil', json.message, 'success');
+                    closeModal('modalApprovalMap');
+                    loadApprovalList();
+                    loadData();
+                } else {
+                    Swal.fire('Gagal Memetakan', json.message, 'error');
+                }
+            } catch (err) {
+                Swal.fire('Error', err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-link"></i> Simpan Pemetaan &amp; Setujui';
+            }
+        }
+
+        async function rejectApproval(id) {
+            const { value: reason } = await Swal.fire({
+                title: 'Tolak Pengajuan Kode Barang?',
+                input: 'textarea',
+                inputLabel: 'Alasan Penolakan:',
+                inputPlaceholder: 'Tuliskan alasan penolakan untuk pemohon...',
+                showCancelButton: true,
+                confirmButtonColor: '#ff4d4f',
+                confirmButtonText: 'Tolak Pengajuan',
+                cancelButtonText: 'Batal',
+                inputValidator: (val) => {
+                    if (!val || !val.trim()) return 'Alasan penolakan wajib diisi!';
+                }
+            });
+
+            if (!reason) return;
+
+            const fd = new FormData();
+            fd.append('action', 'approval_reject');
+            fd.append('id', id);
+            fd.append('notes', reason.trim());
+
+            try {
+                const res = await fetch('material.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    Swal.fire('Ditolak', json.message, 'info');
+                    loadApprovalList();
+                } else {
+                    Swal.fire('Gagal', json.message, 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function updateApprovalBadge() {
+            try {
+                const res = await fetch('material.php?action=get_pending_approvals_count');
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    const badge = document.getElementById('badgePendingApproval');
+                    if (badge) {
+                        badge.innerText = json.count;
+                        badge.style.display = json.count > 0 ? 'inline-block' : 'none';
+                    }
+                }
+            } catch (e) {}
+        }
+
+        window.onload = function() {
+            loadData();
+            updateApprovalBadge();
+        };
     </script>
 </body>
 </html>
