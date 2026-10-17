@@ -4326,10 +4326,45 @@ Delapan (8) tabel yang distandardisasi:
    - `action=list&klas=Raw%20Materials` mengembalikan 1 item yang sesuai (`RPM00563`).
    - `action=list&klas=Finished%20Goods` mengembalikan array kosong `[]` secara tepat.
    - Nilai counter KPI pada respon JSON tetap menghitung total agregat secara akurat (`total: 1`, `bahan_baku: 1`, `finished_goods: 0`, `wip: 0`).
+---
+
+## 105. Implementasi Pusat Notifikasi & Peringatan Sistem pada Ikon Lonceng Topbar (`index.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  *"alert icon ini kalo diklik akan tampil pesan yang menampilkan info :*
+  *- jumlah dokumen yang belum selesai*
+  *- jumlah dokumen yang belum masuk IT Inv (hanya jika konfigurasi IS_INV = 1)*
+  *- Info alert jika ada QTY AKTUAL berbeda dengan QTY di tabel bc_1ab2 (yang diinput oleh Warehouse)"*
+  *(disertai tangkapan layar dengan tanda panah ke ikon lonceng notifikasi 🔔 di topbar sebelah kanan portal).*
+- **Tujuan**: Memberikan visibilitas terpadu kepada pengguna dan manajemen terkait status dokumen yang tertunda di CEISA 4.0, kelengkapan posting dokumen ke IT Inventory, serta deteksi dini selisih fisik barang di gudang secara langsung dari topbar portal tanpa harus berpindah-pindah menu.
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Backend Endpoint (`index.php` & `www/index.php`)**:
+   - Menambahkan AJAX Action `action=get_alert_notifications` dengan kalkulasi multi-aspek berbasis konteks perusahaan aktif:
+     - **Dokumen Belum Selesai**: Menghitung dokumen dari `bc_ceisa_data` yang belum berstatus 'selesai' dan belum diposting (`LOWER(a.namaProses) NOT LIKE '%selesai%' AND (posted.jml IS NULL OR posted.jml = 0)`).
+     - **Dokumen Belum Masuk IT Inventory**: Dijalankan secara bersyarat hanya jika `IS_INV = 1` pada perusahaan aktif. Menghitung dokumen terdaftar (`nomor_daftar IS NOT NULL AND nomor_daftar != '' AND nomor_daftar != '-'`) yang belum tercatat pada tabel `bc_1ab2`.
+     - **Selisih QTY Fisik Warehouse (`bc_1ab2`)**: Memeriksa item barang pada `bc_1ab2` yang memiliki perbedaan antara QTY dokumen dengan QTY aktual hasil penerimaan/pengeluaran gudang (`ABS(QTY_AKTUAL - QTY) > 0.0001 OR (SESUAI = 'N' AND QTY_AKTUAL != 0)`), serta menyertakan rincian data 10 transaksi teratas (No. AJU, Kode Barang, Uraian, QTY Dokumen, QTY Aktual, Selisih, dan Catatan/Memo).
+2. **Topbar Icon & Indikator Pulsa (`index.php`)**:
+   - Menambahkan event handler `onclick="showNotificationAlerts()"` pada `.notif-bell`.
+   - Mengaktifkan badge titik merah (`.notif-header-badge.active`) dengan animasi denyut (*pulse effect*) otomatis jika terdeteksi ada peringatan aktif (`total_alerts > 0`).
+   - Menyinkronkan status badge secara dinamis saat halaman dimuat (`window.onload`) dan saat pengguna berganti perusahaan (`switchCompany`).
+3. **Modal Dialog Interaktif (SweetAlert2)**:
+   - Menampilkan modal dialog yang rapi, padat (*compact*), dan ramah tema terang maupun gelap:
+     - **Card 1: Dokumen Belum Selesai (CEISA 4.0)** dengan badge jumlah dan tombol navigasi langsung `[Buka Dashboard & Daftar Dokumen]`.
+     - **Card 2: Dokumen Belum Masuk IT Inventory** (atau informasi penonaktifan jika `IS_INV = 0`) dengan tombol navigasi `[Buka Data Host to Host (Posting IT Inv)]`.
+     - **Card 3: Kesesuaian QTY Aktual Warehouse** dengan status hijau (*Aman*) jika 0 selisih, atau tabel rincian selisih barang disertai tombol aksi cepat `[Periksa Warehouse Incoming]` dan `[Lihat Laporan 1A IT Inv]`.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terdeteksi pada `/source/public/index.php` dan `/source/public/www/index.php`.
+2. **Pengujian Endpoint via cURL**:
+   - Respons JSON: `{"status":"OK","cmp_id":"010816064431000","cmp_name":"FRAMAS","is_inv":1,"belum_selesai":186,"belum_it_inv":1048,"selisih_qty":0,"items_qty_diff":[],"total_alerts":2}`.
+   - Angka `186` pada dokumen belum selesai selaras 100% dengan metrik pill *BELUM SELESAI* pada dashboard utama.
 3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan dipush ke repositori GitHub `main`.
 
 ---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 

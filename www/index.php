@@ -301,7 +301,121 @@ if ($action === 'change_password') {
 }
 
 // -------------------------------------------------------------
-// 5. LOGOUT
+// 5. AJAX API: GET ALERT NOTIFICATIONS
+// -------------------------------------------------------------
+if ($action === 'get_alert_notifications') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    $activeCmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $activeCmpNpwp = trim($_SESSION['company_npwp'] ?? '');
+    $cleanCmp      = $koneksi->real_escape_string($activeCmpId);
+    $cmpNpwpDigits = preg_replace('/[^0-9]/', '', $activeCmpNpwp);
+
+    $isInv = isset($_SESSION['is_inv']) ? (int)$_SESSION['is_inv'] : 1;
+    $cmpName = $_SESSION['company_name'] ?? 'Perusahaan';
+
+    if (!empty($cleanCmp)) {
+        $qCmp = $koneksi->query("SELECT IFNULL(IS_INV, 1) AS is_inv, npwp, cmp_name FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
+        if ($qCmp && $rc = $qCmp->fetch_assoc()) {
+            $isInv = (int)$rc['is_inv'];
+            if (empty($cmpNpwpDigits)) $cmpNpwpDigits = preg_replace('/[^0-9]/', '', $rc['npwp']);
+            if (!empty($rc['cmp_name'])) $cmpName = $rc['cmp_name'];
+        }
+    }
+
+    // 1. Jumlah Dokumen yang Belum Selesai (CEISA 4.0)
+    $whereCmpData = [];
+    if (!empty($cleanCmp)) {
+        if (!empty($cmpNpwpDigits)) {
+            $whereCmpData[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwpDigits%')";
+        } else {
+            $whereCmpData[] = "a.cmp_id = '$cleanCmp'";
+        }
+    }
+    $whereCmpDataSql = !empty($whereCmpData) ? ' AND ' . implode(' AND ', $whereCmpData) : '';
+
+    $sqlBelumSelesai = "SELECT COUNT(1) 
+        FROM bc_ceisa_data a
+        LEFT JOIN (
+            SELECT nomor_aju, COUNT(1) AS jml 
+            FROM bc_ceisa_aju_posted 
+            GROUP BY nomor_aju
+        ) posted ON a.nomorAju = posted.nomor_aju
+        WHERE (LOWER(a.namaProses) NOT LIKE '%selesai%' AND (posted.jml IS NULL OR posted.jml = 0))
+        $whereCmpDataSql";
+    $cntBelumSelesai = (int)($koneksi->query($sqlBelumSelesai)->fetch_row()[0] ?? 0);
+
+    // 2. Jumlah Dokumen yang Belum Masuk IT Inv (Hanya jika konfigurasi IS_INV = 1)
+    $cntBelumItInv = 0;
+    if ($isInv === 1) {
+        $whereCmpDoc = !empty($cleanCmp) ? "WHERE (doc.cmp_id = '$cleanCmp' OR '$cleanCmp' = '')" : "";
+        $sqlBelumItInv = "SELECT COUNT(DISTINCT doc.nomor_aju)
+            FROM (
+                SELECT nomor_aju, nomor_daftar, cmp_id FROM bc_ceisa_header WHERE nomor_daftar IS NOT NULL AND nomor_daftar != '' AND nomor_daftar != '-'
+                UNION
+                SELECT nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, cmp_id FROM bc_ceisa_data WHERE nomorDaftar IS NOT NULL AND nomorDaftar != '' AND nomorDaftar != '-'
+            ) doc
+            LEFT JOIN (
+                SELECT DISTINCT nomor_aju FROM bc_1ab2 WHERE nomor_aju IS NOT NULL AND nomor_aju != ''
+            ) it ON doc.nomor_aju = it.nomor_aju
+            $whereCmpDoc
+            AND it.nomor_aju IS NULL";
+        $cntBelumItInv = (int)($koneksi->query($sqlBelumItInv)->fetch_row()[0] ?? 0);
+    }
+
+    // 3. Info Alert Jika Ada QTY AKTUAL Berbeda dengan QTY di Tabel bc_1ab2 (Warehouse Input)
+    $whereCmp1ab2 = !empty($cleanCmp) ? "AND (cmp_id = '$cleanCmp' OR cmp_id = '')" : "";
+    $sqlCountQtyDiff = "SELECT COUNT(1) 
+        FROM bc_1ab2 
+        WHERE (ABS(QTY_AKTUAL - QTY) > 0.0001 OR (SESUAI = 'N' AND QTY_AKTUAL != 0))
+        $whereCmp1ab2";
+    $cntQtyDiff = (int)($koneksi->query($sqlCountQtyDiff)->fetch_row()[0] ?? 0);
+
+    $itemsQtyDiff = [];
+    if ($cntQtyDiff > 0) {
+        $sqlItemsQtyDiff = "SELECT 
+                NOMOR_AJU, 
+                BC, 
+                NOMOR_DAFTAR, 
+                TANGGAL_DAFTAR, 
+                NO_BUKTI, 
+                KODE_BARANG, 
+                URAIAN, 
+                QTY, 
+                QTY_AKTUAL, 
+                (QTY_AKTUAL - QTY) AS SELISIH, 
+                UNIT, 
+                MEMO, 
+                SESUAI
+            FROM bc_1ab2
+            WHERE (ABS(QTY_AKTUAL - QTY) > 0.0001 OR (SESUAI = 'N' AND QTY_AKTUAL != 0))
+            $whereCmp1ab2
+            ORDER BY TANGGAL_DAFTAR DESC, NOMOR_AJU DESC
+            LIMIT 10";
+        $resDiff = $koneksi->query($sqlItemsQtyDiff);
+        if ($resDiff) {
+            while ($rd = $resDiff->fetch_assoc()) {
+                $itemsQtyDiff[] = $rd;
+            }
+        }
+    }
+
+    echo json_encode([
+        'status'         => 'OK',
+        'cmp_id'         => $activeCmpId,
+        'cmp_name'       => $cmpName,
+        'is_inv'         => $isInv,
+        'belum_selesai'  => $cntBelumSelesai,
+        'belum_it_inv'   => $cntBelumItInv,
+        'selisih_qty'    => $cntQtyDiff,
+        'items_qty_diff' => $itemsQtyDiff,
+        'total_alerts'   => ($cntBelumSelesai > 0 ? 1 : 0) + ($isInv === 1 && $cntBelumItInv > 0 ? 1 : 0) + ($cntQtyDiff > 0 ? 1 : 0)
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// 6. LOGOUT
 // -------------------------------------------------------------
 if ($action === 'logout') {
     session_destroy();
@@ -1209,23 +1323,36 @@ if ($initialTab === 'editor') {
             position: relative;
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             cursor: pointer;
-            padding: 3px;
-            border-radius: 3px;
-            transition: background 0.2s;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
         }
         .notif-bell:hover {
-            background: #f0f7ff;
+            background: rgba(24, 144, 255, 0.12);
+            transform: scale(1.05);
         }
         .notif-header-badge {
-            background: #ff5757;
-            height: 5px;
-            width: 5px;
+            background: #ff4d4f;
+            height: 7px;
+            width: 7px;
             border-radius: 50%;
             position: absolute;
             top: 2px;
             right: 2px;
-            border: 1px solid #fff;
+            border: 1.5px solid #fff;
+            display: none;
+            box-shadow: 0 0 4px rgba(255, 77, 79, 0.8);
+        }
+        .notif-header-badge.active {
+            display: block;
+            animation: pulseNotif 2s infinite;
+        }
+        @keyframes pulseNotif {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.7); }
+            70% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(255, 77, 79, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); }
         }
 
         /* User Profile Badge */
@@ -2853,11 +2980,11 @@ if ($initialTab === 'editor') {
                     </div>
 
                     <!-- Notification Bell -->
-                    <div class="notif-bell" title="Notifikasi">
+                    <div class="notif-bell" title="Pusat Peringatan & Notifikasi Sistem" onclick="showNotificationAlerts()">
                         <svg viewBox="64 64 896 896" width="20" height="20" fill="rgb(24, 144, 255)">
                             <path d="M816 768h-24V428c0-141.1-104.3-257.7-240-277.1V112c0-22.1-17.9-40-40-40s-40 17.9-40 40v38.9c-135.7 19.4-240 136-240 277.1v340h-24c-17.7 0-32 14.3-32 32v32c0 4.4 3.6 8 8 8h216c0 61.8 50.2 112 112 112s112-50.2 112-112h216c4.4 0 8-3.6 8-8v-32c0-17.7-14.3-32-32-32zM512 888c-26.5 0-48-21.5-48-48h96c0 26.5-21.5 48-48 48zM304 768V428c0-55.6 21.6-107.8 60.9-147.1S456.4 220 512 220c55.6 0 107.8 21.6 147.1 60.9S720 372.4 720 428v340H304z"></path>
                         </svg>
-                        <span class="notif-header-badge"></span>
+                        <span class="notif-header-badge" id="notifBadge"></span>
                     </div>
                     <?php endif; ?>
 
@@ -3730,6 +3857,7 @@ if ($initialTab === 'editor') {
 
                     closeCompanyModal();
                     showToast(`✓ Beralih ke: [${json.cmp_id}] ${json.cmp_name}`);
+                    checkAlertNotificationBadge();
                 } else {
                     showError('Gagal beralih perusahaan: ' + json.message);
                 }
@@ -4050,6 +4178,203 @@ if ($initialTab === 'editor') {
             }
         });
 
+        async function checkAlertNotificationBadge() {
+            try {
+                const res = await fetch(`index.php?action=get_alert_notifications&cmp_id=${encodeURIComponent(currentCmpId)}`);
+                const json = await res.json();
+                const badge = document.getElementById('notifBadge');
+                if (badge && json.status === 'OK') {
+                    if (json.total_alerts > 0) {
+                        badge.classList.add('active');
+                        badge.title = `${json.total_alerts} Peringatan Sistem Aktif`;
+                    } else {
+                        badge.classList.remove('active');
+                        badge.title = 'Tidak ada peringatan';
+                    }
+                }
+            } catch(e) {}
+        }
+
+        async function showNotificationAlerts() {
+            Swal.fire({
+                title: 'Memeriksa Status & Peringatan...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            try {
+                const res = await fetch(`index.php?action=get_alert_notifications&cmp_id=${encodeURIComponent(currentCmpId)}`);
+                const json = await res.json();
+                if (json.status !== 'OK') {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: json.message || 'Terjadi kesalahan sistem.' });
+                    return;
+                }
+
+                const badge = document.getElementById('notifBadge');
+                if (badge) {
+                    if (json.total_alerts > 0) badge.classList.add('active');
+                    else badge.classList.remove('active');
+                }
+
+                // 1. Dokumen Belum Selesai (CEISA 4.0)
+                const cntBelumSelesai = Number(json.belum_selesai || 0);
+                const badgeBelumSelesai = cntBelumSelesai > 0 
+                    ? `<span style="background:#fff7e6; color:#d46b08; border:1px solid #ffd591; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumSelesai.toLocaleString('id-ID')} Dokumen</span>`
+                    : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">0 (Semua Selesai)</span>`;
+
+                // 2. Dokumen Belum Masuk IT Inv (Hanya jika IS_INV = 1)
+                const isInv = parseInt(json.is_inv || 0, 10);
+                let itInvHtml = '';
+                if (isInv === 1) {
+                    const cntBelumItInv = Number(json.belum_it_inv || 0);
+                    const badgeBelumItInv = cntBelumItInv > 0
+                        ? `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumItInv.toLocaleString('id-ID')} Dokumen</span>`
+                        : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">0 (Lengkap)</span>`;
+
+                    itInvHtml = `
+                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:10px; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
+                                <span>📦</span> Dokumen Belum Masuk IT Inventory (bc_1ab2)
+                            </div>
+                            ${badgeBelumItInv}
+                        </div>
+                        <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
+                            ${cntBelumItInv > 0 
+                                ? `Terdapat <strong>${cntBelumItInv.toLocaleString('id-ID')}</strong> dokumen pabean yang telah memiliki Nomor Pendaftaran tetapi belum diposting ke tabel <code>bc_1ab2</code>.`
+                                : `Seluruh dokumen yang telah memiliki Nomor Pendaftaran sudah berhasil diposting ke IT Inventory.`}
+                        </div>
+                        ${cntBelumItInv > 0 ? `
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); switchMainTab('transfer');">
+                            <span>Buka Data Host to Host (Posting IT Inv) →</span>
+                        </button>` : ''}
+                    </div>`;
+                } else {
+                    itInvHtml = `
+                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:8px 12px; margin-bottom:10px; text-align:left; opacity:0.8;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-weight:600; font-size:10.5px; color:var(--text-muted, #8c8c8c); display:flex; align-items:center; gap:6px;">
+                                <span>ℹ️</span> Modul IT Inventory (Nonaktif)
+                            </div>
+                            <span style="background:#f0f0f0; color:#595959; border:1px solid #d9d9d9; padding:1px 6px; border-radius:10px; font-size:9px;">IS_INV = 0</span>
+                        </div>
+                        <div style="font-size:9px; color:var(--text-muted, #8c8c8c); margin-top:2px;">
+                            Peringatan dokumen IT Inventory dinonaktifkan untuk konfigurasi perusahaan aktif ini.
+                        </div>
+                    </div>`;
+                }
+
+                // 3. Selisih QTY Fisik Warehouse vs Dokumen (bc_1ab2)
+                const cntQtyDiff = Number(json.selisih_qty || 0);
+                let qtyDiffRows = '';
+                if (cntQtyDiff > 0 && Array.isArray(json.items_qty_diff)) {
+                    qtyDiffRows = json.items_qty_diff.map(item => `
+                        <tr style="border-bottom:1px solid var(--border-color, #f0f0f0);">
+                            <td style="padding:4px 6px; font-family:monospace; font-size:9px; color:var(--primary, #1890ff);">${escapeHtml(item.NOMOR_AJU || '-')}</td>
+                            <td style="padding:4px 6px; font-weight:600;">${escapeHtml(item.KODE_BARANG || '-')}</td>
+                            <td style="padding:4px 6px; text-align:right;">${Number(item.QTY || 0).toLocaleString('id-ID')}</td>
+                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:#d46b08;">${Number(item.QTY_AKTUAL || 0).toLocaleString('id-ID')}</td>
+                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:${parseFloat(item.SELISIH) < 0 ? '#ff4d4f' : '#52c41a'};">
+                                ${parseFloat(item.SELISIH) > 0 ? '+' : ''}${Number(item.SELISIH || 0).toLocaleString('id-ID')} ${escapeHtml(item.UNIT || '')}
+                            </td>
+                            <td style="padding:4px 6px; color:var(--text-muted, #8c8c8c); font-size:8.5px;">${escapeHtml(item.MEMO || '-')}</td>
+                        </tr>
+                    `).join('');
+                }
+
+                const badgeQtyDiff = cntQtyDiff > 0
+                    ? `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">⚠️ ${cntQtyDiff.toLocaleString('id-ID')} Item Ada Selisih</span>`
+                    : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">✓ Sesuai (0 Selisih)</span>`;
+
+                const contentHtml = `
+                <div style="max-height:75vh; overflow-y:auto; padding:2px 4px; font-family:'Poppins', sans-serif;">
+                    
+                    <!-- 1. Dokumen Belum Selesai -->
+                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:10px; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
+                                <span>⏳</span> Dokumen Belum Selesai (CEISA 4.0)
+                            </div>
+                            ${badgeBelumSelesai}
+                        </div>
+                        <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
+                            ${cntBelumSelesai > 0
+                                ? `Terdapat <strong>${cntBelumSelesai.toLocaleString('id-ID')}</strong> dokumen pengajuan yang masih dalam proses pelayanan pabean (belum selesai / belum SPPB/NPE).`
+                                : `Seluruh dokumen pengajuan telah selesai diproses.`}
+                        </div>
+                        ${cntBelumSelesai > 0 ? `
+                        <button type="button" class="ant-btn ant-btn-sm" style="height:22px; font-size:9.5px; padding:0 8px; background:var(--primary); color:#fff; border-color:var(--primary);" onclick="Swal.close(); switchMainTab('daftar_dokumen');">
+                            <span>Buka Dashboard & Daftar Dokumen →</span>
+                        </button>` : ''}
+                    </div>
+
+                    <!-- 2. Dokumen Belum Masuk IT Inv -->
+                    ${itInvHtml}
+
+                    <!-- 3. Selisih QTY Fisik Warehouse vs Dokumen -->
+                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:6px; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
+                                <span>⚖️</span> Kesesuaian QTY Aktual Warehouse (bc_1ab2)
+                            </div>
+                            ${badgeQtyDiff}
+                        </div>
+                        <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:6px; line-height:1.4;">
+                            ${cntQtyDiff > 0
+                                ? `Ditemukan <strong>${cntQtyDiff.toLocaleString('id-ID')}</strong> baris barang di tabel <code>bc_1ab2</code> dengan perbedaan antara QTY dokumen pabean dan QTY fisik yang diinput oleh tim Warehouse.`
+                                : `Seluruh QTY fisik aktual yang diinput oleh tim Warehouse telah sesuai dengan QTY dokumen kepabeanan.`}
+                        </div>
+
+                        ${cntQtyDiff > 0 ? `
+                        <div style="max-height:150px; overflow-y:auto; border:1px solid var(--border-color, #ebedf0); border-radius:4px; margin-bottom:8px; background:var(--bg-card, #fff);">
+                            <table style="width:100%; border-collapse:collapse; font-size:9px; text-align:left;">
+                                <thead>
+                                    <tr style="background:var(--bg-base, #f5f5f5); border-bottom:1px solid var(--border-color, #e8e8e8); color:var(--text-muted, #595959);">
+                                        <th style="padding:4px 6px;">Nomor AJU</th>
+                                        <th style="padding:4px 6px;">Kode Barang</th>
+                                        <th style="padding:4px 6px; text-align:right;">QTY Dok</th>
+                                        <th style="padding:4px 6px; text-align:right;">QTY Aktual</th>
+                                        <th style="padding:4px 6px; text-align:right;">Selisih</th>
+                                        <th style="padding:4px 6px;">Memo/Ket</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${qtyDiffRows}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="ant-btn ant-btn-sm" style="height:22px; font-size:9.5px; padding:0 8px; background:#faad14; color:#fff; border-color:#faad14;" onclick="Swal.close(); switchMainTab('wh_incoming');">
+                                <span>Periksa Warehouse Incoming →</span>
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); switchMainTab('it_inventory_1a');">
+                                <span>Lihat Laporan 1A IT Inv →</span>
+                            </button>
+                        </div>` : ''}
+                    </div>
+
+                </div>
+                `;
+
+                Swal.fire({
+                    title: `<div style="font-size:13px; font-weight:700; color:var(--text-main, #262626); display:flex; align-items:center; gap:8px;">
+                                <span>🔔</span> Pusat Peringatan & Status Sistem
+                            </div>
+                            <div style="font-size:10px; font-weight:500; color:var(--text-muted, #8c8c8c); margin-top:2px;">
+                                Perusahaan Aktif: <strong>${escapeHtml(json.cmp_name || 'Perusahaan')}</strong> [${escapeHtml(json.cmp_id || '')}]
+                            </div>`,
+                    html: contentHtml,
+                    width: '620px',
+                    showConfirmButton: true,
+                    confirmButtonText: 'Tutup',
+                    confirmButtonColor: '#1890ff'
+                });
+
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: 'Kesalahan Jaringan', text: err.message });
+            }
+        }
+
         window.onload = function() {
             loadSavedTheme();
             loadSidebarPinState();
@@ -4058,6 +4383,7 @@ if ($initialTab === 'editor') {
             if (iframe) {
                 syncIframeState(iframe);
             }
+            checkAlertNotificationBadge();
         };
     </script>
 </body>
