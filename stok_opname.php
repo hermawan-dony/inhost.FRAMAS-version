@@ -9,6 +9,11 @@ require_once __DIR__ . '/koneksi.php';
 
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
 $sessionUser = $_SESSION['user_name'] ?? ($_SESSION['user'] ?? 'SYSTEM');
+$sessionCmpId = $_SESSION['company_id'] ?? ($_GET['cmp_id'] ?? '');
+$escSessionCmp = $koneksi->real_escape_string($sessionCmpId);
+$cmpFilter = !empty($sessionCmpId) ? " AND (a.cmp_id = '$escSessionCmp' OR a.cmp_id = '' OR a.cmp_id IS NULL)" : "";
+$theme = $_GET['theme'] ?? ($_SESSION['theme'] ?? 'light');
+
 $action = $_REQUEST['action'] ?? '';
 
 // 1. AJAX: LIST DATA STOK OPNAME
@@ -19,7 +24,10 @@ if ($action === 'list') {
     $diff   = trim($_GET['diff'] ?? ''); // 'selisih', 'sesuai', ''
     $search = trim($_GET['q'] ?? '');
 
-    $where = [];
+    $where = ["1=1"];
+    if (!empty($sessionCmpId)) {
+        $where[] = "(a.cmp_id = '$escSessionCmp' OR a.cmp_id = '' OR a.cmp_id IS NULL)";
+    }
     if (!empty($tgl)) {
         $where[] = "a.tgl_so = '" . $koneksi->real_escape_string($tgl) . "'";
     }
@@ -36,16 +44,16 @@ if ($action === 'list') {
         $where[] = "a.selisih = 0";
     }
 
-    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+    $whereSql = 'WHERE ' . implode(' AND ', $where);
 
     $sql = "SELECT 
         a.tgl_so, a.kode_barang, b.URAIAN, b.KLAS, a.unit, a.stok, a.sesuai, 
         a.aktual, a.selisih, a.note, a.set_by, a.tipe, a.no_spp
     FROM bc_so a
-    LEFT JOIN bc_material b ON a.kode_barang = b.KODE_BARANG
+    LEFT JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (b.cmp_id = a.cmp_id OR b.cmp_id = '' OR a.cmp_id = '' OR b.cmp_id IS NULL)
     $whereSql
     ORDER BY a.tgl_so DESC, b.KLAS ASC, a.kode_barang ASC
-    LIMIT 300";
+    LIMIT 500";
 
     $res = $koneksi->query($sql);
     $data = [];
@@ -56,19 +64,26 @@ if ($action === 'list') {
     }
 
     // Ambil daftar tanggal SO yang tersedia untuk dropdown
-    $datesRes = $koneksi->query("SELECT DISTINCT tgl_so FROM bc_so ORDER BY tgl_so DESC LIMIT 30");
+    $dateWhere = !empty($sessionCmpId) ? "WHERE (cmp_id = '$escSessionCmp' OR cmp_id = '' OR cmp_id IS NULL)" : "";
+    $datesRes = $koneksi->query("SELECT DISTINCT tgl_so FROM bc_so $dateWhere ORDER BY tgl_so DESC LIMIT 30");
     $dates = [];
     if ($datesRes) {
         while ($r = $datesRes->fetch_assoc()) {
-            $dates[] = $r['tgl_so'];
+            if (!empty($r['tgl_so'])) {
+                $dates[] = $r['tgl_so'];
+            }
         }
     }
 
     // KPI Counters
-    $kpiTotal = $koneksi->query("SELECT COUNT(1) FROM bc_so" . (!empty($tgl) ? " WHERE tgl_so = '$tgl'" : ""))->fetch_row()[0] ?? 0;
-    $kpiSesuai = $koneksi->query("SELECT COUNT(1) FROM bc_so WHERE selisih = 0" . (!empty($tgl) ? " AND tgl_so = '$tgl'" : ""))->fetch_row()[0] ?? 0;
-    $kpiSelisih = $koneksi->query("SELECT COUNT(1) FROM bc_so WHERE selisih <> 0" . (!empty($tgl) ? " AND tgl_so = '$tgl'" : ""))->fetch_row()[0] ?? 0;
-    $kpiQtySelisih = $koneksi->query("SELECT COALESCE(SUM(ABS(selisih)), 0) FROM bc_so" . (!empty($tgl) ? " WHERE tgl_so = '$tgl'" : ""))->fetch_row()[0] ?? 0;
+    $kpiWhere = !empty($sessionCmpId) ? "WHERE (cmp_id = '$escSessionCmp' OR cmp_id = '' OR cmp_id IS NULL)" : "WHERE 1=1";
+    if (!empty($tgl)) {
+        $kpiWhere .= " AND tgl_so = '" . $koneksi->real_escape_string($tgl) . "'";
+    }
+    $kpiTotal = $koneksi->query("SELECT COUNT(1) FROM bc_so $kpiWhere")->fetch_row()[0] ?? 0;
+    $kpiSesuai = $koneksi->query("SELECT COUNT(1) FROM bc_so $kpiWhere AND selisih = 0")->fetch_row()[0] ?? 0;
+    $kpiSelisih = $koneksi->query("SELECT COUNT(1) FROM bc_so $kpiWhere AND selisih <> 0")->fetch_row()[0] ?? 0;
+    $kpiQtySelisih = $koneksi->query("SELECT COALESCE(SUM(ABS(selisih)), 0) FROM bc_so $kpiWhere")->fetch_row()[0] ?? 0;
 
     echo json_encode([
         'status' => 'OK',
@@ -85,7 +100,40 @@ if ($action === 'list') {
     exit;
 }
 
-// 2. AJAX: SIMPAN / UPDATE ITEM STOK OPNAME
+// 2. AJAX: LOOKUP BARANG DARI bc_material (AUTOFILL)
+if ($action === 'lookup_barang') {
+    header('Content-Type: application/json; charset=utf-8');
+    $kode = strtoupper(trim($_GET['kode'] ?? ''));
+    if (empty($kode)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Kode kosong']);
+        exit;
+    }
+    $escK = $koneksi->real_escape_string($kode);
+    $q = $koneksi->query("SELECT KODE_BARANG, URAIAN, KLAS, KODE_SATUAN FROM bc_material WHERE KODE_BARANG = '$escK' LIMIT 1");
+    if ($q && $r = $q->fetch_assoc()) {
+        // Cek stok sistem dari bc_1ab2 jika ada
+        $stokSys = 0;
+        $qStok = $koneksi->query("SELECT COALESCE(SUM(qty), 0) FROM bc_1ab2 WHERE KODE_BARANG = '$escK'");
+        if ($qStok && $rStok = $qStok->fetch_row()) {
+            $stokSys = (float)$rStok[0];
+        }
+        echo json_encode([
+            'status' => 'OK',
+            'data' => [
+                'kode_barang' => $r['KODE_BARANG'],
+                'uraian' => $r['URAIAN'],
+                'klas' => $r['KLAS'],
+                'unit' => $r['KODE_SATUAN'] ?? 'PCE',
+                'stok_sistem' => $stokSys
+            ]
+        ]);
+    } else {
+        echo json_encode(['status' => 'NOT_FOUND']);
+    }
+    exit;
+}
+
+// 3. AJAX: SIMPAN / UPDATE ITEM STOK OPNAME
 if ($action === 'save') {
     header('Content-Type: application/json; charset=utf-8');
     $tgl_so      = trim($_POST['tgl_so'] ?? date('Y-m-d'));
@@ -109,18 +157,18 @@ if ($action === 'save') {
     $escNote = $koneksi->real_escape_string($note);
     $escUser = $koneksi->real_escape_string($sessionUser);
 
-    // Cek apakah sudah ada di tanggal SO tersebut
-    $cek = $koneksi->query("SELECT COUNT(1) FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'")->fetch_row()[0] ?? 0;
+    $cmpCheck = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '' OR cmp_id IS NULL)" : "";
+    $cek = $koneksi->query("SELECT COUNT(1) FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'$cmpCheck")->fetch_row()[0] ?? 0;
     if ($cek > 0) {
         $sql = "UPDATE bc_so SET 
             unit = '$escUnit', stok = $stok, aktual = $aktual, selisih = $selisih, 
             sesuai = '$sesuai', note = '$escNote', set_by = '$escUser'
-            WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'";
+            WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'$cmpCheck";
     } else {
         $sql = "INSERT INTO bc_so 
-            (tgl_so, kode_barang, unit, stok, sesuai, aktual, selisih, note, set_by)
+            (tgl_so, kode_barang, unit, stok, sesuai, aktual, selisih, note, set_by, cmp_id)
             VALUES 
-            ('$escTgl', '$escKode', '$escUnit', $stok, '$sesuai', $aktual, $selisih, '$escNote', '$escUser')";
+            ('$escTgl', '$escKode', '$escUnit', $stok, '$sesuai', $aktual, $selisih, '$escNote', '$escUser', '$escSessionCmp')";
     }
 
     if ($koneksi->query($sql)) {
@@ -131,7 +179,7 @@ if ($action === 'save') {
     exit;
 }
 
-// 3. AJAX: HAPUS RECORD STOK OPNAME
+// 4. AJAX: HAPUS RECORD STOK OPNAME
 if ($action === 'delete') {
     header('Content-Type: application/json; charset=utf-8');
     $tgl_so = trim($_POST['tgl_so'] ?? '');
@@ -139,8 +187,9 @@ if ($action === 'delete') {
 
     $escTgl  = $koneksi->real_escape_string($tgl_so);
     $escKode = $koneksi->real_escape_string($kode);
+    $cmpDel = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '' OR cmp_id IS NULL)" : "";
 
-    $del = $koneksi->query("DELETE FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'");
+    $del = $koneksi->query("DELETE FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'$cmpDel");
     if ($del) {
         echo json_encode(['status' => 'OK', 'message' => 'Record Stok Opname berhasil dihapus.']);
     } else {
@@ -149,7 +198,7 @@ if ($action === 'delete') {
     exit;
 }
 
-// 4. AJAX: IMPORT DATA DARI EXCEL (BATCH UPSERT STOK OPNAME)
+// 5. AJAX: IMPORT DATA DARI EXCEL (BATCH UPSERT STOK OPNAME)
 if ($action === 'import_excel') {
     header('Content-Type: application/json; charset=utf-8');
     $rowsJson = $_POST['rows'] ?? '[]';
@@ -179,13 +228,14 @@ if ($action === 'import_excel') {
         $escTgl = $koneksi->real_escape_string($tgl);
         $escUnit = $koneksi->real_escape_string($unit);
         $escNote = $koneksi->real_escape_string($note);
+        $cmpChk = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '' OR cmp_id IS NULL)" : "";
 
-        $chk = $koneksi->query("SELECT 1 FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode' LIMIT 1");
+        $chk = $koneksi->query("SELECT 1 FROM bc_so WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'$cmpChk LIMIT 1");
         if ($chk && $chk->num_rows > 0) {
-            $koneksi->query("UPDATE bc_so SET unit = '$escUnit', stok = $stok, aktual = $aktual, selisih = $selisih, sesuai = '$sesuai', note = '$escNote', set_by = '$escUser' WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'");
+            $koneksi->query("UPDATE bc_so SET unit = '$escUnit', stok = $stok, aktual = $aktual, selisih = $selisih, sesuai = '$sesuai', note = '$escNote', set_by = '$escUser' WHERE tgl_so = '$escTgl' AND kode_barang = '$escKode'$cmpChk");
             $updated++;
         } else {
-            $koneksi->query("INSERT INTO bc_so (tgl_so, kode_barang, unit, stok, sesuai, aktual, selisih, note, set_by) VALUES ('$escTgl', '$escKode', '$escUnit', $stok, '$sesuai', $aktual, $selisih, '$escNote', '$escUser')");
+            $koneksi->query("INSERT INTO bc_so (tgl_so, kode_barang, unit, stok, sesuai, aktual, selisih, note, set_by, cmp_id) VALUES ('$escTgl', '$escKode', '$escUnit', $stok, '$sesuai', $aktual, $selisih, '$escNote', '$escUser', '$escSessionCmp')");
             $inserted++;
         }
     }
@@ -199,7 +249,7 @@ if ($action === 'import_excel') {
     exit;
 }
 
-// 5. QUERY KLASIFIKASI DARI bc_tipe (WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx)
+// 6. QUERY KLASIFIKASI DARI bc_tipe (WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx)
 $klasList = [];
 $qKlas = $koneksi->query("SELECT * FROM bc_tipe WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx");
 if ($qKlas) {
@@ -209,47 +259,31 @@ if ($qKlas) {
 }
 ?>
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" data-theme="<?= htmlspecialchars($theme) ?>">
 <head>
     <meta charset="UTF-8">
     <title>Stok Opname - Rekonsiliasi Fisik vs IT Inventory</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="/assets/sweetalert2.min.css">
-    <script src="/assets/sweetalert2.all.min.js"></script>
-    <script src="/assets/sweetalert-theme.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        :root {
-            --bg: #f0f2f5;
-            --card-bg: #ffffff;
-            --border: #e8e8e8;
-            --text: #262626;
-            --text-secondary: #8c8c8c;
-            --primary: #1890ff;
-            --primary-hover: #40a9ff;
-            --success: #52c41a;
-            --warning: #faad14;
-            --danger: #f5222d;
-            --row-hover: #f0f7ff;
-        }
-        [data-theme='dark'] {
         :root, html[data-theme="light"], body[data-theme="light"] {
-            --bg: #f0f2f5;
-            --card-bg: #ffffff;
-            --border: #e8e8e8;
-            --text: rgba(0, 0, 0, 0.75);
+            --bg-base: #f0f2f5;
+            --bg-card: #ffffff;
+            --border-color: #e8e8e8;
+            --text-main: rgba(0, 0, 0, 0.85);
             --text-heading: #262626;
-            --text-secondary: #8c8c8c;
+            --text-muted: #8c8c8c;
             --primary: #1890ff;
             --primary-hover: #40a9ff;
             --success: #52c41a;
             --warning: #faad14;
-            --danger: #f5222d;
-            --row-hover: #f0f7ff;
+            --danger: #ff4d4f;
+            --table-hover: #f0f7ff;
             --table-head-bg: #fafafa;
             --bg-filter: #fafafa;
             --bg-input: #ffffff;
@@ -257,256 +291,454 @@ if ($qKlas) {
             color-scheme: light;
         }
         [data-theme='dark'], html[data-theme="dark"], body[data-theme="dark"] {
-            --bg: #141414;
-            --card-bg: #1f1f1f;
-            --border: #303030;
-            --text: rgba(255, 255, 255, 0.85);
+            --bg-base: #141414;
+            --bg-card: #1f1f1f;
+            --border-color: #303030;
+            --text-main: rgba(255, 255, 255, 0.85);
             --text-heading: #ffffff;
-            --text-secondary: rgba(255, 255, 255, 0.45);
+            --text-muted: rgba(255, 255, 255, 0.45);
             --primary: #177ddc;
             --primary-hover: #1890ff;
             --success: #49aa19;
             --warning: #d89614;
             --danger: #a61d24;
-            --row-hover: #262638;
+            --table-hover: #262638;
             --table-head-bg: #1d1d1d;
             --bg-filter: #191919;
             --bg-input: #141414;
             --border-input: #434343;
             color-scheme: dark;
         }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Poppins', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            font-size: 10.5px;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-size: 11px;
             line-height: 1.45;
-            padding: 6px 10px;
+            padding: 8px 12px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
-        .kpi-container {
+
+        /* Top Page Header */
+        .page-header {
             display: flex;
-            gap: 6px;
-            margin-bottom: 6px;
-            flex-wrap: wrap;
-        }
-        .kpi-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 2px;
-            padding: 2px 8px;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            height: 24px;
-        }
-        .kpi-title { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
-        .kpi-value { font-size: 11px; font-weight: 700; color: var(--text-heading); }
-        .kpi-icon { font-size: 11px; opacity: 0.8; }
-        
-        .toolbar-card {
-            background: var(--bg-filter);
-            border: 1px solid var(--border);
-            border-radius: 2px;
-            padding: 5px 8px;
-            margin-bottom: 6px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
             align-items: center;
             justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-color);
         }
-        .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-        .toolbar-left span { font-size: 9px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary); }
+        .page-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-heading);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .page-subtitle {
+            font-size: 10px;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        /* KPI Container & Cards */
+        .kpi-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            transition: all 0.2s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .kpi-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+        }
+        .kpi-card.card-blue::before { background: var(--primary); }
+        .kpi-card.card-green::before { background: var(--success); }
+        .kpi-card.card-red::before { background: var(--danger); }
+        .kpi-card.card-amber::before { background: var(--warning); }
         
-        input, select, button {
+        .kpi-card:hover {
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+            transform: translateY(-1px);
+        }
+        .kpi-info { display: flex; flex-direction: column; gap: 2px; }
+        .kpi-title { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
+        .kpi-value { font-size: 16px; font-weight: 700; color: var(--text-heading); }
+        .kpi-icon-wrap {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+        .card-blue .kpi-icon-wrap { background: rgba(24, 144, 255, 0.12); color: var(--primary); }
+        .card-green .kpi-icon-wrap { background: rgba(82, 196, 26, 0.12); color: var(--success); }
+        .card-red .kpi-icon-wrap { background: rgba(255, 77, 79, 0.12); color: var(--danger); }
+        .card-amber .kpi-icon-wrap { background: rgba(250, 173, 20, 0.12); color: var(--warning); }
+
+        /* Toolbar Filter Card */
+        .toolbar-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        }
+        .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+        .filter-label { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
+        
+        /* Form Inputs */
+        input, select {
             font-family: inherit;
-            font-size: 9.5px;
-            height: 22px;
-            padding: 1px 6px;
-            border-radius: 2px;
+            font-size: 10.5px;
+            height: 26px;
+            padding: 2px 8px;
+            border-radius: 3px;
             border: 1px solid var(--border-input);
             background: var(--bg-input);
-            color: var(--text);
+            color: var(--text-main);
             outline: none;
+            transition: border-color 0.2s;
         }
-        input:focus, select:focus { border-color: var(--primary); }
+        input:focus, select:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
+        }
         select option {
-            background-color: var(--card-bg);
-            color: var(--text);
+            background-color: var(--bg-card);
+            color: var(--text-main);
         }
+
+        /* Buttons */
         .btn-primary, .ant-btn-primary {
             background: var(--primary);
             color: #fff;
             border: 1px solid var(--primary);
             cursor: pointer;
             font-weight: 500;
-            font-size: 10px;
-            height: 22px;
-            padding: 0 7px;
-            border-radius: 2px;
+            font-size: 10.5px;
+            height: 26px;
+            padding: 0 10px;
+            border-radius: 3px;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
             text-decoration: none;
-            line-height: 1.4;
+            line-height: 1;
+            transition: all 0.2s;
         }
         .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); color: #fff; }
+        
+        .btn-success {
+            background: var(--success);
+            color: #fff;
+            border: 1px solid var(--success);
+            cursor: pointer;
+            font-weight: 500;
+            font-size: 10.5px;
+            height: 26px;
+            padding: 0 10px;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            text-decoration: none;
+            line-height: 1;
+            transition: all 0.2s;
+        }
+        .btn-success:hover { background: #49ad16; border-color: #49ad16; color: #fff; }
+
         .btn-default, .ant-btn {
-            background: var(--card-bg);
-            color: var(--text);
+            background: var(--bg-card);
+            color: var(--text-main);
             border: 1px solid var(--border-input);
             cursor: pointer;
-            font-size: 10px;
-            height: 22px;
-            padding: 0 7px;
+            font-size: 10.5px;
+            height: 26px;
+            padding: 0 10px;
+            border-radius: 3px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            text-decoration: none;
+            line-height: 1;
+            transition: all 0.2s;
+        }
+        .btn-default:hover { border-color: var(--primary); color: var(--primary); }
+
+        .btn-sm-action {
+            height: 20px;
+            padding: 0 6px;
+            font-size: 9.5px;
             border-radius: 2px;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            text-decoration: none;
-            line-height: 1.4;
+            gap: 3px;
+            cursor: pointer;
+            border: 1px solid var(--border-input);
+            background: var(--bg-card);
+            color: var(--text-main);
+            transition: all 0.15s;
         }
-        .btn-default:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-sm-action:hover { border-color: var(--primary); color: var(--primary); }
+        .btn-sm-action.del:hover { border-color: var(--danger); color: var(--danger); }
         
+        /* Table Layout */
         .table-container {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 3px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
             overflow: auto;
-            max-height: calc(100vh - 170px);
+            max-height: calc(100vh - 165px);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
-        table { width: 100%; border-collapse: collapse; font-size: 10px; text-align: left; }
+        table { width: 100%; border-collapse: collapse; font-size: 10.5px; text-align: left; }
         th {
             position: sticky;
             top: 0;
             background: var(--table-head-bg);
-            border-bottom: 1px solid var(--border);
-            padding: 4px 6px;
-            font-size: 9.5px;
-            text-align: left;
+            border-bottom: 2px solid var(--border-color);
+            padding: 6px 8px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-heading);
             white-space: nowrap;
             z-index: 2;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
         td {
-            padding: 3px 6px;
-            border-bottom: 1px solid var(--border);
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
             vertical-align: middle;
-            color: var(--text);
+            color: var(--text-main);
         }
-        tr:hover td { background-color: var(--row-hover) !important; }
-        .badge {
-            display: inline-block;
-            padding: 1px 5px;
-            border-radius: 2px;
-            font-size: 9px;
-            font-weight: 600;
-        }
-        .badge-match { background: rgba(82, 196, 26, 0.12); color: var(--success); }
-        .badge-diff { background: rgba(245, 34, 45, 0.12); color: var(--danger); }
+        tr:hover td { background-color: var(--table-hover) !important; }
         
-        /* Modal */
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            font-size: 9.5px;
+            font-weight: 600;
+            line-height: 1.2;
+        }
+        .badge-match {
+            background: rgba(82, 196, 26, 0.12);
+            color: var(--success);
+            border: 1px solid rgba(82, 196, 26, 0.3);
+        }
+        .badge-diff {
+            background: rgba(255, 77, 79, 0.12);
+            color: var(--danger);
+            border: 1px solid rgba(255, 77, 79, 0.3);
+        }
+        .badge-qty-diff {
+            display: inline-block;
+            font-weight: 700;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+
+        /* Modal Dialogs - MUST HAVE display: none by default! */
         .modal {
             display: none;
             position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.55);
+            z-index: 9999;
             align-items: center;
             justify-content: center;
+            backdrop-filter: blur(3px);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+        }
+        .modal.show {
+            display: flex !important;
+            opacity: 1 !important;
+            pointer-events: auto !important;
         }
         .modal-content {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 3px;
-            width: 90%;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            width: 92%;
             max-width: 480px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.25);
+            animation: modalFadeIn 0.2s ease;
+            overflow: hidden;
+        }
+        @keyframes modalFadeIn {
+            from { transform: translateY(-15px) scale(0.98); opacity: 0; }
+            to { transform: translateY(0) scale(1); opacity: 1; }
         }
         .modal-header {
-            padding: 6px 12px;
-            border-bottom: 1px solid var(--border);
+            padding: 10px 14px;
+            background: var(--table-head-bg);
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 11.5px;
-            font-weight: 600;
             color: var(--text-heading);
         }
-        .modal-header h3 { font-size: 11.5px; font-weight: 600; margin: 0; }
-        .modal-body { padding: 8px 12px; font-size: 10px; }
+        .modal-header h3 { font-size: 12.5px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 7px; }
+        .modal-close-btn {
+            background: transparent;
+            border: none;
+            font-size: 18px;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 0 4px;
+            line-height: 1;
+            transition: color 0.15s;
+        }
+        .modal-close-btn:hover { color: var(--danger); }
+        .modal-body { padding: 12px 16px; font-size: 11px; }
         .modal-footer {
-            padding: 6px 12px;
-            border-top: 1px solid var(--border);
+            padding: 8px 14px;
+            background: var(--table-head-bg);
+            border-top: 1px solid var(--border-color);
             display: flex;
             justify-content: flex-end;
-            gap: 6px;
+            gap: 8px;
         }
-        .form-group { margin-bottom: 6px; }
-        .form-group label { display: block; margin-bottom: 2px; color: var(--text-secondary); font-size: 9px; font-weight: 600; text-transform: uppercase; }
-        .form-group input, .form-group select { width: 100%; }
+        .form-group { margin-bottom: 9px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 3px;
+            color: var(--text-muted);
+            font-size: 9.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .form-group input, .form-group select { width: 100%; height: 28px; }
     </style>
 </head>
 <body>
 
-    <!-- KPI Cards -->
-    <div class="kpi-container">
-        <div class="kpi-card">
-            <span class="kpi-title">Total Item Opname</span>
-            <span class="kpi-value" id="kpi-total">0</span>
-            <i class="fa-solid fa-clipboard-list kpi-icon" style="color: #1890ff;"></i>
+    <!-- Top Page Header -->
+    <div class="page-header">
+        <div class="page-title">
+            <i class="fa-solid fa-boxes-packing" style="color:var(--primary);"></i>
+            <span>Stok Opname</span>
+            <span class="page-subtitle">(Rekonsiliasi Fisik Gudang vs IT Inventory)</span>
         </div>
-        <div class="kpi-card">
-            <span class="kpi-title">Stok Sesuai (Match)</span>
-            <span class="kpi-value" id="kpi-sesuai">0</span>
-            <i class="fa-solid fa-square-check kpi-icon" style="color: #52c41a;"></i>
-        </div>
-        <div class="kpi-card">
-            <span class="kpi-title">Ada Selisih (Varian)</span>
-            <span class="kpi-value" id="kpi-selisih" style="color: var(--danger);">0</span>
-            <i class="fa-solid fa-triangle-exclamation kpi-icon" style="color: #f5222d;"></i>
-        </div>
-        <div class="kpi-card">
-            <span class="kpi-title">Total Varian Qty (Absolut)</span>
-            <span class="kpi-value" id="kpi-qty-selisih">0</span>
-            <i class="fa-solid fa-chart-pie kpi-icon" style="color: #faad14;"></i>
+        <div>
+            <span style="font-size: 10px; color: var(--text-muted);">
+                <i class="fa-solid fa-clock-rotate-left"></i> Modul Warehouse Rekap SO
+            </span>
         </div>
     </div>
 
-    <!-- Toolbar Filters -->
+    <!-- KPI Summary Cards -->
+    <div class="kpi-container">
+        <div class="kpi-card card-blue">
+            <div class="kpi-info">
+                <span class="kpi-title">Total Item Opname</span>
+                <span class="kpi-value" id="kpi-total">0</span>
+            </div>
+            <div class="kpi-icon-wrap">
+                <i class="fa-solid fa-clipboard-list"></i>
+            </div>
+        </div>
+        <div class="kpi-card card-green">
+            <div class="kpi-info">
+                <span class="kpi-title">Stok Sesuai (Match)</span>
+                <span class="kpi-value" id="kpi-sesuai" style="color: var(--success);">0</span>
+            </div>
+            <div class="kpi-icon-wrap">
+                <i class="fa-solid fa-circle-check"></i>
+            </div>
+        </div>
+        <div class="kpi-card card-red">
+            <div class="kpi-info">
+                <span class="kpi-title">Ada Selisih (Varian)</span>
+                <span class="kpi-value" id="kpi-selisih" style="color: var(--danger);">0</span>
+            </div>
+            <div class="kpi-icon-wrap">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+        </div>
+        <div class="kpi-card card-amber">
+            <div class="kpi-info">
+                <span class="kpi-title">Total Varian Qty (Absolut)</span>
+                <span class="kpi-value" id="kpi-qty-selisih">0</span>
+            </div>
+            <div class="kpi-icon-wrap">
+                <i class="fa-solid fa-chart-pie"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toolbar Filters & Actions -->
     <div class="toolbar-card">
         <div class="toolbar-left">
-            <span style="font-weight:600; color:var(--text-secondary);"><i class="fa-solid fa-calendar-day"></i> Tgl SO:</span>
-            <select id="filter-tgl" style="min-width: 130px;">
+            <span class="filter-label"><i class="fa-solid fa-calendar-day"></i> Tgl SO:</span>
+            <select id="filter-tgl" style="min-width: 130px;" onchange="loadData()">
                 <option value="">Semua Tanggal SO</option>
             </select>
-            <select id="filter-klas">
+
+            <span class="filter-label"><i class="fa-solid fa-tags"></i> Klas:</span>
+            <select id="filter-klas" style="min-width: 120px;" onchange="loadData()">
                 <option value="">Semua Klasifikasi</option>
                 <?php foreach ($klasList as $k): ?>
                     <option value="<?= htmlspecialchars($k['tipe']) ?>"><?= htmlspecialchars($k['tipe']) ?></option>
                 <?php endforeach; ?>
             </select>
-            <select id="filter-diff">
+
+            <span class="filter-label"><i class="fa-solid fa-scale-balanced"></i> Kondisi:</span>
+            <select id="filter-diff" style="min-width: 130px;" onchange="loadData()">
                 <option value="">Semua Kondisi</option>
                 <option value="selisih">Hanya yang Selisih</option>
                 <option value="sesuai">Hanya yang Sesuai</option>
             </select>
-            <input type="text" id="filter-search" placeholder="Cari kode/nama barang..." style="width: 180px;">
-            <button class="btn-default" onclick="loadData()"><i class="fa-solid fa-magnifying-glass"></i> Filter</button>
+
+            <input type="text" id="filter-search" placeholder="Cari kode/nama barang..." style="width: 180px;" onkeyup="if(event.key==='Enter') loadData()">
+            <button class="btn-default" onclick="loadData()"><i class="fa-solid fa-arrows-rotate"></i> Filter</button>
         </div>
         <div class="toolbar-right">
             <button class="btn-primary" onclick="openNewModal()"><i class="fa-solid fa-plus"></i> Input Hasil Opname</button>
-            <button class="btn-primary" style="background:var(--success); border-color:var(--success);" onclick="openImportModal()"><i class="fa-solid fa-file-excel"></i> Import Excel</button>
-            <button class="btn-default" onclick="exportExcel()"><i class="fa-solid fa-file-arrow-down"></i> Ekspor Excel</button>
+            <button class="btn-success" onclick="openImportModal()"><i class="fa-solid fa-file-excel"></i> Import Excel</button>
+            <button class="btn-default" onclick="exportExcel()"><i class="fa-solid fa-file-export"></i> Ekspor Excel</button>
         </div>
     </div>
 
-    <!-- Main Table -->
+    <!-- Main Data Table -->
     <div class="table-container">
         <table>
             <thead>
@@ -527,30 +759,36 @@ if ($qKlas) {
                 </tr>
             </thead>
             <tbody id="table-body">
-                <tr><td colspan="13" style="text-align: center; padding: 20px;">Memuat data...</td></tr>
+                <tr><td colspan="13" style="text-align: center; padding: 25px; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data Stok Opname...</td></tr>
             </tbody>
         </table>
     </div>
 
-    <!-- Modal Form -->
+    <!-- Modal Form (Input / Edit) -->
     <div class="modal" id="modal-form">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 style="font-size: 13px; font-weight: 700;"><i class="fa-solid fa-pen-to-square"></i> Input / Edit Stok Opname</h3>
-                <span style="cursor: pointer; font-size: 16px;" onclick="closeModal()">&times;</span>
+                <h3><i class="fa-solid fa-pen-to-square" style="color:var(--primary);"></i> Input / Edit Stok Opname</h3>
+                <button type="button" class="modal-close-btn" onclick="closeModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label>Tanggal Pelaksanaan Stok Opname</label>
-                    <input type="date" id="form-tgl" value="<?= date('Y-m-d') ?>">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div class="form-group">
+                        <label>Tanggal Pelaksanaan SO</label>
+                        <input type="date" id="form-tgl" value="<?= date('Y-m-d') ?>">
+                    </div>
+                    <div class="form-group">
+                        <label>Satuan Barang</label>
+                        <input type="text" id="form-unit" value="PCE">
+                    </div>
                 </div>
                 <div class="form-group">
                     <label>Kode Barang</label>
-                    <input type="text" id="form-kode" placeholder="Ketik kode barang...">
-                </div>
-                <div class="form-group">
-                    <label>Satuan</label>
-                    <input type="text" id="form-unit" value="PCE">
+                    <div style="display:flex; gap: 4px;">
+                        <input type="text" id="form-kode" placeholder="Ketik kode barang..." style="flex:1;" onchange="lookupBarang()">
+                        <button type="button" class="btn-default" onclick="lookupBarang()"><i class="fa-solid fa-magnifying-glass"></i> Cek</button>
+                    </div>
+                    <div id="form-uraian-hint" style="font-size: 10px; color: var(--text-muted); margin-top: 3px; min-height: 14px;"></div>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
                     <div class="form-group">
@@ -562,41 +800,42 @@ if ($qKlas) {
                         <input type="number" step="0.01" id="form-aktual" value="0.00" oninput="calcDiff()">
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>Selisih: <strong id="lbl-diff" style="color: var(--primary);">0.00</strong></label>
+                <div class="form-group" style="background: rgba(0,0,0,0.02); border: 1px dashed var(--border-color); border-radius: 4px; padding: 6px 10px; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:10px; font-weight:600; color:var(--text-muted);">HASIL SELISIH:</span>
+                    <strong id="lbl-diff" style="font-size:13px; color: var(--success);">0.00</strong>
                 </div>
                 <div class="form-group">
                     <label>Catatan / Keterangan Selisih</label>
-                    <input type="text" id="form-note" placeholder="Misal: Selisih timbangan, susut, dll">
+                    <input type="text" id="form-note" placeholder="Misal: Selisih timbangan, susut, barang cacat, dll">
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn-default" onclick="closeModal()">Batal</button>
-                <button class="btn-primary" onclick="submitForm()"><i class="fa-solid fa-floppy-disk"></i> Simpan Record</button>
+                <button type="button" class="btn-default" onclick="closeModal()">Batal</button>
+                <button type="button" class="btn-primary" onclick="submitForm()"><i class="fa-solid fa-floppy-disk"></i> Simpan Record</button>
             </div>
         </div>
     </div>
 
     <!-- Modal Import Excel -->
     <div class="modal" id="modal-import">
-        <div class="modal-content" style="max-width: 750px;">
+        <div class="modal-content" style="max-width: 720px;">
             <div class="modal-header">
-                <h3 style="font-size: 13px; font-weight: 700;"><i class="fa-solid fa-file-excel" style="color:var(--success);"></i> Import Hasil Stok Opname dari Excel</h3>
-                <span style="cursor: pointer; font-size: 16px;" onclick="closeImportModal()">&times;</span>
+                <h3><i class="fa-solid fa-file-excel" style="color:var(--success);"></i> Import Hasil Stok Opname dari Excel</h3>
+                <button type="button" class="modal-close-btn" onclick="closeImportModal()">&times;</button>
             </div>
             <div class="modal-body">
-                <div style="background:rgba(24,144,255,0.08); border:1px solid #91d5ff; border-radius:6px; padding:10px 14px; font-size:12px; margin-bottom: 12px;">
-                    <strong>Petunjuk Import Stok Opname:</strong>
-                    <ul style="margin:4px 0 0 16px; padding:0;">
-                        <li>Format kolom: <code>tgl_so</code>, <code>kode_barang</code>, <code>unit</code>, <code>stok</code>, <code>aktual</code>, <code>note</code></li>
+                <div style="background:rgba(24,144,255,0.06); border:1px solid rgba(24,144,255,0.25); border-radius:4px; padding:8px 12px; font-size:10.5px; margin-bottom: 10px;">
+                    <strong style="color:var(--primary);"><i class="fa-solid fa-circle-info"></i> Petunjuk Import:</strong>
+                    <ul style="margin:4px 0 0 16px; padding:0; color:var(--text-main);">
+                        <li>Format kolom Excel: <code>tgl_so</code>, <code>kode_barang</code>, <code>unit</code>, <code>stok</code>, <code>aktual</code>, <code>note</code></li>
                         <li>Format tanggal: YYYY-MM-DD (contoh: <?= date('Y-m-d') ?>).</li>
-                        <li>Sistem akan otomatis menghitung selisih (<code>aktual - stok</code>) dan status kesesuaian.</li>
+                        <li>Sistem otomatis menghitung selisih (<code>aktual - stok</code>) dan status kesesuaian.</li>
                     </ul>
                 </div>
 
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
                     <button type="button" class="btn-default" onclick="downloadTemplate()">
-                        <i class="fa-solid fa-file-excel"></i> Download Template Format (.xlsx)
+                        <i class="fa-solid fa-download" style="color:var(--success);"></i> Download Template (.xlsx)
                     </button>
                     <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleExcelUpload(event)">
                     <button type="button" class="btn-primary" onclick="document.getElementById('excelFileInput').click()">
@@ -604,17 +843,17 @@ if ($qKlas) {
                     </button>
                 </div>
 
-                <div id="dropZone" style="border: 2px dashed var(--border); border-radius: 8px; padding: 25px; text-align: center; cursor: pointer; background: rgba(0,0,0,0.02); margin-bottom: 12px;" onclick="document.getElementById('excelFileInput').click()">
-                    <div style="font-size: 28px; margin-bottom: 6px;">📥</div>
-                    <div style="font-weight: 600; font-size: 13px;">Tarik dan lepaskan file Excel di sini atau Klik untuk memilih file</div>
-                    <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Mendukung format .xlsx, .xls, atau .csv</div>
+                <div id="dropZone" style="border: 2px dashed var(--border-color); border-radius: 6px; padding: 22px; text-align: center; cursor: pointer; background: rgba(0,0,0,0.015); margin-bottom: 10px;" onclick="document.getElementById('excelFileInput').click()">
+                    <div style="font-size: 24px; margin-bottom: 4px; color:var(--primary);"><i class="fa-solid fa-cloud-arrow-up"></i></div>
+                    <div style="font-weight: 600; font-size: 11px;">Tarik dan letakkan file Excel di sini atau Klik untuk memilih file</div>
+                    <div style="font-size: 9.5px; color: var(--text-muted); margin-top: 3px;">Mendukung format .xlsx, .xls, atau .csv</div>
                 </div>
 
                 <!-- Preview Table -->
-                <div id="importPreviewContainer" style="display:none; max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;">
-                    <div style="padding: 6px 12px; background: var(--bg); font-weight: 600; font-size: 11.5px; border-bottom: 1px solid var(--border); display:flex; justify-content:space-between;">
+                <div id="importPreviewContainer" style="display:none; max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 4px;">
+                    <div style="padding: 5px 10px; background: var(--table-head-bg); font-weight: 600; font-size: 10.5px; border-bottom: 1px solid var(--border-color); display:flex; justify-content:space-between;">
                         <span id="previewCountText">Preview Data: 0 baris</span>
-                        <span style="color:var(--text-secondary); font-size:11px;">Maksimal 10 baris pertama</span>
+                        <span style="color:var(--text-muted); font-size:9.5px;">Menampilkan 10 baris pertama</span>
                     </div>
                     <table>
                         <thead>
@@ -622,7 +861,7 @@ if ($qKlas) {
                                 <th>Tanggal SO</th>
                                 <th>Kode Barang</th>
                                 <th>Satuan</th>
-                                <th style="text-align:right;">Stok Buku</th>
+                                <th style="text-align:right;">Stok Sistem</th>
                                 <th style="text-align:right;">Stok Fisik</th>
                                 <th>Catatan</th>
                             </tr>
@@ -633,14 +872,15 @@ if ($qKlas) {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn-default" onclick="closeImportModal()">Batal</button>
-                <button type="button" class="btn-primary" id="btnExecuteImport" style="display:none; background:var(--success); border-color:var(--success);" onclick="executeImport()">
-                    <i class="fa-solid fa-cloud-arrow-up"></i> Mulai Impor Data
+                <button type="button" class="btn-success" id="btnExecuteImport" style="display:none;" onclick="executeImport()">
+                    <i class="fa-solid fa-check"></i> Mulai Impor Data
                 </button>
             </div>
         </div>
     </div>
 
     <script>
+        const sessionCmpId = <?= json_encode($sessionCmpId) ?>;
         let currentData = [];
 
         function calcDiff() {
@@ -649,7 +889,37 @@ if ($qKlas) {
             const diff = (aktual - stok).toFixed(2);
             const lbl = document.getElementById('lbl-diff');
             lbl.innerText = (diff > 0 ? '+' : '') + diff;
-            lbl.style.color = (diff == 0) ? 'var(--success)' : (diff < 0 ? 'var(--danger)' : 'var(--warning)');
+            if (diff == 0) {
+                lbl.style.color = 'var(--success)';
+            } else if (diff < 0) {
+                lbl.style.color = 'var(--danger)';
+            } else {
+                lbl.style.color = 'var(--warning)';
+            }
+        }
+
+        async function lookupBarang() {
+            const kode = document.getElementById('form-kode').value.trim();
+            const hint = document.getElementById('form-uraian-hint');
+            if (!kode) {
+                hint.innerText = '';
+                return;
+            }
+            hint.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mencari barang...';
+            try {
+                const res = await fetch(`stok_opname.php?action=lookup_barang&kode=${encodeURIComponent(kode)}&cmp_id=${encodeURIComponent(sessionCmpId)}`);
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    hint.innerHTML = `<span style="color:var(--success);"><i class="fa-solid fa-circle-check"></i> ${escapeHtml(json.data.uraian)} (${escapeHtml(json.data.klas)})</span>`;
+                    document.getElementById('form-unit').value = json.data.unit || 'PCE';
+                    document.getElementById('form-stok').value = Number(json.data.stok_sistem).toFixed(2);
+                    calcDiff();
+                } else {
+                    hint.innerHTML = `<span style="color:var(--text-muted);"><i class="fa-solid fa-circle-question"></i> Kode belum ada di master barang (akan dibuat otomatis jika disimpan).</span>`;
+                }
+            } catch (e) {
+                hint.innerText = '';
+            }
         }
 
         async function loadData() {
@@ -659,10 +929,11 @@ if ($qKlas) {
             const q = document.getElementById('filter-search').value;
 
             const tbody = document.getElementById('table-body');
-            tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: 20px;">Memuat data...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: 25px; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data Stok Opname...</td></tr>';
 
             try {
-                const res = await fetch(`stok_opname.php?action=list&tgl=${encodeURIComponent(tgl)}&klas=${encodeURIComponent(klas)}&diff=${diff}&q=${encodeURIComponent(q)}`);
+                const url = `stok_opname.php?action=list&tgl=${encodeURIComponent(tgl)}&klas=${encodeURIComponent(klas)}&diff=${diff}&q=${encodeURIComponent(q)}&cmp_id=${encodeURIComponent(sessionCmpId)}`;
+                const res = await fetch(url);
                 const json = await res.json();
                 if (json.status === 'OK') {
                     currentData = json.data;
@@ -684,52 +955,62 @@ if ($qKlas) {
 
                     renderTable(json.data);
                 } else {
-                    tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: red;">${json.message}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: var(--danger); padding:20px;">${json.message}</td></tr>`;
                 }
             } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: red;">Error: ${err.message}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align: center; color: var(--danger); padding:20px;">Error: ${err.message}</td></tr>`;
             }
         }
 
         function renderTable(data) {
             const tbody = document.getElementById('table-body');
             if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="13" style="text-align: center; padding: 20px;">Tidak ada record Stok Opname ditemukan.</td></tr>';
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="13" style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+                            <div style="font-size: 28px; margin-bottom: 8px; opacity: 0.5;"><i class="fa-solid fa-boxes-stacked"></i></div>
+                            <div style="font-weight: 600; font-size: 12px; margin-bottom: 4px;">Tidak ada record Stok Opname ditemukan</div>
+                            <div style="font-size: 10px;">Silakan klik <strong>Input Hasil Opname</strong> atau <strong>Import Excel</strong> untuk memasukkan hasil rekonsiliasi.</div>
+                        </td>
+                    </tr>
+                `;
                 return;
             }
 
             tbody.innerHTML = data.map((r, i) => {
                 const selisih = parseFloat(r.selisih) || 0;
                 let badge = '<span class="badge badge-match"><i class="fa-solid fa-check"></i> Sesuai</span>';
-                let diffColor = 'var(--text)';
+                let diffStyle = 'color: var(--success);';
                 if (selisih !== 0) {
-                    badge = `<span class="badge badge-diff"><i class="fa-solid fa-xmark"></i> Selisih</span>`;
-                    diffColor = selisih < 0 ? 'var(--danger)' : 'var(--warning)';
+                    badge = `<span class="badge badge-diff"><i class="fa-solid fa-triangle-exclamation"></i> Selisih</span>`;
+                    diffStyle = selisih < 0 ? 'color: var(--danger);' : 'color: var(--warning);';
                 }
 
                 return `
                     <tr>
-                        <td style="text-align: center; color: var(--text-secondary);">${i + 1}</td>
-                        <td>${r.tgl_so}</td>
-                        <td style="font-weight: 600; color: var(--primary);">${r.kode_barang}</td>
-                        <td>${r.URAIAN || '-'}</td>
-                        <td>${r.KLAS || '-'}</td>
-                        <td>${r.unit || '-'}</td>
+                        <td style="text-align: center; color: var(--text-muted); font-size: 10px;">${i + 1}</td>
+                        <td style="font-weight: 500;">${r.tgl_so}</td>
+                        <td style="font-weight: 600; color: var(--primary);">${escapeHtml(r.kode_barang)}</td>
+                        <td>${escapeHtml(r.URAIAN || '-')}</td>
+                        <td><span style="font-size: 9.5px; font-weight: 600; padding: 1px 5px; border-radius: 2px; background: rgba(0,0,0,0.04);">${escapeHtml(r.KLAS || '-')}</span></td>
+                        <td>${escapeHtml(r.unit || '-')}</td>
                         <td style="text-align: right; font-weight: 500;">${Number(r.stok || 0).toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
                         <td style="text-align: right; font-weight: 600;">${Number(r.aktual || 0).toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
-                        <td style="text-align: right; font-weight: 700; color: ${diffColor};">
+                        <td style="text-align: right; font-weight: 700; ${diffStyle}">
                             ${selisih > 0 ? '+' : ''}${Number(selisih).toLocaleString('id-ID', {minimumFractionDigits: 2})}
                         </td>
                         <td style="text-align: center;">${badge}</td>
-                        <td>${r.note || '-'}</td>
-                        <td>${r.set_by || '-'}</td>
+                        <td style="color: var(--text-muted);">${escapeHtml(r.note || '-')}</td>
+                        <td style="font-size: 10px; color: var(--text-muted);">${escapeHtml(r.set_by || '-')}</td>
                         <td style="text-align: center;">
-                            <button class="btn-default" style="padding: 2px 6px;" title="Edit Record" onclick="editRow('${r.tgl_so}', '${r.kode_barang}', '${r.unit}', ${r.stok}, ${r.aktual}, '${(r.note || '').replace(/'/g, "\\'")}')">
-                                <i class="fa-solid fa-pen"></i>
-                            </button>
-                            <button class="btn-default" style="padding: 2px 6px; color: var(--danger);" title="Hapus Record" onclick="deleteRow('${r.tgl_so}', '${r.kode_barang}')">
-                                <i class="fa-solid fa-trash"></i>
-                            </button>
+                            <div style="display:inline-flex; gap: 3px;">
+                                <button class="btn-sm-action" title="Edit Record" onclick="editRow('${r.tgl_so}', '${r.kode_barang}', '${r.unit}', ${r.stok}, ${r.aktual}, '${(r.note || '').replace(/'/g, "\\'")}')">
+                                    <i class="fa-solid fa-pen"></i>
+                                </button>
+                                <button class="btn-sm-action del" title="Hapus Record" onclick="deleteRow('${r.tgl_so}', '${r.kode_barang}')">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                </button>
+                            </div>
                         </td>
                     </tr>
                 `;
@@ -742,8 +1023,11 @@ if ($qKlas) {
             document.getElementById('form-stok').value = '0.00';
             document.getElementById('form-aktual').value = '0.00';
             document.getElementById('form-note').value = '';
+            document.getElementById('form-uraian-hint').innerText = '';
             calcDiff();
-            document.getElementById('modal-form').style.display = 'flex';
+            const m = document.getElementById('modal-form');
+            m.classList.add('show');
+            setTimeout(() => document.getElementById('form-kode').focus(), 100);
         }
 
         function editRow(tgl, kode, unit, stok, aktual, note) {
@@ -753,12 +1037,14 @@ if ($qKlas) {
             document.getElementById('form-stok').value = stok;
             document.getElementById('form-aktual').value = aktual;
             document.getElementById('form-note').value = note;
+            document.getElementById('form-uraian-hint').innerText = '';
             calcDiff();
-            document.getElementById('modal-form').style.display = 'flex';
+            const m = document.getElementById('modal-form');
+            m.classList.add('show');
         }
 
         function closeModal() {
-            document.getElementById('modal-form').style.display = 'none';
+            document.getElementById('modal-form').classList.remove('show');
         }
 
         async function submitForm() {
@@ -769,10 +1055,14 @@ if ($qKlas) {
             const aktual = document.getElementById('form-aktual').value;
             const note   = document.getElementById('form-note').value.trim();
 
-            if (!kode) return alert('Kode barang harus diisi.');
+            if (!kode) {
+                Swal.fire({ icon: 'warning', title: 'Data Belum Lengkap', text: 'Kode barang wajib diisi.' });
+                return;
+            }
 
             const fd = new FormData();
             fd.append('action', 'save');
+            fd.append('cmp_id', sessionCmpId);
             fd.append('tgl_so', tgl);
             fd.append('kode_barang', kode);
             fd.append('unit', unit);
@@ -784,19 +1074,33 @@ if ($qKlas) {
                 const res = await fetch('stok_opname.php', { method: 'POST', body: fd });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    alert(json.message);
+                    Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message, timer: 1500, showConfirmButton: false });
                     closeModal();
                     loadData();
                 } else {
-                    alert(json.message);
+                    Swal.fire({ icon: 'error', title: 'Gagal Simpan', text: json.message });
                 }
-            } catch (e) { alert(e.message); }
+            } catch (e) {
+                Swal.fire({ icon: 'error', title: 'Error', text: e.message });
+            }
         }
 
         async function deleteRow(tgl, kode) {
-            if (!confirm(`Hapus record Stok Opname untuk item ${kode} tanggal ${tgl}?`)) return;
+            const confirm = await Swal.fire({
+                title: 'Hapus Record?',
+                html: `Apakah Anda yakin ingin menghapus data Stok Opname <strong>${escapeHtml(kode)}</strong> tanggal <strong>${escapeHtml(tgl)}</strong>?`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#ff4d4f',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: 'Ya, Hapus',
+                cancelButtonText: 'Batal'
+            });
+            if (!confirm.isConfirmed) return;
+
             const fd = new FormData();
             fd.append('action', 'delete');
+            fd.append('cmp_id', sessionCmpId);
             fd.append('tgl_so', tgl);
             fd.append('kode_barang', kode);
 
@@ -804,12 +1108,14 @@ if ($qKlas) {
                 const res = await fetch('stok_opname.php', { method: 'POST', body: fd });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    alert(json.message);
+                    Swal.fire({ icon: 'success', title: 'Dihapus', text: json.message, timer: 1500, showConfirmButton: false });
                     loadData();
                 } else {
-                    alert(json.message);
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: json.message });
                 }
-            } catch (e) { alert(e.message); }
+            } catch (e) {
+                Swal.fire({ icon: 'error', title: 'Error', text: e.message });
+            }
         }
 
         let importedRowsData = [];
@@ -819,11 +1125,11 @@ if ($qKlas) {
             document.getElementById('excelFileInput').value = '';
             document.getElementById('importPreviewContainer').style.display = 'none';
             document.getElementById('btnExecuteImport').style.display = 'none';
-            document.getElementById('modal-import').style.display = 'flex';
+            document.getElementById('modal-import').classList.add('show');
         }
 
         function closeImportModal() {
-            document.getElementById('modal-import').style.display = 'none';
+            document.getElementById('modal-import').classList.remove('show');
         }
 
         function downloadTemplate() {
@@ -864,14 +1170,14 @@ if ($qKlas) {
                     const jsonData = XLSX.utils.sheet_to_json(firstSheet, { defval: "" });
 
                     if (!jsonData || jsonData.length === 0) {
-                        Swal.fire('Format Salah', 'File Excel kosong atau sheet pertama tidak berisi data.', 'warning');
+                        Swal.fire({ icon: 'warning', title: 'Format Salah', text: 'File Excel kosong atau sheet pertama tidak berisi data.' });
                         return;
                     }
 
                     importedRowsData = jsonData;
                     renderImportPreview(jsonData);
                 } catch (err) {
-                    Swal.fire('Error Baca File', 'Gagal memproses file: ' + err.message, 'error');
+                    Swal.fire({ icon: 'error', title: 'Gagal Baca File', text: err.message });
                 }
             };
             reader.readAsArrayBuffer(file);
@@ -895,11 +1201,11 @@ if ($qKlas) {
 
                 tr.innerHTML = `
                     <td>${escapeHtml(tgl)}</td>
-                    <td><strong>${escapeHtml(kd)}</strong></td>
+                    <td style="font-weight:600; color:var(--primary);">${escapeHtml(kd)}</td>
                     <td>${escapeHtml(un)}</td>
-                    <td style="text-align:right;">${Number(st).toLocaleString('id-ID')}</td>
-                    <td style="text-align:right; font-weight:600;">${Number(ak).toLocaleString('id-ID')}</td>
-                    <td>${escapeHtml(nt)}</td>
+                    <td style="text-align:right;">${Number(st).toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
+                    <td style="text-align:right; font-weight:600;">${Number(ak).toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
+                    <td style="color:var(--text-muted);">${escapeHtml(nt)}</td>
                 `;
                 tbody.appendChild(tr);
             }
@@ -910,7 +1216,7 @@ if ($qKlas) {
 
         async function executeImport() {
             if (!importedRowsData || importedRowsData.length === 0) {
-                Swal.fire('Error', 'Tidak ada data untuk diimpor.', 'warning');
+                Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Tidak ada data untuk diimpor.' });
                 return;
             }
 
@@ -935,26 +1241,27 @@ if ($qKlas) {
 
             const fd = new FormData();
             fd.append('action', 'import_excel');
+            fd.append('cmp_id', sessionCmpId);
             fd.append('rows', JSON.stringify(importedRowsData));
 
             try {
                 const res = await fetch('stok_opname.php', { method: 'POST', body: fd });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    Swal.fire('Berhasil', json.message, 'success');
+                    Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message });
                     closeImportModal();
                     loadData();
                 } else {
-                    Swal.fire('Gagal Impor', json.message, 'error');
+                    Swal.fire({ icon: 'error', title: 'Gagal Impor', text: json.message });
                 }
             } catch (err) {
-                Swal.fire('Error Jaringan', err.message, 'error');
+                Swal.fire({ icon: 'error', title: 'Error Jaringan', text: err.message });
             }
         }
 
         function exportExcel() {
             if (!currentData || currentData.length === 0) {
-                Swal.fire('Informasi', 'Tidak ada data untuk diekspor.', 'info');
+                Swal.fire({ icon: 'info', title: 'Informasi', text: 'Tidak ada data untuk diekspor.' });
                 return;
             }
             const dataToExport = currentData.map(r => ({
@@ -980,6 +1287,53 @@ if ($qKlas) {
             if (!text && text !== 0) return '';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+
+        // Close modal on Escape key or clicking outside
+        window.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+                closeImportModal();
+            }
+        });
+        document.getElementById('modal-form').addEventListener('click', function(e) {
+            if (e.target === this) closeModal();
+        });
+        document.getElementById('modal-import').addEventListener('click', function(e) {
+            if (e.target === this) closeImportModal();
+        });
+
+        // Drag & Drop for Excel
+        const dropZone = document.getElementById('dropZone');
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, e => { e.preventDefault(); e.stopPropagation(); }, false);
+        });
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.style.borderColor = 'var(--primary)';
+                dropZone.style.background = 'rgba(24, 144, 255, 0.08)';
+            }, false);
+        });
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => {
+                dropZone.style.borderColor = 'var(--border-color)';
+                dropZone.style.background = 'rgba(0,0,0,0.015)';
+            }, false);
+        });
+        dropZone.addEventListener('drop', e => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files && files.length > 0) {
+                document.getElementById('excelFileInput').files = files;
+                handleExcelUpload({ target: { files: files } });
+            }
+        });
+
+        // Theme Sync from parent frame
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.theme) {
+                document.documentElement.setAttribute('data-theme', e.data.theme);
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', loadData);
     </script>
