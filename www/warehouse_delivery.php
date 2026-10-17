@@ -420,7 +420,18 @@ if ($action === 'detail_tab') {
     $escAju = $koneksi->real_escape_string($nomor_aju);
 
     if ($tab === 'dokumen') {
-        $res = $koneksi->query("SELECT seri, kode_dokumen, nomor_dokumen, tanggal_dokumen FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' ORDER BY seri ASC");
+        $q = "SELECT 
+                d.seri, 
+                d.kode_dokumen, 
+                d.nomor_dokumen, 
+                d.tanggal_dokumen,
+                COALESCE(r.teks, '') AS nama_dokumen
+              FROM bc_ceisa_dokumen d
+              LEFT JOIN bc_ceisa_reff r 
+                ON r.reff = 'DOKUMEN' AND r.kode = d.kode_dokumen
+              WHERE d.nomor_aju = '$escAju'
+              ORDER BY d.seri ASC";
+        $res = $koneksi->query($q);
         $rows = [];
         if ($res) {
             while ($r = $res->fetch_assoc()) $rows[] = $r;
@@ -1072,14 +1083,15 @@ if ($action === 'detail_tab') {
                             <table class="excel-grid">
                                 <thead>
                                     <tr>
-                                        <th style="width:30px; text-align:center;">#</th>
-                                        <th style="width:80px;">Kode Dokumen</th>
-                                        <th style="width:180px;">Nomor Dokumen</th>
-                                        <th style="width:100px;">Tanggal Dokumen</th>
+                                        <th style="width:35px; text-align:center;">#</th>
+                                        <th style="width:75px; text-align:center;">Kode</th>
+                                        <th style="width:200px;">Jenis Dokumen</th>
+                                        <th>Nomor Dokumen</th>
+                                        <th style="width:110px; text-align:center;">Tanggal Dokumen</th>
                                     </tr>
                                 </thead>
                                 <tbody id="dtlTbodyDokumen">
-                                    <tr><td colspan="4" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih dokumen terlebih dahulu.</td></tr>
+                                    <tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih dokumen terlebih dahulu.</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -1621,7 +1633,13 @@ if ($action === 'detail_tab') {
                     let html = '';
                     if (tab === 'dokumen') {
                         data.forEach((r, idx) => {
-                            html += `<tr><td style="text-align:center;">${idx + 1}</td><td><span class="ant-tag">${escapeHtml(r.kode_dokumen)}</span></td><td><strong>${escapeHtml(r.nomor_dokumen)}</strong></td><td>${escapeHtml(r.tanggal_dokumen)}</td></tr>`;
+                            html += `<tr>
+                                <td style="text-align:center; font-weight:600; color:var(--text-muted);">${idx + 1}</td>
+                                <td style="text-align:center;"><span class="ant-tag" style="font-family:monospace; font-weight:700;">${escapeHtml(r.kode_dokumen)}</span></td>
+                                <td><strong style="color:var(--text-heading); font-size:11px;">${escapeHtml(r.nama_dokumen || '-')}</strong></td>
+                                <td><strong style="font-family:monospace; font-size:11.5px;">${escapeHtml(r.nomor_dokumen || '-')}</strong></td>
+                                <td style="text-align:center; font-size:11px;">${escapeHtml(r.tanggal_dokumen || '-')}</td>
+                            </tr>`;
                         });
                     } else if (tab === 'status') {
                         data.forEach(r => {

@@ -4411,7 +4411,57 @@ Delapan (8) tabel yang distandardisasi:
    - Sinkronisasi repositori lokal dan siap untuk git commit.
 
 ---
+
+## 107. Penambahan Nama Jenis Dokumen dari Referensi Pabean pada Tab Dokumen Lampiran (`warehouse_delivery.php` & `warehouse_incoming.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"ini sertakan juga nama jenis dokumen dari referensi"* disertai tangkapan layar tab **Dokumen Lampiran** pada modul **Warehouse - Delivery** (`warehouse_delivery.php`). Pada tangkapan layar tersebut, pengguna menandai kotak merah pada kolom `Kode Dokumen` yang sebelumnya hanya menampilkan angka kode dokumen lampiran pabean (misal `920`, `705`, `380`, `217`).
+- **Tujuan**: Memberikan informasi deskriptif nama dokumen pabean yang jelas kepada operator gudang (*Warehouse*) sesuai tabel referensi resmi CEISA 4.0 (`bc_ceisa_reff` kategori `DOKUMEN`), sehingga operator tidak perlu menghafal kode angka dokumen (misal `217` = PACKING LIST, `380` = INVOICE, `705` = B/L, `920` = SPEK TPB).
+
+### B. Analisis & Solusi
+1. **Pemanfaatan Tabel Referensi Pabean (`bc_ceisa_reff`)**:
+   - Menghubungkan tabel transaksi dokumen pabean `bc_ceisa_dokumen` dengan tabel referensi `bc_ceisa_reff` via `LEFT JOIN` pada kondisi `r.reff = 'DOKUMEN' AND r.kode = d.kode_dokumen`.
+2. **Pembaruan Endpoint API Backend (`warehouse_delivery.php` & `warehouse_incoming.php`)**:
+   - Pada `action === 'detail_tab'` untuk tab `dokumen`:
+     ```sql
+     SELECT 
+         d.seri, 
+         d.kode_dokumen, 
+         d.nomor_dokumen, 
+         d.tanggal_dokumen,
+         COALESCE(r.teks, '') AS nama_dokumen
+     FROM bc_ceisa_dokumen d
+     LEFT JOIN bc_ceisa_reff r 
+         ON r.reff = 'DOKUMEN' AND r.kode = d.kode_dokumen
+     WHERE d.nomor_aju = '$escAju'
+     ORDER BY d.seri ASC
+     ```
+3. **Penyempurnaan Tampilan Antarmuka (UI/Grid)**:
+   - Menambahkan kolom terpisah **"Jenis Dokumen"** tepat setelah kolom **"Kode"** pada tabel grid Dokumen Lampiran.
+   - Header kolom yang diperbarui:
+     - `#` (Nomor urut)
+     - `Kode` (Badge tag monospaced angka kode dokumen)
+     - `Jenis Dokumen` (Nama resmi dari referensi pabean, misal `SPEK TPB`, `B/L`, `INVOICE`, `PACKING LIST`)
+     - `Nomor Dokumen`
+     - `Tanggal Dokumen`
+   - Diterapkan secara konsisten baik pada modul **Warehouse - Delivery** maupun **Warehouse - Incoming**.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terverifikasi pada:
+   - `/source/public/warehouse_delivery.php` & `/source/public/www/warehouse_delivery.php`
+   - `/source/public/warehouse_incoming.php` & `/source/public/www/warehouse_incoming.php`
+2. **Pengujian API via cURL**:
+   - Request `action=detail_tab&nomor_aju=XXXX30FRG65020261014011480&tab=dokumen` berhasil mengembalikan nama dokumen lampiran secara lengkap:
+     - `920` &rarr; `SPEK TPB`
+     - `705` &rarr; `B/L`
+     - `380` &rarr; `INVOICE`
+     - `217` &rarr; `PACKING LIST`
+3. **Deployment**:
+   - Berkas disinkronkan ke server Alibaba Cloud dan di-push ke repositori GitHub `main`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 
