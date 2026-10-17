@@ -4217,80 +4217,13 @@ if ($initialTab === 'editor') {
                     else badge.classList.remove('active');
                 }
 
-                // 1. Dokumen Belum Selesai (CEISA 4.0)
+                let alertCardsHtml = '';
+
+                // 1. Dokumen Belum Selesai (CEISA 4.0) - HANYA jika > 0
                 const cntBelumSelesai = Number(json.belum_selesai || 0);
-                const badgeBelumSelesai = cntBelumSelesai > 0 
-                    ? `<span style="background:#fff7e6; color:#d46b08; border:1px solid #ffd591; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumSelesai.toLocaleString('id-ID')} Dokumen</span>`
-                    : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">0 (Semua Selesai)</span>`;
-
-                // 2. Dokumen Belum Masuk IT Inv (Hanya jika IS_INV = 1)
-                const isInv = parseInt(json.is_inv || 0, 10);
-                let itInvHtml = '';
-                if (isInv === 1) {
-                    const cntBelumItInv = Number(json.belum_it_inv || 0);
-                    const badgeBelumItInv = cntBelumItInv > 0
-                        ? `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumItInv.toLocaleString('id-ID')} Dokumen</span>`
-                        : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">0 (Lengkap)</span>`;
-
-                    itInvHtml = `
-                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:10px; text-align:left;">
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                            <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
-                                <span>📦</span> Dokumen Belum Masuk IT Inventory (bc_1ab2)
-                            </div>
-                            ${badgeBelumItInv}
-                        </div>
-                        <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
-                            ${cntBelumItInv > 0 
-                                ? `Terdapat <strong>${cntBelumItInv.toLocaleString('id-ID')}</strong> dokumen pabean staging yang telah memiliki Nomor Pendaftaran tetapi belum diposting ke tabel <code>bc_1ab2</code>.`
-                                : `Seluruh dokumen staging yang telah memiliki Nomor Pendaftaran sudah berhasil diposting ke IT Inventory.`}
-                        </div>
-                        ${cntBelumItInv > 0 ? `
-                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); openTransferNotItInv();">
-                            <span>Buka Data Host to Host (Posting IT Inv) →</span>
-                        </button>` : ''}
-                    </div>`;
-                } else {
-                    itInvHtml = `
-                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:8px 12px; margin-bottom:10px; text-align:left; opacity:0.8;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <div style="font-weight:600; font-size:10.5px; color:var(--text-muted, #8c8c8c); display:flex; align-items:center; gap:6px;">
-                                <span>ℹ️</span> Modul IT Inventory (Nonaktif)
-                            </div>
-                            <span style="background:#f0f0f0; color:#595959; border:1px solid #d9d9d9; padding:1px 6px; border-radius:10px; font-size:9px;">IS_INV = 0</span>
-                        </div>
-                        <div style="font-size:9px; color:var(--text-muted, #8c8c8c); margin-top:2px;">
-                            Peringatan dokumen IT Inventory dinonaktifkan untuk konfigurasi perusahaan aktif ini.
-                        </div>
-                    </div>`;
-                }
-
-                // 3. Selisih QTY Fisik Warehouse vs Dokumen (bc_1ab2)
-                const cntQtyDiff = Number(json.selisih_qty || 0);
-                let qtyDiffRows = '';
-                if (cntQtyDiff > 0 && Array.isArray(json.items_qty_diff)) {
-                    qtyDiffRows = json.items_qty_diff.map(item => `
-                        <tr style="border-bottom:1px solid var(--border-color, #f0f0f0);">
-                            <td style="padding:4px 6px; font-family:monospace; font-size:9px; color:var(--primary, #1890ff);">${escapeHtml(item.NOMOR_AJU || '-')}</td>
-                            <td style="padding:4px 6px; font-weight:600;">${escapeHtml(item.KODE_BARANG || '-')}</td>
-                            <td style="padding:4px 6px; text-align:right;">${Number(item.QTY || 0).toLocaleString('id-ID')}</td>
-                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:#d46b08;">${Number(item.QTY_AKTUAL || 0).toLocaleString('id-ID')}</td>
-                            <td style="padding:4px 6px; text-align:right; font-weight:700; color:${parseFloat(item.SELISIH) < 0 ? '#ff4d4f' : '#52c41a'};">
-                                ${parseFloat(item.SELISIH) > 0 ? '+' : ''}${Number(item.SELISIH || 0).toLocaleString('id-ID')} ${escapeHtml(item.UNIT || '')}
-                            </td>
-                            <td style="padding:4px 6px; color:var(--text-muted, #8c8c8c); font-size:8.5px;">${escapeHtml(item.MEMO || '-')}</td>
-                        </tr>
-                    `).join('');
-                }
-
-                const badgeQtyDiff = cntQtyDiff > 0
-                    ? `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">⚠️ ${cntQtyDiff.toLocaleString('id-ID')} Item Ada Selisih</span>`
-                    : `<span style="background:#f6ffed; color:#389e0d; border:1px solid #b7eb8f; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">✓ Sesuai (0 Selisih)</span>`;
-
-                const contentHtml = `
-                <div style="max-height:75vh; overflow-y:auto; padding:2px 4px; font-family:'Poppins', sans-serif;">
-                    
-                    <!-- 1. Dokumen Belum Selesai -->
+                if (cntBelumSelesai > 0) {
+                    const badgeBelumSelesai = `<span style="background:#fff7e6; color:#d46b08; border:1px solid #ffd591; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumSelesai.toLocaleString('id-ID')} Dokumen</span>`;
+                    alertCardsHtml += `
                     <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:10px; text-align:left;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                             <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
@@ -4299,20 +4232,58 @@ if ($initialTab === 'editor') {
                             ${badgeBelumSelesai}
                         </div>
                         <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
-                            ${cntBelumSelesai > 0
-                                ? `Terdapat <strong>${cntBelumSelesai.toLocaleString('id-ID')}</strong> dokumen pengajuan yang masih dalam proses pelayanan pabean (belum selesai / belum SPPB/NPE).`
-                                : `Seluruh dokumen pengajuan telah selesai diproses.`}
+                            Terdapat <strong>${cntBelumSelesai.toLocaleString('id-ID')}</strong> dokumen pengajuan yang masih dalam proses pelayanan pabean (belum selesai / belum SPPB/NPE).
                         </div>
-                        ${cntBelumSelesai > 0 ? `
                         <button type="button" class="ant-btn ant-btn-sm" style="height:22px; font-size:9.5px; padding:0 8px; background:var(--primary); color:#fff; border-color:var(--primary);" onclick="Swal.close(); switchMainTab('daftar_dokumen');">
                             <span>Buka Dashboard & Daftar Dokumen →</span>
-                        </button>` : ''}
-                    </div>
+                        </button>
+                    </div>`;
+                }
 
-                    <!-- 2. Dokumen Belum Masuk IT Inv -->
-                    ${itInvHtml}
+                // 2. Dokumen Belum Masuk IT Inv (Hanya jika IS_INV = 1 DAN cntBelumItInv > 0)
+                const isInv = parseInt(json.is_inv || 0, 10);
+                const cntBelumItInv = Number(json.belum_it_inv || 0);
+                if (isInv === 1 && cntBelumItInv > 0) {
+                    const badgeBelumItInv = `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">${cntBelumItInv.toLocaleString('id-ID')} Dokumen</span>`;
+                    alertCardsHtml += `
+                    <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:10px; text-align:left;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                            <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
+                                <span>📦</span> Dokumen Belum Masuk IT Inventory (bc_1ab2)
+                            </div>
+                            ${badgeBelumItInv}
+                        </div>
+                        <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
+                            Terdapat <strong>${cntBelumItInv.toLocaleString('id-ID')}</strong> dokumen pabean staging yang telah memiliki Nomor Pendaftaran tetapi belum diposting ke tabel <code>bc_1ab2</code>.
+                        </div>
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); openTransferNotItInv();">
+                            <span>Buka Data Host to Host (Posting IT Inv) →</span>
+                        </button>
+                    </div>`;
+                }
 
-                    <!-- 3. Selisih QTY Fisik Warehouse vs Dokumen -->
+                // 3. Selisih QTY Fisik Warehouse vs Dokumen (bc_1ab2) - HANYA jika > 0
+                const cntQtyDiff = Number(json.selisih_qty || 0);
+                if (cntQtyDiff > 0) {
+                    let qtyDiffRows = '';
+                    if (Array.isArray(json.items_qty_diff)) {
+                        qtyDiffRows = json.items_qty_diff.map(item => `
+                            <tr style="border-bottom:1px solid var(--border-color, #f0f0f0);">
+                                <td style="padding:4px 6px; font-family:monospace; font-size:9px; color:var(--primary, #1890ff);">${escapeHtml(item.NOMOR_AJU || '-')}</td>
+                                <td style="padding:4px 6px; font-weight:600;">${escapeHtml(item.KODE_BARANG || '-')}</td>
+                                <td style="padding:4px 6px; text-align:right;">${Number(item.QTY || 0).toLocaleString('id-ID')}</td>
+                                <td style="padding:4px 6px; text-align:right; font-weight:700; color:#d46b08;">${Number(item.QTY_AKTUAL || 0).toLocaleString('id-ID')}</td>
+                                <td style="padding:4px 6px; text-align:right; font-weight:700; color:${parseFloat(item.SELISIH) < 0 ? '#ff4d4f' : '#52c41a'};">
+                                    ${parseFloat(item.SELISIH) > 0 ? '+' : ''}${Number(item.SELISIH || 0).toLocaleString('id-ID')} ${escapeHtml(item.UNIT || '')}
+                                </td>
+                                <td style="padding:4px 6px; color:var(--text-muted, #8c8c8c); font-size:8.5px;">${escapeHtml(item.MEMO || '-')}</td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    const badgeQtyDiff = `<span style="background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:2px 8px; border-radius:12px; font-weight:700; font-size:10px;">⚠️ ${cntQtyDiff.toLocaleString('id-ID')} Item Ada Selisih</span>`;
+
+                    alertCardsHtml += `
                     <div style="background:var(--bg-base, #f9fafb); border:1px solid var(--border-color, #e5e7eb); border-radius:6px; padding:10px 12px; margin-bottom:6px; text-align:left;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                             <div style="font-weight:700; font-size:11px; color:var(--text-main, #262626); display:flex; align-items:center; gap:6px;">
@@ -4321,12 +4292,8 @@ if ($initialTab === 'editor') {
                             ${badgeQtyDiff}
                         </div>
                         <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:6px; line-height:1.4;">
-                            ${cntQtyDiff > 0
-                                ? `Ditemukan <strong>${cntQtyDiff.toLocaleString('id-ID')}</strong> baris barang di tabel <code>bc_1ab2</code> dengan perbedaan antara QTY dokumen pabean dan QTY fisik yang diinput oleh tim Warehouse.`
-                                : `Seluruh QTY fisik aktual yang diinput oleh tim Warehouse telah sesuai dengan QTY dokumen kepabeanan.`}
+                            Ditemukan <strong>${cntQtyDiff.toLocaleString('id-ID')}</strong> baris barang di tabel <code>bc_1ab2</code> dengan perbedaan antara QTY dokumen pabean dan QTY fisik yang diinput oleh tim Warehouse.
                         </div>
-
-                        ${cntQtyDiff > 0 ? `
                         <div style="max-height:150px; overflow-y:auto; border:1px solid var(--border-color, #ebedf0); border-radius:4px; margin-bottom:8px; background:var(--bg-card, #fff);">
                             <table style="width:100%; border-collapse:collapse; font-size:9px; text-align:left;">
                                 <thead>
@@ -4351,9 +4318,22 @@ if ($initialTab === 'editor') {
                             <button type="button" class="ant-btn ant-btn-sm" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); switchMainTab('it_inventory_1a');">
                                 <span>Lihat Laporan 1A IT Inv →</span>
                             </button>
-                        </div>` : ''}
-                    </div>
+                        </div>
+                    </div>`;
+                }
 
+                if (!alertCardsHtml) {
+                    alertCardsHtml = `
+                    <div style="padding:28px 16px; text-align:center; color:var(--text-muted, #8c8c8c);">
+                        <div style="font-size:38px; margin-bottom:8px;">🎉</div>
+                        <div style="font-size:12px; font-weight:700; color:var(--text-main, #262626); margin-bottom:4px;">Semua Proses Berjalan Normal</div>
+                        <div style="font-size:10px; line-height:1.5;">Tidak ada peringatan aktif. Seluruh dokumen telah selesai diproses, data IT Inventory lengkap, dan tidak ada selisih QTY fisik.</div>
+                    </div>`;
+                }
+
+                const contentHtml = `
+                <div style="max-height:75vh; overflow-y:auto; padding:2px 4px; font-family:'Poppins', sans-serif;">
+                    ${alertCardsHtml}
                 </div>
                 `;
 

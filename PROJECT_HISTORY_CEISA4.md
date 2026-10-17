@@ -4530,6 +4530,27 @@ Delapan (8) tabel yang distandardisasi:
 3. **Deployment**: Berkas disinkronkan ke server produksi `/source/public/` dan di-push ke repositori GitHub `main`.
 
 ---
+
+## 110. Penyembunyian Kartu Peringatan Bernilai 0 pada Pusat Peringatan Sistem
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta agar item/kartu pada modal **"Pusat Peringatan & Status Sistem"** tidak ditampilkan jika nilainya = 0 (misalnya: *Kesesuaian QTY Aktual Warehouse* yang bernilai 0 selisih, *Dokumen Belum Selesai* jika 0, atau *Dokumen Belum Masuk IT Inventory* jika 0 / non-aktif).
+- Hanya kartu dengan status peringatan aktif (> 0) yang ditampilkan agar tampilan modal ringkas, fokus, dan informatif.
+
+### B. Solusi & Implementasi
+1. **Conditional Rendering Kartu**:
+   - Kartu 1 (*Dokumen Belum Selesai*): Hanya dirender jika `cntBelumSelesai > 0`.
+   - Kartu 2 (*Dokumen Belum Masuk IT Inventory*): Hanya dirender jika `isInv === 1 && cntBelumItInv > 0`.
+   - Kartu 3 (*Kesesuaian QTY Aktual Warehouse*): Hanya dirender jika `cntQtyDiff > 0`.
+2. **State Bersih (Semua Bernilai 0)**:
+   - Jika seluruh item bernilai 0 (tidak ada peringatan aktif sama sekali), modal menampilkan status bersih: *"🎉 Semua Proses Berjalan Normal - Tidak ada peringatan aktif"*.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - File disinkronkan ke `www/index.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 
