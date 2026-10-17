@@ -4363,7 +4363,56 @@ Delapan (8) tabel yang distandardisasi:
 3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan dipush ke repositori GitHub `main`.
 
 ---
+
+## 106. Perbaikan Kendala Halaman Kelola Perusahaan Macet Loading Selamanya (`company.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"halaman ini gak terbuka loading terus"* disertai tangkapan layar tab **Kelola Perusahaan** (`company.php`), di mana indikator pemuatan data berputar terus-menerus pada baris tabel bertuliskan *"Memuat data konfigurasi perusahaan..."* dan seluruh kartu metrik statistik di atasnya menunjukkan nilai strip (`-`).
+- **Tujuan**: Mendiagnosis penyebab halaman tidak dapat memuat data, memperbaiki sintaks dan mekanisme pemanggilan API, serta memastikan konfigurasi perusahaan dan statistik pemakaian data termuat secara instan dan andal.
+
+### B. Analisis Akar Masalah (Root Cause Analysis)
+1. **JavaScript SyntaxError (`Unexpected end of input`)**:
+   - Ditemukan ketidakseimbangan tanda kurung kurawal pada blok JavaScript utama di `company.php` (Opens: 454, Closes: 453, Diff: 1).
+   - Fungsi `testMfaSecret()` kehilangan kurung kurawal penutup `}` setelah blok `.catch(...)`.
+   - Hal ini menyebabkan parser JavaScript di browser (Chromium/Firefox) melempar `SyntaxError: Unexpected end of input` saat mem-parse dokumen. Akibatnya, seluruh script JavaScript berhenti total dan fungsi inisialisasi `loadCompanyList()` tidak pernah dieksekusi sama sekali, membiarkan markup HTML awal tetap membeku pada status loading.
+2. **Timing `DOMContentLoaded` pada Iframe Dinamis**:
+   - Di dalam portal terintegrasi `index.php`, iframe dimuat secara dinamis. Jika dokumen iframe selesai di-parse sebelum event listener terpasang, event `DOMContentLoaded` sudah terlewat sehingga callback tidak pernah dipanggil.
+3. **Penyertaan Parameter Administrasi (`is_admin=1`) pada Endpoint AJAX**:
+   - Sub-request fetch AJAX memanggil URL `company.php?action=list` tanpa membawa parameter `is_admin=1` dari URL iframe utama, yang berisiko memicu respons HTTP 403 Forbidden jika sesi admin terisolasi pada konteks peramban tertentu.
+
+### C. Solusi & Implementasi
+1. **Perbaikan Penutup Fungsi `testMfaSecret()`**:
+   - Menambahkan kurung kurawal penutup `}` pada fungsi `testMfaSecret()`, sehingga keseimbangan blok sintaks kembali 100% presisi (Opens: 466, Closes: 466, Diff: 0).
+2. **Penerapan ReadyState Guard**:
+   - Memperbarui inisialisasi script agar memeriksa status dokumen secara adaptif:
+     ```javascript
+     if (document.readyState === 'loading') {
+         document.addEventListener('DOMContentLoaded', initCompanyPage);
+     } else {
+         initCompanyPage();
+     }
+     ```
+3. **Helper API URL Terpadu (`getCompanyApiUrl`)**:
+   - Membangun fungsi `getCompanyApiUrl(action, extraParams)` yang secara otomatis mempertahankan parameter `&is_admin=1` pada seluruh 11 titik AJAX di `company.php` (`list`, `calc_storage`, `get`, `save`, `toggle_status`, `toggle_is_inv`, `toggle_alert_it_inv`, `set_active`, `clear_data`, `delete`, dan `test_totp`).
+4. **Ekspos Global Hook `window.loadData`**:
+   - Mendaftarkan `window.loadData = loadCompanyList;` agar fungsi switch tab di `index.php` dapat me-refresh data perusahaan secara otomatis saat pengguna berpindah tab dan kembali lagi.
+5. **Session Guard & HTTP Error Handling**:
+   - Memperkuat verifikasi admin di backend PHP dengan menyimpan status `$_SESSION['is_admin'] = true` saat validasi request pertama kali lolos.
+   - Menambahkan pengecekan `!r.ok` pada fetch API dan tombol interaktif *"🔄 Coba Lagi"* jika koneksi terganggu.
+
+### D. Pengujian & Deployment
+1. **Linting Sintaksis**:
+   - PHP (`php -l`): 0 syntax errors pada `/source/public/company.php` dan `/source/public/www/company.php`.
+   - JavaScript: Brace balance terverifikasi seimbang sempurna (`Diff: 0`).
+2. **Pengujian Endpoint via cURL**:
+   - `curl -s 'http://127.0.0.1/company.php?action=list&is_admin=1'` mengembalikan data JSON 3 perusahaan (`FRAMAS`, `HANBIT`, `RODA MAJU BAHAGIA`) dengan status `OK` dan rekap ringkasan lengkap.
+3. **Deployment**:
+   - Sinkronisasi kedua berkas ke remote server Alibaba Cloud `/source/public/company.php` dan `/source/public/www/company.php`.
+   - Sinkronisasi repositori lokal dan siap untuk git commit.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 

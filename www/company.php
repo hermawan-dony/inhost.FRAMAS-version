@@ -46,6 +46,11 @@ if (!$isAdmin) {
     exit;
 }
 
+// Pastikan status admin tersimpan di sesi untuk request berikutnya
+if ($isAdmin && empty($_SESSION['is_admin'])) {
+    $_SESSION['is_admin'] = true;
+}
+
 $action = $_REQUEST['action'] ?? '';
 
 // -------------------------------------------------------------
@@ -2526,8 +2531,21 @@ $theme = $_GET['theme'] ?? 'light';
         let sessionActiveCmp = '';
         let currentStorageData = null;
 
-        // Inisialisasi Muat Data
-        document.addEventListener('DOMContentLoaded', function() {
+        // Helper API URL yang mempertahankan parameter administrasi (is_admin=1)
+        const currentUrlParams = new URLSearchParams(window.location.search);
+        const isAdminSession = <?= $isAdmin ? 'true' : 'false' ?>;
+        const adminQueryParam = (isAdminSession || currentUrlParams.get('is_admin') === '1') ? '&is_admin=1' : '';
+
+        function getCompanyApiUrl(action, extraParams = '') {
+            let url = 'company.php?action=' + encodeURIComponent(action) + adminQueryParam;
+            if (extraParams) {
+                url += (extraParams.startsWith('&') ? '' : '&') + extraParams;
+            }
+            return url;
+        }
+
+        // Inisialisasi Muat Data dengan ReadyState Guard
+        function initCompanyPage() {
             // Sinkronkan tema
             const storedTheme = localStorage.getItem('ceisa_theme') || 'light';
             document.documentElement.setAttribute('data-theme', storedTheme);
@@ -2559,35 +2577,68 @@ $theme = $_GET['theme'] ?? 'light';
             }
 
             loadCompanyList();
-        });
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initCompanyPage);
+        } else {
+            initCompanyPage();
+        }
+
+        // Global alias agar parent portal index.php dapat merefresh saat tab diaktifkan kembali
+        window.loadData = loadCompanyList;
 
         // 1. LOAD LIST COMPANY
         function loadCompanyList() {
             const tbody = document.getElementById('companyTbody');
-            tbody.innerHTML = `<tr><td colspan="12" class="loading-wrap"><div class="spinner"></div><div style="margin-top:8px;">Memuat data konfigurasi perusahaan...</div></td></tr>`;
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="12" class="loading-wrap"><div class="spinner"></div><div style="margin-top:8px;">Memuat data konfigurasi perusahaan...</div></td></tr>`;
+            }
 
-            fetch('company.php?action=list')
-                .then(r => r.json())
+            fetch(getCompanyApiUrl('list'))
+                .then(r => {
+                    if (!r.ok) {
+                        throw new Error(`HTTP Error ${r.status}: ${r.statusText || 'Akses ditolak atau server error'}`);
+                    }
+                    return r.json();
+                })
                 .then(res => {
                     if (res.status === 'OK') {
                         allCompanies = res.data || [];
                         sessionActiveCmp = res.session_active_cmp || '';
                         
                         // Update Stat Cards
-                        document.getElementById('statTotal').innerText = res.summary.total;
-                        document.getElementById('statActive').innerText = res.summary.active;
-                        document.getElementById('statInvActive').innerText = res.summary.inv_active;
+                        const elTot = document.getElementById('statTotal');
+                        const elAct = document.getElementById('statActive');
+                        const elInv = document.getElementById('statInvActive');
+                        const elSes = document.getElementById('statSession');
+
+                        if (elTot && res.summary) elTot.innerText = res.summary.total;
+                        if (elAct && res.summary) elAct.innerText = res.summary.active;
+                        if (elInv && res.summary) elInv.innerText = res.summary.inv_active;
                         
                         const activeComp = allCompanies.find(c => c.cmp_id === sessionActiveCmp);
-                        document.getElementById('statSession').innerText = activeComp ? activeComp.cmp_name : (sessionActiveCmp || '-');
+                        if (elSes) elSes.innerText = activeComp ? activeComp.cmp_name : (sessionActiveCmp || '-');
 
                         renderTable(allCompanies);
                     } else {
-                        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:20px; color:#ff4d4f;">Gagal memuat data: ${res.message}</td></tr>`;
+                        if (tbody) {
+                            tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:25px; color:#ff4d4f;">
+                                <div style="font-size:13px; font-weight:600; margin-bottom:6px;">⚠️ Gagal Memuat Data</div>
+                                <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">${escapeHtml(res.message || 'Respons tidak valid')}</div>
+                                <button type="button" class="ant-btn ant-btn-default" onclick="loadCompanyList()">🔄 Coba Lagi</button>
+                            </td></tr>`;
+                        }
                     }
                 })
                 .catch(err => {
-                    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:20px; color:#ff4d4f;">Terjadi kesalahan jaringan: ${err.message}</td></tr>`;
+                    if (tbody) {
+                        tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:25px; color:#ff4d4f;">
+                            <div style="font-size:13px; font-weight:600; margin-bottom:6px;">⚠️ Terjadi Kesalahan Koneksi</div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">${escapeHtml(err.message)}</div>
+                            <button type="button" class="ant-btn ant-btn-default" onclick="loadCompanyList()">🔄 Coba Lagi</button>
+                        </td></tr>`;
+                    }
                 });
         }
 
@@ -2772,7 +2823,7 @@ $theme = $_GET['theme'] ?? 'light';
                 btn.innerHTML = `<span>⏳</span> Menghitung...`;
             }
 
-            fetch('company.php?action=calc_storage')
+            fetch(getCompanyApiUrl('calc_storage'))
                 .then(r => r.json())
                 .then(res => {
                     if (btn) {
@@ -3128,7 +3179,7 @@ $theme = $_GET['theme'] ?? 'light';
                 didOpen: () => { Swal.showLoading(); }
             });
 
-            fetch(`company.php?action=get&cmp_id=${encodeURIComponent(cmpId)}`)
+            fetch(getCompanyApiUrl('get', `cmp_id=${encodeURIComponent(cmpId)}`))
                 .then(r => r.json())
                 .then(res => {
                     Swal.close();
@@ -3284,7 +3335,7 @@ $theme = $_GET['theme'] ?? 'light';
             btnSave.disabled = true;
             btnSave.innerHTML = `<span>⏳</span> Menyimpan...`;
 
-            fetch('company.php?action=save', {
+            fetch(getCompanyApiUrl('save'), {
                 method: 'POST',
                 body: formData
             })
@@ -3356,7 +3407,7 @@ $theme = $_GET['theme'] ?? 'light';
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
 
-                    fetch('company.php?action=toggle_status', {
+                    fetch(getCompanyApiUrl('toggle_status'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3395,7 +3446,7 @@ $theme = $_GET['theme'] ?? 'light';
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
 
-                    fetch('company.php?action=toggle_is_inv', {
+                    fetch(getCompanyApiUrl('toggle_is_inv'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3438,7 +3489,7 @@ $theme = $_GET['theme'] ?? 'light';
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
 
-                    fetch('company.php?action=toggle_alert_it_inv', {
+                    fetch(getCompanyApiUrl('toggle_alert_it_inv'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3480,7 +3531,7 @@ $theme = $_GET['theme'] ?? 'light';
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
 
-                    fetch('company.php?action=set_active', {
+                    fetch(getCompanyApiUrl('set_active'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3563,7 +3614,7 @@ $theme = $_GET['theme'] ?? 'light';
                     fd.append('cmp_id', cmpId);
                     fd.append('confirm_name', value.trim());
 
-                    return fetch('company.php?action=clear_data', {
+                    return fetch(getCompanyApiUrl('clear_data'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3607,7 +3658,7 @@ $theme = $_GET['theme'] ?? 'light';
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
 
-                    fetch('company.php?action=delete', {
+                    fetch(getCompanyApiUrl('delete'), {
                         method: 'POST',
                         body: fd
                     })
@@ -3625,6 +3676,9 @@ $theme = $_GET['theme'] ?? 'light';
                         } else {
                             Swal.fire({ icon: 'error', title: 'Gagal', text: res.message });
                         }
+                    })
+                    .catch(err => {
+                        Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
                     });
                 }
             });
@@ -3638,7 +3692,7 @@ $theme = $_GET['theme'] ?? 'light';
                 return;
             }
 
-            fetch(`company.php?action=test_totp&secret=${encodeURIComponent(secret)}`)
+            fetch(getCompanyApiUrl('test_totp', 'secret=' + encodeURIComponent(secret)))
                 .then(r => r.json())
                 .then(res => {
                     const box = document.getElementById('totpPreviewBox');
@@ -3660,6 +3714,8 @@ $theme = $_GET['theme'] ?? 'light';
                 .catch(err => {
                     Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
                 });
+        }
+
         // -------------------------------------------------------------
         // 11. FITUR IMPORT EXCEL DOKUMEN CEISA (SHEET ENTITAS)
         // -------------------------------------------------------------
