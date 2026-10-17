@@ -175,6 +175,13 @@ $currentSettings = getAppSettings($koneksi);
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Setting Aplikasi - Administrator</title>
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || '<?= htmlspecialchars($themeParam) ?>' || 'light';
+            document.documentElement.setAttribute('data-theme', th);
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
@@ -201,11 +208,11 @@ $currentSettings = getAppSettings($koneksi);
         }
 
         html[data-theme="dark"], body[data-theme="dark"] {
-            --bg-base: #151521;
-            --bg-card: #1e1e2d;
-            --bg-header: #232334;
-            --border-color: #2b2b40;
-            --border-light: #232334;
+            --bg-base: #141414;
+            --bg-card: #1f1f1f;
+            --bg-header: #262626;
+            --border-color: #303030;
+            --border-light: #262626;
             --primary: #3699ff;
             --primary-hover: #187de4;
             --primary-light: rgba(54, 153, 255, 0.15);
@@ -216,16 +223,22 @@ $currentSettings = getAppSettings($koneksi);
             --text-secondary: #b5b5c3;
             --text-muted: #92929f;
             --shadow-card: 0 4px 16px rgba(0, 0, 0, 0.25);
-            color-scheme: dark;
+            color-scheme: dark !important;
+        }
+
+        html[data-theme="dark"] select,
+        html[data-theme="dark"] option {
+            background-color: #1f1f1f !important;
+            color: #e1e3ea !important;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 11px;
+            font-size: 10.5px;
             background: var(--bg-base);
             color: var(--text-main);
-            padding: 16px 20px 40px;
+            padding: 6px 12px 24px;
             min-height: 100vh;
         }
 
@@ -236,35 +249,35 @@ $currentSettings = getAppSettings($koneksi);
             justify-content: space-between;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 14px 20px;
-            margin-bottom: 16px;
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin-bottom: 8px;
             box-shadow: var(--shadow-card);
         }
         .page-title-wrap {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
         }
         .page-title-icon {
-            font-size: 26px;
+            font-size: 18px;
             line-height: 1;
         }
         .page-title {
-            font-size: 15px;
+            font-size: 12.5px;
             font-weight: 700;
             color: var(--text-main);
             line-height: 1.2;
         }
         .page-subtitle {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--text-muted);
             margin-top: 2px;
         }
         .header-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         /* Buttons */
@@ -272,12 +285,12 @@ $currentSettings = getAppSettings($koneksi);
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            height: 32px;
-            padding: 0 14px;
-            font-size: 11px;
+            gap: 5px;
+            height: 24px;
+            padding: 0 10px;
+            font-size: 10px;
             font-weight: 600;
-            border-radius: 6px;
+            border-radius: 4px;
             cursor: pointer;
             transition: all 0.2s ease;
             border: 1px solid transparent;
@@ -316,7 +329,7 @@ $currentSettings = getAppSettings($koneksi);
         .settings-layout {
             display: grid;
             grid-template-columns: 1fr 340px;
-            gap: 16px;
+            gap: 10px;
             align-items: start;
         }
         @media (max-width: 1024px) {
@@ -331,16 +344,16 @@ $currentSettings = getAppSettings($koneksi);
             gap: 4px;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px 8px 0 0;
-            padding: 8px 12px 0;
+            border-radius: 6px 6px 0 0;
+            padding: 4px 8px 0;
             border-bottom: 2px solid var(--border-color);
         }
         .tab-btn {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 8px 16px;
-            font-size: 11px;
+            gap: 5px;
+            padding: 5px 10px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-secondary);
             background: transparent;
@@ -358,7 +371,7 @@ $currentSettings = getAppSettings($koneksi);
             color: var(--primary);
             border-bottom-color: var(--primary);
             background: var(--primary-light);
-            border-radius: 6px 6px 0 0;
+            border-radius: 5px 5px 0 0;
         }
 
         /* Tab Content Card */
@@ -367,8 +380,8 @@ $currentSettings = getAppSettings($koneksi);
             background: var(--bg-card);
             border: 1px solid var(--border-color);
             border-top: none;
-            border-radius: 0 0 8px 8px;
-            padding: 20px;
+            border-radius: 0 0 6px 6px;
+            padding: 12px 14px;
             box-shadow: var(--shadow-card);
         }
         .tab-pane.active {
@@ -377,66 +390,63 @@ $currentSettings = getAppSettings($koneksi);
 
         /* Form Groups */
         .form-section-title {
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
             color: var(--primary);
-            margin-bottom: 14px;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             text-transform: uppercase;
             letter-spacing: 0.3px;
         }
         .form-row {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 14px;
-            margin-bottom: 14px;
+            gap: 10px;
+            margin-bottom: 10px;
         }
         .form-row.single {
             grid-template-columns: 1fr;
         }
         .form-group {
-            margin-bottom: 14px;
+            margin-bottom: 10px;
         }
         .form-group label {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            font-size: 10.5px;
+            font-size: 9.5px;
             font-weight: 600;
             color: var(--text-main);
-            margin-bottom: 5px;
+            margin-bottom: 3px;
         }
         .form-group .hint {
-            font-size: 9px;
+            font-size: 8.5px;
             color: var(--text-muted);
             font-weight: normal;
         }
         .form-control {
             width: 100%;
-            height: 32px;
-            padding: 4px 10px;
+            height: 24px;
+            padding: 2px 8px;
             border: 1px solid var(--border-color);
             background: var(--bg-base);
-            border-radius: 6px;
-            font-size: 11px;
+            border-radius: 4px;
+            font-size: 10px;
             color: var(--text-main);
             font-family: inherit;
             outline: none;
             transition: all 0.2s;
         }
         .form-control:focus {
-            background: #ffffff;
+            background: var(--bg-card);
             border-color: var(--primary);
             box-shadow: 0 0 0 2px var(--primary-light);
         }
-        html[data-theme="dark"] .form-control:focus {
-            background: #1e1e2d;
-        }
         textarea.form-control {
             height: auto;
-            min-height: 60px;
+            min-height: 50px;
             resize: vertical;
         }
 
@@ -445,31 +455,31 @@ $currentSettings = getAppSettings($koneksi);
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 10px 14px;
+            padding: 6px 10px;
             background: var(--bg-base);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            margin-bottom: 10px;
+            border-radius: 5px;
+            margin-bottom: 8px;
         }
         .switch-label-wrap {
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: 1px;
         }
         .switch-label-title {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-main);
         }
         .switch-label-desc {
-            font-size: 9px;
+            font-size: 8.5px;
             color: var(--text-muted);
         }
         .toggle-switch {
             position: relative;
             display: inline-block;
-            width: 38px;
-            height: 20px;
+            width: 32px;
+            height: 16px;
             flex-shrink: 0;
         }
         .toggle-switch input {
@@ -483,15 +493,15 @@ $currentSettings = getAppSettings($koneksi);
             top: 0; left: 0; right: 0; bottom: 0;
             background-color: #ccc;
             transition: .3s;
-            border-radius: 20px;
+            border-radius: 16px;
         }
         .slider:before {
             position: absolute;
             content: "";
-            height: 14px;
-            width: 14px;
-            left: 3px;
-            bottom: 3px;
+            height: 12px;
+            width: 12px;
+            left: 2px;
+            bottom: 2px;
             background-color: white;
             transition: .3s;
             border-radius: 50%;
@@ -500,50 +510,50 @@ $currentSettings = getAppSettings($koneksi);
             background-color: var(--primary);
         }
         input:checked + .slider:before {
-            transform: translateX(18px);
+            transform: translateX(16px);
         }
 
         /* Preview Sidebar Box */
         .preview-sticky-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 16px;
+            border-radius: 6px;
+            padding: 12px;
             box-shadow: var(--shadow-card);
             position: sticky;
-            top: 16px;
+            top: 8px;
         }
         .preview-header-title {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             color: var(--text-main);
-            margin-bottom: 12px;
+            margin-bottom: 8px;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
         .live-preview-box {
             background: var(--bg-base);
             border: 1px dashed var(--primary);
-            border-radius: 8px;
-            padding: 14px;
-            margin-bottom: 14px;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 10px;
         }
         .preview-sidebar-brand {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
+            gap: 6px;
+            padding: 6px 10px;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border-radius: 5px;
             box-shadow: 0 1px 4px rgba(0,0,0,0.04);
         }
         .preview-brand-logo {
-            width: 26px;
-            height: 26px;
+            width: 22px;
+            height: 22px;
             object-fit: contain;
-            border-radius: 4px;
+            border-radius: 3px;
             background: #fff;
             padding: 2px;
             border: 1px solid var(--border-light);
@@ -556,7 +566,7 @@ $currentSettings = getAppSettings($koneksi);
             line-height: 1.15;
         }
         .preview-brand-name {
-            font-size: 13px;
+            font-size: 11px;
             font-weight: 700;
             color: #1890ff;
             letter-spacing: 0.2px;
@@ -565,7 +575,7 @@ $currentSettings = getAppSettings($koneksi);
             text-overflow: ellipsis;
         }
         .preview-brand-sub {
-            font-size: 7.5px;
+            font-size: 7px;
             font-weight: 600;
             color: #8c8c8c;
             letter-spacing: 0.1px;
@@ -577,32 +587,32 @@ $currentSettings = getAppSettings($koneksi);
         .preview-tab-pill {
             display: flex;
             align-items: center;
-            gap: 6px;
-            margin-top: 10px;
-            padding: 6px 10px;
+            gap: 5px;
+            margin-top: 8px;
+            padding: 4px 8px;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            font-size: 9px;
+            border-radius: 5px;
+            font-size: 8.5px;
             color: var(--text-muted);
         }
 
         .logo-presets-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 8px;
-            margin-top: 8px;
-            margin-bottom: 12px;
+            gap: 6px;
+            margin-top: 6px;
+            margin-bottom: 8px;
         }
         .preset-logo-item {
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 6px;
+            padding: 4px;
             background: var(--bg-base);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border-radius: 5px;
             cursor: pointer;
             transition: all 0.2s;
             text-align: center;
@@ -612,13 +622,13 @@ $currentSettings = getAppSettings($koneksi);
             background: var(--primary-light);
         }
         .preset-logo-item img {
-            width: 24px;
-            height: 24px;
+            width: 20px;
+            height: 20px;
             object-fit: contain;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
         .preset-logo-item span {
-            font-size: 8px;
+            font-size: 7.5px;
             color: var(--text-main);
             font-weight: 600;
         }
@@ -626,8 +636,8 @@ $currentSettings = getAppSettings($koneksi);
         .file-upload-wrap {
             display: flex;
             align-items: center;
-            gap: 8px;
-            margin-top: 6px;
+            gap: 6px;
+            margin-top: 5px;
         }
         .file-upload-wrap input[type="file"] {
             display: none;
@@ -1167,13 +1177,28 @@ $currentSettings = getAppSettings($koneksi);
             });
         }
 
+        function applyCurrentTheme(th) {
+            document.documentElement.setAttribute('data-theme', th);
+            if (document.body) document.body.setAttribute('data-theme', th);
+            try {
+                if (typeof syncSweetAlertTheme === 'function') {
+                    syncSweetAlertTheme(th);
+                }
+            } catch(e) {}
+        }
+
         // Listener sync theme dari parent window
         window.addEventListener('message', function(e) {
             if (!e.data || typeof e.data !== 'object') return;
             if (e.data.type === 'SET_THEME' && e.data.theme) {
-                document.documentElement.setAttribute('data-theme', e.data.theme);
-                document.body.setAttribute('data-theme', e.data.theme);
+                applyCurrentTheme(e.data.theme);
             }
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || '<?= htmlspecialchars($themeParam) ?>' || 'light';
+            applyCurrentTheme(th);
         });
     </script>
 </body>

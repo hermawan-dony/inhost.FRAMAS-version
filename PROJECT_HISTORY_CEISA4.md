@@ -4240,10 +4240,60 @@ Delapan (8) tabel yang distandardisasi:
    - Seluruh salinan pada `/source/public/www/` ➔ **No syntax errors detected**.
 2. **Deployment**:
    - Seluruh berkas telah disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`).
-3. **Penyimpanan Repositori**:
-   - Melakukan commit dan push ke repositori GitHub `hermawan-dony/inhost.web.id` branch `main`.
+---
+
+## 103. Peningkatan Sinkronisasi Dark Theme Dinamis & Penyesuaian Standarisasi Ukuran Font Compact
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  1. Halaman yang belum bisa ganti tema ke dark:
+     - Master Data Barang (`material.php`)
+     - Koreksi Klasifikasi IT Inventory (`klas_koreksi.php`)
+     - Master Bill of Materials / BOM (`bom.php`)
+     - Production - Stock Transfer / Mutasi Produksi (`stock_transfer.php`)
+     - Warehouse - Transfer BC27 OUT-->IN (`transfer_bc27.php`)
+     - Import BC 2.7 IN dan Post ke IT Inv (`scan27.php`)
+  2. Halaman yang ukuran font terlalu besar, sesuaikan dengan standar antarmuka compact portal:
+     - Tracking Respon Pabean (`statusaju.php`)
+     - Master Bill of Materials / BOM (`bom.php`)
+     - Warehouse - Transfer BC27 OUT-->IN (`transfer_bc27.php`)
+     - Stok Opname (`stok_opname.php`)
+     - Kelola Perusahaan (`company.php`)
+     - Setting Aplikasi (`setting_aplikasi.php`)
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Sinkronisasi Dark Theme Dinamis (Tanpa Reload)**:
+   - **Inline Early Detector Script**: Ditambahkan pada `<head>` setiap modul untuk membaca preferensi `theme` langsung dari URL query string maupun `localStorage.getItem('ceisa_theme')`, mencegah white flash saat iframe dimuat.
+   - **PostMessage Event Listener**: Menambahkan pendengar pesan `window.addEventListener('message', function(e) { if (e.data && e.data.type === 'SET_THEME') applyCurrentTheme(e.data.theme); })` pada seluruh modul iframe terkait sehingga saat toggle tema di topbar portal `index.php` ditekan, seluruh modul langsung beralih antara tema gelap (*dark*) dan terang (*light*) secara instan.
+   - **Kompatibilitas SweetAlert2 Dark Mode**: Menyertakan helper `/assets/sweetalert-theme.js` dan sinkronisasi `syncSweetAlertTheme(theme)` pada seluruh modal dialog.
+   - **CSS Theme Variables & Dark Form Controls**: Melengkapi styling `html[data-theme="dark"]` dengan `color-scheme: dark !important;`, latar gelap `#141414` / `#1f1f1f`, teks terang `#e1e3ea`, serta penyesuaian elemen input/select option di browser Chromium/WebKit.
+
+2. **Standarisasi Tipografi & Desain Layout Compact (10.5px Base Font)**:
+   - **Tipografi Standar**: Menggantikan font berukuran besar (11.5px–15px / font keluarga Public Sans) dengan standar portal `Poppins, sans-serif` base size `10.5px`.
+   - **Header & Title Sizing**: Judul halaman diseragamkan ke `12px – 12.5px`, ikon `18px`, padding header `6px – 8px`.
+   - **Toolbar, Filter & Tombol Kontrol**: Ketinggian tombol dan kolom input diseragamkan ke `22px – 24px`, font `9.5px – 10px`, padding ringkas `0 8px – 10px`.
+   - **KPI Card Summary**: Nilai KPI disesuaikan ke `13px – 14px` dan label disesuaikan ke `9px – 9.5px` dengan padding ringkas.
+   - **Tabel & Data Grid**: Font tabel diseragamkan ke `10px`, padding sel `3px 6px` hingga `4px 8px` sehingga muat lebih banyak data transaksi per layar tanpa perlu scrolling berlebihan.
+
+### C. Daftar File yang Diperbarui
+1. `material.php` & `www/material.php`: Dark theme dynamic sync, early script detector, `applyCurrentTheme`, SweetAlert dark styling.
+2. `klas_koreksi.php` & `www/klas_koreksi.php`: Dark theme CSS variables, postMessage listener, early script detector, SweetAlert dark theme.
+3. `bom.php` & `www/bom.php`: Dark theme sync + standarisasi font compact 10.5px, compact toolbar, compact table grid, dan form modal.
+4. `stock_transfer.php` & `www/stock_transfer.php`: Dark theme dynamic sync, early script detector, `applyCurrentTheme`, SweetAlert dark sync.
+5. `transfer_bc27.php` & `www/transfer_bc27.php`: Dark theme sync + standarisasi font compact 10.5px, compact KPI summary cards, compact table rows.
+6. `scan27.php` & `www/scan27.php`: Dark theme dynamic sync, select dark rules, postMessage listener, early detector script.
+7. `statusaju.php` & `www/statusaju.php`: Standarisasi font compact 10.5px, compact header, compact KPI metrics, compact tracking table, dark theme sync.
+8. `stok_opname.php` & `www/stok_opname.php`: Standarisasi font compact 10.5px, compact KPI bar, compact table grid, dark theme sync.
+9. `company.php` & `www/company.php`: Standarisasi font compact 10.5px, compact stat-card, compact header box, compact table, dark theme sync.
+10. `setting_aplikasi.php` & `www/setting_aplikasi.php`: Standarisasi font compact 10.5px, compact tabs & form control (24px height), compact preview sidebar, dark theme sync.
+
+### D. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**: Memastikan 0 kesalahan sintaksis pada seluruh 10 file di direktori utama dan `www/`.
+2. **Deployment Server**: Seluruh berkas disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`) via SCP.
+3. **Penyimpanan Repositori**: Berkas dicommit dan dipush ke branch `main` repositori GitHub `hermawan-dony/inhost.web.id`.
 
 ---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 

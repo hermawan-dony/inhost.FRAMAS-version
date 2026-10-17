@@ -145,10 +145,23 @@ if ($action === 'unpost_in') {
     <meta charset="UTF-8">
     <title>Warehouse - Transfer BC 2.7 OUT -> IN</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/assets/sweetalert2.min.css">
+    <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <style>
-        :root {
+        :root, html[data-theme="light"], body[data-theme="light"] {
             --bg: #f0f2f5;
             --card-bg: #ffffff;
             --border: #e8e8e8;
@@ -159,67 +172,77 @@ if ($action === 'unpost_in') {
             --success: #52c41a;
             --warning: #faad14;
             --danger: #f5222d;
-            --row-hover: #fafafa;
+            --row-hover: #f0f7ff;
+            --table-header: #fafafa;
+            --bg-input: #ffffff;
+            --border-input: #d9d9d9;
+            color-scheme: light;
         }
-        [data-theme='dark'] {
+        [data-theme='dark'], html[data-theme="dark"], body[data-theme="dark"] {
             --bg: #141414;
             --card-bg: #1f1f1f;
             --border: #303030;
-            --text: #d9d9d9;
-            --text-secondary: #6e6e6e;
+            --text: rgba(255, 255, 255, 0.85);
+            --text-secondary: rgba(255, 255, 255, 0.45);
             --primary: #177ddc;
-            --primary-hover: #3c9ae8;
+            --primary-hover: #1890ff;
             --success: #49aa19;
             --warning: #d89614;
             --danger: #a61d24;
-            --row-hover: #262626;
+            --row-hover: #262638;
+            --table-header: #1d1d1d;
+            --bg-input: #141414;
+            --border-input: #434343;
+            color-scheme: dark !important;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Public Sans', sans-serif;
+            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg);
             color: var(--text);
-            font-size: 11.5px;
-            padding: 12px;
+            font-size: 10.5px;
+            line-height: 1.45;
+            padding: 6px 10px;
         }
         .kpi-container {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 12px;
-            margin-bottom: 12px;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 6px;
+            margin-bottom: 6px;
         }
         .kpi-card {
             background: var(--card-bg);
             border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 12px 16px;
+            border-radius: 3px;
+            padding: 4px 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
-        .kpi-title { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
-        .kpi-value { font-size: 20px; font-weight: 700; margin-top: 4px; color: var(--text); }
-        .kpi-icon { font-size: 24px; opacity: 0.8; }
+        .kpi-title { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
+        .kpi-value { font-size: 13px; font-weight: 700; margin-top: 2px; color: var(--text); }
+        .kpi-icon { font-size: 16px; opacity: 0.8; }
         
         .toolbar-card {
             background: var(--card-bg);
             border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 10px 14px;
-            margin-bottom: 12px;
+            border-radius: 3px;
+            padding: 5px 8px;
+            margin-bottom: 6px;
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 6px;
             align-items: center;
             justify-content: space-between;
         }
-        .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
         
         input, select, button {
             font-family: inherit;
-            font-size: 11.5px;
-            padding: 5px 10px;
-            border-radius: 4px;
+            font-size: 10px;
+            height: 24px;
+            padding: 2px 8px;
+            border-radius: 3px;
             border: 1px solid var(--border);
             background: var(--card-bg);
             color: var(--text);
@@ -234,28 +257,20 @@ if ($action === 'unpost_in') {
         .table-container {
             background: var(--card-bg);
             border: 1px solid var(--border);
-            border-radius: 6px;
+            border-radius: 3px;
             overflow: auto;
-            max-height: calc(100vh - 200px);
+            max-height: calc(100vh - 170px);
         }
-        table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
-        th {
-            position: sticky;
-            top: 0;
-            background: var(--bg);
-            border-bottom: 1px solid var(--border);
-            padding: 8px 10px;
-            text-align: left;
-            font-weight: 600;
-            white-space: nowrap;
-            z-index: 2;
+        table { width: 100%; border-collapse: collapse; font-size: 10px; }
+        th { position: sticky; top: 0; background: var(--table-header, var(--card-bg)); padding: 5px 8px; font-size: 9.5px; border-bottom: 1px solid var(--border); white-space: nowrap; z-index: 2; font-weight: 600; text-align: left; }
+        td { padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+        tbody tr:hover { background: var(--row-hover); }
+        
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
         }
-        td {
-            padding: 7px 10px;
-            border-bottom: 1px solid var(--border);
-            white-space: nowrap;
-        }
-        tr:hover td { background-color: var(--row-hover); }
+
         .badge {
             display: inline-block;
             padding: 2px 6px;
@@ -470,6 +485,24 @@ if ($action === 'unpost_in') {
             a.download = `transfer_bc27_${new Date().toISOString().slice(0,10)}.csv`;
             a.click();
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         document.addEventListener('DOMContentLoaded', loadData);
     </script>

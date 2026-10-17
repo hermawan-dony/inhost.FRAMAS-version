@@ -159,12 +159,23 @@ if ($action === 'delete') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Master BOM - INHOST CEISA 4.0</title>
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        :root, html[data-theme="light"] {
+        :root, html[data-theme="light"], body[data-theme="light"] {
             --bg-base: #f0f2f5;
             --bg-card: #ffffff;
             --text-main: #262626;
@@ -175,51 +186,68 @@ if ($action === 'delete') {
             --danger: #ff4d4f;
             --success: #52c41a;
             --warning: #faad14;
-            --row-hover: #fafafa;
-            --table-header: #f0f2f5;
+            --row-hover: #f0f7ff;
+            --table-header: #fafafa;
+            --bg-input: #ffffff;
+            --border-input: #d9d9d9;
+            color-scheme: light;
         }
-        html[data-theme="dark"] {
+        [data-theme="dark"], html[data-theme="dark"], body[data-theme="dark"] {
             --bg-base: #141414;
             --bg-card: #1f1f1f;
-            --text-main: #d9d9d9;
-            --text-muted: #737373;
+            --text-main: rgba(255, 255, 255, 0.85);
+            --text-muted: rgba(255, 255, 255, 0.45);
             --border-color: #303030;
             --primary: #177ddc;
-            --primary-hover: #3c9ae8;
+            --primary-hover: #1890ff;
             --danger: #a61d24;
             --success: #49aa19;
             --warning: #d89614;
-            --row-hover: #262626;
-            --table-header: #141414;
+            --row-hover: #262638;
+            --table-header: #1d1d1d;
+            --bg-input: #141414;
+            --border-input: #434343;
+            color-scheme: dark !important;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: var(--bg-base); color: var(--text-main); font-family: 'Public Sans', sans-serif; font-size: 11.5px; padding: 12px; }
-        .ant-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); overflow: hidden; padding: 12px; }
-        .ant-card-head { padding-bottom: 10px; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-        .ant-card-title { font-size: 13.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+        body { background: var(--bg-base); color: var(--text-main); font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 10.5px; line-height: 1.45; padding: 6px 10px; }
+        .ant-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.03); overflow: hidden; padding: 6px 10px; }
+        .ant-card-head { padding-bottom: 6px; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px; }
+        .ant-card-title { font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
         .ant-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-        .ant-btn { padding: 5px 12px; font-size: 11.5px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-main); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+        .ant-btn { padding: 0 9px; height: 24px; font-size: 10px; border-radius: 3px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-main); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; font-weight: 500; }
         .ant-btn:hover { border-color: var(--primary); color: var(--primary); }
         .ant-btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
         .ant-btn-primary:hover { background: var(--primary-hover); color:#fff; }
         .ant-btn-success { background: var(--success); color: #fff; border-color: var(--success); }
         .ant-btn-success:hover { background: #73d13d; color:#fff; }
-        .filter-panel { padding: 8px 10px; background: var(--bg-base); border-radius: 4px; border: 1px solid var(--border-color); margin-bottom: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-        .form-control { padding: 5px 8px; font-size: 11.5px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--bg-card); color: var(--text-main); outline: none; }
-        .table-responsive { max-height: calc(100vh - 200px); overflow: auto; border: 1px solid var(--border-color); border-radius: 4px; }
-        table.ant-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 11px; }
-        table.ant-table th { position: sticky; top: 0; background: var(--table-header); color: var(--text-main); font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--border-color); white-space: nowrap; z-index: 2; }
-        table.ant-table td { padding: 6px 10px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
+        .filter-panel { padding: 5px 8px; background: var(--bg-base); border-radius: 3px; border: 1px solid var(--border-color); margin-bottom: 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 10px; }
+        .form-control { padding: 2px 7px; height: 24px; font-size: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--bg-card); color: var(--text-main); outline: none; }
+        .form-control:focus { border-color: var(--primary); }
+        .table-responsive { max-height: calc(100vh - 170px); overflow: auto; border: 1px solid var(--border-color); border-radius: 3px; }
+        table.ant-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 10px; }
+        table.ant-table th { position: sticky; top: 0; background: var(--table-header); color: var(--text-main); font-weight: 600; padding: 5px 8px; font-size: 9.5px; border-bottom: 1px solid var(--border-color); white-space: nowrap; z-index: 2; }
+        table.ant-table td { padding: 4px 8px; border-bottom: 1px solid var(--border-color); white-space: nowrap; }
         table.ant-table tbody tr:hover { background: var(--row-hover); }
         
+        [data-theme='dark'] select, [data-theme='dark'] input {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-color: var(--border-color);
+        }
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
+        }
+
         .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
-        .modal-content { background: var(--bg-card); width: 90%; max-width: 600px; border-radius: 6px; border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.15); overflow: hidden; display: flex; flex-direction: column; }
-        .modal-header { padding: 10px 14px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 700; }
-        .modal-body { padding: 14px; overflow-y: auto; flex: 1; }
-        .modal-footer { padding: 8px 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 8px; }
-        .form-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-        .form-group label { font-size: 10.5px; font-weight: 600; color: var(--text-muted); }
-        .dropzone { border: 2px dashed var(--border-color); border-radius: 6px; padding: 25px; text-align: center; cursor: pointer; background: var(--bg-base); transition: 0.2s; margin-bottom: 12px; }
+        .modal-content { background: var(--bg-card); width: 90%; max-width: 520px; border-radius: 4px; border: 1px solid var(--border-color); box-shadow: 0 4px 12px rgba(0,0,0,0.15); overflow: hidden; display: flex; flex-direction: column; }
+        .modal-header { padding: 8px 12px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 700; }
+        .modal-body { padding: 10px 12px; overflow-y: auto; flex: 1; font-size: 10px; }
+        .modal-footer { padding: 6px 12px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 6px; }
+        .form-group { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+        .form-group label { font-size: 9.5px; font-weight: 600; color: var(--text-muted); }
+        .dropzone { border: 2px dashed var(--border-color); border-radius: 4px; padding: 16px; text-align: center; cursor: pointer; background: var(--bg-base); transition: 0.2s; margin-bottom: 8px; font-size: 10.5px; }
         .dropzone:hover { border-color: var(--primary); }
     </style>
 </head>
@@ -632,6 +660,24 @@ if ($action === 'delete') {
             if (!text) return '';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         window.onload = loadData;
     </script>

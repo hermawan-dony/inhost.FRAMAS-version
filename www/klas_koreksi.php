@@ -260,13 +260,22 @@ if ($action === 'update_bulk') {
     <meta charset="UTF-8">
     <title>Koreksi Klasifikasi IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <style>
-        :root {
+        :root, html[data-theme='light'], body[data-theme='light'] {
             --bg-base: #f0f2f5;
             --bg-card: #ffffff;
             --border-color: #e8e8e8;
@@ -278,6 +287,41 @@ if ($action === 'update_bulk') {
             --warning: #faad14;
             --danger: #ff4d4f;
             --table-hover: #f0f7ff;
+            --table-head-bg: #fafafa;
+            --bg-input: #ffffff;
+            --border-input: #d9d9d9;
+            color-scheme: light;
+        }
+        [data-theme='dark'], html[data-theme='dark'], body[data-theme='dark'] {
+            --bg-base: #141414;
+            --bg-card: #1f1f1f;
+            --border-color: #303030;
+            --text-main: rgba(255, 255, 255, 0.85);
+            --text-muted: rgba(255, 255, 255, 0.45);
+            --primary: #177ddc;
+            --primary-hover: #1890ff;
+            --success: #49aa19;
+            --warning: #d89614;
+            --danger: #a61d24;
+            --table-hover: #262638;
+            --table-head-bg: #1d1d1d;
+            --bg-input: #141414;
+            --border-input: #434343;
+            color-scheme: dark !important;
+        }
+        [data-theme='dark'] select, [data-theme='dark'] input {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-color: var(--border-color);
+        }
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
+        }
+        [data-theme='dark'] div[style*="background:#e6f7ff"] {
+            background: rgba(24, 144, 255, 0.15) !important;
+            border-color: rgba(24, 144, 255, 0.3) !important;
+            color: #40a9ff !important;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -755,6 +799,24 @@ if ($action === 'update_bulk') {
             if (!text) return '';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         window.onload = loadData;
     </script>

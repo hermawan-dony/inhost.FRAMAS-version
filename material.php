@@ -1499,14 +1499,23 @@ if ($action === 'approval_reject') {
     <meta charset="UTF-8">
     <title>Master Data Barang<?= $isAdmin ? ' (bc_material)' : '' ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        :root {
+        :root, html[data-theme='light'], body[data-theme='light'] {
             --bg-base: #f0f2f5;
             --bg-card: #ffffff;
             --border-color: #e8e8e8;
@@ -1518,8 +1527,12 @@ if ($action === 'approval_reject') {
             --warning: #faad14;
             --danger: #ff4d4f;
             --table-hover: #f0f7ff;
+            --table-head-bg: #fafafa;
+            --bg-input: #ffffff;
+            --border-input: #d9d9d9;
+            color-scheme: light;
         }
-        [data-theme='dark'] {
+        [data-theme='dark'], html[data-theme='dark'], body[data-theme='dark'] {
             --bg-base: #141414;
             --bg-card: #1f1f1f;
             --border-color: #303030;
@@ -1531,6 +1544,24 @@ if ($action === 'approval_reject') {
             --warning: #d89614;
             --danger: #a61d24;
             --table-hover: #262638;
+            --table-head-bg: #1d1d1d;
+            --bg-input: #141414;
+            --border-input: #434343;
+            color-scheme: dark !important;
+        }
+        [data-theme='dark'] select, [data-theme='dark'] input {
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            border-color: var(--border-color);
+        }
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
+        }
+        [data-theme='dark'] .alert-card, [data-theme='dark'] div[style*="background:#fff"] {
+            background: #222 !important;
+            border-color: #444 !important;
+            color: var(--text-main) !important;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -4359,6 +4390,24 @@ if ($action === 'approval_reject') {
                 }
             } catch (e) {}
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         window.onload = function() {
             loadData();

@@ -985,6 +985,14 @@ $theme = $_GET['theme'] ?? 'light';
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Master Konfigurasi Perusahaan - CEISA 4.0</title>
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="shortcut icon" type="image/png" href="/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1034,18 +1042,18 @@ $theme = $_GET['theme'] ?? 'light';
             --row-selected-text: #e6f7ff;
             --row-selected-border: #177ddc;
             --tag-bg: #2a2a2a;
-            color-scheme: dark;
+            color-scheme: dark !important;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
         html, body { height: 100%; }
         body {
             font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            font-size: 11px;
+            font-size: 10.5px;
             line-height: 1.45;
             background: var(--bg-body);
             color: var(--text-main);
-            padding: 10px 14px;
+            padding: 6px 10px;
             -webkit-font-smoothing: antialiased;
             overflow-y: auto;
         }
@@ -1056,14 +1064,14 @@ $theme = $_GET['theme'] ?? 'light';
             margin: 0 auto;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 6px;
         }
 
         .header-box {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 6px;
-            padding: 12px 16px;
+            border-radius: 3px;
+            padding: 6px 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
@@ -1073,42 +1081,42 @@ $theme = $_GET['theme'] ?? 'light';
         .header-title-wrap {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
         .header-icon {
-            font-size: 24px;
+            font-size: 18px;
             line-height: 1;
         }
 
         .header-title {
-            font-size: 14px;
+            font-size: 12.5px;
             font-weight: 600;
             color: var(--text-heading);
             margin: 0;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .header-subtitle {
-            font-size: 11px;
+            font-size: 9.5px;
             color: var(--text-muted);
-            margin-top: 2px;
+            margin-top: 1px;
         }
 
         /* STATS PILLS */
         .stats-bar {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 6px;
         }
 
         .stat-card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 6px;
-            padding: 10px 14px;
+            border-radius: 3px;
+            padding: 4px 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1120,19 +1128,19 @@ $theme = $_GET['theme'] ?? 'light';
             transform: translateY(-1px);
         }
         .stat-info { display: flex; flex-direction: column; }
-        .stat-label { font-size: 10.5px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
-        .stat-value { font-size: 18px; font-weight: 700; color: var(--text-heading); line-height: 1.2; margin-top: 2px; }
-        .stat-icon { font-size: 22px; opacity: 0.85; }
+        .stat-label { font-size: 9px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
+        .stat-value { font-size: 13px; font-weight: 700; color: var(--text-heading); line-height: 1.2; margin-top: 1px; }
+        .stat-icon { font-size: 16px; opacity: 0.85; }
 
         /* TOOLBAR */
         .toolbar {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 6px;
-            padding: 8px 14px;
+            border-radius: 3px;
+            padding: 4px 8px;
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 6px;
             align-items: center;
             justify-content: space-between;
         }
@@ -1141,26 +1149,26 @@ $theme = $_GET['theme'] ?? 'light';
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex: 1;
         }
 
         .toolbar-right {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .search-input {
-            height: 28px;
-            padding: 0 10px;
-            font-size: 11px;
+            height: 22px;
+            padding: 1px 6px;
+            font-size: 9.5px;
             border: 1px solid var(--border-input);
-            border-radius: 4px;
+            border-radius: 2px;
             background: var(--bg-input);
             color: var(--text-main);
             outline: none;
-            min-width: 260px;
+            min-width: 180px;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
         .search-input:focus {
@@ -1169,11 +1177,11 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .filter-select {
-            height: 28px;
-            padding: 0 8px;
-            font-size: 11px;
+            height: 22px;
+            padding: 1px 6px;
+            font-size: 9.5px;
             border: 1px solid var(--border-input);
-            border-radius: 4px;
+            border-radius: 2px;
             background: var(--bg-input);
             color: var(--text-main);
             outline: none;
@@ -1183,17 +1191,22 @@ $theme = $_GET['theme'] ?? 'light';
             border-color: var(--primary);
         }
 
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
+        }
+
         /* BUTTONS */
         .ant-btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            height: 28px;
-            padding: 0 12px;
-            font-size: 11px;
+            gap: 4px;
+            height: 22px;
+            padding: 0 8px;
+            font-size: 10px;
             font-weight: 500;
-            border-radius: 4px;
+            border-radius: 2px;
             border: 1px solid transparent;
             cursor: pointer;
             text-decoration: none;
@@ -1254,26 +1267,26 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .ant-btn-sm {
-            height: 22px;
-            padding: 0 7px;
-            font-size: 10.5px;
-            border-radius: 3px;
+            height: 20px;
+            padding: 0 5px;
+            font-size: 9px;
+            border-radius: 2px;
         }
 
         /* TABLE GRID */
         .table-wrap {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 6px;
+            border-radius: 3px;
             overflow: auto;
             box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-            max-height: calc(100vh - 190px);
+            max-height: calc(100vh - 160px);
         }
 
         table.grid-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
+            font-size: 10px;
             white-space: nowrap;
         }
 
@@ -1288,15 +1301,15 @@ $theme = $_GET['theme'] ?? 'light';
             color: var(--text-heading);
             font-weight: 600;
             text-align: left;
-            padding: 7px 10px;
+            padding: 4px 6px;
             border: 1px solid var(--border-table);
-            font-size: 10.5px;
+            font-size: 9.5px;
             letter-spacing: 0.2px;
             user-select: none;
         }
 
         table.grid-table td {
-            padding: 6px 10px;
+            padding: 3px 6px;
             border: 1px solid var(--border-table);
             color: var(--text-main);
             vertical-align: middle;
@@ -4309,10 +4322,23 @@ $theme = $_GET['theme'] ?? 'light';
                 .replace(/'/g, '&#039;');
         }
 
-        function escapeJs(str) {
-            if (!str) return '';
-            return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"');
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
         }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
     </script>
 </body>
 </html>

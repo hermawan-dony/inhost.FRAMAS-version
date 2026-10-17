@@ -264,11 +264,20 @@ if ($qKlas) {
     <meta charset="UTF-8">
     <title>Stok Opname - Rekonsiliasi Fisik vs IT Inventory</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         :root, html[data-theme="light"], body[data-theme="light"] {
@@ -307,7 +316,7 @@ if ($qKlas) {
             --bg-filter: #191919;
             --bg-input: #141414;
             --border-input: #434343;
-            color-scheme: dark;
+            color-scheme: dark !important;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -315,9 +324,9 @@ if ($qKlas) {
             font-family: 'Poppins', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background-color: var(--bg-base);
             color: var(--text-main);
-            font-size: 11px;
+            font-size: 10.5px;
             line-height: 1.45;
-            padding: 8px 12px;
+            padding: 6px 10px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
         }
@@ -327,20 +336,20 @@ if ($qKlas) {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-bottom: 8px;
-            padding-bottom: 6px;
+            margin-bottom: 6px;
+            padding-bottom: 5px;
             border-bottom: 1px solid var(--border-color);
         }
         .page-title {
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 700;
             color: var(--text-heading);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
         .page-subtitle {
-            font-size: 10px;
+            font-size: 9.5px;
             color: var(--text-muted);
             font-weight: 400;
         }
@@ -348,15 +357,15 @@ if ($qKlas) {
         /* KPI Container & Cards */
         .kpi-container {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-            gap: 8px;
-            margin-bottom: 8px;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 6px;
+            margin-bottom: 6px;
         }
         .kpi-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 8px 12px;
+            border-radius: 3px;
+            padding: 4px 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -382,17 +391,17 @@ if ($qKlas) {
             box-shadow: 0 2px 6px rgba(0,0,0,0.08);
             transform: translateY(-1px);
         }
-        .kpi-info { display: flex; flex-direction: column; gap: 2px; }
-        .kpi-title { font-size: 9.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
-        .kpi-value { font-size: 16px; font-weight: 700; color: var(--text-heading); }
+        .kpi-info { display: flex; flex-direction: column; gap: 1px; }
+        .kpi-title { font-size: 9px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; letter-spacing: 0.3px; }
+        .kpi-value { font-size: 13px; font-weight: 700; color: var(--text-heading); }
         .kpi-icon-wrap {
-            width: 32px;
-            height: 32px;
+            width: 24px;
+            height: 24px;
             border-radius: 50%;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 14px;
+            font-size: 11px;
         }
         .card-blue .kpi-icon-wrap { background: rgba(24, 144, 255, 0.12); color: var(--primary); }
         .card-green .kpi-icon-wrap { background: rgba(82, 196, 26, 0.12); color: var(--success); }
@@ -403,26 +412,26 @@ if ($qKlas) {
         .toolbar-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-bottom: 8px;
+            border-radius: 3px;
+            padding: 5px 8px;
+            margin-bottom: 6px;
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 6px;
             align-items: center;
             justify-content: space-between;
             box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
         .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-        .filter-label { font-size: 10px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
+        .filter-label { font-size: 9.5px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
         
         /* Form Inputs */
         input, select {
             font-family: inherit;
-            font-size: 10.5px;
-            height: 26px;
-            padding: 2px 8px;
-            border-radius: 3px;
+            font-size: 9.5px;
+            height: 22px;
+            padding: 1px 6px;
+            border-radius: 2px;
             border: 1px solid var(--border-input);
             background: var(--bg-input);
             color: var(--text-main);
@@ -445,13 +454,13 @@ if ($qKlas) {
             border: 1px solid var(--primary);
             cursor: pointer;
             font-weight: 500;
-            font-size: 10.5px;
-            height: 26px;
-            padding: 0 10px;
-            border-radius: 3px;
+            font-size: 10px;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 2px;
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             text-decoration: none;
             line-height: 1;
             transition: all 0.2s;
@@ -464,13 +473,13 @@ if ($qKlas) {
             border: 1px solid var(--success);
             cursor: pointer;
             font-weight: 500;
-            font-size: 10.5px;
-            height: 26px;
-            padding: 0 10px;
-            border-radius: 3px;
+            font-size: 10px;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 2px;
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             text-decoration: none;
             line-height: 1;
             transition: all 0.2s;
@@ -482,13 +491,13 @@ if ($qKlas) {
             color: var(--text-main);
             border: 1px solid var(--border-input);
             cursor: pointer;
-            font-size: 10.5px;
-            height: 26px;
-            padding: 0 10px;
-            border-radius: 3px;
+            font-size: 10px;
+            height: 22px;
+            padding: 0 8px;
+            border-radius: 2px;
             display: inline-flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
             text-decoration: none;
             line-height: 1;
             transition: all 0.2s;
@@ -497,8 +506,8 @@ if ($qKlas) {
 
         .btn-sm-action {
             height: 20px;
-            padding: 0 6px;
-            font-size: 9.5px;
+            padding: 0 5px;
+            font-size: 9px;
             border-radius: 2px;
             display: inline-flex;
             align-items: center;
@@ -516,19 +525,19 @@ if ($qKlas) {
         .table-container {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 3px;
             overflow: auto;
-            max-height: calc(100vh - 165px);
+            max-height: calc(100vh - 160px);
             box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
-        table { width: 100%; border-collapse: collapse; font-size: 10.5px; text-align: left; }
+        table { width: 100%; border-collapse: collapse; font-size: 10px; text-align: left; }
         th {
             position: sticky;
             top: 0;
             background: var(--table-head-bg);
             border-bottom: 2px solid var(--border-color);
-            padding: 6px 8px;
-            font-size: 10px;
+            padding: 4px 6px;
+            font-size: 9.5px;
             font-weight: 600;
             color: var(--text-heading);
             white-space: nowrap;
@@ -537,7 +546,7 @@ if ($qKlas) {
             letter-spacing: 0.3px;
         }
         td {
-            padding: 5px 8px;
+            padding: 3px 6px;
             border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
             vertical-align: middle;
@@ -1328,10 +1337,21 @@ if ($qKlas) {
             }
         });
 
-        // Theme Sync from parent frame
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
         window.addEventListener('message', function(e) {
-            if (e.data && e.data.theme) {
-                document.documentElement.setAttribute('data-theme', e.data.theme);
+            if (e.data && (e.data.type === 'SET_THEME' || e.data.theme)) {
+                applyCurrentTheme(e.data.theme);
             }
         });
 

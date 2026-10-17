@@ -406,6 +406,14 @@ if ($qKlas) {
     <meta charset="UTF-8">
     <title>Mutasi Produksi (CEISA 4.0 & IT Inventory)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="stylesheet" href="/assets/sweetalert2.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
@@ -1325,6 +1333,24 @@ if ($qKlas) {
             XLSX.utils.book_append_sheet(wb, ws, "Mutasi_Produksi");
             XLSX.writeFile(wb, `Stock_Transfer_${new Date().toISOString().slice(0,10)}.xlsx`);
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         // Inisialisasi
         document.addEventListener('DOMContentLoaded', () => {

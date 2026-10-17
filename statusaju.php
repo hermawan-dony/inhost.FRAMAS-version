@@ -702,11 +702,20 @@ if ($action === 'sync_company') {
     <meta charset="UTF-8">
     <title>Tracking Respon Pabean (CEISA 4.0) - <?= htmlspecialchars($namaperusahaan ?: 'CEISA 4.0') ?></title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script>
+        (function() {
+            var urlParams = new URLSearchParams(window.location.search);
+            var theme = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            document.documentElement.style.colorScheme = theme;
+        })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <style>
         :root, html[data-theme="light"], body[data-theme="light"] {
             --bg-base: #f0f2f5;
@@ -744,9 +753,9 @@ if ($action === 'sync_company') {
             font-family: 'Poppins', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             background-color: var(--bg-base);
             color: var(--text-main);
-            font-size: 11px;
+            font-size: 10.5px;
             line-height: 1.45;
-            padding: 8px 12px;
+            padding: 6px 10px;
             -webkit-font-smoothing: antialiased;
         }
 
@@ -757,49 +766,49 @@ if ($action === 'sync_company') {
             align-items: center;
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 10px 14px;
-            margin-bottom: 10px;
+            border-radius: 3px;
+            padding: 6px 10px;
+            margin-bottom: 6px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.03);
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 6px;
         }
         .page-title {
             display: flex;
             align-items: center;
-            gap: 8px;
-            font-size: 14px;
+            gap: 6px;
+            font-size: 12.5px;
             font-weight: 600;
             color: var(--text-main);
         }
         .page-title i {
             color: var(--primary);
-            font-size: 16px;
+            font-size: 14px;
         }
         .page-subtitle {
-            font-size: 11px;
+            font-size: 9.5px;
             color: var(--text-muted);
-            margin-top: 2px;
+            margin-top: 1px;
         }
         .header-badges {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             flex-wrap: wrap;
         }
 
         /* KPI Cards Grid */
         .kpi-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-            gap: 10px;
-            margin-bottom: 10px;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 6px;
+            margin-bottom: 6px;
         }
         .kpi-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 10px 14px;
+            border-radius: 3px;
+            padding: 5px 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -820,26 +829,26 @@ if ($action === 'sync_company') {
             flex-direction: column;
         }
         .kpi-label {
-            font-size: 11px;
+            font-size: 9px;
             color: var(--text-muted);
             font-weight: 500;
             text-transform: uppercase;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
         }
         .kpi-value {
-            font-size: 18px;
+            font-size: 14px;
             font-weight: 700;
             color: var(--text-main);
-            margin-top: 2px;
+            margin-top: 1px;
         }
         .kpi-icon {
-            width: 36px;
-            height: 36px;
-            border-radius: 8px;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
+            font-size: 13px;
         }
         .kpi-icon.blue { background: rgba(24, 144, 255, 0.12); color: var(--primary); }
         .kpi-icon.green { background: rgba(82, 196, 26, 0.12); color: var(--success); }
@@ -850,31 +859,31 @@ if ($action === 'sync_company') {
         .toolbar-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 8px 12px;
-            margin-bottom: 10px;
+            border-radius: 3px;
+            padding: 5px 8px;
+            margin-bottom: 6px;
             display: flex;
             flex-wrap: wrap;
             align-items: center;
             justify-content: space-between;
-            gap: 8px;
+            gap: 6px;
         }
         .toolbar-left, .toolbar-right {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex-wrap: wrap;
         }
         .search-input {
-            height: 28px;
-            padding: 0 10px 0 28px;
+            height: 24px;
+            padding: 0 8px 0 24px;
             border: 1px solid var(--border-color);
             border-radius: 3px;
             background: var(--bg-card);
             color: var(--text-main);
-            font-size: 11px;
+            font-size: 10px;
             outline: none;
-            width: 220px;
+            width: 180px;
             transition: border-color 0.2s;
         }
         .search-input:focus { border-color: var(--primary); }
@@ -885,34 +894,39 @@ if ($action === 'sync_company') {
         }
         .search-box i {
             position: absolute;
-            left: 9px;
+            left: 7px;
             color: var(--text-muted);
             pointer-events: none;
-            font-size: 11px;
+            font-size: 10px;
         }
         .select-filter {
-            height: 28px;
-            padding: 0 8px;
+            height: 24px;
+            padding: 0 6px;
             border: 1px solid var(--border-color);
             border-radius: 3px;
             background: var(--bg-card);
             color: var(--text-main);
-            font-size: 11px;
+            font-size: 10px;
             outline: none;
             cursor: pointer;
         }
         .select-filter:focus { border-color: var(--primary); }
 
+        [data-theme='dark'] select option {
+            background: #1f1f1f;
+            color: #fff;
+        }
+
         /* Buttons */
         .ant-btn {
             display: inline-flex;
             align-items: center;
-            gap: 5px;
-            height: 28px;
-            padding: 0 10px;
-            font-size: 11px;
+            gap: 4px;
+            height: 24px;
+            padding: 0 8px;
+            font-size: 10px;
             font-weight: 500;
-            border-radius: 3px;
+            border-radius: 2px;
             cursor: pointer;
             border: 1px solid var(--border-color);
             background: var(--bg-card);
@@ -945,16 +959,16 @@ if ($action === 'sync_company') {
             color: #ffffff;
         }
         .ant-btn-sm {
-            height: 24px;
-            padding: 0 6px;
-            font-size: 10px;
+            height: 20px;
+            padding: 0 5px;
+            font-size: 9px;
         }
 
         /* Table Card */
         .table-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 4px;
+            border-radius: 3px;
             overflow: hidden;
             box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
@@ -965,19 +979,20 @@ if ($action === 'sync_company') {
         table.ant-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11px;
+            font-size: 10px;
             text-align: left;
         }
         table.ant-table th {
             background: var(--table-header);
             color: var(--text-muted);
             font-weight: 600;
-            padding: 8px 10px;
+            padding: 5px 8px;
+            font-size: 9.5px;
             border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
         }
         table.ant-table td {
-            padding: 8px 10px;
+            padding: 4px 8px;
             border-bottom: 1px solid var(--border-color);
             color: var(--text-main);
             vertical-align: middle;
@@ -990,10 +1005,10 @@ if ($action === 'sync_company') {
         .badge {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 2px 7px;
-            border-radius: 3px;
-            font-size: 10px;
+            gap: 3px;
+            padding: 1px 5px;
+            border-radius: 2px;
+            font-size: 9px;
             font-weight: 600;
             line-height: 1.2;
             white-space: nowrap;
@@ -1859,6 +1874,24 @@ if ($action === 'sync_company') {
                 Swal.fire('Error', 'Terjadi kesalahan jaringan: ' + err.message, 'error');
             }
         }
+
+        function applyCurrentTheme(th) {
+            if (!th) {
+                var urlParams = new URLSearchParams(window.location.search);
+                th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || 'light';
+            }
+            if (th !== 'light' && th !== 'dark') th = 'light';
+            document.documentElement.setAttribute('data-theme', th);
+            document.documentElement.style.colorScheme = th;
+            if (document.body) document.body.setAttribute('data-theme', th);
+        }
+        applyCurrentTheme();
+
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'SET_THEME') {
+                applyCurrentTheme(e.data.theme);
+            }
+        });
 
         // Inisialisasi awal saat halaman dimuat
         document.addEventListener('DOMContentLoaded', () => {
