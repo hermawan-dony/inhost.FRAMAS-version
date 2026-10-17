@@ -2552,6 +2552,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     selectRowByAju(e.data.aju);
                 }
             }
+            if (e.data.type === 'FILTER_STATUS') {
+                if (typeof Swal !== 'undefined' && typeof Swal.close === 'function') {
+                    try { Swal.close(); } catch(err) {}
+                }
+                const sel = document.getElementById('filterStatus');
+                if (sel && e.data.status) {
+                    sel.value = e.data.status;
+                    hasShownItInvAlert = true;
+                    loadList();
+                }
+            }
         });
 
         function onPeriodChange(periodStr) {

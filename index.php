@@ -346,20 +346,21 @@ if ($action === 'get_alert_notifications') {
     $cntBelumSelesai = (int)($koneksi->query($sqlBelumSelesai)->fetch_row()[0] ?? 0);
 
     // 2. Jumlah Dokumen yang Belum Masuk IT Inv (Hanya jika konfigurasi IS_INV = 1)
+    // Diambil khusus dari tabel staging (bc_ceisa_header) saja yang sudah terbit Nomor Pendaftaran
     $cntBelumItInv = 0;
     if ($isInv === 1) {
-        $whereCmpDoc = !empty($cleanCmp) ? "WHERE (doc.cmp_id = '$cleanCmp' OR '$cleanCmp' = '')" : "";
-        $sqlBelumItInv = "SELECT COUNT(DISTINCT doc.nomor_aju)
-            FROM (
-                SELECT nomor_aju, nomor_daftar, cmp_id FROM bc_ceisa_header WHERE nomor_daftar IS NOT NULL AND nomor_daftar != '' AND nomor_daftar != '-'
-                UNION
-                SELECT nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, cmp_id FROM bc_ceisa_data WHERE nomorDaftar IS NOT NULL AND nomorDaftar != '' AND nomorDaftar != '-'
-            ) doc
+        $whereCmpHdr = !empty($cleanCmp) ? "AND (h.cmp_id = '$cleanCmp' OR '$cleanCmp' = '')" : "";
+        $sqlBelumItInv = "SELECT COUNT(DISTINCT h.nomor_aju)
+            FROM bc_ceisa_header h
             LEFT JOIN (
                 SELECT DISTINCT nomor_aju FROM bc_1ab2 WHERE nomor_aju IS NOT NULL AND nomor_aju != ''
-            ) it ON doc.nomor_aju = it.nomor_aju
-            $whereCmpDoc
-            AND it.nomor_aju IS NULL";
+            ) it ON h.nomor_aju = it.nomor_aju
+            WHERE h.nomor_daftar IS NOT NULL 
+              AND TRIM(h.nomor_daftar) != '' 
+              AND TRIM(h.nomor_daftar) != '-'
+              AND (h.user_id != 'CEISA_PORTAL' OR h.user_id IS NULL OR h.user_id = '')
+              $whereCmpHdr
+              AND it.nomor_aju IS NULL";
         $cntBelumItInv = (int)($koneksi->query($sqlBelumItInv)->fetch_row()[0] ?? 0);
     }
 
@@ -4241,11 +4242,11 @@ if ($initialTab === 'editor') {
                         </div>
                         <div style="font-size:9.5px; color:var(--text-muted, #8c8c8c); margin-bottom:8px; line-height:1.4;">
                             ${cntBelumItInv > 0 
-                                ? `Terdapat <strong>${cntBelumItInv.toLocaleString('id-ID')}</strong> dokumen pabean yang telah memiliki Nomor Pendaftaran tetapi belum diposting ke tabel <code>bc_1ab2</code>.`
-                                : `Seluruh dokumen yang telah memiliki Nomor Pendaftaran sudah berhasil diposting ke IT Inventory.`}
+                                ? `Terdapat <strong>${cntBelumItInv.toLocaleString('id-ID')}</strong> dokumen pabean staging yang telah memiliki Nomor Pendaftaran tetapi belum diposting ke tabel <code>bc_1ab2</code>.`
+                                : `Seluruh dokumen staging yang telah memiliki Nomor Pendaftaran sudah berhasil diposting ke IT Inventory.`}
                         </div>
                         ${cntBelumItInv > 0 ? `
-                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); switchMainTab('transfer');">
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="height:22px; font-size:9.5px; padding:0 8px;" onclick="Swal.close(); openTransferNotItInv();">
                             <span>Buka Data Host to Host (Posting IT Inv) →</span>
                         </button>` : ''}
                     </div>`;
@@ -4373,6 +4374,24 @@ if ($initialTab === 'editor') {
             } catch (err) {
                 Swal.fire({ icon: 'error', title: 'Kesalahan Jaringan', text: err.message });
             }
+        }
+
+        function openTransferNotItInv() {
+            switchMainTab('transfer');
+            const sendFilter = () => {
+                try {
+                    const ifrm = window.tabIframes && window.tabIframes['transfer'];
+                    if (ifrm && ifrm.contentWindow) {
+                        ifrm.contentWindow.postMessage({
+                            type: 'FILTER_STATUS',
+                            status: 'not_it_inv'
+                        }, '*');
+                    }
+                } catch(e) {}
+            };
+            sendFilter();
+            setTimeout(sendFilter, 300);
+            setTimeout(sendFilter, 800);
         }
 
         window.onload = function() {

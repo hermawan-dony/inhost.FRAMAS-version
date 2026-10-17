@@ -4500,7 +4500,38 @@ Delapan (8) tabel yang distandardisasi:
 3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan di-push ke repositori GitHub `main`.
 
 ---
+
+## 109. Koreksi Perhitungan Peringatan "Dokumen Belum Masuk IT Inventory" (Khusus Tabel Staging bc_ceisa_header)
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php)
+
+### A. Masalah & Analisis
+- Pada modal **"Pusat Peringatan & Status Sistem"**, jumlah *Dokumen Belum Masuk IT Inventory (bc_1ab2)* menampilkan angka yang sangat besar (1.048 dokumen).
+- **Penyebab**: Query backend `action=get_alert_notifications` sebelumnya melakukan penggabungan `UNION` antara tabel staging pabean lokal `bc_ceisa_header` dan tabel data sinkronisasi portal CEISA 4.0 (`bc_ceisa_data`). Karena `bc_ceisa_data` menampung seluruh riwayat dokumen pabean yang disinkronkan dari server Bea Cukai (lebih dari 1.000 dokumen) dan bukan merupakan dokumen staging yang dipersiapkan untuk posting IT Inventory, angka alert menjadi tidak akurat dan tidak sesuai dengan data Host to Host.
+- Pengguna meminta agar perhitungan dokumen belum masuk IT Inventory diambil **HANYA dari tabel staging (`bc_ceisa_header`)** yang telah terbit Nomor Pendaftarannya, bukan dari hasil sync portal CEISA.
+
+### B. Solusi & Implementasi
+1. **Pembaruan Query Backend (`action=get_alert_notifications` di `index.php`)**:
+   - Menghapus klausa `UNION SELECT ... FROM bc_ceisa_data`.
+   - Mengarahkan query perhitungan murni ke tabel staging `bc_ceisa_header` dengan kondisi:
+     * Telah memiliki Nomor Pendaftaran resmi (`nomor_daftar IS NOT NULL AND TRIM(nomor_daftar) != '' AND TRIM(nomor_daftar) != '-'`).
+     * Dokumen staging internal (`user_id != 'CEISA_PORTAL' OR user_id IS NULL OR user_id = ''`).
+     * Filter sesuai profil perusahaan aktif (`h.cmp_id = '$cleanCmp'`).
+     * Belum tercatat pada tabel IT Inventory `bc_1ab2` (`it.nomor_aju IS NULL`).
+   - Hasil perhitungan untuk PT FRAMAS kini berubah dari 1.048 dokumen menjadi **47 dokumen**, identik 100% dengan total dokumen `Belum Masuk IT Inventory` pada modul Data Host to Host (`transfer.php`).
+2. **Navigasi & Filter Otomatis ke Data Host to Host**:
+   - Ditambahkan fungsi JavaScript `openTransferNotItInv()` pada `index.php`.
+   - Ditambahkan penanganan message `FILTER_STATUS` pada `transfer.php` sehingga ketika tombol **"Buka Data Host to Host (Posting IT Inv) →"** diklik, halaman Host to Host langsung terbuka dan otomatis mengaktifkan filter status `Belum Masuk IT Inventory` (`not_it_inv`).
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis**: `php -l` lolos 0 errors pada berkas root dan `www/`.
+2. **Pengujian API via cURL**:
+   - Endpoint `index.php?action=get_alert_notifications&cmp_id=010816064431000` berhasil mengembalikan payload JSON dengan `"belum_it_inv": 47`.
+3. **Deployment**: Berkas disinkronkan ke server produksi `/source/public/` dan di-push ke repositori GitHub `main`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 
