@@ -89,7 +89,17 @@ if ($action === 'list') {
 
     $where = [];
     if (!empty($klas)) {
-        $where[] = "KLAS = '" . $koneksi->real_escape_string($klas) . "'";
+        $escKlas = $koneksi->real_escape_string($klas);
+        $lowerKlas = strtolower($klas);
+        if (strpos($lowerKlas, 'raw') !== false || strpos($lowerKlas, 'bahan baku') !== false) {
+            $where[] = "(m.KLAS = '$escKlas' OR m.KLAS LIKE '%Raw%' OR m.KLAS LIKE '%Bahan Baku%')";
+        } elseif (strpos($lowerKlas, 'finish') !== false || strpos($lowerKlas, 'barang jadi') !== false) {
+            $where[] = "(m.KLAS = '$escKlas' OR m.KLAS LIKE '%Finished%' OR m.KLAS LIKE '%Barang Jadi%')";
+        } elseif (strpos($lowerKlas, 'progress') !== false || strpos($lowerKlas, 'wip') !== false || strpos($lowerKlas, 'dalam proses') !== false) {
+            $where[] = "(m.KLAS = '$escKlas' OR m.KLAS LIKE '%Progress%' OR m.KLAS LIKE '%WIP%' OR m.KLAS LIKE '%Dalam Proses%')";
+        } else {
+            $where[] = "m.KLAS = '$escKlas'";
+        }
     }
     if (!empty($search)) {
         $s = $koneksi->real_escape_string($search);
@@ -1630,6 +1640,68 @@ if ($action === 'approval_reject') {
             gap: 6px;
             margin-bottom: 6px;
             flex-wrap: wrap;
+            align-items: center;
+        }
+        .kpi-container .kpi-badge {
+            background: var(--bg-base);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 3px 10px;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 9.5px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.18s ease-in-out;
+            position: relative;
+        }
+        .kpi-container .kpi-badge:hover {
+            border-color: var(--primary);
+            background: rgba(24, 144, 255, 0.08);
+            transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.06);
+        }
+        .kpi-container .kpi-badge:active {
+            transform: translateY(0);
+        }
+        .kpi-container .kpi-badge.active {
+            border-color: var(--primary) !important;
+            background: rgba(24, 144, 255, 0.12) !important;
+            box-shadow: 0 0 0 1.5px var(--primary);
+        }
+        .kpi-container .kpi-badge.active .kpi-title {
+            color: var(--primary) !important;
+            font-weight: 700;
+        }
+        .kpi-container .kpi-badge.active .kpi-val {
+            font-weight: 800;
+        }
+        .kpi-container .kpi-badge.active::after {
+            content: '✓';
+            font-size: 9.5px;
+            font-weight: 800;
+            color: var(--primary);
+            margin-left: 2px;
+        }
+        html[data-theme="dark"] .kpi-container .kpi-badge {
+            background: #1f1f1f;
+            border-color: #303030;
+        }
+        html[data-theme="dark"] .kpi-container .kpi-badge:hover {
+            border-color: #177ddc;
+            background: rgba(23, 125, 220, 0.15);
+        }
+        html[data-theme="dark"] .kpi-container .kpi-badge.active {
+            border-color: #177ddc !important;
+            background: rgba(23, 125, 220, 0.25) !important;
+            box-shadow: 0 0 0 1.5px #177ddc;
+        }
+        html[data-theme="dark"] .kpi-container .kpi-badge.active .kpi-title {
+            color: #177ddc !important;
+        }
+        html[data-theme="dark"] .kpi-container .kpi-badge.active::after {
+            color: #177ddc;
         }
         .kpi-badge {
             background: var(--bg-base);
@@ -1796,19 +1868,19 @@ if ($action === 'approval_reject') {
 
         <!-- KPI Cards -->
         <div class="kpi-container">
-            <div class="kpi-badge">
+            <div class="kpi-badge active" id="kpiBadgeTotal" onclick="filterByKpi('')" title="Klik untuk menampilkan semua klasifikasi barang">
                 <span class="kpi-title">Total Items</span>
                 <span class="kpi-val" id="kpiTotal">0</span>
             </div>
-            <div class="kpi-badge">
+            <div class="kpi-badge" id="kpiBadgeBb" onclick="filterByKpi('Raw Materials')" title="Klik untuk memfilter: Raw Materials (Bahan Baku)">
                 <span class="kpi-title">Raw Materials</span>
                 <span class="kpi-val" id="kpiBb" style="color:var(--primary);">0</span>
             </div>
-            <div class="kpi-badge">
+            <div class="kpi-badge" id="kpiBadgeFg" onclick="filterByKpi('Finished Goods')" title="Klik untuk memfilter: Finished Goods (Barang Jadi)">
                 <span class="kpi-title">Finished Goods</span>
                 <span class="kpi-val" id="kpiFg" style="color:var(--success);">0</span>
             </div>
-            <div class="kpi-badge">
+            <div class="kpi-badge" id="kpiBadgeWip" onclick="filterByKpi('Work In Progress')" title="Klik untuk memfilter: Work In Progress (Barang Dalam Proses)">
                 <span class="kpi-title">Work In Progress</span>
                 <span class="kpi-val" id="kpiWip" style="color:var(--warning);">0</span>
             </div>
@@ -2626,9 +2698,76 @@ if ($action === 'approval_reject') {
         let rawItemsData = [];
         let parsedExcelRows = [];
 
+        function isMatchingKlas(val1, val2) {
+            if (!val1 && !val2) return true;
+            if (!val1 || !val2) return false;
+            const v1 = val1.trim().toLowerCase();
+            const v2 = val2.trim().toLowerCase();
+            if (v1 === v2) return true;
+            if ((v1.includes('raw') || v1.includes('bahan baku')) && (v2.includes('raw') || v2.includes('bahan baku'))) return true;
+            if ((v1.includes('finish') || v1.includes('barang jadi')) && (v2.includes('finish') || v2.includes('barang jadi'))) return true;
+            if ((v1.includes('progress') || v1.includes('wip') || v1.includes('dalam proses')) && (v2.includes('progress') || v2.includes('wip') || v2.includes('dalam proses'))) return true;
+            return false;
+        }
+
+        function filterByKpi(klasName) {
+            const filterKlasSelect = document.getElementById('filterKlas');
+            const currentVal = filterKlasSelect ? filterKlasSelect.value : '';
+
+            // Jika mengklik card yang sudah aktif (kecuali ''), toggle off ke Semua Klasifikasi
+            let targetVal = klasName;
+            if (klasName !== '' && (currentVal === klasName || isMatchingKlas(currentVal, klasName))) {
+                targetVal = '';
+            }
+
+            if (filterKlasSelect) {
+                let found = false;
+                for (let i = 0; i < filterKlasSelect.options.length; i++) {
+                    const optVal = filterKlasSelect.options[i].value;
+                    if (targetVal === '' && optVal === '') {
+                        filterKlasSelect.selectedIndex = i;
+                        found = true;
+                        break;
+                    } else if (targetVal !== '' && isMatchingKlas(optVal, targetVal)) {
+                        filterKlasSelect.selectedIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    filterKlasSelect.value = targetVal;
+                }
+            }
+
+            syncKpiCardActive(targetVal);
+            loadData();
+        }
+
+        function syncKpiCardActive(currentKlas) {
+            const badgeTotal = document.getElementById('kpiBadgeTotal');
+            const badgeBb    = document.getElementById('kpiBadgeBb');
+            const badgeFg    = document.getElementById('kpiBadgeFg');
+            const badgeWip   = document.getElementById('kpiBadgeWip');
+
+            [badgeTotal, badgeBb, badgeFg, badgeWip].forEach(b => {
+                if (b) b.classList.remove('active');
+            });
+
+            if (!currentKlas || currentKlas === '') {
+                if (badgeTotal) badgeTotal.classList.add('active');
+            } else if (isMatchingKlas(currentKlas, 'Raw Materials')) {
+                if (badgeBb) badgeBb.classList.add('active');
+            } else if (isMatchingKlas(currentKlas, 'Finished Goods')) {
+                if (badgeFg) badgeFg.classList.add('active');
+            } else if (isMatchingKlas(currentKlas, 'Work In Progress')) {
+                if (badgeWip) badgeWip.classList.add('active');
+            }
+        }
+
         async function loadData() {
             const q = document.getElementById('filterSearch').value.trim();
             const klas = document.getElementById('filterKlas').value;
+            syncKpiCardActive(klas);
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding:15px;"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data material...</td></tr>';
 

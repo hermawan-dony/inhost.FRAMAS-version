@@ -4290,10 +4290,47 @@ Delapan (8) tabel yang distandardisasi:
 ### D. Pengujian, Deployment & Git
 1. **Linting Sintaksis PHP (`php -l`)**: Memastikan 0 kesalahan sintaksis pada seluruh 10 file di direktori utama dan `www/`.
 2. **Deployment Server**: Seluruh berkas disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`) via SCP.
-3. **Penyimpanan Repositori**: Berkas dicommit dan dipush ke branch `main` repositori GitHub `hermawan-dony/inhost.web.id`.
+---
+
+## 104. Implementasi Fitur Clickable KPI Summary Cards untuk Filtering Cepat pada Master Data Barang (`material.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"buat card ini bisa diklik sekaligus filter hanya tampil card yang diklik"* (disertai tangkapan layar yang menandai card KPI *Total Items*, *Raw Materials*, *Finished Goods*, dan *Work In Progress*).
+- **Tujuan**: Memungkinkan pengguna memfilter data tabel barang secara instan hanya dengan mengklik kartu ringkasan (*KPI summary badge*), tanpa harus memilih opsi secara manual dari dropdown filter klasifikasi.
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Frontend Interaktif & Styling Visual ([`material.php`](file:///c:/dp/g-ceisa/material.php) & [`www/material.php`](file:///c:/dp/g-ceisa/www/material.php))**:
+   - Menambahkan event handler `onclick="filterByKpi('...')"` dan atribut `title` deskriptif pada setiap kartu KPI:
+     - `kpiBadgeTotal` ➔ `filterByKpi('')` (menampilkan semua klasifikasi)
+     - `kpiBadgeBb` ➔ `filterByKpi('Raw Materials')` (filter Bahan Baku / Raw Materials)
+     - `kpiBadgeFg` ➔ `filterByKpi('Finished Goods')` (filter Barang Jadi / Finished Goods)
+     - `kpiBadgeWip` ➔ `filterByKpi('Work In Progress')` (filter Barang Dalam Proses / WIP)
+   - Styling interaktif `.kpi-container .kpi-badge`:
+     - `cursor: pointer`, efek hover (`transform: translateY(-1px)`, soft shadow, border highlight).
+     - Status `.active` yang jelas dengan ring warna biru (`box-shadow: 0 0 0 1.5px var(--primary)`), background tint, dan indikator centang (`✓`).
+     - Kompatibilitas penuh dengan tema terang (*light*) dan tema gelap (*dark*).
+2. **Sinkronisasi Dua Arah (*Two-Way Synchronization*)**:
+   - Fungsi `filterByKpi(klasName)`:
+     - Mendukung *toggle-off*: Jika kartu yang sedang aktif diklik kembali, filter otomatis kembali ke Semua Klasifikasi (*Total Items*).
+     - Menyelaraskan nilai pada dropdown `<select id="filterKlas">`.
+     - Memanggil `loadData()`.
+   - Fungsi `syncKpiCardActive(currentKlas)`:
+     - Menggunakan pencocokan cerdas `isMatchingKlas()` yang mengenali istilah bilingual (*Raw Materials / Bahan Baku*, *Finished Goods / Barang Jadi*, *Work In Progress / WIP / Dalam Proses*).
+     - Saat pengguna mengubah dropdown `filterKlas` secara manual, kartu KPI otomatis menyesuaikan status `.active` miliknya.
+3. **Backend Filtering Query**:
+   - Memperbarui klausul `WHERE` pada endpoint `action=list` agar klausa filter klasifikasi selaras dengan logika penghitungan KPI (`m.KLAS = '$escKlas' OR m.KLAS LIKE '%Raw%' OR m.KLAS LIKE '%Bahan Baku%'`, dst.).
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terdeteksi pada `/source/public/material.php` dan `/source/public/www/material.php`.
+2. **Pengujian API via cURL**:
+   - `action=list&klas=Raw%20Materials` mengembalikan 1 item yang sesuai (`RPM00563`).
+   - `action=list&klas=Finished%20Goods` mengembalikan array kosong `[]` secara tepat.
+   - Nilai counter KPI pada respon JSON tetap menghitung total agregat secara akurat (`total: 1`, `bahan_baku: 1`, `finished_goods: 0`, `wip: 0`).
+3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan dipush ke repositori GitHub `main`.
 
 ---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 
