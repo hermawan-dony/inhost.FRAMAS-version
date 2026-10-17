@@ -1,25 +1,43 @@
-# Archives and dumps
-*.tar.gz
-database/*.sql
+# Database dumps
 *.sql
-
-# Keep zipped database
-!ceisa0400db.sql.zip
+database/*.sql
 !database/ceisa0400db.sql.zip
 
-# Local credentials and helper scripts
+# Archives & Installers & Binaries
+*.tar.gz
+*.exe
+*.msi
+www/mysql.exe
+
+# Local scratch and test scripts
+scratch_*.php
+check_*.php
+sample_reff.php
+apply_sql.php
+list_tables.php
+test_*.php
+SQLyogTunnel.php
+dp.php
+dp/
+sync_and_push.ps1
+tmp_dump.sh
+
+# Batch scripts and credentials
+*.bat
+*.cmd
+*.sh
 pass.txt
 cookie.txt
-ssh_exec.bat
-scp_push.bat
-scp_pull.bat
-run_remote.bat
-dump_db.sh
-pack_project.sh
-test_conn.php
-test_git_cred.ps1
-sync_and_push.ps1
-scratch_*.php
 
-# Local shared / installer directory
+# Debug outputs, logs, and sample text/PDF files
+*.txt
+*.log
+webhook_log.txt
+*.pdf
+pdf/
+www/pdf/
+uploads/logos/*
+!uploads/logos/.gitkeep
+
+# Shared and external directories
 share/
