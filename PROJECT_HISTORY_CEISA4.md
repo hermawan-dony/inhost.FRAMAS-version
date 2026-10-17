@@ -4037,4 +4037,76 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
 
 ---
+
+## 99. Penghapusan Fitur Create/Kirim AJU & Implementasi Modal Riwayat Tracking Perubahan Status pada Dashboard Dokumen CEISA 4.0 (`daftar_dokumen.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**:
+  1. *"create AJU ini ga perlu di halaman Dashboard Ceisa 4.0 kan ga lengkap, ga ada data barang, dll"*
+  2. *"matikan aja hyperlink yang membuka preview json, mungkin bisa diganti menampilkan history tracking perubahan statusnya"*
+- **Akar Masalah (Root Cause)**:
+  - Halaman **Dashboard Ceisa 4.0** ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php)) berfungsi sebagai dashboard pemantauan dokumen pabean (*status monitoring & tracking*) yang ditarik dari portal CEISA 4.0 (`bc_ceisa_data`, `bc_ceisa_status`, `bc_ceisa_respons`).
+  - Halaman ini tidak memuat struktur tabel rincian transaksi pengiriman seperti barang (`bc_ceisa_barang`), bahan baku (`bc_ceisa_bahan_baku`), dokumen lampiran, kemasan, kontainer, dan tarif pungutan yang dikelola pada modul *Host to Host* ([`transfer.php`](file:///c:/dp/g-ceisa/transfer.php)) atau [`editor.php`](file:///c:/dp/g-ceisa/editor.php).
+  - Hyperlink pada Nomor AJU dan Nomor Respon sebelumnya memicu fungsi `previewJson()` yang membuka modal pratinjau mentah JSON dan memiliki tombol *"🚀 Kirim AJU Ini ke CEISA 4.0"*. Menjalankan pengiriman dokumen dari dashboard ini menghasilkan payload yang tidak lengkap dan berisiko penolakan (*reject*) dari gateway Bea Cukai.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **Pembersihan Logika Pengiriman Dokumen dari Dashboard ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php) & [`www/daftar_dokumen.php`](file:///c:/dp/g-ceisa/www/daftar_dokumen.php))**:
+   - Menghapus modal `#modalPreview` dan tombol `#btnTransferFromModal` (*"🚀 Kirim AJU Ini ke CEISA 4.0"*).
+   - Menghapus modal `#modalResult` dan fungsi pengiriman batch/single (`transferSingle`, `transferFromModal`, `transferSelected`, `renderTransferResponse`).
+   - Menghapus dependensi `require_once __DIR__ . '/CeisaJsonBuilder.php';` sehingga halaman memuat lebih cepat tanpa beban modul payload builder yang tidak relevan.
+   - Mengubah status chip default dari label *"Siap Kirim"* menjadi **"Proses Pabean"** (atau status aktual dari CEISA 4.0 seperti *Stuffing, Gate In, Selesai Proses, Terkirim*).
+
+2. **Backend API Endpoint Riwayat Tracking (`action === 'get_timeline'`)**:
+   - Menyediakan endpoint AJAX `action === 'get_timeline'` (alias `tracking_history`):
+     - Menerima parameter `nomor_aju` dan `cmp_id`.
+     - Mengambil riwayat tahapan proses dari tabel `bc_ceisa_status` diurutkan secara kronologis (`waktu_status ASC, id ASC`).
+     - Mengambil respon resmi Bea Cukai dari tabel `bc_ceisa_respons` diurutkan berdasarkan ID.
+     - Mengambil metadata pendaftaran dari `bc_ceisa_header` dan data induk `bc_ceisa_data`.
+     - Mengambil respon mentah JSON dari tabel log `bc_ceisa_respon_logs`.
+     - Menghitung logika *Visual Stepper* 5 Tahapan proses secara otomatis:
+       - **Tahap 1: Perekaman Dokumen** (Draft & perekaman awal dokumen)
+       - **Tahap 2: Pengiriman LNSW** (Dokumen terkirim ke sistem INSW/Gateway)
+       - **Tahap 3: Validasi Pabean** (Validasi konten & Nomor Pendaftaran terbit)
+       - **Tahap 4: Penjaluran / Billing** (Penetapan jalur & kode billing pembayaran)
+       - **Tahap 5: Keputusan Akhir** (Persetujuan pengeluaran SPPB/NPE atau selesai proses)
+     - Dilengkapi mekanisme fallback sintesis jika data detail status belum ditarik terpisah tetapi data induk di `bc_ceisa_data` telah memiliki nomor respon atau nama proses.
+     - Mendukung eksekusi via PHP CLI untuk kemudahan pengujian mandiri.
+
+3. **Antarmuka Interaktif Modal Tracking (`#modalTrackingHistory`)**:
+   - Merancang dialog modal modern dengan standar desain Ant Design 5.0 (lebar 880px, responsif, dan mendukung *Dark Mode* penuh).
+   - **Header Modal**: Menampilkan judul riwayat, tag jenis dokumen (`BC 2.3`, `BC 2.7`, dll), Nomor AJU berfont monospace, dan tombol tutup.
+   - **Kartu Ringkasan Dokumen**:
+     - Nomor & Tanggal Pendaftaran Bea Cukai.
+     - Nama Perusahaan / Pemilik Dokumen.
+     - Kantor Pabean Pengawas (KPPBC).
+     - Tombol **"Sync Ulang Live"** (`syncTrackingModalAju()`) yang memicu sinkronisasi seketika ke API gateway portal CEISA 4.0 via `statusaju.php?action=sync_single` dan memperbarui tampilan modal secara real-time.
+   - **Visual Stepper Progress Bar**:
+     - Menampilkan diagram 5 tahapan alur proses pabean dengan garis progres hijau yang bergerak dinamis sesuai persentase penyelesaian, lingkaran status dengan ikon centang `✓`, judul tahapan, deskripsi ringkas, dan stempel waktu (*timestamp*).
+   - **3 Tab Konten Terperinci**:
+     - **Tab 1: Riwayat Status Proses**: Menampilkan tabel log kronologis (No, Waktu Status, Kode Proses, Keterangan Proses, dan No. Daftar).
+     - **Tab 2: Respon Resmi Bea Cukai**: Menampilkan tabel respon resmi (No, Kode Respon, Nomor Respon, Tanggal Respon, Keterangan, dan Tombol Unduh Dokumen PDF resmi Bea Cukai).
+     - **Tab 3: Log Respon Mentah (JSON)**: Menampilkan payload respon mentah JSON dari CEISA 4.0 dalam kotak kode *syntax highlighting* yang dilengkapi tombol salin satu-klik ke clipboard.
+
+4. **Integrasi Grid Tabel Dokumen**:
+   - Kolom **Nomor Pengajuan**: Nomor AJU kini berformat tautan aktif berwarna biru dan dilengkapi ikon tracking jam/alur. Klik pada nomor AJU atau ikon akan langsung membuka modal riwayat tracking status.
+   - Kolom **Nama Respon**: Klik pada nomor respon resmi (misal nomor SPPB) kini juga membuka modal riwayat tracking status.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/daftar_dokumen.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/daftar_dokumen.php` ➔ **No syntax errors detected**.
+2. **Uji API Backend (`action=get_timeline`)**:
+   - Pengujian query AJU contoh `0509270FRM0220261017000617` via CLI remote server:
+     - Mengembalikan response JSON `status: "OK"`.
+     - Kelima tahapan stepper terhitung dengan akurat (Tahap 1 s.d. Tahap 5 selesai dengan timestamp `2026-10-17 10:20:30`).
+     - Respon resmi SPPB (`624806/KBC.0804/2026`) beserta tautan unduh PDF resmi Bea Cukai teridentifikasi dan disajikan dengan presisi.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+

@@ -5,7 +5,6 @@
  * Format: C:\dp\g-ceisa\share\Portal Ceisa 4.0.html
  */
 require_once __DIR__ . '/koneksi.php';
-require_once __DIR__ . '/CeisaJsonBuilder.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -38,6 +37,16 @@ if (!function_exists('isDocPermitted')) {
 // AJAX API ENDPOINTS
 // -------------------------------------------------------------
 $action = $_REQUEST['action'] ?? '';
+if (PHP_SAPI === 'cli' && empty($action)) {
+    foreach ($argv as $arg) {
+        if (strpos($arg, '=') !== false) {
+            list($k, $v) = explode('=', $arg, 2);
+            $_GET[$k] = $v;
+            $_REQUEST[$k] = $v;
+        }
+    }
+    $action = $_REQUEST['action'] ?? '';
+}
 
 if ($action === 'list') {
     header('Content-Type: application/json; charset=utf-8');
@@ -159,59 +168,185 @@ if ($action === 'list') {
     exit;
 }
 
-if ($action === 'preview_json') {
+if ($action === 'get_timeline' || $action === 'tracking_history') {
     header('Content-Type: application/json; charset=utf-8');
-    $nomor_aju = trim($_GET['nomor_aju'] ?? '');
-    $cmp_id    = trim($_GET['cmp_id'] ?? '');
-
-    $result = CeisaJsonBuilder::generate($nomor_aju, $cmp_id);
-    if (!isset($result['status']) || $result['status'] !== 'OK') {
-        // Fallback: tampilkan data dari bc_ceisa_data
-        $stmtBcd = $koneksi->prepare("SELECT * FROM bc_ceisa_data WHERE nomorAju = ? LIMIT 1");
-        if ($stmtBcd) {
-            $stmtBcd->bind_param("s", $nomor_aju);
-            $stmtBcd->execute();
-            $resBcd = $stmtBcd->get_result();
-            if ($rowBcd = $resBcd->fetch_assoc()) {
-                $result = [
-                    'status' => 'OK',
-                    'nomor_aju' => $nomor_aju,
-                    'kode_dokumen' => $rowBcd['kodeDokumen'],
-                    'json' => json_encode($rowBcd, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
-                    'data' => $rowBcd,
-                    'source' => 'bc_ceisa_data'
-                ];
-            }
-            $stmtBcd->close();
-        }
-    }
-    echo json_encode($result);
-    exit;
-}
-
-if ($action === 'transfer') {
-    header('Content-Type: application/json; charset=utf-8');
-    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
-    $cmp_id    = trim($_REQUEST['cmp_id'] ?? '');
+    $nomor_aju = trim($_GET['nomor_aju'] ?? ($_GET['aju'] ?? ($_POST['nomor_aju'] ?? ($_POST['aju'] ?? ''))));
+    $cmp_id    = trim($_GET['cmp_id'] ?? ($_POST['cmp_id'] ?? ''));
 
     if (empty($nomor_aju)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
         exit;
     }
 
-    $_REQUEST['nomor_aju'] = $nomor_aju;
-    $_REQUEST['cmp_id']    = $cmp_id;
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $escCmp = $koneksi->real_escape_string($cmp_id);
 
-    ob_start();
-    include __DIR__ . '/posting.php';
-    $postOutput = ob_get_clean();
-
-    $decoded = json_decode($postOutput, true);
-    if ($decoded !== null) {
-        echo json_encode(['status' => 'OK', 'nomor_aju' => $nomor_aju, 'response' => $decoded]);
-    } else {
-        echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+    // 1. Status Proses Pabean
+    $sqlStatus = "SELECT kode_dokumen, nomor_aju, nomor_daftar, tanggal_daftar, kode_proses, waktu_status, keterangan 
+                  FROM bc_ceisa_status 
+                  WHERE nomor_aju = '$escAju' 
+                  ORDER BY waktu_status ASC, id ASC";
+    $resStatus = $koneksi->query($sqlStatus);
+    $listStatus = [];
+    if ($resStatus) {
+        while ($s = $resStatus->fetch_assoc()) {
+            $listStatus[] = $s;
+        }
     }
+
+    // 2. Respon Resmi Bea Cukai
+    $sqlResp = "SELECT kode_dokumen, nomor_aju, kode_respon, nomor_daftar, tanggal_daftar, nomor_respon, tanggal_respon, keterangan, pdf 
+                FROM bc_ceisa_respons 
+                WHERE nomor_aju = '$escAju' 
+                ORDER BY id ASC";
+    $resResp = $koneksi->query($sqlResp);
+    $listResp = [];
+    if ($resResp) {
+        while ($rp = $resResp->fetch_assoc()) {
+            $listResp[] = $rp;
+        }
+    }
+
+    // 3. Header info dari bc_ceisa_header
+    $sqlHdr = "SELECT kode_dokumen, nomor_daftar, tanggal_daftar, nomor_aju, nama_pernyataan, tanggal_pernyataan 
+               FROM bc_ceisa_header 
+               WHERE nomor_aju = '$escAju' LIMIT 1";
+    $resHdr = $koneksi->query($sqlHdr);
+    $header = $resHdr ? $resHdr->fetch_assoc() : null;
+
+    // 4. Data dari bc_ceisa_data (fallback jika header kosong atau butuh info kantor/perusahaan)
+    $sqlBcd = "SELECT kodeDokumen AS kode_dokumen, nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, 
+                      tanggalDaftar AS tanggal_daftar, namaPerusahaan AS nama_perusahaan, idPerusahaan AS id_perusahaan, 
+                      kodeKantor AS kode_kantor, namaKantorPendek AS nama_kantor, namaProses AS nama_proses, 
+                      namaRespon AS nama_respon, nomorRespon AS nomor_respon, tanggalRespon AS tanggal_respon, 
+                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, cmp_id
+               FROM bc_ceisa_data 
+               WHERE nomorAju = '$escAju' LIMIT 1";
+    $resBcd = $koneksi->query($sqlBcd);
+    $rowBcd = $resBcd ? $resBcd->fetch_assoc() : null;
+
+    if (!$header && $rowBcd) {
+        $header = [
+            'kode_dokumen' => $rowBcd['kode_dokumen'],
+            'nomor_daftar' => $rowBcd['nomor_daftar'],
+            'tanggal_daftar' => $rowBcd['tanggal_daftar'],
+            'nomor_aju' => $rowBcd['nomor_aju'],
+            'nama_pernyataan' => $rowBcd['nama_perusahaan'],
+            'tanggal_pernyataan' => $rowBcd['tanggal_daftar']
+        ];
+    }
+
+    // 5. Raw log respon
+    $sqlLog = "SELECT respon FROM bc_ceisa_respon_logs 
+               WHERE respon LIKE '%$escAju%' 
+               ORDER BY id DESC LIMIT 1";
+    $resLog = $koneksi->query($sqlLog);
+    $rawLog = $resLog ? $resLog->fetch_assoc() : null;
+
+    // 6. Hitung Stepper Tahapan 1 - 5
+    $stages = [
+        1 => ['title' => 'Perekaman Dokumen', 'desc' => 'Draft & perekaman awal dokumen', 'done' => true, 'time' => $header['tanggal_pernyataan'] ?? ($rowBcd['tanggal_daftar'] ?? '')],
+        2 => ['title' => 'Pengiriman LNSW', 'desc' => 'Dokumen terkirim ke INSW', 'done' => false, 'time' => ''],
+        3 => ['title' => 'Validasi Pabean', 'desc' => 'Validasi konten & No. Daftar terbit', 'done' => false, 'time' => ''],
+        4 => ['title' => 'Penjaluran / Billing', 'desc' => 'Penetapan jalur & kode billing', 'done' => false, 'time' => ''],
+        5 => ['title' => 'Keputusan Akhir (SPPB/NPE)', 'desc' => 'Dokumen selesai diproses', 'done' => false, 'time' => '']
+    ];
+
+    foreach ($listStatus as $st) {
+        $kp = (string)($st['kode_proses'] ?? '');
+        $kt = (string)($st['keterangan'] ?? '');
+        $tm = (string)($st['waktu_status'] ?? '');
+
+        if ($kp === '104' || $kp === '105' || $kp === '106' || stripos($kt, 'LNSW') !== false || stripos($kt, 'Kirim') !== false) {
+            $stages[2]['done'] = true;
+            if (empty($stages[2]['time'])) $stages[2]['time'] = $tm;
+        }
+        if ($kp === '110' || $kp === '200' || !empty($st['nomor_daftar'])) {
+            $stages[3]['done'] = true;
+            if (empty($stages[3]['time'])) $stages[3]['time'] = $tm;
+        }
+        if ($kp === '230' || $kp === '240' || $kp === '501' || $kp === '510' || stripos($kt, 'Jalur') !== false) {
+            $stages[4]['done'] = true;
+            if (empty($stages[4]['time'])) $stages[4]['time'] = $tm;
+        }
+        if ($kp === '511' || $kp === '800' || stripos($kt, 'Selesai') !== false) {
+            $stages[5]['done'] = true;
+            if (empty($stages[5]['time'])) $stages[5]['time'] = $tm;
+        }
+    }
+
+    foreach ($listResp as $rp) {
+        $kr = (string)($rp['kode_respon'] ?? '');
+        $kt = (string)($rp['keterangan'] ?? '');
+        $tm = (string)($rp['tanggal_respon'] ?? '');
+
+        if (in_array($kr, ['2003', '2303', '2503', '2703', '3003', '4003', '4103', '61103', '61303']) || stripos($kt, 'SPPB') !== false || stripos($kt, 'NPE') !== false) {
+            $stages[5]['done'] = true;
+            if (empty($stages[5]['time'])) $stages[5]['time'] = $tm;
+        }
+        if (substr($kr, -2) === '08' || stripos($kt, 'Billing') !== false) {
+            $stages[4]['done'] = true;
+            if (empty($stages[4]['time'])) $stages[4]['time'] = $tm;
+        }
+    }
+
+    // Jika di bc_ceisa_data ada nomor daftar
+    if (!empty($rowBcd['nomor_daftar']) && $rowBcd['nomor_daftar'] !== '-') {
+        $stages[2]['done'] = true;
+        $stages[3]['done'] = true;
+        if (empty($stages[3]['time'])) $stages[3]['time'] = $rowBcd['tanggal_daftar'];
+    }
+    // Jika di bc_ceisa_data nama_respon mengindikasikan SPPB / NPE / Selesai
+    $namaResponVal = $rowBcd['nama_respon'] ?? '';
+    $namaProsesVal = $rowBcd['nama_proses'] ?? '';
+    if (!empty($namaResponVal) && (stripos($namaResponVal, 'SPPB') !== false || stripos($namaResponVal, 'NPE') !== false || stripos($namaProsesVal, 'Selesai') !== false)) {
+        $stages[2]['done'] = true;
+        $stages[3]['done'] = true;
+        $stages[4]['done'] = true;
+        $stages[5]['done'] = true;
+        if (empty($stages[5]['time']) && !empty($rowBcd['tanggal_respon'])) {
+            $stages[5]['time'] = $rowBcd['tanggal_respon'];
+        }
+    }
+
+    // Fallback: Jika listStatus masih kosong tetapi ada nama_proses di bc_ceisa_data
+    if (empty($listStatus) && !empty($namaProsesVal) && $namaProsesVal !== '-') {
+        $listStatus[] = [
+            'kode_dokumen'   => $rowBcd['kode_dokumen'] ?? '',
+            'nomor_aju'      => $nomor_aju,
+            'nomor_daftar'   => $rowBcd['nomor_daftar'] ?? '',
+            'tanggal_daftar' => $rowBcd['tanggal_daftar'] ?? '',
+            'kode_proses'    => $namaProsesVal,
+            'waktu_status'   => $rowBcd['tanggal_respon'] ?: ($rowBcd['tanggal_daftar'] ?? '-'),
+            'keterangan'     => $namaProsesVal
+        ];
+    }
+
+    // Fallback: Jika listResp masih kosong tetapi ada respon (SPPB/NPE) di bc_ceisa_data
+    if (empty($listResp) && !empty($namaResponVal) && $namaResponVal !== '-') {
+        $listResp[] = [
+            'kode_dokumen'   => $rowBcd['kode_dokumen'] ?? '',
+            'nomor_aju'      => $nomor_aju,
+            'kode_respon'    => $namaResponVal,
+            'nomor_daftar'   => $rowBcd['nomor_daftar'] ?? '',
+            'tanggal_daftar' => $rowBcd['tanggal_daftar'] ?? '',
+            'nomor_respon'   => $rowBcd['nomor_respon'] ?? '',
+            'tanggal_respon' => $rowBcd['tanggal_respon'] ?? '',
+            'keterangan'     => $namaResponVal,
+            'pdf'            => $rowBcd['pdf'] ?? ''
+        ];
+    }
+
+    echo json_encode([
+        'status'      => 'OK',
+        'nomor_aju'   => $nomor_aju,
+        'header'      => $header,
+        'data_row'    => $rowBcd,
+        'stages'      => $stages,
+        'data_status' => $listStatus,
+        'data_respon' => $listResp,
+        'raw_log'     => $rawLog
+    ]);
     exit;
 }
 $themeParam = $_GET['theme'] ?? 'light';
@@ -875,6 +1010,127 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* Visual Stepper / Progress Bar (CEISA 4.0 Tracking) */
+        .stepper-container {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            position: relative;
+            margin: 14px 10px 22px;
+            padding: 0 10px;
+        }
+        .stepper-progress-bar {
+            position: absolute;
+            top: 15px;
+            left: 45px;
+            right: 45px;
+            height: 2px;
+            background: var(--border-card);
+            z-index: 1;
+        }
+        .stepper-progress-active {
+            position: absolute;
+            top: 15px;
+            left: 45px;
+            height: 2px;
+            background: #52c41a;
+            z-index: 2;
+            transition: width 0.35s ease;
+        }
+        .step-item {
+            position: relative;
+            z-index: 3;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            width: 120px;
+        }
+        .step-icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            border: 2px solid var(--border-card);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
+            transition: all 0.3s;
+        }
+        .step-item.done .step-icon {
+            border-color: #52c41a;
+            background: #52c41a;
+            color: #ffffff;
+        }
+        .step-item.active .step-icon {
+            border-color: var(--primary);
+            background: var(--primary);
+            color: #ffffff;
+            box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.25);
+        }
+        .step-title {
+            font-size: 10.5px;
+            font-weight: 600;
+            color: var(--text-heading);
+            margin-top: 6px;
+            line-height: 1.3;
+        }
+        .step-desc {
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .step-time {
+            font-size: 9px;
+            color: var(--primary);
+            margin-top: 3px;
+            font-family: monospace;
+            font-weight: 600;
+        }
+
+        /* Modal Tabs */
+        .modal-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-card);
+            margin-bottom: 12px;
+            gap: 16px;
+        }
+        .modal-tab-btn {
+            background: none;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 6px 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+        .modal-tab-btn:hover {
+            color: var(--primary);
+        }
+        .modal-tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        /* Dark Theme Support for Modal */
+        body[data-theme="dark"] .modal {
+            background: #1f1f1f;
+            border-color: #303030;
+        }
+        body[data-theme="dark"] .modal-header,
+        body[data-theme="dark"] .modal-footer {
+            background: #191919;
+            border-color: #303030;
+        }
+
         /* Silent CEISA Sync Indicator */
         .sync-indicator {
             display: inline-flex;
@@ -1185,38 +1441,130 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         </div>
     </div>
 
-    <!-- MODAL 1: PREVIEW JSON PAYLOAD -->
-    <div class="modal-overlay" id="modalPreview">
-        <div class="modal">
-            <div class="modal-header">
-                <h3 id="modalPreviewTitle">Preview JSON Payload</h3>
-                <button type="button" class="ant-btn ant-btn-sm" onclick="closeModal('modalPreview')">✕</button>
-            </div>
-            <div class="modal-body">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:11.5px; color:#8c8c8c;">
-                    <span id="modalJsonMeta">Ukuran: -</span>
-                    <button type="button" class="ant-btn ant-btn-sm" onclick="copyJsonText()">📋 Salin JSON</button>
+    <!-- MODAL: RIWAYAT TRACKING PERUBAHAN STATUS DOKUMEN CEISA 4.0 -->
+    <div class="modal-overlay" id="modalTrackingHistory" style="display:none;">
+        <div class="modal" style="max-width:880px; width:95%; max-height:92vh; display:flex; flex-direction:column; padding:0; border-radius:6px; overflow:hidden;">
+            <!-- Header Modal -->
+            <div class="modal-header" style="padding:12px 18px; border-bottom:1px solid var(--border-card); background:var(--bg-filter); display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <div style="width:28px; height:28px; border-radius:6px; background:rgba(24,144,255,0.12); display:flex; align-items:center; justify-content:center; color:var(--primary);">
+                        <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
+                            <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                            <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style="font-size:13px; font-weight:700; color:var(--text-heading); display:flex; align-items:center; gap:8px;">
+                            <span>Riwayat Tracking Perubahan Status</span>
+                            <span id="modalTrackDokBadge" class="ant-tag ant-tag-blue" style="font-size:10.5px; padding:1px 6px;">BC -</span>
+                        </div>
+                        <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px; font-family:monospace;" id="modalTrackAjuText">-</div>
+                    </div>
                 </div>
-                <pre class="code-view" id="modalJsonContent"></pre>
+                <button type="button" class="ant-btn ant-btn-sm" style="border:none; background:transparent; font-size:15px; cursor:pointer;" onclick="closeModal('modalTrackingHistory')">✕</button>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="ant-btn" onclick="closeModal('modalPreview')">Tutup</button>
-                <button type="button" class="ant-btn ant-btn-success" id="btnTransferFromModal" onclick="transferFromModal()">🚀 Kirim AJU Ini ke CEISA 4.0</button>
-            </div>
-        </div>
-    </div>
 
-    <!-- MODAL 2: HASIL TRANSFER CEISA 4.0 -->
-    <div class="modal-overlay" id="modalResult">
-        <div class="modal" style="max-width:580px;">
-            <div class="modal-header">
-                <h3 id="modalResultTitle">Hasil Transfer CEISA 4.0</h3>
-                <button type="button" class="ant-btn ant-btn-sm" onclick="closeModal('modalResult')">✕</button>
+            <!-- Body Modal -->
+            <div class="modal-body" style="padding:16px 20px; overflow-y:auto; flex:1;">
+                <!-- Ringkasan Info Cepat (Pendaftaran & Sync) -->
+                <div style="background:var(--bg-filter); border:1px solid var(--border-card); border-radius:4px; padding:10px 14px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div style="display:flex; gap:20px; flex-wrap:wrap;">
+                        <div>
+                            <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Nomor & Tanggal Pendaftaran</div>
+                            <div style="font-size:11.5px; font-weight:600; color:var(--text-heading); margin-top:2px;" id="modalTrackDaftarText">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Perusahaan / Pemilik</div>
+                            <div style="font-size:11.5px; font-weight:600; color:var(--text-heading); margin-top:2px;" id="modalTrackPerusahaanText">-</div>
+                        </div>
+                        <div>
+                            <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; font-weight:600;">Kantor Pabean</div>
+                            <div style="font-size:11.5px; font-weight:600; color:var(--text-heading); margin-top:2px;" id="modalTrackKantorText">-</div>
+                        </div>
+                    </div>
+                    <div>
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" id="btnModalSyncLive" onclick="syncTrackingModalAju()" style="display:inline-flex; align-items:center; gap:5px;">
+                            <svg viewBox="64 64 896 896" width="12" height="12" fill="currentColor">
+                                <path d="M756.1 487.6l23.5-23.5c3.1-3.1 3.1-8.2 0-11.3l-90.5-90.5c-3.1-3.1-8.2-3.1-11.3 0l-90.5 90.5c-3.1 3.1-3.1 8.2 0 11.3l23.5 23.5c3.1 3.1 8.2 3.1 11.3 0l38.2-38.2c1.9 44.4-14.7 89.1-49.8 124.2-65.7 65.7-167.3 69.8-237.7 12.3-4.5-3.7-11.1-3.1-14.9 1.4l-25.1 30.6c-3.7 4.5-3.1 11.1 1.4 14.9 98 80.1 239.5 74.4 331-17.1 49.3-49.3 72.8-112.5 70.4-175.6l38.2 38.2c3.1 3.1 8.2 3.1 11.3 0zM267.9 536.4l-23.5 23.5c-3.1 3.1-3.1 8.2 0 11.3l90.5 90.5c3.1 3.1 8.2 3.1 11.3 0l90.5-90.5c3.1-3.1 3.1-8.2 0-11.3l-23.5-23.5c-3.1-3.1-8.2-3.1-11.3 0l-38.2 38.2c-1.9-44.4 14.7-89.1 49.8-124.2 65.7-65.7 167.3-69.8 237.7-12.3 4.5 3.7 11.1 3.1 14.9-1.4l25.1-30.6c3.7-4.5 3.1-11.1-1.4-14.9-98-80.1-239.5-74.4-331 17.1-49.3 49.3-72.8 112.5-70.4 175.6l-38.2-38.2c-3.1-3.1-8.2-3.1-11.3 0z"></path>
+                            </svg>
+                            <span>Sync Ulang Live</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Visual Stepper Progress Bar -->
+                <div class="stepper-container" id="modalVisualStepper">
+                    <div class="stepper-progress-bar"></div>
+                    <div class="stepper-progress-active" id="modalStepperActiveBar" style="width:0%;"></div>
+                </div>
+
+                <!-- Tabs: Status Proses, Respon Resmi, Log Mentah -->
+                <div class="modal-tabs">
+                    <button type="button" class="modal-tab-btn active" id="tabBtnStatus" onclick="switchTrackingTab('status')">
+                        Riwayat Status Proses (<span id="modalTrackCountStatus">0</span>)
+                    </button>
+                    <button type="button" class="modal-tab-btn" id="tabBtnRespon" onclick="switchTrackingTab('respon')">
+                        Respon Resmi Bea Cukai (<span id="modalTrackCountRespon">0</span>)
+                    </button>
+                    <button type="button" class="modal-tab-btn" id="tabBtnRaw" onclick="switchTrackingTab('raw')">
+                        Log Respon Mentah (JSON)
+                    </button>
+                </div>
+
+                <!-- Tab Pane 1: Status Proses -->
+                <div class="tab-pane active" id="paneTrackStatus">
+                    <div style="border:1px solid var(--border-card); border-radius:3px; overflow:hidden;">
+                        <table class="ant-table" style="width:100%;">
+                            <thead class="ant-table-thead">
+                                <tr>
+                                    <th style="width:35px; text-align:center;">#</th>
+                                    <th style="width:145px;">Waktu Status</th>
+                                    <th style="width:90px;">Kode Proses</th>
+                                    <th>Keterangan Proses</th>
+                                    <th style="width:110px;">No. Daftar</th>
+                                </tr>
+                            </thead>
+                            <tbody class="ant-table-tbody" id="modalTrackStatusTbody">
+                                <tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);"><span class="spinner"></span> Memuat status...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab Pane 2: Respon Resmi -->
+                <div class="tab-pane" id="paneTrackRespon">
+                    <div style="border:1px solid var(--border-card); border-radius:3px; overflow:hidden;">
+                        <table class="ant-table" style="width:100%;">
+                            <thead class="ant-table-thead">
+                                <tr>
+                                    <th style="width:35px; text-align:center;">#</th>
+                                    <th style="width:95px;">Kode Respon</th>
+                                    <th style="width:150px;">Nomor Respon</th>
+                                    <th style="width:145px;">Tanggal Respon</th>
+                                    <th>Keterangan Respon</th>
+                                    <th style="width:85px; text-align:center;">Dokumen PDF</th>
+                                </tr>
+                            </thead>
+                            <tbody class="ant-table-tbody" id="modalTrackResponTbody">
+                                <tr><td colspan="6" style="text-align:center; padding:16px; color:var(--text-muted);"><span class="spinner"></span> Memuat respon...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tab Pane 3: Raw JSON Log -->
+                <div class="tab-pane" id="paneTrackRaw">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="color:var(--text-muted); font-size:10px;">Respon mentah terakhir dari CEISA 4.0:</span>
+                        <button type="button" class="ant-btn ant-btn-sm" onclick="copyTrackRawJson()">📋 Salin JSON</button>
+                    </div>
+                    <pre class="code-view" id="modalTrackRawBox" style="max-height:280px; overflow:auto;">// Menunggu data...</pre>
+                </div>
             </div>
-            <div class="modal-body" id="modalResultBody">
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="ant-btn ant-btn-primary" onclick="closeModal('modalResult'); loadList();">OK, Selesai</button>
+
+            <!-- Footer Modal -->
+            <div class="modal-footer" style="padding:10px 18px; border-top:1px solid var(--border-card); background:var(--bg-filter); display:flex; justify-content:flex-end;">
+                <button type="button" class="ant-btn" onclick="closeModal('modalTrackingHistory')">Tutup</button>
             </div>
         </div>
     </div>
@@ -1624,15 +1972,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const isSelected = selectedAju.has(r.nomor_aju);
                 const isPosted = parseInt(r.posted) > 0;
 
-                // Status Chip (Gate In TPB/KEK / Stuffing / Selesai Proses / Siap Kirim)
-                let tagClass = 'ant-tag-gold';
-                let tagText = 'Siap Kirim';
+                // Status Chip (Gate In TPB/KEK / Stuffing / Selesai Proses / Proses Pabean)
+                let tagClass = 'ant-tag-blue';
+                let tagText = 'Proses Pabean';
                 if (r.namaProses) {
                     tagText = r.namaProses;
                     const np = tagText.toLowerCase();
                     if (np.includes('selesai')) tagClass = 'ant-tag-green';
                     else if (np.includes('gate')) tagClass = 'ant-tag-gold';
                     else if (np.includes('stuffing')) tagClass = 'ant-tag-gold';
+                    else if (np.includes('reject') || np.includes('tolak')) tagClass = 'ant-tag-red';
                 } else if (isPosted) {
                     tagClass = 'ant-tag-blue';
                     tagText = `Terkirim (${(r.posted_waktu || '').substring(0, 10)})`;
@@ -1682,14 +2031,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <td style="font-weight:500;">BC ${r.bc}</td>
                         <td>
                             <div style="display:flex; align-items:center;">
-                                <b>${r.nomor_aju}</b>
-                                <i class="anticon anticon-info-circle ml-2" style="cursor:pointer; margin-left:6px;" onclick="previewJson('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Preview JSON">
+                                <b style="cursor:pointer; color:var(--primary);" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Klik untuk melihat riwayat tracking status">${r.nomor_aju}</b>
+                                <span style="cursor:pointer; margin-left:6px; display:inline-flex; align-items:center; color:var(--primary);" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat History Tracking Perubahan Status">
                                     <svg viewBox="64 64 896 896" width="13" height="13" fill="currentColor">
-                                        <path fill="#1890ff" d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
-                                        <path fill="#e6f7ff" d="M512 140c-205.4 0-372 166.6-372 372s166.6 372 372 372 372-166.6 372-372-166.6-372-372-372zm32 588c0 4.4-3.6 8-8 8h-48c-4.4 0-8-3.6-8-8V456c0-4.4 3.6-8 8-8h48c4.4 0 8 3.6 8 8v272zm-32-344a48.01 48.01 0 0 1 0-96 48.01 48.01 0 0 1 0 96z"></path>
-                                        <path fill="#1890ff" d="M464 336a48 48 0 1 0 96 0 48 48 0 1 0-96 0zm72 112h-48c-4.4 0-8 3.6-8 8v272c0 4.4 3.6 8 8 8h48c4.4 0 8-3.6 8-8V456c0-4.4-3.6-8-8-8z"></path>
+                                        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                                        <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
                                     </svg>
-                                </i>
+                                </span>
                             </div>
                             <p style="margin:4px 0px;"><span class="ant-tag ${tagClass}">${escapeHtml(tagText)}</span></p>
                         </td>
@@ -1699,7 +2047,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         </td>
                         <td>
                             <div>${escapeHtml(namaRespon)}${responBadgeExtra}</div>
-                            ${noRespon ? `<p style="cursor:pointer; text-decoration:underline; color:rgb(3, 157, 252); margin:0; font-size:10px;" onclick="previewJson('${r.nomor_aju}', '${r.cmp_id || ''}')">${escapeHtml(noRespon)}</p>` : ''}
+                            ${noRespon ? `<p style="cursor:pointer; text-decoration:underline; color:rgb(3, 157, 252); margin:0; font-size:10px;" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat Riwayat Tracking Status">${escapeHtml(noRespon)}</p>` : ''}
                         </td>
                         <td style="text-align:center;">
                             ${pdfHtml}
@@ -1824,162 +2172,252 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const count = (typeof selectedAju !== 'undefined' && selectedAju) ? selectedAju.size : 0;
             const el = document.getElementById('selectedCount');
             if (el) el.innerText = count;
-            const btn = document.getElementById('btnMainTransfer');
-            if (btn) btn.disabled = (count === 0);
         }
 
-        async function previewJson(nomorAju, cmpId) {
-            activePreviewAju = { nomorAju, cmpId };
-            const pt = document.getElementById('modalPreviewTitle');
-            if (pt) pt.innerText = `Preview JSON Payload: ${nomorAju}`;
-            const jm = document.getElementById('modalJsonMeta');
-            if (jm) jm.innerText = 'Membuat payload JSON...';
-            const jc = document.getElementById('modalJsonContent');
-            if (jc) jc.innerText = 'Loading JSON dari builder...';
-            const mp = document.getElementById('modalPreview');
-            if (mp) mp.style.display = 'flex';
+        // =========================================================================
+        // HISTORY TRACKING PERUBAHAN STATUS CEISA 4.0
+        // =========================================================================
+        let activeTrackingAju = null;
+
+        async function openTrackingHistory(nomorAju, cmpId) {
+            activeTrackingAju = { nomorAju, cmpId };
+
+            const modal = document.getElementById('modalTrackingHistory');
+            if (!modal) return;
+            modal.style.display = 'flex';
+
+            const txtAju = document.getElementById('modalTrackAjuText');
+            if (txtAju) txtAju.textContent = nomorAju;
+            const dokBadge = document.getElementById('modalTrackDokBadge');
+            if (dokBadge) dokBadge.textContent = 'BC -';
+            const txtDaftar = document.getElementById('modalTrackDaftarText');
+            if (txtDaftar) txtDaftar.textContent = 'Memuat...';
+            const txtPerusahaan = document.getElementById('modalTrackPerusahaanText');
+            if (txtPerusahaan) txtPerusahaan.textContent = '-';
+            const txtKantor = document.getElementById('modalTrackKantorText');
+            if (txtKantor) txtKantor.textContent = '-';
+
+            const tbStatus = document.getElementById('modalTrackStatusTbody');
+            if (tbStatus) tbStatus.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);"><span class="spinner"></span> Memuat riwayat status proses...</td></tr>`;
+            const tbRespon = document.getElementById('modalTrackResponTbody');
+            if (tbRespon) tbRespon.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);"><span class="spinner"></span> Memuat respon resmi Bea Cukai...</td></tr>`;
+            const rawBox = document.getElementById('modalTrackRawBox');
+            if (rawBox) rawBox.textContent = '// Menghubungi database...';
+
+            switchTrackingTab('status');
 
             try {
-                const res = await fetch(`daftar_dokumen.php?action=preview_json&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(cmpId)}`);
-                const json = await res.json();
-                const formatted = JSON.stringify(json, null, 2);
-                if (jc) jc.innerText = formatted;
-                if (jm) jm.innerText = `Ukuran: ${formatted.length} bytes | Format: CEISA 4.0 Standard`;
+                const res = await fetch(`daftar_dokumen.php?action=get_timeline&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(cmpId || '')}`);
+                const result = await res.json();
+
+                if (result.status === 'OK') {
+                    renderTrackingDetails(result);
+                } else {
+                    if (tbStatus) tbStatus.innerHTML = `<tr><td colspan="5" style="color:#ff4d4f; text-align:center; padding:16px;">${escapeHtml(result.message || 'Gagal memuat status dokumen')}</td></tr>`;
+                }
             } catch (err) {
-                if (jc) jc.innerText = 'Gagal memuat JSON: ' + err.message;
+                if (tbStatus) tbStatus.innerHTML = `<tr><td colspan="5" style="color:#ff4d4f; text-align:center; padding:16px;">Gagal memuat riwayat: ${escapeHtml(err.message)}</td></tr>`;
             }
         }
 
-        function copyJsonText() {
-            const el = document.getElementById('modalJsonContent');
+        function renderTrackingDetails(data) {
+            const hdr = data.header || {};
+            const dRow = data.data_row || {};
+            const kdDok = hdr.kode_dokumen || dRow.kode_dokumen || (data.data_status && data.data_status[0]?.kode_dokumen) || '-';
+            const noDaftar = hdr.nomor_daftar || dRow.nomor_daftar || (data.data_status && data.data_status[0]?.nomor_daftar) || '-';
+            const tglDaftar = hdr.tanggal_daftar || dRow.tanggal_daftar || (data.data_status && data.data_status[0]?.tanggal_daftar) || '-';
+            const compName = hdr.nama_pernyataan || dRow.nama_perusahaan || '-';
+            const kantor = dRow.nama_kantor || (dRow.kode_kantor ? `KPPBC ${dRow.kode_kantor}` : '-');
+
+            const dokBadge = document.getElementById('modalTrackDokBadge');
+            if (dokBadge) dokBadge.textContent = kdDok !== '-' ? `BC ${kdDok}` : 'BC';
+            const txtDaftar = document.getElementById('modalTrackDaftarText');
+            if (txtDaftar) txtDaftar.textContent = (noDaftar !== '-' && noDaftar) ? `${noDaftar} (Tgl: ${tglDaftar})` : 'Belum Terdaftar';
+            const txtPerusahaan = document.getElementById('modalTrackPerusahaanText');
+            if (txtPerusahaan) txtPerusahaan.textContent = compName;
+            const txtKantor = document.getElementById('modalTrackKantorText');
+            if (txtKantor) txtKantor.textContent = kantor;
+
+            // 1. Visual Stepper Tahapan 1 - 5
+            const stages = data.stages || {};
+            let stepperHtml = `
+                <div class="stepper-progress-bar"></div>
+                <div class="stepper-progress-active" id="modalStepperActiveBar" style="width:0%;"></div>
+            `;
+            let doneCount = 0;
+            const stageKeys = [1, 2, 3, 4, 5];
+            stageKeys.forEach(k => {
+                const st = stages[k] || { title: '', desc: '', done: false, time: '' };
+                if (st.done) doneCount++;
+                const isCurrentActive = st.done && (k === 5 || !stages[k + 1]?.done);
+                const stepClass = st.done ? (isCurrentActive ? 'done active' : 'done') : '';
+                const icon = st.done ? '✓' : k;
+
+                stepperHtml += `
+                    <div class="step-item ${stepClass}">
+                        <div class="step-icon">${icon}</div>
+                        <div class="step-title">${escapeHtml(st.title)}</div>
+                        <div class="step-desc">${escapeHtml(st.desc)}</div>
+                        <div class="step-time">${escapeHtml(st.time ? st.time.substring(0, 16) : '')}</div>
+                    </div>
+                `;
+            });
+            const vStepper = document.getElementById('modalVisualStepper');
+            if (vStepper) vStepper.innerHTML = stepperHtml;
+            const activePercent = Math.max(0, Math.min(100, (doneCount - 1) * 25));
+            setTimeout(() => {
+                const bar = document.getElementById('modalStepperActiveBar');
+                if (bar) bar.style.width = activePercent + '%';
+            }, 50);
+
+            // 2. Tab 1: Status Proses
+            const statusList = data.data_status || [];
+            const cntStatus = document.getElementById('modalTrackCountStatus');
+            if (cntStatus) cntStatus.textContent = statusList.length;
+            const tbStatus = document.getElementById('modalTrackStatusTbody');
+            if (tbStatus) {
+                if (statusList.length === 0) {
+                    tbStatus.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-muted);">Belum ada riwayat status proses pabean untuk dokumen ini.</td></tr>`;
+                } else {
+                    let sHtml = '';
+                    statusList.forEach((s, idx) => {
+                        sHtml += `
+                            <tr>
+                                <td style="text-align:center; color:var(--text-muted); font-size:10px;">${idx + 1}</td>
+                                <td><code style="font-size:10px;">${escapeHtml(s.waktu_status || '-')}</code></td>
+                                <td><span class="ant-tag ant-tag-blue" style="font-size:9.5px;">${escapeHtml(s.kode_proses || '-')}</span></td>
+                                <td><strong>${escapeHtml(s.keterangan || '-')}</strong></td>
+                                <td>${escapeHtml(s.nomor_daftar || '-')}</td>
+                            </tr>
+                        `;
+                    });
+                    tbStatus.innerHTML = sHtml;
+                }
+            }
+
+            // 3. Tab 2: Respon Resmi
+            const respList = data.data_respon || [];
+            const cntRespon = document.getElementById('modalTrackCountRespon');
+            if (cntRespon) cntRespon.textContent = respList.length;
+            const tbRespon = document.getElementById('modalTrackResponTbody');
+            if (tbRespon) {
+                if (respList.length === 0) {
+                    tbRespon.innerHTML = `<tr><td colspan="6" style="text-align:center; padding:20px; color:var(--text-muted);">Belum ada respon resmi yang diterbitkan oleh Bea Cukai.</td></tr>`;
+                } else {
+                    let rHtml = '';
+                    respList.forEach((rp, idx) => {
+                        let pdfBtn = '<span style="color:var(--text-muted);">-</span>';
+                        if (rp.pdf) {
+                            pdfBtn = `<a href="pdf.php?aju=${encodeURIComponent(data.nomor_aju)}&pdf=${encodeURIComponent(rp.pdf)}" target="_blank" class="pdf-btn-badge" style="display:inline-flex; align-items:center; gap:2px; font-weight:600; text-decoration:none;">
+                                <svg viewBox="64 64 896 896" width="12" height="12" fill="#ff4d4f"><path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path></svg>
+                                <span>PDF</span>
+                            </a>`;
+                        }
+                        rHtml += `
+                            <tr>
+                                <td style="text-align:center; color:var(--text-muted); font-size:10px;">${idx + 1}</td>
+                                <td><span class="ant-tag ant-tag-blue" style="font-size:9.5px;">${escapeHtml(rp.kode_respon || '-')}</span></td>
+                                <td><strong>${escapeHtml(rp.nomor_respon || '-')}</strong></td>
+                                <td style="font-size:10px;">${escapeHtml(rp.tanggal_respon || '-')}</td>
+                                <td>${escapeHtml(rp.keterangan || '-')}</td>
+                                <td style="text-align:center;">${pdfBtn}</td>
+                            </tr>
+                        `;
+                    });
+                    tbRespon.innerHTML = rHtml;
+                }
+            }
+
+            // 4. Tab 3: Log Mentah (JSON)
+            const rawBox = document.getElementById('modalTrackRawBox');
+            if (rawBox) {
+                if (data.raw_log && data.raw_log.respon) {
+                    try {
+                        const parsed = JSON.parse(data.raw_log.respon);
+                        rawBox.textContent = JSON.stringify(parsed, null, 2);
+                    } catch (e) {
+                        rawBox.textContent = data.raw_log.respon;
+                    }
+                } else {
+                    rawBox.textContent = '// Belum ada log respon mentah yang tersimpan di bc_ceisa_respon_logs untuk nomor AJU ini.';
+                }
+            }
+        }
+
+        function switchTrackingTab(tab) {
+            document.querySelectorAll('.modal-tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+
+            if (tab === 'status') {
+                const b = document.getElementById('tabBtnStatus');
+                if (b) b.classList.add('active');
+                const p = document.getElementById('paneTrackStatus');
+                if (p) p.classList.add('active');
+            } else if (tab === 'respon') {
+                const b = document.getElementById('tabBtnRespon');
+                if (b) b.classList.add('active');
+                const p = document.getElementById('paneTrackRespon');
+                if (p) p.classList.add('active');
+            } else if (tab === 'raw') {
+                const b = document.getElementById('tabBtnRaw');
+                if (b) b.classList.add('active');
+                const p = document.getElementById('paneTrackRaw');
+                if (p) p.classList.add('active');
+            }
+        }
+
+        function copyTrackRawJson() {
+            const el = document.getElementById('modalTrackRawBox');
             const text = el ? el.innerText : '';
             navigator.clipboard.writeText(text).then(() => {
-                showSuccess('JSON berhasil disalin ke clipboard!');
+                showSuccess('JSON respon mentah berhasil disalin ke clipboard!');
             }).catch(err => {
                 showError('Gagal menyalin: ' + err);
             });
         }
 
-        async function transferSingle(nomorAju, cmpId) {
-            const ok = await showConfirm(`Kirim Dokumen AJU [${nomorAju}] langsung ke Portal CEISA 4.0?`, 'Konfirmasi Transfer CEISA 4.0', 'Ya, Kirim Dokumen', 'Batal', 'info');
-            if (!ok) return;
+        async function syncTrackingModalAju() {
+            if (!activeTrackingAju) return;
+            const btn = document.getElementById('btnModalSyncLive');
+            if (btn) btn.disabled = true;
 
-            showResultModal(`Mengirim AJU ${nomorAju}...`, `<div style="text-align:center; padding:20px;"><span class="spinner"></span> Menghubungkan ke Gateway Bea Cukai CEISA 4.0...</div>`);
+            Swal.fire({
+                title: 'Tarik / Sync Respon CEISA',
+                html: `Menghubungi portal Bea Cukai untuk memeriksa respon dokumen AJU:<br><b style="font-family:monospace; color:var(--primary);">${escapeHtml(activeTrackingAju.nomorAju)}</b>...`,
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
 
             try {
-                const fd = new FormData();
-                fd.append('action', 'transfer');
-                fd.append('nomor_aju', nomorAju);
-                fd.append('cmp_id', cmpId);
+                const res = await fetch(`statusaju.php?action=sync_single&aju=${encodeURIComponent(activeTrackingAju.nomorAju)}&cmp_id=${encodeURIComponent(activeTrackingAju.cmpId || '')}`);
+                const result = await res.json();
 
-                const res = await fetch('transfer.php', { method: 'POST', body: fd });
-                const json = await res.json();
-                renderTransferResponse(json);
+                if (result.status === 'OK') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Sinkronisasi Berhasil!',
+                        text: result.message || 'Status dan respon dokumen berhasil diperbarui.',
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    openTrackingHistory(activeTrackingAju.nomorAju, activeTrackingAju.cmpId);
+                    loadList();
+                } else {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Respon CEISA 4.0',
+                        text: result.message || 'Tidak ada pembaruan status baru dari CEISA 4.0.'
+                    });
+                }
             } catch (err) {
-                renderTransferResponse({ status: 'ERROR', message: 'Koneksi error: ' + err.message });
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal Sinkronisasi',
+                    text: err.message
+                });
+            } finally {
+                if (btn) btn.disabled = false;
             }
-        }
-
-        async function transferFromModal() {
-            if (!activePreviewAju) return;
-            closeModal('modalPreview');
-            await transferSingle(activePreviewAju.nomorAju, activePreviewAju.cmpId);
-        }
-
-        async function transferSelected() {
-            const count = selectedAju.size;
-            if (count === 0) return;
-            const ok = await showConfirm(`Apakah Anda yakin ingin mentransfer ${count} dokumen terpilih ke CEISA 4.0?`, 'Konfirmasi Transfer Batch', 'Ya, Transfer Sekarang', 'Batal', 'info');
-            if (!ok) return;
-
-            const ajuList = Array.from(selectedAju);
-            showResultModal(`Memproses ${count} Dokumen...`, `<div id="batchProgress">Memulai transfer batch...</div>`);
-
-            let successCount = 0;
-            let failCount = 0;
-            let logHtml = '';
-
-            for (let i = 0; i < ajuList.length; i++) {
-                const noAju = ajuList[i];
-                const matched = ajuData.find(x => x.nomor_aju === noAju);
-                const cmpId = matched ? matched.cmp_id : '';
-
-                const bp = document.getElementById('batchProgress');
-                if (bp) {
-                    bp.innerHTML = `
-                        <div style="margin-bottom:12px; font-weight:600;">Mengirim (${i + 1}/${count}): <code style="color:#1890ff;">${noAju}</code></div>
-                        <div style="background:#f0f0f0; height:8px; border-radius:4px; overflow:hidden;">
-                            <div style="background:#1890ff; width:${((i+1)/count)*100}%; height:100%; transition:width 0.3s;"></div>
-                        </div>
-                    `;
-                }
-
-                try {
-                    const fd = new FormData();
-                    fd.append('action', 'transfer');
-                    fd.append('nomor_aju', noAju);
-                    fd.append('cmp_id', cmpId);
-
-                    const res = await fetch('transfer.php', { method: 'POST', body: fd });
-                    const json = await res.json();
-
-                    if (json.status === 'OK') {
-                        successCount++;
-                        logHtml += `<div style="color:#52c41a; font-size:11.5px; margin-bottom:4px;">✓ [${noAju}] Berhasil ditransfer</div>`;
-                    } else {
-                        failCount++;
-                        logHtml += `<div style="color:#f5222d; font-size:11.5px; margin-bottom:4px;">✕ [${noAju}] ${json.message || 'Gagal'}</div>`;
-                    }
-                } catch (err) {
-                    failCount++;
-                    logHtml += `<div style="color:#f5222d; font-size:11.5px; margin-bottom:4px;">✕ [${noAju}] Error jaringan</div>`;
-                }
-            }
-
-            const mrt = document.getElementById('modalResultTitle');
-            if (mrt) mrt.innerText = 'Hasil Transfer Batch CEISA 4.0';
-            const mrb = document.getElementById('modalResultBody');
-            if (mrb) {
-                mrb.innerHTML = `
-                    <div style="margin-bottom:12px; font-weight:600; font-size:13px;">
-                        Transfer Selesai: <span style="color:#52c41a;">${successCount} Sukses</span>, <span style="color:#f5222d;">${failCount} Gagal</span>
-                    </div>
-                    <div style="max-height:260px; overflow-y:auto; border:1px solid #d9d9d9; padding:10px; border-radius:4px; background:#fafafa;">
-                        ${logHtml}
-                    </div>
-                `;
-            }
-        }
-
-        function showResultModal(title, bodyHtml) {
-            const mrt = document.getElementById('modalResultTitle');
-            if (mrt) mrt.innerText = title;
-            const mrb = document.getElementById('modalResultBody');
-            if (mrb) mrb.innerHTML = bodyHtml;
-            const mr = document.getElementById('modalResult');
-            if (mr) mr.style.display = 'flex';
-        }
-
-        function renderTransferResponse(json) {
-            let html = '';
-            if (json.status === 'OK') {
-                html = `
-                    <div style="background:#e6f7ff; border:1px solid #91d5ff; border-radius:4px; padding:12px; margin-bottom:12px;">
-                        <h4 style="color:#1890ff; margin-bottom:4px; font-size:13px;">✓ Dokumen Berhasil Diposting ke CEISA 4.0</h4>
-                        <p style="font-size:11.5px; color:#595959;">Nomor AJU: <strong style="font-family:monospace;">${escapeHtml(json.nomor_aju)}</strong></p>
-                    </div>
-                    <pre class="code-view">${escapeHtml(JSON.stringify(json.response, null, 2))}</pre>
-                `;
-            } else {
-                html = `
-                    <div style="background:#fff1f0; border:1px solid #ffa39e; border-radius:4px; padding:12px; margin-bottom:12px;">
-                        <h4 style="color:#f5222d; margin-bottom:4px; font-size:13px;">✕ Respon Transfer CEISA 4.0</h4>
-                        <p style="font-size:11.5px; color:#595959;">${escapeHtml(json.message || 'Gagal memproses dokumen')}</p>
-                    </div>
-                    ${json.raw_response ? `<pre class="code-view">${escapeHtml(json.raw_response)}</pre>` : ''}
-                `;
-            }
-            document.getElementById('modalResultBody').innerHTML = html;
         }
 
         function closeModal(id) {
