@@ -1107,6 +1107,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <style>
@@ -1220,6 +1221,51 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            transition: flex 0.2s ease;
+        }
+
+        /* Maximized Pane States */
+        .split-container.maximized-top .split-pane-top {
+            flex: 1 1 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+        .split-container.maximized-top .split-divider,
+        .split-container.maximized-top .split-pane-bottom {
+            display: none !important;
+        }
+
+        .split-container.maximized-bottom .split-pane-bottom {
+            flex: 1 1 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+        .split-container.maximized-bottom .split-divider,
+        .split-container.maximized-bottom .split-pane-top {
+            display: none !important;
+        }
+
+        .split-divider .split-btn-collapse {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            color: var(--text-muted);
+            font-size: 8px;
+            line-height: 1;
+            padding: 1px 5px;
+            height: 14px;
+            border-radius: 2px;
+            cursor: pointer;
+            margin: 0 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            z-index: 25;
+        }
+        .split-divider .split-btn-collapse:hover {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary);
         }
 
         /* -------------------------------------------------------------
@@ -1503,18 +1549,18 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         /* -------------------------------------------------------------
            POWERBUILDER CEISA COLORING RULES (Aktif HANYA JIKA IS_INV = 1)
            ------------------------------------------------------------- */
-        /* 1. Baris Dokumen sudah submit ke CEISA: Warna Latar BIRU SOFT TERANG */
+        /* 1. Baris Dokumen sudah submit ke CEISA: Warna Latar BIRU SOFT PASTEL */
         #hdrTbody tr.row-submitted-ceisa td:not(.cell-no-it-inv):not(.cell-it-inv) {
-            background-color: #bfe0ff !important;
-            color: #002766 !important;
-            border-color: rgba(24, 144, 255, 0.25) !important;
+            background-color: #e6f4ff !important;
+            color: #002c6a !important;
+            border-color: rgba(24, 144, 255, 0.18) !important;
         }
         #hdrTbody tr.row-submitted-ceisa td:not(.cell-no-it-inv):not(.cell-it-inv) a {
             color: #0958d9 !important;
         }
         #hdrTbody tr.row-submitted-ceisa td .ant-tag {
             background: #ffffff !important;
-            border-color: #91caff !important;
+            border-color: #adc6ff !important;
         }
         #hdrTbody tr.row-submitted-ceisa td .ant-tag-blue {
             color: #096dd9 !important;
@@ -1532,13 +1578,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             border-color: #ffa39e !important;
         }
         #hdrTbody tr.row-submitted-ceisa:hover td:not(.cell-no-it-inv):not(.cell-it-inv) {
-            background-color: #a8d5ff !important;
-            color: #002766 !important;
+            background-color: #d4ecff !important;
+            color: #002c6a !important;
         }
         body[data-theme="dark"] #hdrTbody tr.row-submitted-ceisa td:not(.cell-no-it-inv):not(.cell-it-inv) {
-            background-color: #112a45 !important;
+            background-color: #11253e !important;
             color: #bae7ff !important;
-            border-color: rgba(23, 125, 220, 0.3) !important;
+            border-color: rgba(23, 125, 220, 0.25) !important;
         }
         body[data-theme="dark"] #hdrTbody tr.row-submitted-ceisa td .ant-tag {
             background: #163860 !important;
@@ -1546,7 +1592,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             border-color: #177ddc !important;
         }
         body[data-theme="dark"] #hdrTbody tr.row-submitted-ceisa:hover td:not(.cell-no-it-inv):not(.cell-it-inv) {
-            background-color: #17375e !important;
+            background-color: #163254 !important;
         }
 
         /* 2. Kolom Nomor AJU & nomor urut jika sudah masuk IT Inventory: KUNING (TETAP KUNING SAAT HOVER / TERPILIH) */
@@ -1851,6 +1897,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn" onclick="loadList()" title="Muat Ulang Data">
                             <span>&#128259; Muat Ulang</span>
                         </button>
+                        <button type="button" class="ant-btn" id="btnMaxTop" onclick="toggleMaximizePane('top')" title="Perbesar / Maximize Grid Dokumen (Layar Penuh)">
+                            <i class="fa-solid fa-expand" id="iconMaxTop"></i> <span id="textMaxTop">Maximize</span>
+                        </button>
                     </div>
                 </div>
 
@@ -1965,8 +2014,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         </div>
 
         <!-- SPLITBAR (RESIZABLE HORIZONTAL DIVIDER) -->
-        <div class="split-divider" id="splitbar" title="Tarik ke atas / bawah untuk mengubah ukuran tampilan">
+        <div class="split-divider" id="splitbar" title="Tarik untuk mengubah ukuran tampilan, double-click untuk toggle maximize">
+            <button type="button" class="split-btn-collapse" onclick="event.stopPropagation(); toggleMaximizePane('top');" title="Maximize Grid Master (Atas)">&#x25BC; Maximize Grid</button>
             <div class="split-handle"></div>
+            <button type="button" class="split-btn-collapse" onclick="event.stopPropagation(); toggleMaximizePane('bottom');" title="Maximize Grid Detail (Bawah)">&#x25B2; Detail</button>
         </div>
 
         <!-- PANE BOTTOM: TAB DETAIL DOKUMEN (BARANG, DOKUMEN, STATUS, RESPON) -->
@@ -1978,22 +2029,27 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <span style="font-size:10px; color:var(--text-muted); font-weight:400;">Dokumen Terpilih:</span>
                         <span id="detailAjuTitle" style="color:var(--primary); font-weight:700;">-</span>
                     </div>
-                    <div class="tab-bar">
-                        <button type="button" class="tab-btn active" data-tab="barang" onclick="switchDetailTab('barang')">
-                            <span>&#128230; Data Barang</span>
-                            <span class="ant-tag" id="cnt-barang" style="margin-left:2px;">0</span>
-                        </button>
-                        <button type="button" class="tab-btn" data-tab="dokumen" onclick="switchDetailTab('dokumen')">
-                            <span>&#128196; Dokumen</span>
-                            <span class="ant-tag" id="cnt-dokumen" style="margin-left:2px;">0</span>
-                        </button>
-                        <button type="button" class="tab-btn" data-tab="status" onclick="switchDetailTab('status')">
-                            <span>&#8505;&#65039; Status</span>
-                            <span class="ant-tag" id="cnt-status" style="margin-left:2px;">0</span>
-                        </button>
-                        <button type="button" class="tab-btn" data-tab="respon" onclick="switchDetailTab('respon')">
-                            <span>&#128172; Respon</span>
-                            <span class="ant-tag" id="cnt-respon" style="margin-left:2px;">0</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <div class="tab-bar">
+                            <button type="button" class="tab-btn active" data-tab="barang" onclick="switchDetailTab('barang')">
+                                <span>&#128230; Data Barang</span>
+                                <span class="ant-tag" id="cnt-barang" style="margin-left:2px;">0</span>
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="dokumen" onclick="switchDetailTab('dokumen')">
+                                <span>&#128196; Dokumen</span>
+                                <span class="ant-tag" id="cnt-dokumen" style="margin-left:2px;">0</span>
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="status" onclick="switchDetailTab('status')">
+                                <span>&#8505;&#65039; Status</span>
+                                <span class="ant-tag" id="cnt-status" style="margin-left:2px;">0</span>
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="respon" onclick="switchDetailTab('respon')">
+                                <span>&#128172; Respon</span>
+                                <span class="ant-tag" id="cnt-respon" style="margin-left:2px;">0</span>
+                            </button>
+                        </div>
+                        <button type="button" class="ant-btn ant-btn-sm" id="btnMaxBottom" onclick="toggleMaximizePane('bottom')" title="Perbesar / Maximize Grid Detail (Layar Penuh)">
+                            <i class="fa-solid fa-expand" id="iconMaxBottom"></i> <span id="textMaxBottom">Maximize Detail</span>
                         </button>
                     </div>
                 </div>
@@ -2365,6 +2421,119 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
             });
         })();
+
+        // -------------------------------------------------------------
+        // MAXIMIZE / RESTORE PANE LOGIC
+        // -------------------------------------------------------------
+        let currentMaximizedPane = null; // null | 'top' | 'bottom'
+
+        function toggleMaximizePane(pane) {
+            const container = document.getElementById('splitContainer');
+            const topPane = document.getElementById('topPane');
+            const bottomPane = document.getElementById('bottomPane');
+            const splitbar = document.getElementById('splitbar');
+            const btnTop = document.getElementById('btnMaxTop');
+            const btnBottom = document.getElementById('btnMaxBottom');
+            const iconTop = document.getElementById('iconMaxTop');
+            const textTop = document.getElementById('textMaxTop');
+            const iconBottom = document.getElementById('iconMaxBottom');
+            const textBottom = document.getElementById('textMaxBottom');
+
+            if (currentMaximizedPane === pane) {
+                // Restore split layout
+                currentMaximizedPane = null;
+                container.classList.remove('maximized-top', 'maximized-bottom');
+                topPane.style.display = '';
+                bottomPane.style.display = '';
+                splitbar.style.display = '';
+
+                const savedH = localStorage.getItem('ceisa_transfer_top_h');
+                if (savedH && parseInt(savedH, 10) >= 160) {
+                    topPane.style.flex = `0 0 ${savedH}px`;
+                } else {
+                    topPane.style.flex = '0 0 53%';
+                }
+                bottomPane.style.flex = '1 1 0';
+
+                if (btnTop) {
+                    btnTop.classList.remove('ant-btn-primary');
+                    btnTop.title = 'Perbesar / Maximize Grid Dokumen (Layar Penuh)';
+                    if (iconTop) iconTop.className = 'fa-solid fa-expand';
+                    if (textTop) textTop.textContent = 'Maximize';
+                }
+                if (btnBottom) {
+                    btnBottom.classList.remove('ant-btn-primary');
+                    btnBottom.title = 'Perbesar / Maximize Grid Detail (Layar Penuh)';
+                    if (iconBottom) iconBottom.className = 'fa-solid fa-expand';
+                    if (textBottom) textBottom.textContent = 'Maximize Detail';
+                }
+            } else {
+                // Maximize target pane
+                currentMaximizedPane = pane;
+                if (pane === 'top') {
+                    container.classList.remove('maximized-bottom');
+                    container.classList.add('maximized-top');
+                    topPane.style.display = 'flex';
+                    topPane.style.flex = '1 1 100%';
+                    topPane.style.height = '100%';
+                    bottomPane.style.display = 'none';
+                    splitbar.style.display = 'none';
+
+                    if (btnTop) {
+                        btnTop.classList.add('ant-btn-primary');
+                        btnTop.title = 'Kembalikan Ukuran Normal Grid Dokumen (Restore / Esc)';
+                        if (iconTop) iconTop.className = 'fa-solid fa-compress';
+                        if (textTop) textTop.textContent = 'Restore';
+                    }
+                    if (btnBottom) {
+                        btnBottom.classList.remove('ant-btn-primary');
+                        if (iconBottom) iconBottom.className = 'fa-solid fa-expand';
+                        if (textBottom) textBottom.textContent = 'Maximize Detail';
+                    }
+                } else if (pane === 'bottom') {
+                    container.classList.remove('maximized-top');
+                    container.classList.add('maximized-bottom');
+                    topPane.style.display = 'none';
+                    splitbar.style.display = 'none';
+                    bottomPane.style.display = 'flex';
+                    bottomPane.style.flex = '1 1 100%';
+                    bottomPane.style.height = '100%';
+
+                    if (btnBottom) {
+                        btnBottom.classList.add('ant-btn-primary');
+                        btnBottom.title = 'Kembalikan Ukuran Normal Grid Detail (Restore / Esc)';
+                        if (iconBottom) iconBottom.className = 'fa-solid fa-compress';
+                        if (textBottom) textBottom.textContent = 'Restore';
+                    }
+                    if (btnTop) {
+                        btnTop.classList.remove('ant-btn-primary');
+                        if (iconTop) iconTop.className = 'fa-solid fa-expand';
+                        if (textTop) textTop.textContent = 'Maximize';
+                    }
+                }
+            }
+
+            // Trigger window resize to adjust internal scroll & table columns
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        // Double-click splitbar toggles maximize
+        document.addEventListener('DOMContentLoaded', function() {
+            const sb = document.getElementById('splitbar');
+            if (sb) {
+                sb.addEventListener('dblclick', function(e) {
+                    if (e.target.closest('.split-btn-collapse')) return;
+                    toggleMaximizePane('top');
+                });
+            }
+        });
+
+        // Esc key restores maximized view
+        window.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && currentMaximizedPane) {
+                toggleMaximizePane(currentMaximizedPane);
+            }
+        });
 
         // Sinkronisasi tema & interaksi parent
         window.addEventListener('message', function(e) {

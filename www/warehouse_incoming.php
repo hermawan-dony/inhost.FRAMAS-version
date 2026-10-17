@@ -716,12 +716,65 @@ if ($action === 'detail_tab') {
             font-weight: 600;
         }
         tr.row-submitted td:not(.cell-it-inv) {
-            background-color: #bfe0ff !important;
-            color: #002766 !important;
+            background-color: #e6f4ff !important;
+            color: #002c6a !important;
+            border-color: rgba(24, 144, 255, 0.18) !important;
+        }
+        tr.row-submitted:hover td:not(.cell-it-inv) {
+            background-color: #d4ecff !important;
+            color: #002c6a !important;
         }
         body[data-theme="dark"] tr.row-submitted td:not(.cell-it-inv) {
-            background-color: #112a45 !important;
+            background-color: #11253e !important;
             color: #bae7ff !important;
+            border-color: rgba(23, 125, 220, 0.25) !important;
+        }
+        body[data-theme="dark"] tr.row-submitted:hover td:not(.cell-it-inv) {
+            background-color: #163254 !important;
+        }
+
+        /* Maximized states */
+        .split-container.maximized-top .split-pane-top {
+            flex: 1 1 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+        .split-container.maximized-top .split-divider,
+        .split-container.maximized-top .split-pane-bottom {
+            display: none !important;
+        }
+
+        .split-container.maximized-bottom .split-pane-bottom {
+            flex: 1 1 100% !important;
+            height: 100% !important;
+            max-height: 100% !important;
+        }
+        .split-container.maximized-bottom .split-divider,
+        .split-container.maximized-bottom .split-pane-top {
+            display: none !important;
+        }
+
+        .split-divider .split-btn-collapse {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-size: 8px;
+            line-height: 1;
+            padding: 1px 5px;
+            height: 14px;
+            border-radius: 2px;
+            cursor: pointer;
+            margin: 0 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+            z-index: 25;
+        }
+        .split-divider .split-btn-collapse:hover {
+            background: var(--primary);
+            color: #fff;
+            border-color: var(--primary);
         }
 
         /* Tags */
@@ -839,6 +892,9 @@ if ($action === 'detail_tab') {
                         <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" onclick="loadList()" title="Segarkan Data">
                             <i class="fa-solid fa-arrows-rotate"></i> Muat Ulang
                         </button>
+                        <button type="button" class="ant-btn ant-btn-sm" id="btnMaxTop" onclick="toggleMaximizePane('top')" title="Perbesar / Maximize Grid Dokumen (Layar Penuh)">
+                            <i class="fa-solid fa-expand" id="iconMaxTop"></i> <span id="textMaxTop">Maximize</span>
+                        </button>
                     </div>
                 </div>
 
@@ -913,8 +969,10 @@ if ($action === 'detail_tab') {
         </div>
 
         <!-- SPLITBAR DIVIDER -->
-        <div class="split-divider" id="splitbar" title="Tarik untuk mengubah ukuran tampilan">
+        <div class="split-divider" id="splitbar" title="Tarik untuk mengubah ukuran tampilan, double-click untuk toggle maximize">
+            <button type="button" class="split-btn-collapse" onclick="event.stopPropagation(); toggleMaximizePane('top');" title="Maximize Grid Master (Atas)">&#x25BC; Maximize Grid</button>
             <div class="split-handle"></div>
+            <button type="button" class="split-btn-collapse" onclick="event.stopPropagation(); toggleMaximizePane('bottom');" title="Maximize Grid Detail (Bawah)">&#x25B2; Detail</button>
         </div>
 
         <!-- PANE BOTTOM: DETAIL DOKUMEN & VERIFIKASI FISIK WAREHOUSE -->
@@ -961,6 +1019,10 @@ if ($action === 'detail_tab') {
                                 <i class="fa-solid fa-reply"></i> Respon CEISA
                             </button>
                         </div>
+
+                        <button type="button" class="ant-btn ant-btn-sm" id="btnMaxBottom" onclick="toggleMaximizePane('bottom')" title="Perbesar / Maximize Grid Detail (Layar Penuh)">
+                            <i class="fa-solid fa-expand" id="iconMaxBottom"></i> <span id="textMaxBottom">Maximize Detail</span>
+                        </button>
                     </div>
                 </div>
 
@@ -1617,6 +1679,119 @@ if ($action === 'detail_tab') {
                 }
             });
         })();
+
+        // -------------------------------------------------------------
+        // MAXIMIZE / RESTORE PANE LOGIC
+        // -------------------------------------------------------------
+        let currentMaximizedPane = null; // null | 'top' | 'bottom'
+
+        function toggleMaximizePane(pane) {
+            const container = document.getElementById('splitContainer');
+            const topPane = document.getElementById('topPane');
+            const bottomPane = document.getElementById('bottomPane');
+            const splitbar = document.getElementById('splitbar');
+            const btnTop = document.getElementById('btnMaxTop');
+            const btnBottom = document.getElementById('btnMaxBottom');
+            const iconTop = document.getElementById('iconMaxTop');
+            const textTop = document.getElementById('textMaxTop');
+            const iconBottom = document.getElementById('iconMaxBottom');
+            const textBottom = document.getElementById('textMaxBottom');
+
+            if (currentMaximizedPane === pane) {
+                // Restore split layout
+                currentMaximizedPane = null;
+                container.classList.remove('maximized-top', 'maximized-bottom');
+                topPane.style.display = '';
+                bottomPane.style.display = '';
+                splitbar.style.display = '';
+
+                const savedH = localStorage.getItem('ceisa_wh_in_top_h');
+                if (savedH && parseInt(savedH, 10) >= 160) {
+                    topPane.style.flex = `0 0 ${savedH}px`;
+                } else {
+                    topPane.style.flex = '0 0 52%';
+                }
+                bottomPane.style.flex = '1';
+
+                if (btnTop) {
+                    btnTop.classList.remove('ant-btn-primary');
+                    btnTop.title = 'Perbesar / Maximize Grid Dokumen (Layar Penuh)';
+                    if (iconTop) iconTop.className = 'fa-solid fa-expand';
+                    if (textTop) textTop.textContent = 'Maximize';
+                }
+                if (btnBottom) {
+                    btnBottom.classList.remove('ant-btn-primary');
+                    btnBottom.title = 'Perbesar / Maximize Grid Detail (Layar Penuh)';
+                    if (iconBottom) iconBottom.className = 'fa-solid fa-expand';
+                    if (textBottom) textBottom.textContent = 'Maximize Detail';
+                }
+            } else {
+                // Maximize target pane
+                currentMaximizedPane = pane;
+                if (pane === 'top') {
+                    container.classList.remove('maximized-bottom');
+                    container.classList.add('maximized-top');
+                    topPane.style.display = 'flex';
+                    topPane.style.flex = '1 1 100%';
+                    topPane.style.height = '100%';
+                    bottomPane.style.display = 'none';
+                    splitbar.style.display = 'none';
+
+                    if (btnTop) {
+                        btnTop.classList.add('ant-btn-primary');
+                        btnTop.title = 'Kembalikan Ukuran Normal Grid Dokumen (Restore / Esc)';
+                        if (iconTop) iconTop.className = 'fa-solid fa-compress';
+                        if (textTop) textTop.textContent = 'Restore';
+                    }
+                    if (btnBottom) {
+                        btnBottom.classList.remove('ant-btn-primary');
+                        if (iconBottom) iconBottom.className = 'fa-solid fa-expand';
+                        if (textBottom) textBottom.textContent = 'Maximize Detail';
+                    }
+                } else if (pane === 'bottom') {
+                    container.classList.remove('maximized-top');
+                    container.classList.add('maximized-bottom');
+                    topPane.style.display = 'none';
+                    splitbar.style.display = 'none';
+                    bottomPane.style.display = 'flex';
+                    bottomPane.style.flex = '1 1 100%';
+                    bottomPane.style.height = '100%';
+
+                    if (btnBottom) {
+                        btnBottom.classList.add('ant-btn-primary');
+                        btnBottom.title = 'Kembalikan Ukuran Normal Grid Detail (Restore / Esc)';
+                        if (iconBottom) iconBottom.className = 'fa-solid fa-compress';
+                        if (textBottom) textBottom.textContent = 'Restore';
+                    }
+                    if (btnTop) {
+                        btnTop.classList.remove('ant-btn-primary');
+                        if (iconTop) iconTop.className = 'fa-solid fa-expand';
+                        if (textTop) textTop.textContent = 'Maximize';
+                    }
+                }
+            }
+
+            // Trigger window resize to adjust internal scroll & table columns
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        // Double-click splitbar toggles maximize
+        document.addEventListener('DOMContentLoaded', function() {
+            const sb = document.getElementById('splitbar');
+            if (sb) {
+                sb.addEventListener('dblclick', function(e) {
+                    if (e.target.closest('.split-btn-collapse')) return;
+                    toggleMaximizePane('top');
+                });
+            }
+        });
+
+        // Esc key restores maximized view
+        window.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && currentMaximizedPane) {
+                toggleMaximizePane(currentMaximizedPane);
+            }
+        });
 
         // Theme sync from parent
         window.addEventListener('message', function(e) {

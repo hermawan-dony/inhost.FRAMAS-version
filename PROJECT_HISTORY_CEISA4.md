@@ -3939,4 +3939,45 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
 
 ---
+---
+
+## 97. Fitur Maximize Grid & Penyesuaian Warna Baris Terkirim (Soft Blue) pada Data Host to Host & Warehouse
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Operator pabean dan warehouse yang bekerja dengan ratusan dokumen pabean membutuhkan kemampuan untuk memperbesar (*maximize*) grid tampilan dokumen agar dapat melihat baris dokumen dalam jumlah banyak secara vertikal tanpa terhalang panel detail bawah.
+   - Sebelumnya, pemisahan panel hanya dapat disesuaikan dengan drag splitbar secara manual, belum ada tombol instan untuk memperluas (*maximize*) grid master maupun detail ke layar penuh (*full pane*).
+   - Warna baris dokumen terkirim/terdaftar pabean (`row-submitted-ceisa`) sebelumnya menggunakan warna biru `#bfe0ff` yang terasa agak mencolok (*punchy/saturated*). Pengguna menginginkan warna biru tersebut disesuaikan menjadi lebih lembut (*softer pastel blue*).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`transfer.php`](file:///c:/dp/g-ceisa/transfer.php) & [`www/transfer.php`](file:///c:/dp/g-ceisa/www/transfer.php)**:
+   - **Soft Pastel Blue Styling**:
+     - Mengubah warna latar baris submitted `#hdrTbody tr.row-submitted-ceisa` dari `#bfe0ff` menjadi warna soft pastel blue `#e6f4ff` (Ant Design Blue-1) dengan garis tepi lembut `rgba(24, 144, 255, 0.18)` dan warna teks `#002c6a`.
+     - Efek hover disesuaikan menjadi `#d4ecff` yang nyaman di mata untuk pemakaian jangka panjang.
+     - Penyesuaian Dark Mode: Menggunakan navy pastel lembut `#11253e` dengan efek hover `#163254`.
+   - **Fitur Maximize / Restore Grid**:
+     - Menambahkan tombol `[ ⛶ Maximize ]` (`#btnMaxTop`) pada toolbar atas kartu Data Host to Host untuk memperluas grid master ke 100% tinggi layar dan menyembunyikan panel detail sementara.
+     - Menambahkan tombol `[ ⛶ Maximize Detail ]` (`#btnMaxBottom`) pada kartu bawah untuk memperluas panel detail barang jika memeriksa dokumen dengan puluhan rincian barang.
+     - Menambahkan tombol mikro runtuh/maksimalkan (`▼ Maximize Grid` dan `▲ Detail`) langsung pada batang pemisah (*splitbar*).
+     - Menambahkan event *double-click* pada splitbar divider untuk toggle cepat maximize/restore grid master.
+     - Menambahkan shortcut tombol keyboard `Escape` untuk mengembalikan ukuran grid ke posisi split normal secara instan.
+2. **[`warehouse_incoming.php`](file:///c:/dp/g-ceisa/warehouse_incoming.php) & [`warehouse_delivery.php`](file:///c:/dp/g-ceisa/warehouse_delivery.php)**:
+   - Menerapkan penyesuaian warna soft pastel blue `#e6f4ff` yang identik pada baris dokumen terdaftar.
+   - Menyematkan tombol Maximize pada toolbar master dan detail panel beserta kontrol splitbar divider.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/transfer.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_delivery.php` ➔ **No syntax errors detected**.
+2. **Uji Render & Respons**:
+   - cURL markup verifikasi membuktikan keberadaan tombol `#btnMaxTop` dan warna `#e6f4ff`.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
