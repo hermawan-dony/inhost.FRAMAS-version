@@ -4108,5 +4108,38 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
 
 ---
+
+## 100. Penggantian Tombol Redundan 'Monitoring ▾' Menjadi Tombol 'Rekap Dokumen' pada Dashboard CEISA 4.0 (`daftar_dokumen.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Pertanyaan & Saran Pengguna**:
+  *"guna tombol monitoring ini apa ya? ga berguna sepertinya atau sebaiknya diganti jadi menampilkan halaman rekap saja"* (disertai tangkapan layar area aksi header card [`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php)).
+- **Akar Masalah (Root Cause)**:
+  - Tombol bertuliskan `Monitoring ▾` sebelumnya hanya menjalankan pemanggilan fungsi `loadList()` (muat ulang tabel). Fungsi ini persis sama dengan tombol `Muat Ulang` yang terletak tepat di sampingnya.
+  - Ikon panah bawah (`▾`) memberi kesan adanya menu dropdown yang bisa dipilih, padahal tidak ada aksi dropdown sama sekali. Akibatnya tombol tersebut bersifat redundan, tidak fungsional, dan membingungkan pengguna.
+  - Sementara itu, akses menuju modul matriks **Rekapitulasi Dokumen Pabean** ([`rekap/index.php`](file:///c:/dp/g-ceisa/rekap/index.php)) sebelumnya tersembunyi di dalam modal menu *Utilitas*, sehingga membutuhkan beberapa kali klik untuk membukanya.
+
+---
+
+### B. Implementasi Solusi
+1. **Pembaruan Tombol Aksi Header Card ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php) & [`www/daftar_dokumen.php`](file:///c:/dp/g-ceisa/www/daftar_dokumen.php))**:
+   - Menghapus tombol `Monitoring ▾` yang redundan.
+   - Menggantikannya dengan tombol baru yang elegan: **`📊 Rekap Dokumen`** lengkap dengan ikon visual grafik batang Ant Design.
+   - Menghubungkan klik tombol langsung ke fungsi `openRekapTool('index.php', '📊 Rekap Dokumen CEISA 4.0')`.
+2. **Pengalaman Pengguna (User Experience)**:
+   - Pengguna kini dapat langsung membuka matriks rekapitulasi dokumen pabean masuk & keluar bulanan (BC 1.6, BC 2.0, BC 2.3, BC 4.0, BC 2.7 IN, BC 2.6.2, BC 2.7 OUT, BC 2.5, BC 3.0, BC 4.1) dalam satu klik dari header dashboard.
+   - Halaman rekap dimuat secara instan melalui modal *in-page viewer* responsif (`#modalRekapViewer`) dengan dukungan tema gelap/terang, filter per perusahaan, drill-down angka dokumen, serta tombol buka di Tab Baru.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/daftar_dokumen.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/daftar_dokumen.php` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
