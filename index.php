@@ -503,7 +503,7 @@ $breadcrumbTitlesPhp = [
     'inv_bom'         => 'Master BOM',
     'inv_tarif'       => 'Master Tarif BM dari Kode HS',
     'inv_jaminan'     => 'Master Jaminan',
-    'inv_stock_transfer' => 'Production - Stock Transfer',
+    'inv_stock_transfer' => 'Mutasi Produksi',
     'inv_warehouse_in'=> 'Warehouse - Incoming',
     'inv_warehouse_delivery' => 'Warehouse - Delivery',
     'inv_transfer_bc27' => 'Warehouse - Transfer BC27 OUT-->IN',
@@ -2543,7 +2543,7 @@ if ($initialTab === 'editor') {
                     <div class="kt-menu__item <?= ($initialTab === 'inv_stock_transfer') ? 'active' : '' ?>" id="nav-item-inv_stock_transfer" onclick="switchMainTab('inv_stock_transfer')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">🏭</span>
-                            <span class="kt-menu__link-text">Production - Stock Transfer</span>
+                            <span class="kt-menu__link-text">Mutasi Produksi</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
@@ -3142,7 +3142,7 @@ if ($initialTab === 'editor') {
             'inv_bom': 'Master BOM',
             'inv_tarif': 'Master Tarif BM dari Kode HS',
             'inv_jaminan': 'Master Jaminan',
-            'inv_stock_transfer': 'Production - Stock Transfer',
+            'inv_stock_transfer': 'Mutasi Produksi',
             'inv_warehouse_in': 'Warehouse - Incoming',
             'inv_warehouse_delivery': 'Warehouse - Delivery',
             'inv_transfer_bc27': 'Warehouse - Transfer BC27 OUT-->IN',

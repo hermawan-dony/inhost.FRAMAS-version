@@ -404,7 +404,7 @@ if ($qKlas) {
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <title>Production - Stock Transfer (CEISA 4.0 & IT Inventory)</title>
+    <title>Mutasi Produksi (CEISA 4.0 & IT Inventory)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="/assets/sweetalert2.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
@@ -718,7 +718,7 @@ if ($qKlas) {
             <button class="btn-default" onclick="loadData()"><i class="fa-solid fa-magnifying-glass"></i> Cari</button>
         </div>
         <div class="toolbar-right">
-            <button class="btn-primary" onclick="openNewModal()"><i class="fa-solid fa-plus"></i> Transaksi Transfer Baru</button>
+            <button class="btn-primary" onclick="openNewModal()"><i class="fa-solid fa-plus"></i> Transaksi Mutasi Produksi Baru</button>
             <button class="btn-default" onclick="exportExcel()"><i class="fa-solid fa-file-excel"></i> Ekspor Excel</button>
         </div>
     </div>
@@ -754,7 +754,7 @@ if ($qKlas) {
     <div class="modal" id="modal-form">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 style="font-size: 13px; font-weight: 700;" id="formModalTitle"><i class="fa-solid fa-file-circle-plus"></i> Form Pengeluaran / Stock Transfer</h3>
+                <h3 style="font-size: 13px; font-weight: 700;" id="formModalTitle"><i class="fa-solid fa-file-circle-plus"></i> Form Mutasi Produksi</h3>
                 <span style="cursor: pointer; font-size: 16px;" onclick="closeModal('modal-form')">&times;</span>
             </div>
             <div class="modal-body">
@@ -883,7 +883,7 @@ if ($qKlas) {
     <div class="modal" id="modal-detail">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 style="font-size: 13px; font-weight: 700;" id="detail-title"><i class="fa-solid fa-circle-info"></i> Detail Stock Transfer</h3>
+                <h3 style="font-size: 13px; font-weight: 700;" id="detail-title"><i class="fa-solid fa-circle-info"></i> Detail Mutasi Produksi</h3>
                 <span style="cursor: pointer; font-size: 16px;" onclick="closeModal('modal-detail')">&times;</span>
             </div>
             <div class="modal-body" id="detail-body">

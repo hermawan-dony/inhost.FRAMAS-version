@@ -4200,6 +4200,50 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas lokal dan remote server Alibaba Cloud telah disinkronkan secara penuh.
 
 ---
+
+## 102. Penyelarasan Nama Menu "Production - Stock Transfer" Menjadi "Mutasi Produksi"
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"Menu 'Production - Stock Transfer' ganti jadi 'Mutasi Produksi'"*
+- **Tujuan**: Menggunakan istilah yang lebih intuitif, baku, dan sesuai dengan operasional lantai produksi serta pelaporan IT Inventory kepabeanan Indonesia, yaitu "Mutasi Produksi".
+
+---
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Navigasi Sidebar & Breadcrumb (`index.php` & `www/index.php`)**:
+   - Memperbarui label navigasi menu sidebar dari `<span class="kt-menu__link-text">Production - Stock Transfer</span>` menjadi `<span class="kt-menu__link-text">Mutasi Produksi</span>`.
+   - Memperbarui pemetaan judul breadcrumb PHP `$breadcrumbTitlesPhp['inv_stock_transfer']` menjadi `'Mutasi Produksi'`.
+   - Memperbarui kamus JavaScript judul tab `tabTitles['inv_stock_transfer']` menjadi `'Mutasi Produksi'`.
+   - ID internal tab (`inv_stock_transfer`) dipertahankan agar tidak memutus kompatibilitas tautan langsung (*deep-linking*) dan izin hak akses user.
+
+2. **Manajemen Hak Akses Pengguna (`user_management.php` & `www/user_management.php`)**:
+   - Memperbarui daftar modul hak akses `$availableMenus['inv_stock_transfer']` menjadi `['title' => 'Mutasi Produksi', 'icon' => '🏭', 'group' => 'Modul Inventory']`.
+
+3. **Modul Transaksi Mutasi Produksi (`stock_transfer.php` & `www/stock_transfer.php`)**:
+   - Memperbarui judul halaman `<title>` menjadi `Mutasi Produksi (CEISA 4.0 & IT Inventory)`.
+   - Memperbarui tombol aksi utama toolbar menjadi `Transaksi Mutasi Produksi Baru`.
+   - Memperbarui header modal form pengeluaran/transfer menjadi `Form Mutasi Produksi`.
+   - Memperbarui header modal view detail rincian transaksi menjadi `Detail Mutasi Produksi`.
+
+4. **Pengaturan Aplikasi (`setting_aplikasi.php` & `www/setting_aplikasi.php`)**:
+   - Memperbarui label konfigurasi prefiks nomor bukti dari `Prefiks Dokumen Stock Transfer` menjadi `Prefiks Dokumen Mutasi Produksi`.
+   - Memperbarui hint penjelasan menjadi `Awalan bukti mutasi / transfer produksi internal`.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**:
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - `/source/public/user_management.php` ➔ **No syntax errors detected**.
+   - `/source/public/stock_transfer.php` ➔ **No syntax errors detected**.
+   - `/source/public/setting_aplikasi.php` ➔ **No syntax errors detected**.
+   - Seluruh salinan pada `/source/public/www/` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Seluruh berkas telah disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`).
+3. **Penyimpanan Repositori**:
+   - Melakukan commit dan push ke repositori GitHub `hermawan-dony/inhost.web.id` branch `main`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

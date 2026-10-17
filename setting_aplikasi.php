@@ -871,8 +871,8 @@ $currentSettings = getAppSettings($koneksi);
                         </div>
                         <div class="form-group">
                             <label>
-                                <span>Prefiks Dokumen Stock Transfer</span>
-                                <span class="hint">Awalan bukti transfer produksi internal</span>
+                                <span>Prefiks Dokumen Mutasi Produksi</span>
+                                <span class="hint">Awalan bukti mutasi / transfer produksi internal</span>
                             </label>
                             <input type="text" class="form-control" id="inp_prefix_transfer" name="prefix_transfer" 
                                    value="<?= htmlspecialchars($currentSettings['prefix_transfer']) ?>" placeholder="TRF-">

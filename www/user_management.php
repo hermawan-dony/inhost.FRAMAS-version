@@ -53,7 +53,7 @@ $availableMenus = [
     'inv_bom'         => ['title' => 'Master BOM', 'icon' => '🧩', 'group' => 'Data Master'],
     'inv_tarif'       => ['title' => 'Master Tarif BM dari Kode HS', 'icon' => '📑', 'group' => 'Referensi'],
     'inv_jaminan'     => ['title' => 'Master Jaminan', 'icon' => '🛡️', 'group' => 'Data Master'],
-    'inv_stock_transfer' => ['title' => 'Production - Stock Transfer', 'icon' => '🏭', 'group' => 'Modul Inventory'],
+    'inv_stock_transfer' => ['title' => 'Mutasi Produksi', 'icon' => '🏭', 'group' => 'Modul Inventory'],
     'inv_warehouse_in'=> ['title' => 'Warehouse - Incoming', 'icon' => '📥', 'group' => 'Transaksi Warehouse'],
     'inv_warehouse_delivery' => ['title' => 'Warehouse - Delivery', 'icon' => '🚚', 'group' => 'Transaksi Warehouse'],
     'inv_transfer_bc27' => ['title' => 'Warehouse - Transfer BC27 OUT-->IN', 'icon' => '🔄', 'group' => 'Transaksi Warehouse'],
