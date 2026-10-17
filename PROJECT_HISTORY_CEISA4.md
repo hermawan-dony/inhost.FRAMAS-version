@@ -4592,6 +4592,31 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 113. Penyesuaian Tampilan Nomor Pengajuan, Ikon Peringatan IT Inventory, dan Pengurutan Berdasarkan Tanggal Respon pada Dashboard Dokumen
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Kebutuhan Pengguna
+1. Teks **Nomor Pengajuan** diubah menjadi warna hitam (bukan biru tema default), dengan dukungan mode gelap (putih).
+2. Menghapus ikon jam di samping Nomor Pengajuan.
+3. Menambahkan ikon alert/x warna merah di samping Nomor Pengajuan sebagai penanda jika dokumen belum masuk ke IT Inventory (`bc_1ab2`), **hanya jika** konfigurasi perusahaan `IS_INV = 1`. Jika `IS_INV = 0` atau dokumen sudah masuk IT Inventory, tidak menampilkan ikon apa pun.
+4. Mengubah urutan daftar dokumen (grid list) menjadi *sort by Tanggal Respon descending* (`ORDER BY a.tanggalRespon DESC, a.nomorAju DESC`).
+
+### B. Solusi & Implementasi
+1. **Pembaruan Query Backend (`action=list`)**:
+   - Menambahkan pengecekan flag `IS_INV` perusahaan dari `bc_ceisa_company`.
+   - Melakukan `LEFT JOIN` ke subquery agregasi `bc_1ab2` (`SELECT DISTINCT nomor_aju, 1 AS jml FROM bc_1ab2 WHERE nomor_aju IS NOT NULL AND nomor_aju != ''`) dengan performa tinggi (< 4 ms).
+   - Mengubah klausa sorting SQL dari `ORDER BY a.tanggalDaftar DESC, a.nomorAju DESC` menjadi `ORDER BY a.tanggalRespon DESC, a.nomorAju DESC`.
+2. **Pembaruan UI & Rendering JavaScript**:
+   - Menambahkan kelas CSS `.nomor-aju-link` dengan warna teks `#000000 !important` pada mode terang dan `#ffffff !important` pada mode gelap.
+   - Mengganti SVG ikon jam dengan SVG alert `close-circle` warna merah `#ff4d4f` yang hanya dirender bila `isInv === 1 && !inItInv`.
+   - Tooltip informatif `"Dokumen belum masuk IT Inventory (bc_1ab2)"` disertakan saat kursor diarahkan ke ikon merah.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/daftar_dokumen.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

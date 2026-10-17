@@ -61,12 +61,14 @@ if ($action === 'list') {
     }
 
     $where = [];
+    $cmpIsInv = 1;
     if (!empty($filter_cmp)) {
         $cleanCmp = $koneksi->real_escape_string($filter_cmp);
         $cmpNpwp = '';
-        $resComp = $koneksi->query("SELECT npwp FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
+        $resComp = $koneksi->query("SELECT npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
         if ($resComp && $cr = $resComp->fetch_assoc()) {
             $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
+            $cmpIsInv = (int)$cr['IS_INV'];
         }
         if (!empty($cmpNpwp)) {
             $where[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwp%')";
@@ -131,9 +133,16 @@ if ($action === 'list') {
         COALESCE(NULLIF(a.kodeJalur, ''), 'H') AS bcd_kodeJalur,
         COALESCE(NULLIF(a.namaKantorPendek, ''), CONCAT('KPPBC ', a.kodeKantor)) AS bcd_namaKantorPendek,
         COALESCE(NULLIF(a.namaPerusahaan, ''), '') AS bcd_namaPerusahaan,
-        COALESCE(NULLIF(a.idPerusahaan, ''), '') AS bcd_idPerusahaan
+        COALESCE(NULLIF(a.idPerusahaan, ''), '') AS bcd_idPerusahaan,
+        COALESCE(cmp.IS_INV, $cmpIsInv, 1) AS is_inv,
+        IFNULL(it_inv.jml, 0) AS in_it_inv
     FROM bc_ceisa_data a
     LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
+    LEFT JOIN (
+        SELECT DISTINCT nomor_aju, 1 AS jml
+        FROM bc_1ab2
+        WHERE nomor_aju IS NOT NULL AND nomor_aju != ''
+    ) it_inv ON a.nomorAju = it_inv.nomor_aju
     LEFT JOIN (
         SELECT nomorAju, MIN(nomorRespon) AS nomorRespon, MAX(tanggalRespon) AS tanggalRespon, MAX(pdf) AS pdf
         FROM bc_ceisa_sppb
@@ -150,7 +159,7 @@ if ($action === 'list') {
         GROUP BY nomor_aju
     ) posted ON a.nomorAju = posted.nomor_aju
     $whereSql
-    ORDER BY a.tanggalDaftar DESC, a.nomorAju DESC";
+    ORDER BY a.tanggalRespon DESC, a.nomorAju DESC";
 
     try {
         $res = $koneksi->query($sql);
@@ -807,6 +816,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             color: #bfbfbf;
             display: flex;
             align-items: center;
+        }
+
+        .nomor-aju-link {
+            color: #000000 !important;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            transition: color 0.15s ease;
+        }
+        .nomor-aju-link:hover {
+            color: var(--primary, #1890ff) !important;
+            text-decoration: underline;
+        }
+        body[data-theme="dark"] .nomor-aju-link {
+            color: #ffffff !important;
+        }
+        body[data-theme="dark"] .nomor-aju-link:hover {
+            color: #40a9ff !important;
         }
 
         /* -------------------------------------------------------------
@@ -2025,19 +2052,28 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     `;
                 }
 
+                // Cek status IT Inventory jika IS_INV = 1
+                const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
+                const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
+                let itInvIconHtml = '';
+                if (isInv === 1 && !inItInv) {
+                    itInvIconHtml = `
+                        <span style="cursor:pointer; margin-left:6px; display:inline-flex; align-items:center; color:#ff4d4f;" title="Dokumen belum masuk IT Inventory (bc_1ab2)" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')">
+                            <svg viewBox="64 64 896 896" width="13" height="13" fill="currentColor">
+                                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm165.4 618.2l-66-.3L512 563.1l-99.3 118.8-66 .3c-4.4 0-8-3.6-8-8 0-2.1.8-4.1 2.3-5.6l120-143.7-120.1-143.8a8 8 0 0 1-2.2-5.7c0-4.4 3.6-8 8-8l66 .3L512 485.9l99.4-118.8 66-.3c4.4 0 8 3.6 8 8 0 2.1-.8 4.2-2.3 5.7L563.1 524.3l120.1 143.7c1.5 1.5 2.2 3.5 2.2 5.6 0 4.4-3.6 8.4-8 8.4z"></path>
+                            </svg>
+                        </span>
+                    `;
+                }
+
                 html += `
                     <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}">
                         <td style="color:#8c8c8c; font-family:monospace;">${itemNum}</td>
                         <td style="font-weight:500;">BC ${r.bc}</td>
                         <td>
                             <div style="display:flex; align-items:center;">
-                                <b style="cursor:pointer; color:var(--primary);" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Klik untuk melihat riwayat tracking status">${r.nomor_aju}</b>
-                                <span style="cursor:pointer; margin-left:6px; display:inline-flex; align-items:center; color:var(--primary);" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat History Tracking Perubahan Status">
-                                    <svg viewBox="64 64 896 896" width="13" height="13" fill="currentColor">
-                                        <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
-                                        <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
-                                    </svg>
-                                </span>
+                                <a class="nomor-aju-link" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Klik untuk melihat riwayat tracking status">${r.nomor_aju}</a>
+                                ${itInvIconHtml}
                             </div>
                             <p style="margin:4px 0px;"><span class="ant-tag ${tagClass}">${escapeHtml(tagText)}</span></p>
                         </td>
