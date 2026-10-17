@@ -4460,7 +4460,48 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke server Alibaba Cloud dan di-push ke repositori GitHub `main`.
 
 ---
+
+## 108. Filter Wajib Nomor Daftar dan Tombol Tarik / Sync Respon pada Warehouse Incoming & Delivery (`warehouse_incoming.php` & `warehouse_delivery.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  *"yang tampil di Warehouse Incoming & Delivery HANYA Data yang sudah dapat Nomor Daftar*
+  *bisa ditambahkan tombol 'Tarik/Sync Respon' agar mengupdate nomor daftar*
+  *lalu bisa muncul di sini jika sudah ada"*
+  *(disertai tangkapan layar Warehouse - Incoming dengan kotak merah menunjuk pada kolom No. Daftar yang bernilai strip/kosong).*
+- **Tujuan**:
+  1. Memastikan bagian Gudang (*Warehouse*) hanya memproses barang fisik dan memposting ke IT Inventory untuk dokumen pabean yang telah resmi didaftarkan dan memiliki Nomor Pendaftaran Bea Cukai (`nomor_daftar`).
+  2. Menyediakan tombol aksi cepat **"Tarik / Sync Respon"** di toolbar atas agar operator gudang dapat langsung menarik respon dan nomor pendaftaran terbaru dari portal CEISA 4.0 secara mandiri tanpa harus berpindah ke modul lain.
+
+### B. Analisis & Implementasi
+1. **Pengetatan Kriteria Filter Backend Query**:
+   - Menambahkan filter wajib pada klausul `WHERE` di `warehouse_incoming.php` dan `warehouse_delivery.php`:
+     ```sql
+     h.nomor_daftar IS NOT NULL AND TRIM(h.nomor_daftar) != '' AND TRIM(h.nomor_daftar) != '-'
+     ```
+   - Dengan filter ini, seluruh dokumen yang masih berupa draf / belum diterbitkan nomor daftar oleh Bea Cukai tidak akan muncul di antrean gudang.
+2. **Tombol "Tarik / Sync Respon" di Header Toolbar**:
+   - Menambahkan tombol interaktif `btnSyncRespon` pada header kartu utama (`ant-card-head-actions`) di samping tombol "Muat Ulang":
+     ```html
+     <button type="button" class="ant-btn ant-btn-sm" id="btnSyncRespon" onclick="triggerSyncRespon()" title="Tarik respon & perbarui nomor daftar dari portal CEISA 4.0">
+         <i class="fa-solid fa-cloud-arrow-down" id="iconSyncRespon" style="color:var(--primary);"></i> <span id="textSyncRespon">Tarik / Sync Respon</span>
+     </button>
+     ```
+3. **Mekanisme Sinkronisasi Respon Otomatis (`triggerSyncRespon`)**:
+   - Memanggil `ceisa_sync_service.php?cmp_id=${cmpId}&force=1` secara terintegrasi dengan SweetAlert loading modal dan indikator tombol berputar (*spinning icon*).
+   - Layanan sinkronisasi secara otomatis mengupdate `bc_ceisa_data` dan menyinkronkan `nomor_daftar` serta `tanggal_daftar` ke tabel `bc_ceisa_header`.
+   - Setelah penarikan selesai, daftar tabel `loadList()` otomatis dimuat ulang sehingga dokumen yang baru mendapatkan nomor daftar langsung muncul seketika di grid.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis**: 0 syntax errors pada semua berkas root dan `www/`.
+2. **Pengujian API via cURL**:
+   - Dokumen BC 28 tanpa nomor daftar (`00002801081620261009000001`) yang sebelumnya muncul pada incoming kini terfilter sempurna (tidak muncul lagi).
+   - Seluruh 6 dokumen yang tampil pada incoming dan 42 dokumen pada delivery 100% memiliki Nomor Daftar resmi.
+3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan di-push ke repositori GitHub `main`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 

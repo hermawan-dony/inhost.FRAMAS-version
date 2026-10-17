@@ -39,6 +39,9 @@ if ($action === 'list') {
         $where[] = "(h.cmp_id = '$escCmp' OR h.cmp_id = '')";
     }
 
+    // WAJIB: HANYA TAMPILKAN DOKUMEN YANG SUDAH MENDAPATKAN NOMOR DAFTAR DARI BEA CUKAI
+    $where[] = "h.nomor_daftar IS NOT NULL AND TRIM(h.nomor_daftar) != '' AND TRIM(h.nomor_daftar) != '-'";
+
     if (!empty($filter_bc)) {
         $where[] = "h.kode_dokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
     } else {
@@ -903,6 +906,9 @@ if ($action === 'detail_tab') {
                         </div>
                     </div>
                     <div class="ant-card-head-actions">
+                        <button type="button" class="ant-btn ant-btn-sm" id="btnSyncRespon" onclick="triggerSyncRespon()" title="Tarik respon & perbarui nomor daftar dari portal CEISA 4.0">
+                            <i class="fa-solid fa-cloud-arrow-down" id="iconSyncRespon" style="color:var(--primary);"></i> <span id="textSyncRespon">Tarik / Sync Respon</span>
+                        </button>
                         <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" onclick="loadList()" title="Segarkan Data">
                             <i class="fa-solid fa-arrows-rotate"></i> Muat Ulang
                         </button>
@@ -1821,6 +1827,82 @@ if ($action === 'detail_tab') {
                 document.body.setAttribute('data-theme', e.data.theme);
             }
         });
+
+        // 7. Tarik / Sync Respon dari CEISA 4.0
+        async function triggerSyncRespon() {
+            const btn = document.getElementById('btnSyncRespon');
+            const icon = document.getElementById('iconSyncRespon');
+            const text = document.getElementById('textSyncRespon');
+
+            if (btn) btn.disabled = true;
+            if (icon) icon.className = 'fa-solid fa-spinner fa-spin';
+            if (text) text.innerText = 'Menyinkronkan...';
+
+            Swal.fire({
+                title: 'Menarik Respon CEISA 4.0...',
+                html: '<div style="font-size:12px; line-height:1.6; color:var(--text-main);">Menghubungi server Bea Cukai untuk memperbarui nomor daftar dan status respon pabean terbaru...</div>',
+                allowOutsideClick: false,
+                didOpen: () => {
+                    Swal.showLoading();
+                }
+            });
+
+            try {
+                const targetCmp = (new URLSearchParams(window.location.search)).get('cmp_id') || cmpId;
+                const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(targetCmp)}&force=1`);
+                const json = await res.json();
+
+                Swal.close();
+
+                if (json.status === 'OK') {
+                    const insertedCount = json.inserted || json.count || 0;
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Sinkronisasi Berhasil!',
+                        html: `<span style="font-size:12.5px;">Respon CEISA 4.0 berhasil ditarik & diperbarui.</span><br><span style="font-size:11px; color:#8c8c8c;">${insertedCount} dokumen terupdate. Daftar dokumen akan otomatis disegarkan.</span>`,
+                        timer: 2500,
+                        showConfirmButton: false
+                    });
+                    loadList();
+                    if (activeAju) {
+                        const curTab = document.querySelector('.tab-btn.active')?.dataset.tab || 'dokumen';
+                        if (curTab !== 'barang') loadSubTab(curTab);
+                    }
+                } else if (json.status === 'RATE_LIMITED') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: 'Antrean Server Bea Cukai Padat',
+                        text: json.message || 'Antrean padat, sinkronisasi dijeda sejenak.',
+                        timer: 4000
+                    });
+                    loadList();
+                } else if (json.status === 'SKIPPED') {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Sinkronisasi Dilewati',
+                        text: json.message || 'Kredensial belum lengkap.'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Info CEISA 4.0',
+                        text: json.message || 'Sinkronisasi selesai.'
+                    });
+                    loadList();
+                }
+            } catch (err) {
+                Swal.close();
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Gagal Terhubung ke CEISA 4.0',
+                    text: err.message
+                });
+            } finally {
+                if (btn) btn.disabled = false;
+                if (icon) icon.className = 'fa-solid fa-cloud-arrow-down';
+                if (text) text.innerText = 'Tarik / Sync Respon';
+            }
+        }
 
         document.addEventListener('DOMContentLoaded', () => {
             loadList();
