@@ -4002,5 +4002,32 @@ Delapan (8) tabel yang distandardisasi:
 3. **Deployment**:
    - Berkas telah disinkronkan ke `/source/public/www/material.php` dan `/source/public/material.php` dengan kepemilikan `www-data:www-data`.
 
+
+---
+
+## 98. Pencadangan Lengkap Lokal, Database Dump & Git Push ke Repository GitHub inhost.web.id (17 Oktober 2026)
+
+### A. Latar Belakang & Kebutuhan
+1. **Penyalinan Source Code Lengkap ke Lokal**:
+   - Seluruh source code web application terkini dari remote server (`/source/public`) disinkronkan ke direktori kerja lokal `c:\dp\g-ceisa`.
+2. **Database Backup Lengkap (Dump & Compressed)**:
+   - Pencadangan penuh basis data Alibaba Cloud RDS MySQL (`ceisa0400db`, 93 tabel, ~73 MB uncompressed) menggunakan `mysqldump` dengan konfigurasi konsistensi penuh (`--single-transaction`, `--set-gtid-purged=OFF`, `--routines`, `--triggers`, `--hex-blob`).
+   - Berkas database dikompresi ke dalam bentuk ZIP (`ceisa0400db.sql.zip`, ~4.1 MB) untuk efisiensi penyimpanan dan transfer.
+   - Disediakan berkas uncompressed `database/ceisa0400db.sql` dan compressed `database/ceisa0400db.sql.zip` di lokal.
+3. **Penyusunan Repositori Git & Push ke GitHub**:
+   - Inisialisasi git repository lokal di `c:\dp\g-ceisa`.
+   - Konfigurasi `.gitignore` untuk melindungi file kredensial lokal dan file scratch/installer.
+   - Otentikasi dan push commit awal ke remote repository GitHub: `https://github.com/hermawan-dony/inhost.web.id` (branch `main`).
+
+---
+
+### B. Hasil & Verifikasi
+1. **Sinkronisasi Lokal `c:\dp\g-ceisa`**:
+   - Seluruh file proyek web (termasuk modul master barang, IT Inventory, sinkronisasi Odoo/ERP, manifes, dokumen pabean, aset SweetAlert2, template SQL, dan folder `www/`) telah tersalin lengkap.
+   - Direktori `database/` terisi `ceisa0400db.sql` (73 MB) dan `ceisa0400db.sql.zip` (4.1 MB).
+2. **Repositori GitHub**:
+   - Remote: `https://github.com/hermawan-dony/inhost.web.id.git`
+   - Branch: `main` (up to date dengan remote GitHub).
+
 ---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
