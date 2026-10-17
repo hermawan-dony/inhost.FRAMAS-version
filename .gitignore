@@ -18,6 +18,7 @@ dump_db.sh
 pack_project.sh
 test_conn.php
 test_git_cred.ps1
+sync_and_push.ps1
 scratch_*.php
 
 # Local shared / installer directory
