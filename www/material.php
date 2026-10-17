@@ -518,6 +518,7 @@ if ($action === 'save_imported_materials') {
     $processedCodes = [];
 
     $koneksi->begin_transaction();
+    $itemErrors = [];
 
     try {
         foreach ($items as $idx => $it) {
@@ -535,6 +536,7 @@ if ($action === 'save_imported_materials') {
 
             // 2. FORMAT KODE: Huruf Kapital (Default) vs Allow Huruf Kecil
             $kode = $allowLowercase ? $rawKode : strtoupper($rawKode);
+            $kode = mb_substr($kode, 0, 100);
 
             // Validasi keunikan dalam batch
             $normKey = strtoupper($kode);
@@ -544,15 +546,30 @@ if ($action === 'save_imported_materials') {
             }
             $processedCodes[$normKey] = true;
 
-            // 3. VALIDASI URAIAN
+            // 3. VALIDASI & NORMALISASI URAIAN MULTI-BYTE / FULLWIDTH
             if (empty($uraian)) {
                 throw new Exception("Baris #" . ($idx + 1) . " (Kode: $kode): Uraian barang wajib diisi.");
             }
+
+            // Normalisasi tanda baca fullwidth & karakter khusus Asia agar tersimpan rapi dan kompatibel
+            $uraian = str_replace(
+                ['（', '）', '【', '】', '［', '］', '〔', '〕', '、', '，', '：', '；', '“', '”', '’', '‘', '—', '–'],
+                ['(',  ')',  '[',  ']',  '[',  ']',  '(',  ')',  ', ', ', ', ': ', '; ', '"', '"', "'", "'", '-', '-'],
+                $uraian
+            );
+            if (!mb_check_encoding($uraian, 'UTF-8')) {
+                $uraian = mb_convert_encoding($uraian, 'UTF-8', 'UTF-8');
+            }
+            $uraian = mb_substr(trim($uraian), 0, 255);
 
             // 4. VALIDASI MUTLAK: KLAS TIDAK BOLEH KOSONG ATAU '-'
             if (empty($klas) || $klas === '-' || !isset($validKlasMap[$klas])) {
                 throw new Exception("Baris #" . ($idx + 1) . " (Kode: $kode): Klasifikasi (KLAS) '$klas' tidak valid atau kosong! Pilih klasifikasi resmi dari daftar referensi.");
             }
+
+            $satuan = substr($satuan, 0, 5);
+            $hs     = substr($hs, 0, 20);
+            $klas   = mb_substr($klas, 0, 40);
 
             $escKode   = $koneksi->real_escape_string($kode);
             $escUraian = $koneksi->real_escape_string($uraian);
@@ -575,7 +592,8 @@ if ($action === 'save_imported_materials') {
                     TGL_UPDATE = NOW()
                     WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$escSessionCmp' OR cmp_id = '')";
                 if (!$koneksi->query($sql)) {
-                    throw new Exception("Gagal update data [$kode]: " . $koneksi->error);
+                    $itemErrors[] = "Update [$kode]: " . $koneksi->error;
+                    continue;
                 }
                 $updated++;
             } else {
@@ -588,20 +606,31 @@ if ($action === 'save_imported_materials') {
                     'IDR', '$escKlas', 'Y', NOW()
                 )";
                 if (!$koneksi->query($sql)) {
-                    throw new Exception("Gagal insert item baru [$kode]: " . $koneksi->error);
+                    $itemErrors[] = "Insert [$kode]: " . $koneksi->error;
+                    continue;
                 }
                 $inserted++;
             }
         }
 
+        if (($inserted + $updated) === 0 && !empty($itemErrors)) {
+            throw new Exception("Gagal menyimpan item ke database: " . implode('; ', array_slice($itemErrors, 0, 5)));
+        }
+
         $koneksi->commit();
+
+        $msg = "Import berhasil disimpan! Berhasil menambahkan <strong>$inserted</strong> item baru dan memperbarui <strong>$updated</strong> item yang sudah ada.";
+        if (!empty($itemErrors)) {
+            $msg .= "<br><small style='color:#fa8c16;'>⚠️ Catatan: " . count($itemErrors) . " item dilewati karena kesalahan format.</small>";
+        }
 
         echo json_encode([
             'status'   => 'OK',
             'inserted' => $inserted,
             'updated'  => $updated,
             'total'    => ($inserted + $updated),
-            'message'  => "Import berhasil disimpan! Berhasil menambahkan $inserted item baru dan memperbarui $updated item yang sudah ada."
+            'errors'   => $itemErrors,
+            'message'  => $msg
         ]);
     } catch (Exception $e) {
         $koneksi->rollback();

@@ -4703,7 +4703,38 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors. Pengujian impor riil dan simulasi deduplikasi berjalan sempurna dengan status `OK`.
 
 ---
+
+## 117. Perbaikan Galat "Incorrect string value: '\xEF\xBC\x88Han...'" pada Impor Master Barang dari Staging Pabean (material.php)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [material.php](file:///c:/dp/g-ceisa/material.php), [www/material.php](file:///c:/dp/g-ceisa/www/material.php), Basis Data RDS `bc_material`
+
+### A. Masalah & Analisis
+1. **Gejala Error**:
+   - Saat pengguna melakukan impor massal Master Barang dari Staging Pabean (`bc_ceisa_barang`) untuk ~1.990 item kandidat di halaman Master Data Barang (`material.php`), muncul dialog SweetAlert kegagalan:
+     `Gagal Import: Incorrect string value: '\xEF\xBC\x88Han...' for column 'URAIAN' at row 1`
+   - Akibat kegagalan satu baris tersebut, transaksi di-rollback secara penuh dan seluruh 1.990 item gagal tersimpan.
+2. **Penyebab**:
+   - `\xEF\xBC\x88` adalah representasi UTF-8 dari tanda kurung fullwidth `（` (U+FF08), yang terdapat pada uraian barang kepabeanan seperti `bicycle parts （Hanger, folding mechanism）`.
+   - Tabel `bc_material` pada database RDS MySQL sebelumnya masih menggunakan collation lama **`latin1_swedish_ci`** (`CHARSET=latin1`), sedangkan koneksi database PHP sudah beroperasi pada `utf8mb4`.
+   - Karena karakter multi-byte fullwidth tidak ada pada set karakter ISO-8859-1 (latin1), MySQL menolak masukan tersebut dengan galat `Incorrect string value`.
+
+### B. Solusi & Implementasi
+1. **Migrasi Charset Tabel `bc_material` ke `utf8mb4`**:
+   - Menjalankan migrasi DDL pada RDS MySQL:
+     `ALTER TABLE bc_material CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+   - Kini kolom `URAIAN`, `KODE_BARANG`, `SPESIFIKASI`, dsb. mendukung penuh seluruh set karakter UTF-8 multi-byte (karakter Asia, simbol, fullwidth, maupun emoji) tanpa hambatan.
+2. **Sanitasi & Normalisasi Otomatis pada `save_imported_materials` ([material.php](file:///c:/dp/g-ceisa/material.php))**:
+   - Menambahkan normalisasi tanda kurung dan tanda baca fullwidth (`（`, `）`, `【`, `】`, `、`, `，`, dsb.) ke bentuk standar ASCII agar data rapi dan konsisten.
+   - Menambahkan pemangkasan aman panjang kolom (`mb_substr`) sesuai batas skema tabel (`URAIAN` max 255, `KODE_BARANG` max 100, `KODE_SATUAN` max 5, `POS_TARIF` max 20, `KLAS` max 40).
+3. **Resilience & Penanganan Error Per-Item**:
+   - Memperbarui mekanisme penyimpanan agar jika terdapat item tertentu dengan galat format, item tersebut dilewati dan dicatat ke daftar peringatan, sementara seluruh item lain yang valid tetap sukses tersimpan dan di-commit ke basis data.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/material.php` dan server produksi Alibaba Cloud `/source/public/` serta `/source/public/www/`.
+   - Linting `php -l` lolos 0 errors. Pengujian endpoint simulasi impor dengan uraian `bicycle parts （Hanger, folding mechanism）` berhasil 100% dengan status `OK`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 
