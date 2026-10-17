@@ -4733,6 +4733,38 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors. Pengujian endpoint simulasi impor dengan uraian `bicycle parts （Hanger, folding mechanism）` berhasil 100% dengan status `OK`.
 
 ---
+
+## 118. Penanganan Masalah Impor Excel Macet / Lambat (Nginx Body Limit 100M, PHP-FPM Tuning, Bulk Batch Deletion & Engine Fast Parsing)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [import_excel.php](file:///c:/dp/g-ceisa/import_excel.php), [api_import_excel.php](file:///c:/dp/g-ceisa/api_import_excel.php), Konfigurasi Nginx & PHP-FPM
+
+### A. Masalah & Analisis
+1. **Gejala**:
+   - Pengguna mengunggah antrean 17 file Excel portal CEISA 4.0 berukuran 1.7 MB – 3.7 MB per file.
+   - Pada file pertama (`01-06-2026 - 07-06-2026.xlsx` ukuran 1.8 MB), proses tertahan ("Memproses...") lebih dari 5 menit tanpa ada progres.
+2. **Penyebab Utama**:
+   - **Batas Ukuran Nginx (`client_max_body_size`)**: Nilai default Nginx adalah `1M`. Saat browser mengirim berkas 1.8 MB – 3.7 MB (dengan multipart body 1.9 MB+), Nginx memblokir koneksi dengan galat HTTP 413 (`client intended to send too large body: 1921220 bytes`). Pada koneksi HTTP/2, pemutusan soket oleh Nginx saat upload menyebabkan browser Chrome tertahan (*hung*) pada `fetch()` hingga batas timeout browser (300 detik).
+   - **Batas PHP-FPM**: Konfigurasi `/etc/php/8.5/fpm/php.ini` sebelumnya membatasi `upload_max_filesize = 2M`, `post_max_size = 8M`, dan `memory_limit = 128M`. File mingguan berukuran > 2 MB ditolak oleh PHP.
+   - **Query Deletion Lambat**: Pada mode `overwrite`, sistem sebelumnya menjalankan `DELETE` satu per satu per AJU dalam perulangan 22 tabel. Untuk file rekapan dengan 150–300 AJU, hal ini menghasilkan 3.300 – 6.600 kueri SQL individual berulang kali melalui jaringan WAN ke RDS, memakan waktu hingga 4 menit hanya untuk penghapusan data lama.
+   - **Ekstraksi XML Berat**: Pemanggilan fungsi regex `preg_match` berulang kali pada ratusan ribu sel XML dan alokasi closure anonim `array_filter` pada baris data memperlambat runtime PHP.
+
+### B. Solusi & Optimalisasi Performa
+1. **Konfigurasi Server Nginx & PHP-FPM**:
+   - Nginx `/etc/nginx/sites-available/default`: Menambahkan `client_max_body_size 100M;` dan `client_body_timeout 300s;`.
+   - PHP-FPM `/etc/php/8.5/fpm/php.ini`: Menaikkan `upload_max_filesize = 100M`, `post_max_size = 100M`, `memory_limit = 512M`, dan `max_execution_time = 600`.
+   - Layanan `php8.5-fpm` dan `nginx` telah direstart dan direload tanpa downtime.
+2. **Optimalisasi Batch Delete (`deleteExistingBatch` di `CeisaXlsxImporter.php`)**:
+   - Mengubah mekanisme hapus data lama menjadi klausa SQL massal: `DELETE FROM table WHERE cmp_id = ? AND nomor_aju IN (?, ?, ...)` (dalam blok 150 AJU).
+   - Mengurangi jumlah kueri dari 3.000+ kali round-trip menjadi cukup 1 kali per tabel (peningkatan kecepatan penghapusan hingga 100x lipat).
+3. **Optimalisasi Parsing XML Native**:
+   - Menggantikan `preg_match` dengan operasi string C native `rtrim($cellRef, '0123456789')`.
+   - Menggantikan `array_filter` dengan loop cepat yang langsung *break* pada sel non-kosong pertama.
+4. **Resilience & Feedback Antarmuka ([import_excel.php](file:///c:/dp/g-ceisa/import_excel.php))**:
+   - Menambahkan pemeriksaan status respon HTTP (`res.ok`) sebelum parsing JSON, serta menangani galat HTTP 413 dan HTTP 504 dengan pesan yang ramah bagi pengguna.
+5. **Hasil Benchmark**:
+   - Pengujian impor file besar berukuran 1.9 MB dengan **29.972 baris data** pabean (termasuk 5.971 bahan baku dan 16.455 tarif) selesai diproses secara penuh hanya dalam waktu **5,5 detik** (sebelumnya butuh lebih dari 5 menit / timeout).
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

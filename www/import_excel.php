@@ -1082,6 +1082,23 @@ $isEmbedded = (!empty($_GET['embedded']) && $_GET['embedded'] == '1') || (isset(
                     method: 'POST',
                     body: fd
                 });
+
+                if (!res.ok) {
+                    const text = await res.text();
+                    let errMsg = `HTTP ${res.status}: ${res.statusText}`;
+                    try {
+                        const parsed = JSON.parse(text);
+                        if (parsed.message) errMsg = parsed.message;
+                    } catch (e) {
+                        if (res.status === 413) {
+                            errMsg = `Ukuran file melebihi batas upload server (HTTP 413 Payload Too Large).`;
+                        } else if (res.status === 504) {
+                            errMsg = `Proses impor timeout (HTTP 504 Gateway Timeout).`;
+                        }
+                    }
+                    throw new Error(errMsg);
+                }
+
                 const json = await res.json();
 
                 if (json.status === 'OK') {
@@ -1095,7 +1112,7 @@ $isEmbedded = (!empty($_GET['embedded']) && $_GET['embedded'] == '1') || (isset(
                 }
             } catch (err) {
                 item.status = 'error';
-                item.errorMessage = 'Kesalahan jaringan: ' + err.message;
+                item.errorMessage = err.message;
                 failCount++;
             }
 

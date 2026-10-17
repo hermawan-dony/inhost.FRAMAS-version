@@ -17,6 +17,8 @@ header('Content-Type: application/json; charset=utf-8');
 // Matikan output error langsung agar JSON tidak rusak
 error_reporting(E_ALL);
 ini_set('display_errors', '0');
+@ini_set('memory_limit', '1024M');
+@set_time_limit(600);
 
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';

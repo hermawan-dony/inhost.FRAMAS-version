@@ -147,8 +147,7 @@ class CeisaXlsxImporter {
 
                 foreach ($row->c as $c) {
                     $cellRef = (string)$c['r'];
-                    preg_match('/([A-Z]+)(\d+)/', $cellRef, $matches);
-                    $colLetter = $matches[1] ?? '';
+                    $colLetter = rtrim($cellRef, '0123456789');
 
                     $val = '';
                     if (isset($c->v)) {
@@ -182,10 +181,15 @@ class CeisaXlsxImporter {
                     }
                 } else {
                     $namedRow = [];
+                    $hasPayload = false;
                     foreach ($headerKeyMap as $colLetter => $colKey) {
-                        $namedRow[$colKey] = $rowData[$colLetter] ?? null;
+                        $v = $rowData[$colLetter] ?? null;
+                        $namedRow[$colKey] = $v;
+                        if ($v !== null && $v !== '') {
+                            $hasPayload = true;
+                        }
                     }
-                    if (!empty(array_filter($namedRow, function($v) { return $v !== null && $v !== ''; }))) {
+                    if ($hasPayload) {
                         $rows[] = $namedRow;
                     }
                 }
@@ -433,9 +437,7 @@ class CeisaXlsxImporter {
                         }
 
                         if ($overwrite) {
-                            foreach ($allAjus as $aju) {
-                                $this->deleteExisting($tableName, $cmpId, $aju);
-                            }
+                            $this->deleteExistingBatch($tableName, $cmpId, $allAjus);
                         }
 
                         $cnt = $this->insertBatch($tableName, $versiRows, $tableCols, 150);
@@ -458,9 +460,7 @@ class CeisaXlsxImporter {
 
                     // Jika overwrite aktif, bersihkan data lama untuk seluruh AJU yang tertera di file ini
                     if ($overwrite) {
-                        foreach ($allAjus as $aju) {
-                            $this->deleteExisting($tableName, $cmpId, $aju);
-                        }
+                        $this->deleteExistingBatch($tableName, $cmpId, $allAjus);
                     }
 
                     // Siapkan baris data dengan penyesuaian kolom & alias
@@ -611,24 +611,38 @@ class CeisaXlsxImporter {
     }
 
     /**
-     * Hapus data AJU lama saat overwrite
+     * Hapus data AJU lama saat overwrite secara batch (jauh lebih cepat daripada query satu per satu)
      */
-    private function deleteExisting($tableName, $cmpId, $nomorAju) {
+    private function deleteExistingBatch($tableName, $cmpId, array $allAjus) {
+        if (empty($allAjus)) return;
         $tableCols = $this->getTableColumns($tableName);
-        if (isset($tableCols['cmp_id']) && isset($tableCols['nomor_aju'])) {
-            $deleteSql = "DELETE FROM `$tableName` WHERE cmp_id = ? AND nomor_aju = ?";
+        if (!isset($tableCols['cmp_id']) || !isset($tableCols['nomor_aju'])) {
+            return;
+        }
+
+        $chunks = array_chunk($allAjus, 150);
+        foreach ($chunks as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $deleteSql = "DELETE FROM `$tableName` WHERE cmp_id = ? AND nomor_aju IN ($placeholders)";
+            $params = array_merge([$cmpId], $chunk);
+
             if ($this->pdo) {
                 $delStmt = $this->pdo->prepare($deleteSql);
-                $delStmt->execute([$cmpId, $nomorAju]);
+                $delStmt->execute($params);
             } elseif ($this->koneksi) {
                 $delStmt = mysqli_prepare($this->koneksi, $deleteSql);
                 if ($delStmt) {
-                    mysqli_stmt_bind_param($delStmt, "ss", $cmpId, $nomorAju);
+                    $types = str_repeat('s', count($params));
+                    mysqli_stmt_bind_param($delStmt, $types, ...$params);
                     mysqli_stmt_execute($delStmt);
                     mysqli_stmt_close($delStmt);
                 }
             }
         }
+    }
+
+    private function deleteExisting($tableName, $cmpId, $nomorAju) {
+        $this->deleteExistingBatch($tableName, $cmpId, [$nomorAju]);
     }
 }
 ?>
