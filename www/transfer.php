@@ -1085,6 +1085,33 @@ if ($action === 'transfer') {
     exit;
 }
 
+// 7b. POSTING / TRANSFER KE INSW (PPKEK / PPFTZ)
+if ($action === 'transfer_insw') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    $cmp_id    = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+
+    $_REQUEST['nomor_aju'] = $nomor_aju;
+    $_REQUEST['cmp_id']    = $cmp_id;
+
+    ob_start();
+    include __DIR__ . '/posting_insw.php';
+    $postOutput = ob_get_clean();
+
+    $decoded = json_decode($postOutput, true);
+    if ($decoded !== null) {
+        echo json_encode($decoded);
+    } else {
+        echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+    }
+    exit;
+}
+
 $themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 ?>
@@ -1377,6 +1404,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             background: #ff7875;
             border-color: #ff7875;
             color: #ffffff !important;
+        }
+        .ant-btn-insw {
+            background: linear-gradient(135deg, #722ed1 0%, #531dab 100%);
+            border-color: #531dab;
+            color: #ffffff !important;
+            font-weight: 600;
+            box-shadow: 0 2px 4px rgba(114, 46, 209, 0.2);
+        }
+        .ant-btn-insw:hover {
+            background: linear-gradient(135deg, #9254de 0%, #722ed1 100%);
+            border-color: #722ed1;
+            color: #ffffff !important;
+            box-shadow: 0 3px 8px rgba(114, 46, 209, 0.35);
         }
         .ant-btn-sm {
             height: 22px;
@@ -1863,6 +1903,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <div class="ant-card-head-actions">
                         <button type="button" class="ant-btn ant-btn-primary" onclick="transferActiveAju()" title="Transfer Dokumen ke Portal CEISA 4.0">
                             <span>&#128640; Transfer CEISA</span>
+                        </button>
+                        <button type="button" class="ant-btn ant-btn-insw" id="btnPostingInsw" onclick="postInswActiveAju()" title="Posting / Transfer Dokumen ke Portal INSW (PPKEK 613/611/612 & FTZ)">
+                            <span>🌐 Posting INSW</span>
                         </button>
                         <button type="button" class="ant-btn" onclick="setH2HActiveAju()" title="Set Status Dokumen ke H2H (Siap Kirim)">
                             <span>&#9889; Set H2H</span>
@@ -2355,6 +2398,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <div id="rowContextMenu" class="context-menu">
         <div class="context-menu-item" onclick="contextAction('edit')"><i class="fa-solid fa-pen-to-square" style="color:#1890ff; width:16px;"></i> Edit Dokumen</div>
         <div class="context-menu-item" onclick="contextAction('delete')"><i class="fa-solid fa-trash-can" style="color:#ff4d4f; width:16px;"></i> Hapus AJU</div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" onclick="contextAction('transfer_ceisa')"><i class="fa-solid fa-rocket" style="color:#1890ff; width:16px;"></i> Transfer CEISA</div>
+        <div class="context-menu-item" onclick="contextAction('post_insw')" style="color:#722ed1; font-weight:600;"><i class="fa-solid fa-globe" style="color:#722ed1; width:16px;"></i> Posting INSW</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('sync')"><i class="fa-solid fa-cloud-arrow-down" style="color:#52c41a; width:16px;"></i> Tarik / Sync Respon</div>
         <div class="context-menu-item" onclick="contextAction('manual_respon')" style="font-weight:600; color:#1890ff;"><i class="fa-solid fa-file-pen" style="color:#1890ff; width:16px;"></i> Set Manual Respon</div>
@@ -3188,6 +3234,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 case 'delete':
                     deleteActiveAju();
                     break;
+                case 'transfer_ceisa':
+                    transferActiveAju();
+                    break;
+                case 'post_insw':
+                    postInswActiveAju();
+                    break;
                 case 'sync':
                     syncActiveAju(targetAju);
                     break;
@@ -3649,6 +3701,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
+            // Peringatan otomatis jika dokumen bertipe PPKEK / KPBPB (613, 611, 612)
+            if (activeBc === '613' || activeBc === '611' || activeBc === '612') {
+                const swalCheck = await Swal.fire({
+                    title: 'Dokumen PPKEK Terdeteksi',
+                    html: `Dokumen <strong>${escapeHtml(activeAju)}</strong> adalah jenis <strong>PPKEK [${escapeHtml(activeBc)}]</strong>.<br><br>` +
+                          `Dokumen ini diproses melalui <strong>Lembaga National Single Window (INSW / LNSW)</strong>, bukan API CEISA 4.0 biasa.<br><br>` +
+                          `Apakah Anda ingin beralih ke <strong>Posting INSW</strong>?`,
+                    icon: 'info',
+                    showCancelButton: true,
+                    confirmButtonText: '🌐 Ya, Posting INSW',
+                    cancelButtonText: 'Tetap Transfer CEISA 4.0',
+                    confirmButtonColor: '#722ed1',
+                    cancelButtonColor: '#8c8c8c'
+                });
+                if (swalCheck.isConfirmed) {
+                    postInswActiveAju();
+                    return;
+                }
+            }
+
             const ok = await showConfirm(
                 `Apakah Anda yakin ingin mentransfer dokumen AJU <strong>${escapeHtml(activeAju)}</strong> ke Portal CEISA 4.0?`,
                 'Konfirmasi Transfer CEISA 4.0',
@@ -3658,9 +3730,15 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             );
             if (!ok) return;
 
+            const modal = document.getElementById('modalTransferResult');
             const content = document.getElementById('transferResultContent');
+            const headerTitle = modal.querySelector('.modal-header h3');
+            if (headerTitle) {
+                headerTitle.innerHTML = '&#128640; Hasil Transfer ke Portal CEISA 4.0';
+            }
+
             content.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spinner"></span> Mengirim payload ke CEISA 4.0... Mohon tunggu...</div>';
-            document.getElementById('modalTransferResult').style.display = 'flex';
+            modal.style.display = 'flex';
 
             const cmpId = document.getElementById('filterCmp')?.value || '';
             const formData = new FormData();
@@ -3678,15 +3756,167 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <pre class="code-view" style="max-height:260px;">${JSON.stringify(json.response, null, 2)}</pre>
                     `;
                 } else {
+                    let helperHint = '';
+                    if (String(json.raw_response || json.message || '').includes('kodeDokumen tidak dikenali') && (activeBc === '613' || activeBc === '611')) {
+                        helperHint = `
+                            <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:8px 10px; margin-top:10px; font-size:11px; color:#ad6800;">
+                                💡 <strong>Petunjuk Dokumen ${escapeHtml(activeBc)}:</strong> Error ini muncul karena API CEISA 4.0 OpenAPI hanya menerima dokumen kepabeanan standar (BC 2.0, 2.3, 4.0, dll). Dokumen PPKEK ${escapeHtml(activeBc)} diproses melalui <strong>Posting INSW</strong>.
+                            </div>
+                        `;
+                    }
                     content.innerHTML = `
                         <div style="color:#f5222d; font-weight:700; margin-bottom:8px;">&#9888;&#65039; Respon Transfer:</div>
                         <p><strong>Nomor AJU:</strong> ${escapeHtml(json.nomor_aju || activeAju)}</p>
                         <pre class="code-view" style="max-height:260px;">${escapeHtml(json.raw_response || json.message || JSON.stringify(json, null, 2))}</pre>
+                        ${helperHint}
                     `;
                 }
             } catch (err) {
                 content.innerHTML = `<div style="color:#f5222d; font-weight:700;">&#10060; Terjadi Kesalahan Jaringan / Server:</div><p>${err.message}</p>`;
             }
+        }
+
+        async function postInswActiveAju() {
+            if (!activeAju) {
+                showWarning('Silakan pilih salah satu dokumen yang akan diposting ke INSW.');
+                return;
+            }
+
+            let confirmMsg = `Apakah Anda yakin ingin memposting dokumen AJU <strong>${escapeHtml(activeAju)}</strong> (PPKEK [${escapeHtml(activeBc || '613')}]) ke <strong>Portal INSW / LNSW</strong>?`;
+            let confirmTitle = 'Konfirmasi Posting INSW (PPKEK)';
+            let confirmIcon = 'question';
+
+            if (activeBc && activeBc !== '613' && activeBc !== '611' && activeBc !== '612') {
+                confirmMsg = `Dokumen <strong>${escapeHtml(activeAju)}</strong> adalah jenis <strong>BC ${escapeHtml(activeBc)}</strong> (umumnya diproses melalui Transfer CEISA 4.0).<br><br>Apakah Anda yakin tetap ingin memposting ke gateway INSW?`;
+                confirmTitle = 'Perhatian: Bukan Dokumen KEK';
+                confirmIcon = 'warning';
+            }
+
+            const ok = await showConfirm(
+                confirmMsg,
+                confirmTitle,
+                '🌐 Ya, Posting INSW',
+                'Batal',
+                confirmIcon
+            );
+            if (!ok) return;
+
+            const modal = document.getElementById('modalTransferResult');
+            const content = document.getElementById('transferResultContent');
+            const headerTitle = modal.querySelector('.modal-header h3');
+            if (headerTitle) {
+                headerTitle.innerHTML = '&#127760; Hasil Posting Dokumen ke Portal INSW (PPKEK / LNSW)';
+            }
+
+            content.innerHTML = '<div style="text-align:center; padding:25px;"><span class="spinner"></span> Menghubungkan ke Portal INSW (LNSW)... Memvalidasi payload JSON PPKEK...</div>';
+            modal.style.display = 'flex';
+
+            const cmpId = document.getElementById('filterCmp')?.value || '';
+            const formData = new FormData();
+            formData.append('action', 'transfer_insw');
+            formData.append('nomor_aju', activeAju);
+            formData.append('cmp_id', cmpId);
+
+            try {
+                const res = await fetch('transfer.php', { method: 'POST', body: formData });
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    content.innerHTML = `
+                        <div style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:6px; padding:12px; margin-bottom:12px;">
+                            <div style="color:#52c41a; font-weight:700; font-size:13px; margin-bottom:4px;">&#9989; Berhasil Ditransfer ke Gateway INSW!</div>
+                            <div style="font-size:11px; color:#595959;">Dokumen PPKEK [${escapeHtml(json.kode_dokumen || activeBc)}] berhasil diterima oleh gateway LNSW.</div>
+                        </div>
+                        <p><strong>Nomor AJU:</strong> ${escapeHtml(json.nomor_aju || activeAju)}</p>
+                        <pre class="code-view" style="max-height:260px;">${JSON.stringify(json.response || json, null, 2)}</pre>
+                    `;
+                } else if (json.status === 'READY_INSW') {
+                    const rawJsonStr = json.raw_json || JSON.stringify(json.json_payload || {}, null, 2);
+                    window._lastInswJson = rawJsonStr;
+                    window._lastInswAju = json.nomor_aju || activeAju;
+
+                    content.innerHTML = `
+                        <div style="background:#f9f0ff; border:1px solid #d3adf7; border-radius:6px; padding:12px; margin-bottom:12px;">
+                            <div style="color:#722ed1; font-weight:700; font-size:12.5px; margin-bottom:4px;">
+                                🌐 Dokumen PPKEK [${escapeHtml(json.kode_dokumen || '613')}] Siap untuk INSW
+                            </div>
+                            <div style="font-size:11px; color:#595959; line-height:1.5;">
+                                Dokumen ini dikelola langsung oleh <strong>Lembaga National Single Window (LNSW)</strong>.<br>
+                                Payload JSON resmi PPKEK telah berhasil dibangun langsung dari database.
+                            </div>
+                        </div>
+
+                        <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:6px; padding:10px; margin-bottom:12px; font-size:11px; line-height:1.5;">
+                            <strong>💡 Catatan Akun & Transmisi INSW:</strong>
+                            <ul style="margin:4px 0 0 16px; padding:0;">
+                                <li><strong>Akun Portal Web (kek.insw.go.id):</strong> Dapat menggunakan akun SSO Kemenkeu / NPWP yang sama dengan CEISA 4.0.</li>
+                                <li><strong>Akun API Host-to-Host (H2H):</strong> Memerlukan <em>Client ID & Secret</em> atau Bearer Token terdaftar di LNSW (terpisah dari OpenApi Bea Cukai).</li>
+                            </ul>
+                        </div>
+
+                        <div style="display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap;">
+                            <button type="button" class="ant-btn ant-btn-insw ant-btn-sm" onclick="copyInswPayload()">
+                                📋 Salin JSON INSW
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm" onclick="downloadInswPayload()">
+                                📥 Unduh File JSON
+                            </button>
+                            <a href="https://kek.insw.go.id" target="_blank" class="ant-btn ant-btn-sm" style="display:inline-flex; align-items:center; gap:4px; text-decoration:none; color:inherit;">
+                                ↗️ Buka Portal KEK INSW
+                            </a>
+                        </div>
+
+                        <p style="margin-bottom:4px;"><strong>Preview Payload JSON PPKEK (${escapeHtml(json.nomor_aju || activeAju)}):</strong></p>
+                        <pre class="code-view" style="max-height:220px; font-size:10px;">${escapeHtml(rawJsonStr)}</pre>
+                    `;
+                } else {
+                    content.innerHTML = `
+                        <div style="background:#fff2f0; border:1px solid #ffccc7; border-radius:6px; padding:12px; margin-bottom:12px;">
+                            <div style="color:#f5222d; font-weight:700; font-size:12.5px; margin-bottom:4px;">&#9888;&#65039; Respon Gateway INSW:</div>
+                            <div style="font-size:11px; color:#595959;">${escapeHtml(json.message || 'Gagal memproses pengiriman ke INSW.')}</div>
+                        </div>
+                        <p><strong>Nomor AJU:</strong> ${escapeHtml(json.nomor_aju || activeAju)}</p>
+                        <pre class="code-view" style="max-height:260px;">${escapeHtml(json.raw_response || JSON.stringify(json, null, 2))}</pre>
+                    `;
+                }
+            } catch (err) {
+                content.innerHTML = `
+                    <div style="background:#fff2f0; border:1px solid #ffccc7; border-radius:6px; padding:12px; margin-bottom:12px;">
+                        <div style="color:#f5222d; font-weight:700;">&#10060; Terjadi Kesalahan Jaringan / Server:</div>
+                        <p style="margin-top:4px;">${escapeHtml(err.message)}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function copyInswPayload() {
+            if (!window._lastInswJson) return;
+            navigator.clipboard.writeText(window._lastInswJson).then(() => {
+                Swal.fire({
+                    toast: true,
+                    position: 'top-end',
+                    icon: 'success',
+                    title: 'JSON Dokumen INSW disalin ke clipboard!',
+                    showConfirmButton: false,
+                    timer: 2000
+                });
+            }).catch(() => {
+                showWarning('Gagal menyalin ke clipboard.');
+            });
+        }
+
+        function downloadInswPayload() {
+            if (!window._lastInswJson) return;
+            const filename = (window._lastInswAju ? 'PPKEK_' + window._lastInswAju : 'PPKEK_613') + '.json';
+            const blob = new Blob([window._lastInswJson], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
         }
 
         function closeModal(id) {

@@ -155,6 +155,10 @@ if ($action === 'save') {
     $is_final       = (isset($_POST['is_final']) && strtolower($_POST['is_final']) === 'true') ? 'true' : 'false';
     $token_ceisa    = trim($_POST['token_ceisa'] ?? '');
     $api_key_ceisa  = trim($_POST['api_key_ceisa'] ?? 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83');
+    $insw_client_id     = trim($_POST['insw_client_id'] ?? '');
+    $insw_client_secret = trim($_POST['insw_client_secret'] ?? '');
+    $insw_token         = trim($_POST['insw_token'] ?? '');
+    $insw_api_url       = trim($_POST['insw_api_url'] ?? 'https://api.insw.go.id/document');
     $erp_name       = trim($_POST['ERP_Name'] ?? '-');
     $erp_user       = trim($_POST['ERP_User'] ?? '');
     $erp_password   = trim($_POST['ERP_Password'] ?? '');
@@ -217,6 +221,16 @@ if ($action === 'save') {
         }
     }
     
+    // Auto check / add INSW columns if not exists
+    $chkCol = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'insw_client_id'");
+    if ($chkCol && $chkCol->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company 
+            ADD COLUMN insw_client_id VARCHAR(100) NULL AFTER api_key_ceisa,
+            ADD COLUMN insw_client_secret VARCHAR(100) NULL AFTER insw_client_id,
+            ADD COLUMN insw_token TEXT NULL AFTER insw_client_secret,
+            ADD COLUMN insw_api_url VARCHAR(255) NULL DEFAULT 'https://api.insw.go.id/document' AFTER insw_token");
+    }
+
     if ($mode === 'add') {
         // Cek duplikasi cmp_id
         $checkStmt = $koneksi->prepare("SELECT cmp_id FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
@@ -234,9 +248,10 @@ if ($action === 'save') {
             cmp_id, cmp_name, logo, card_color, subdomain, app_password, npwp, nib, alamat,
             kode_kantor, kode_jenis_tpb, nomor_skep, tanggal_skep,
             username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, is_final,
-            token_ceisa, api_key_ceisa, ERP_Name, ERP_User, ERP_Password, ERP_Constring,
+            token_ceisa, api_key_ceisa, insw_client_id, insw_client_secret, insw_token, insw_api_url,
+            ERP_Name, ERP_User, ERP_Password, ERP_Constring,
             AI_Name, AI_API_Key, is_active, IS_INV, allow_lowercase_code, alert_it_inv_unposted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $koneksi->prepare($sql);
         if (!$stmt) {
@@ -245,11 +260,12 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssssssssssssiiii",
+            "ssssssssssssssssssssssssssssssiiii",
             $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
-            $token_ceisa, $api_key_ceisa, $erp_name, $erp_user, $erp_password, $erp_constring,
+            $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
+            $erp_name, $erp_user, $erp_password, $erp_constring,
             $ai_name, $ai_api_key, $is_active, $is_inv, $allow_lowercase_code, $alert_it_inv_unposted
         );
         
@@ -266,7 +282,8 @@ if ($action === 'save') {
             cmp_name = ?, logo = ?, card_color = ?, subdomain = ?, app_password = ?, npwp = ?, nib = ?, alamat = ?,
             kode_kantor = ?, kode_jenis_tpb = ?, nomor_skep = ?, tanggal_skep = ?,
             username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, id_user_ceisa = ?, is_final = ?,
-            token_ceisa = ?, api_key_ceisa = ?, ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
+            token_ceisa = ?, api_key_ceisa = ?, insw_client_id = ?, insw_client_secret = ?, insw_token = ?, insw_api_url = ?,
+            ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
             AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
             WHERE cmp_id = ?";
             
@@ -277,11 +294,12 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssssssssssiiiis",
+            "sssssssssssssssssssssssssssssiiiis",
             $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
-            $token_ceisa, $api_key_ceisa, $erp_name, $erp_user, $erp_password, $erp_constring,
+            $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
+            $erp_name, $erp_user, $erp_password, $erp_constring,
             $ai_name, $ai_api_key, $is_active, $is_inv, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
         );
         
@@ -2265,6 +2283,50 @@ $theme = $_GET['theme'] ?? 'light';
                                 </label>
                                 <input type="text" id="f_token_ceisa" name="token_ceisa" class="form-control" placeholder="Token auth CEISA (opsional/auto)">
                             </div>
+
+                            <div class="form-group full-width" style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-card);">
+                                <div style="font-weight:700; color:#722ed1; font-size:11.5px; display:flex; align-items:center; gap:6px;">
+                                    <span>🌐</span> Kredensial Host-to-Host (H2H) INSW / PPKEK (LNSW)
+                                </div>
+                                <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                                    Diperlukan untuk pengiriman otomatis Dokumen KEK (PPKEK 613, 611, 612) ke Gateway LNSW (kek.insw.go.id)
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>Client ID INSW</span>
+                                    <span class="form-hint">Diberikan oleh LNSW via Portal INSW</span>
+                                </label>
+                                <input type="text" id="f_insw_client_id" name="insw_client_id" class="form-control" placeholder="Contoh: CLIENT_ID_LNSW">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>Client Secret INSW</span>
+                                    <span class="form-hint">Kunci rahasia API H2H INSW</span>
+                                </label>
+                                <div class="input-group">
+                                    <input type="password" id="f_insw_client_secret" name="insw_client_secret" class="form-control" placeholder="Client secret LNSW">
+                                    <button type="button" class="input-group-btn" onclick="togglePass('f_insw_client_secret')">👁️</button>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>Endpoint Gateway INSW</span>
+                                    <span class="form-hint">URL API LNSW Dokumen KEK</span>
+                                </label>
+                                <input type="text" id="f_insw_api_url" name="insw_api_url" class="form-control" value="https://api.insw.go.id/document">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>Bearer Token INSW (Opsional)</span>
+                                    <span class="form-hint">Access token aktif INSW</span>
+                                </label>
+                                <input type="text" id="f_insw_token" name="insw_token" class="form-control" placeholder="Bearer token INSW jika sudah ada">
+                            </div>
                         </div>
                     </div>
 
@@ -3153,6 +3215,10 @@ $theme = $_GET['theme'] ?? 'light';
             document.getElementById('f_alert_it_inv_unposted').value = '0';
             document.getElementById('f_is_final').value = 'false';
             document.getElementById('f_api_key_ceisa').value = 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83';
+            document.getElementById('f_insw_client_id').value = '';
+            document.getElementById('f_insw_client_secret').value = '';
+            document.getElementById('f_insw_token').value = '';
+            document.getElementById('f_insw_api_url').value = 'https://api.insw.go.id/document';
             document.getElementById('f_ERP_Name').value = '-';
             document.getElementById('f_kode_jenis_tpb').value = '1';
             document.getElementById('f_tanggal_skep').value = '';
@@ -3222,6 +3288,10 @@ $theme = $_GET['theme'] ?? 'light';
                         document.getElementById('f_id_user_ceisa').value = d.id_user_ceisa || '';
                         document.getElementById('f_token_ceisa').value = d.token_ceisa || '';
                         document.getElementById('f_api_key_ceisa').value = d.api_key_ceisa || 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83';
+                        document.getElementById('f_insw_client_id').value = d.insw_client_id || '';
+                        document.getElementById('f_insw_client_secret').value = d.insw_client_secret || '';
+                        document.getElementById('f_insw_token').value = d.insw_token || '';
+                        document.getElementById('f_insw_api_url').value = d.insw_api_url || 'https://api.insw.go.id/document';
 
                         document.getElementById('f_IS_INV').value = (d.IS_INV !== null && d.IS_INV !== undefined) ? d.IS_INV : '1';
                         document.getElementById('f_allow_lowercase_code').value = (d.allow_lowercase_code !== null && d.allow_lowercase_code !== undefined) ? d.allow_lowercase_code : '0';

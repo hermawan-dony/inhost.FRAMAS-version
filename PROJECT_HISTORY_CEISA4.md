@@ -4765,6 +4765,40 @@ Delapan (8) tabel yang distandardisasi:
    - Pengujian impor file besar berukuran 1.9 MB dengan **29.972 baris data** pabean (termasuk 5.971 bahan baku dan 16.455 tarif) selesai diproses secara penuh hanya dalam waktu **5,5 detik** (sebelumnya butuh lebih dari 5 menit / timeout).
 
 ---
+
+## 119. Penambahan Tombol "Posting INSW", Integrasi Dokumen PPKEK 613/611/612 (LNSW), dan Penjelasan Kompatibilitas Akun CEISA 4.0 vs INSW
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php), [posting_insw.php](file:///c:/dp/g-ceisa/posting_insw.php), [www/posting_insw.php](file:///c:/dp/g-ceisa/www/posting_insw.php), [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Masalah & Analisis
+1. **Galat Transfer Dokumen 613**:
+   - Saat pengguna mentransfer dokumen BC 613 (Pemberitahuan Pabean Kawasan Ekonomi Khusus / PPKEK 6.1.3 atau PPFTZ-03) menggunakan tombol "Transfer CEISA", API Bea Cukai OpenAPI (`https://apis-gw.beacukai.go.id/openapi/document`) menolak dokumen dengan galat:
+     `{"status": "failed", "message": "kodeDokumen tidak dikenali"}`
+2. **Penyebab Utama**:
+   - Endpoint Bea Cukai OpenAPI hanya menerima dokumen kepabeanan umum/tpb standar (BC 2.0, 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 3.0, 4.0, 4.1, 1.6).
+   - Dokumen Kawasan Ekonomi Khusus (PPKEK 6.1.1, 6.1.2, 6.1.3) dan Kawasan Perdagangan Bebas (KPBPB/FTZ) dikelola dan diatur langsung oleh **Lembaga National Single Window (LNSW / SINSW)** melalui Portal KEK (`https://kek.insw.go.id`) dan Gateway API INSW (`https://api.insw.go.id/document`).
+3. **Analisis Kompatibilitas Akun (CEISA 4.0 vs INSW)**:
+   - **Portal Web (Browser)**: Ya, dapat menggunakan akun SSO Kemenkeu yang sama (NPWP & Password akun portal). Pengguna dapat langsung login ke `kek.insw.go.id` menggunakan akun SSO Kemenkeu yang sama dengan CEISA 4.0.
+   - **Host-to-Host / API (Transmisi Otomatis)**: Memerlukan kredensial API terpisah. CEISA 4.0 menggunakan akun OpenApi Bea Cukai (Username, Password, Bearer Token NLE), sedangkan INSW menggunakan `Client-Id` dan `Client-Secret` (atau OAuth Token LNSW) yang didaftarkan khusus di menu Host-to-Host Portal INSW karena gateway server-nya berbeda.
+
+### B. Solusi & Implementasi
+1. **Penambahan Tombol "🌐 Posting INSW" pada Toolbar & Context Menu ([transfer.php](file:///c:/dp/g-ceisa/transfer.php))**:
+   - Ditambahkan tombol modern dengan gradien ungu khas Single Window (`.ant-btn-insw`) tepat di samping tombol "🚀 Transfer CEISA".
+   - Ditambahkan pula opsi `🌐 Posting INSW` pada menu klik kanan (context menu baris dokumen).
+2. **Intersepsi Cerdas pada `transferActiveAju()`**:
+   - Jika pengguna memilih dokumen 613/611/612 lalu menekan "Transfer CEISA", sistem secara proaktif menampilkan konfirmasi cerdas mendeteksi bahwa dokumen tersebut adalah dokumen PPKEK dan menawarkan opsi untuk beralih langsung ke "Posting INSW".
+3. **Engine Pengiriman INSW ([posting_insw.php](file:///c:/dp/g-ceisa/posting_insw.php))**:
+   - Membangun payload JSON resmi PPKEK langsung dari basis data riil via `CeisaJsonBuilder::generate($nomor_aju)`.
+   - Jika kredensial API INSW sudah diisi: Menembakkan cURL ke gateway INSW (`https://api.insw.go.id/document`) dan mencatat status posted jika berhasil.
+   - Jika kredensial API INSW belum diset (awal aktivasi): Menampilkan dialog terstruktur dengan status `READY_INSW`, menyajikan payload JSON PPKEK yang siap pakai, tombol "Salin JSON INSW", tombol "Unduh File JSON (PPKEK_613.json)", tautan langsung ke `kek.insw.go.id`, serta ringkasan perbedaan akun SSO vs H2H.
+4. **Dukungan Kredensial INSW di Master Konfigurasi Perusahaan ([company.php](file:///c:/dp/g-ceisa/company.php))**:
+   - Menambahkan kolom konfigurasi otomatis (*auto-migration*) pada tabel `bc_ceisa_company`: `insw_client_id`, `insw_client_secret`, `insw_token`, dan `insw_api_url`.
+   - Menambahkan form input kredensial H2H INSW pada Tab 3 pengaturan perusahaan.
+5. **Deployment & Verifikasi Produksi**:
+   - Berkas disinkronkan ke direktori `www/` dan di-deploy ke server Alibaba Cloud `/source/public/` serta `/source/public/www/`.
+   - Seluruh berkas lulus pemeriksaan sintaksis PHP (`php -l`) dengan **0 errors**.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 
