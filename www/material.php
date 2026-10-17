@@ -2127,6 +2127,21 @@ if ($action === 'sync_satuan') {
         const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
         const sessionCmpId = '<?= htmlspecialchars($sessionCmpId) ?>';
 
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function escapeJs(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
+        }
+
         function openKoreksiKlas() {
             if (window.parent && typeof window.parent.switchMainTab === 'function') {
                 window.parent.switchMainTab('inv_koreksi_klas');
@@ -2145,7 +2160,7 @@ if ($action === 'sync_satuan') {
             tbody.innerHTML = '<tr><td colspan="14" style="text-align:center; padding:15px;"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data material...</td></tr>';
 
             try {
-                const res = await fetch(`material.php?action=list&q=${encodeURIComponent(q)}&klas=${encodeURIComponent(klas)}`);
+                const res = await fetch(`material.php?action=list&q=${encodeURIComponent(q)}&klas=${encodeURIComponent(klas)}&cmp_id=${encodeURIComponent(sessionCmpId)}`);
                 const json = await res.json();
                 if (json.status === 'OK') {
                     rawItemsData = json.data;
