@@ -1,204 +1,1636 @@
 <?php
 /**
  * CEISA 4.0 - Warehouse: Delivery (warehouse_delivery.php)
- * Menu placeholder modul pengeluaran barang / delivery order
+ * Modul Pengeluaran Barang Aktual Fisik Gudang & Posting ke IT Inventory (Laporan 1B - Pengeluaran).
+ * Tampilan & nuansa setara dengan Data Host to Host (transfer.php) khusus untuk PIC Warehouse.
  */
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
 require_once __DIR__ . '/koneksi.php';
+require_once __DIR__ . '/datalogin.php';
+
+$isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
+$sessionCmpId = trim($_GET['cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($cmp_id ?? '')));
+$theme = trim($_GET['theme'] ?? ($_SESSION['theme'] ?? 'light'));
+
+// -------------------------------------------------------------
+// AJAX API ENDPOINTS
+// -------------------------------------------------------------
+$action = $_REQUEST['action'] ?? '';
+
+// 1. LIST DOKUMEN PENGELUARAN (DELIVERY / OUTBOUND)
+if ($action === 'list') {
+    header('Content-Type: application/json; charset=utf-8');
+    $filter_cmp  = trim($_GET['cmp_id'] ?? $sessionCmpId);
+    $filter_bc   = trim($_GET['bc'] ?? '');
+    $filter_stat = trim($_GET['status'] ?? '');
+    $search      = trim($_GET['q'] ?? '');
+    $filter_per  = trim($_GET['periode'] ?? '');
+    $filter_tgl1 = trim($_GET['tgl_awal'] ?? '');
+    $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
+
+    $escCmp = $koneksi->real_escape_string($filter_cmp);
+    $outboundBcs = "'25','261','27','30','41','33','331','613'";
+
+    $where = [];
+    if (!empty($escCmp)) {
+        $where[] = "(h.cmp_id = '$escCmp' OR h.cmp_id = '')";
+    }
+
+    if (!empty($filter_bc)) {
+        $where[] = "h.kode_dokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
+    } else {
+        $where[] = "h.kode_dokumen IN ($outboundBcs)";
+    }
+
+    // Filter tanggal pernyataan / pendaftaran
+    if (!empty($filter_tgl1) && !empty($filter_tgl2)) {
+        $t1 = $koneksi->real_escape_string($filter_tgl1);
+        $t2 = $koneksi->real_escape_string($filter_tgl2);
+        $where[] = "((h.tanggal_pernyataan >= '$t1' AND h.tanggal_pernyataan <= '$t2') OR (h.tanggal_daftar >= '$t1' AND h.tanggal_daftar <= '$t2'))";
+    } elseif (!empty($filter_per)) {
+        $per = $koneksi->real_escape_string($filter_per);
+        $where[] = "(h.tanggal_pernyataan LIKE '$per%' OR h.tanggal_daftar LIKE '$per%')";
+    }
+
+    // Filter pencarian teks
+    if (!empty($search)) {
+        $s = $koneksi->real_escape_string($search);
+        $where[] = "(h.nomor_aju LIKE '%$s%' OR h.nomor_daftar LIKE '%$s%' OR c.nama_entitas LIKE '%$s%' OR doc.nomor_dokumen LIKE '%$s%')";
+    }
+
+    $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
+
+    $sql = "SELECT 
+        h.nomor_aju,
+        h.kode_dokumen AS bc,
+        IFNULL(h.nomor_daftar, '-') AS nomor_daftar,
+        IFNULL(h.tanggal_daftar, '-') AS tanggal_daftar,
+        IFNULL(h.tanggal_pernyataan, '-') AS tanggal_pernyataan,
+        IFNULL(c.nama_entitas, IFNULL(h.nama_pernyataan, '-')) AS buyer_name,
+        IFNULL(doc.nomor_dokumen, '-') AS invoice_do,
+        IFNULL(h.kode_valuta, 'IDR') AS valuta,
+        IFNULL(h.bruto, 0) AS bruto,
+        IFNULL(resp.nomor_respon, IFNULL(resp.keterangan, '-')) AS sppb_npe,
+        (SELECT COUNT(1) FROM bc_ceisa_barang b WHERE b.nomor_aju = h.nomor_aju) AS jml_barang,
+        (SELECT COUNT(1) FROM bc_1ab2 inv WHERE inv.nomor_aju = h.nomor_aju) AS is_it_inv,
+        (SELECT MAX(inv.TGL_PROSES) FROM bc_1ab2 inv WHERE inv.nomor_aju = h.nomor_aju) AS it_tgl_proses,
+        (SELECT MAX(inv.DOK) FROM bc_1ab2 inv WHERE inv.nomor_aju = h.nomor_aju) AS it_dok
+    FROM bc_ceisa_header h
+    LEFT JOIN (
+        SELECT nomor_aju, MIN(nama_entitas) AS nama_entitas
+        FROM bc_ceisa_entitas 
+        WHERE kode_entitas IN ('6','8','2','3','PENERIMA','PEMBELI','IMPORTIR')
+        GROUP BY nomor_aju
+    ) c ON h.nomor_aju = c.nomor_aju
+    LEFT JOIN (
+        SELECT nomor_aju, MIN(nomor_dokumen) AS nomor_dokumen
+        FROM bc_ceisa_dokumen 
+        WHERE kode_dokumen IN ('380','230','217','999')
+        GROUP BY nomor_aju
+    ) doc ON h.nomor_aju = doc.nomor_aju
+    LEFT JOIN (
+        SELECT nomor_aju, MAX(nomor_respon) AS nomor_respon, MAX(keterangan) AS keterangan
+        FROM bc_ceisa_respons 
+        WHERE kode_respon IN ('2503','3003','4103','2703','61303','3001','3002') OR keterangan LIKE '%SPPB%' OR keterangan LIKE '%NPE%'
+        GROUP BY nomor_aju
+    ) resp ON h.nomor_aju = resp.nomor_aju
+    $whereSql
+    ORDER BY h.tanggal_pernyataan DESC, h.nomor_aju DESC
+    LIMIT 300";
+
+    $res = $koneksi->query($sql);
+    $data = [];
+    $kpiTotal = 0;
+    $kpiUnposted = 0;
+    $kpiPosted = 0;
+
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $isInv = intval($r['is_it_inv']);
+            if ($isInv > 0) {
+                $kpiPosted++;
+            } else {
+                $kpiUnposted++;
+            }
+            $kpiTotal++;
+
+            if ($filter_stat === 'it_inv' && $isInv == 0) continue;
+            if ($filter_stat === 'unposted' && $isInv > 0) continue;
+
+            $data[] = $r;
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'data'   => $data,
+        'count'  => count($data),
+        'kpi'    => [
+            'total'    => $kpiTotal,
+            'unposted' => $kpiUnposted,
+            'posted'   => $kpiPosted
+        ]
+    ]);
+    exit;
+}
+
+// 2. GET DETAIL BARANG & VERIFIKASI FISIK PENGELUARAN
+if ($action === 'detail_barang') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_GET['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $escCmp = $koneksi->real_escape_string($sessionCmpId);
+
+    // Ambil Header & Dokumen
+    $h = $koneksi->query("SELECT nomor_aju, kode_dokumen, nomor_daftar, tanggal_daftar, nama_pernyataan FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1")->fetch_assoc();
+    $customer = $koneksi->query("SELECT nama_entitas FROM bc_ceisa_entitas WHERE nomor_aju = '$escAju' AND kode_entitas IN ('6','8','2','3','PENERIMA','PEMBELI','IMPORTIR') LIMIT 1")->fetch_assoc()['nama_entitas'] ?? ($h['nama_pernyataan'] ?? '-');
+    $suggestedDok = $koneksi->query("SELECT nomor_dokumen FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' AND kode_dokumen IN ('230','380','217') ORDER BY kode_dokumen ASC LIMIT 1")->fetch_assoc()['nomor_dokumen'] ?? ($h['nomor_daftar'] ?? '');
+
+    // Cek apakah sudah pernah diposting di bc_1ab2
+    $postedInfo = $koneksi->query("SELECT MAX(TGL_PROSES) AS tgl_proses, MAX(DOK) AS dok, COUNT(1) AS jml FROM bc_1ab2 WHERE nomor_aju = '$escAju'")->fetch_assoc();
+    $isPosted = !empty($postedInfo['jml']) && intval($postedInfo['jml']) > 0;
+
+    // Ambil Data Barang
+    $sql = "SELECT 
+        b.seri_barang,
+        b.kode_barang,
+        b.uraian,
+        IFNULL(b.jumlah_satuan, 0) AS jumlah_satuan,
+        IFNULL(b.kode_satuan, 'PCE') AS kode_satuan,
+        IFNULL(b.hs, '') AS pos_tarif,
+        IFNULL(b.harga_penyerahan, 0) AS harga_penyerahan,
+        IFNULL(b.cif, 0) AS cif,
+        IFNULL(b.fob, 0) AS fob,
+        IFNULL(b.netto, 0) AS netto,
+        IFNULL((SELECT klas FROM bc_material m WHERE m.KODE_BARANG = b.kode_barang AND (m.cmp_id = '$escCmp' OR m.cmp_id = '') LIMIT 1), IFNULL(b.tipe, 'Barang Jadi')) AS klas,
+        inv.SESUAI AS inv_sesuai,
+        inv.QTY_AKTUAL AS inv_qty_aktual,
+        inv.MEMO AS inv_memo
+    FROM bc_ceisa_barang b
+    LEFT JOIN bc_1ab2 inv ON b.nomor_aju = inv.nomor_aju AND b.seri_barang = inv.SERI_BARANG
+    WHERE b.nomor_aju = '$escAju'
+    ORDER BY b.seri_barang ASC";
+
+    $res = $koneksi->query($sql);
+    $rows = [];
+    $totQtyDok = 0;
+    $totQtyAktual = 0;
+    $totNilai = 0;
+
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $qtyDok = floatval($r['jumlah_satuan']);
+            $totQtyDok += $qtyDok;
+            $valBarang = floatval($r['harga_penyerahan'] ?: ($r['fob'] ?: ($r['cif'] ?: 0)));
+            $totNilai += $valBarang;
+
+            if ($isPosted) {
+                $qtyAktual = floatval($r['inv_qty_aktual']);
+                $sesuai = $r['inv_sesuai'] ?: ($qtyAktual == $qtyDok ? 'Y' : 'N');
+                $memo = $r['inv_memo'] ?? '';
+            } else {
+                $qtyAktual = $qtyDok;
+                $sesuai = 'Y';
+                $memo = '';
+            }
+            $totQtyAktual += $qtyAktual;
+
+            $r['qty_dokumen'] = $qtyDok;
+            $r['qty_aktual']  = $qtyAktual;
+            $r['sesuai']      = $sesuai;
+            $r['memo']        = $memo;
+
+            $rows[] = $r;
+        }
+    }
+
+    echo json_encode([
+        'status'         => 'OK',
+        'nomor_aju'      => $nomor_aju,
+        'header'         => $h,
+        'customer'       => $customer,
+        'suggested_dok'  => $suggestedDok,
+        'is_posted'      => $isPosted,
+        'posted_info'    => [
+            'tgl_proses' => $postedInfo['tgl_proses'] ?? '',
+            'dok'        => $postedInfo['dok'] ?? ''
+        ],
+        'totals'         => [
+            'qty_dokumen' => $totQtyDok,
+            'qty_aktual'  => $totQtyAktual,
+            'nilai'       => $totNilai
+        ],
+        'data'           => $rows
+    ]);
+    exit;
+}
+
+// 3. KONFIRMASI PENGELUARAN WAREHOUSE & POSTING KE IT INVENTORY (bc_1ab2, AB = 'B')
+if ($action === 'confirm_post') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju   = trim($_POST['nomor_aju'] ?? '');
+    $tgl_proses  = trim($_POST['tanggal_proses'] ?? date('Y-m-d'));
+    $dok         = trim($_POST['dok'] ?? '');
+    $itemsJson   = $_POST['items'] ?? '[]';
+    $items       = json_decode($itemsJson, true);
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+    if (empty($tgl_proses)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Tanggal Aktual Keluar (TANGGAL_PROSES) wajib diisi.']);
+        exit;
+    }
+    if (empty($dok)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor BUKTI Pengeluaran / DO / Surat Jalan (DOK) wajib diisi.']);
+        exit;
+    }
+    if (!is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Daftar rincian barang kosong.']);
+        exit;
+    }
+
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+
+    // Cek apakah sudah terposting
+    $chk = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '$escAju'")->fetch_row()[0] ?? 0;
+    if ($chk > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah terposting di IT Inventory!"]);
+        exit;
+    }
+
+    // Ambil data header
+    $h = $koneksi->query("SELECT * FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1")->fetch_assoc();
+    if (!$h) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju tidak ditemukan di staging header."]);
+        exit;
+    }
+
+    $docCmp = !empty($h['cmp_id']) ? $h['cmp_id'] : $sessionCmpId;
+    $kodeBc = $h['kode_dokumen'] ?? '25';
+    $noDaftar = $h['nomor_daftar'] ?? '-';
+    $tglDaftar = $h['tanggal_daftar'] ?? '-';
+
+    // Ambil customer & invoice / DO
+    $customer = $koneksi->query("SELECT nama_entitas FROM bc_ceisa_entitas WHERE nomor_aju = '$escAju' AND kode_entitas IN ('6','8','2','3','PENERIMA','PEMBELI','IMPORTIR') LIMIT 1")->fetch_assoc()['nama_entitas'] ?? ($h['nama_pernyataan'] ?? 'PEMBELI');
+    $invoice  = $koneksi->query("SELECT nomor_dokumen FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' AND kode_dokumen IN ('380','217') LIMIT 1")->fetch_assoc()['nomor_dokumen'] ?? '';
+    $sj       = $koneksi->query("SELECT nomor_dokumen FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' AND kode_dokumen = '230' LIMIT 1")->fetch_assoc()['nomor_dokumen'] ?? '';
+
+    // Ambil master barang pabean
+    $qBrg = $koneksi->query("SELECT * FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
+    $mapBrg = [];
+    if ($qBrg) {
+        while ($b = $qBrg->fetch_assoc()) {
+            $mapBrg[$b['seri_barang']] = $b;
+        }
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        $stmtInsert = $koneksi->prepare("
+            INSERT INTO bc_1ab2 (
+                cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS,
+                KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER,
+                SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO,
+                SESUAI, QTY_AKTUAL, MEMO, DOK, TGL_PROSES, CRT_DT, CRT_USER
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, NOW(), ?
+            )
+        ");
+
+        if (!$stmtInsert) {
+            throw new Exception("Prepare failed: " . $koneksi->error);
+        }
+
+        $postedItems = 0;
+        $currentUser = $_SESSION['user_id'] ?? ($_SESSION['username'] ?? 'WAREHOUSE');
+
+        foreach ($items as $it) {
+            $seri = intval($it['seri_barang'] ?? 0);
+            if (!isset($mapBrg[$seri])) continue;
+            $b = $mapBrg[$seri];
+
+            $qtyDok = floatval($b['jumlah_satuan'] ?? 0);
+            $qtyAkt = floatval($it['qty_aktual'] ?? $qtyDok);
+            $sesuai = ($it['sesuai'] === 'Y' || ($qtyAkt == $qtyDok && empty($it['memo']))) ? 'Y' : 'N';
+            $memo   = trim((string)($it['memo'] ?? ''));
+
+            // Validasi wajib memo jika beda
+            if ($qtyAkt != $qtyDok && empty($memo)) {
+                throw new Exception("Baris #$seri (Kode: {$b['kode_barang']}) memiliki selisih fisik ({$qtyAkt} vs {$qtyDok}), kolom MEMO wajib diisi alasan selisih!");
+            }
+
+            // Ambil klasifikasi material
+            $escKode = $koneksi->real_escape_string($b['kode_barang']);
+            $klas = $koneksi->query("SELECT KLAS FROM bc_material WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$docCmp' OR cmp_id = '') LIMIT 1")->fetch_assoc()['KLAS'] ?? ($b['tipe'] ?: 'Barang Jadi');
+
+            $hs = $b['pos_tarif'] ?: ($b['hs'] ?? '');
+            $satuan = $b['kode_satuan'] ?: 'PCE';
+            $valuta = $h['kode_valuta'] ?: 'IDR';
+            $nilai  = floatval($b['harga_penyerahan'] ?: ($b['fob'] ?: ($b['cif'] ?: 0)));
+            $ab     = 'B'; // Delivery = Pengeluaran (1B)
+            $noBukti = !empty($invoice) ? $invoice : (!empty($sj) ? $sj : $noDaftar);
+            $tglBukti = $h['tanggal_pernyataan'] ?: ($h['tanggal_daftar'] ?: date('Y-m-d'));
+            $faktur = '';
+            $hargaPenyerahan = floatval($b['harga_penyerahan'] ?? 0);
+            $cif = floatval($b['cif'] ?? 0);
+            $netto = floatval($b['netto'] ?? 0);
+
+            $stmtInsert->bind_param(
+                "ssssssssssssdsssssssiddssssssss",
+                $docCmp, $kodeBc, $noDaftar, $tglDaftar, $noBukti, $tglBukti, $customer,
+                $b['kode_barang'], $hs, $b['uraian'], $klas, $satuan, $qtyDok, $valuta, $nilai, $ab, $nomor_aju,
+                $sj, $invoice, $faktur, $nomor_aju, $seri, $hargaPenyerahan, $cif, $netto,
+                $sesuai, $qtyAkt, $memo, $dok, $tgl_proses, $currentUser
+            );
+
+            if (!$stmtInsert->execute()) {
+                throw new Exception("Execute insert error item #$seri: " . $stmtInsert->error);
+            }
+            $postedItems++;
+        }
+        $stmtInsert->close();
+
+        // Update bc_ceisa_aju_posted
+        $koneksi->query("INSERT INTO bc_ceisa_aju_posted (cmp_id, nomor_aju, waktu, bc, nomor_daftar, tanggal_daftar) 
+                         VALUES ('$docCmp', '$escAju', NOW(), '$kodeBc', '$noDaftar', '$tglDaftar')
+                         ON DUPLICATE KEY UPDATE waktu = NOW(), nomor_daftar = VALUES(nomor_daftar), tanggal_daftar = VALUES(tanggal_daftar)");
+
+        $koneksi->commit();
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Berhasil mengonfirmasi pengeluaran barang dan memposting $postedItems item ke IT Inventory (1B - Pengeluaran)!"
+        ]);
+    } catch (Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// 4. BATALKAN POSTING WAREHOUSE (UNPOSTING)
+if ($action === 'unpost_it_inv') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+
+    $koneksi->begin_transaction();
+    try {
+        // Hapus dari bc_1ab2
+        $del = $koneksi->query("DELETE FROM bc_1ab2 WHERE nomor_aju = '$escAju'");
+        if (!$del) {
+            throw new Exception("Gagal menghapus data dari bc_1ab2: " . $koneksi->error);
+        }
+        $koneksi->commit();
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Posting IT Inventory pengeluaran untuk nomor AJU $nomor_aju berhasil dibatalkan. Dokumen sekarang siap diverifikasi ulang."
+        ]);
+    } catch (Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
+// 5. DETAIL TAB: DOKUMEN LAMPIRAN, STATUS, RESPON
+if ($action === 'detail_tab') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_GET['nomor_aju'] ?? '');
+    $tab       = trim($_GET['tab'] ?? 'dokumen');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+
+    if ($tab === 'dokumen') {
+        $res = $koneksi->query("SELECT seri, kode_dokumen, nomor_dokumen, tanggal_dokumen FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' ORDER BY seri ASC");
+        $rows = [];
+        if ($res) {
+            while ($r = $res->fetch_assoc()) $rows[] = $r;
+        }
+        echo json_encode(['status' => 'OK', 'data' => $rows]);
+        exit;
+    }
+
+    if ($tab === 'status') {
+        $res = $koneksi->query("SELECT waktu_status, kode_proses, keterangan, nomor_daftar FROM bc_ceisa_status WHERE nomor_aju = '$escAju' ORDER BY waktu_status ASC, id ASC");
+        $rows = [];
+        if ($res) {
+            while ($r = $res->fetch_assoc()) $rows[] = $r;
+        }
+        echo json_encode(['status' => 'OK', 'data' => $rows]);
+        exit;
+    }
+
+    if ($tab === 'respon') {
+        $res = $koneksi->query("SELECT tanggal_respon, kode_respon, nomor_respon, keterangan, pdf FROM bc_ceisa_respons WHERE nomor_aju = '$escAju' ORDER BY id ASC");
+        $rows = [];
+        if ($res) {
+            while ($r = $res->fetch_assoc()) $rows[] = $r;
+        }
+        echo json_encode(['status' => 'OK', 'data' => $rows]);
+        exit;
+    }
+}
 ?>
 <!DOCTYPE html>
-<html lang="id">
+<html lang="id" data-theme="<?= htmlspecialchars($theme) ?>">
 <head>
     <meta charset="UTF-8">
-    <title>Warehouse - Delivery</title>
+    <title>Warehouse - Delivery (Pengeluaran Barang & Posting IT Inventory 1B)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/assets/sweetalert2.all.min.js"></script>
     <style>
-        :root {
-            --bg: #f0f2f5;
-            --card-bg: #ffffff;
-            --border: #e8e8e8;
-            --text: #262626;
-            --text-secondary: #8c8c8c;
+        :root, html[data-theme="light"], body[data-theme="light"] {
+            --bg-base: #f0f2f5;
+            --bg-card: #ffffff;
+            --bg-filter: #f9fbfd;
+            --border-color: #d9d9d9;
+            --border-table: #e0e0e0;
+            --text-main: #262626;
+            --text-heading: #1f1f1f;
+            --text-muted: #8c8c8c;
             --primary: #1890ff;
             --primary-hover: #40a9ff;
             --success: #52c41a;
             --warning: #faad14;
-            --danger: #f5222d;
+            --danger: #ff4d4f;
+            --row-hover: #f0f7ff;
+            --row-selected: #e6f7ff;
+            --row-selected-text: #002766;
+            --table-head-bg: #fafafa;
         }
-        [data-theme='dark'] {
-            --bg: #141414;
-            --card-bg: #1f1f1f;
-            --border: #303030;
-            --text: #d9d9d9;
-            --text-secondary: #6e6e6e;
+        [data-theme='dark'], html[data-theme="dark"], body[data-theme="dark"] {
+            --bg-base: #141414;
+            --bg-card: #1f1f1f;
+            --bg-filter: #181818;
+            --border-color: #303030;
+            --border-table: #303030;
+            --text-main: rgba(255, 255, 255, 0.85);
+            --text-heading: #ffffff;
+            --text-muted: rgba(255, 255, 255, 0.45);
             --primary: #177ddc;
-            --primary-hover: #3c9ae8;
+            --primary-hover: #1890ff;
             --success: #49aa19;
             --warning: #d89614;
             --danger: #a61d24;
+            --row-hover: #262638;
+            --row-selected: #112a45;
+            --row-selected-text: #bae7ff;
+            --table-head-bg: #191919;
         }
+
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Public Sans', sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            font-size: 12px;
-            padding: 16px;
+            font-family: 'Poppins', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            font-size: 10px;
+            line-height: 1.45;
+            padding: 4px 6px;
+            overflow: hidden;
+            height: 100vh;
         }
-        .kpi-container {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 12px;
-            margin-bottom: 16px;
+
+        /* Split Screen Container */
+        .split-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 8px);
+            width: 100%;
+            overflow: hidden;
         }
-        .kpi-card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 14px 18px;
+        .split-pane-top {
+            flex: 0 0 52%;
+            min-height: 160px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .split-divider {
+            height: 5px;
+            background: #d9d9d9;
+            cursor: row-resize;
+            margin: 2px 0;
+            position: relative;
+            z-index: 10;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .split-divider:hover, .split-divider.dragging {
+            background: var(--primary);
+        }
+        .split-handle {
+            width: 32px;
+            height: 2px;
+            background: #8c8c8c;
+            border-radius: 1px;
+        }
+        .split-pane-bottom {
+            flex: 1;
+            min-height: 140px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Card container */
+        .ant-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .ant-card-head {
+            min-height: 32px;
             display: flex;
             align-items: center;
             justify-content: space-between;
+            border-bottom: 1px solid var(--border-color);
+            padding: 4px 8px;
+            background: var(--bg-card);
+            flex-wrap: wrap;
+            gap: 6px;
         }
-        .kpi-title { font-size: 11px; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; }
-        .kpi-value { font-size: 22px; font-weight: 700; margin-top: 4px; color: var(--text); }
-        .kpi-icon { font-size: 26px; opacity: 0.8; }
-
-        .placeholder-box {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 40px 24px;
-            text-align: center;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        }
-        .placeholder-icon {
-            font-size: 48px;
-            color: var(--primary);
-            margin-bottom: 16px;
-        }
-        .placeholder-title {
-            font-size: 16px;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: var(--text);
-        }
-        .placeholder-desc {
-            font-size: 12px;
-            color: var(--text-secondary);
-            max-width: 520px;
-            margin: 0 auto 24px auto;
-            line-height: 1.6;
-        }
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 16px;
-            max-width: 800px;
-            margin: 0 auto;
-            text-align: left;
-        }
-        .feature-item {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 14px;
-        }
-        .feature-item h4 {
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 4px;
+        .ant-card-head-title {
             display: flex;
             align-items: center;
             gap: 6px;
-            color: var(--text);
-        }
-        .feature-item p {
             font-size: 11px;
-            color: var(--text-secondary);
-            line-height: 1.4;
+            font-weight: 600;
+            color: var(--text-heading);
         }
-        .btn-primary {
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            padding: 7px 16px;
-            border-radius: 4px;
-            cursor: pointer;
+        .ant-card-head-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .ant-card-body {
+            padding: 4px 6px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Buttons */
+        .ant-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            height: 24px;
+            padding: 0 8px;
+            font-size: 10px;
             font-weight: 500;
-            font-size: 12px;
-            margin-top: 20px;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-main);
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            white-space: nowrap;
         }
-        .btn-primary:hover { background: var(--primary-hover); }
+        .ant-btn:hover { color: var(--primary); border-color: var(--primary); }
+        .ant-btn-primary { background: var(--primary); border-color: var(--primary); color: #fff !important; font-weight: 600; }
+        .ant-btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+        .ant-btn-success { background: var(--success); border-color: var(--success); color: #fff !important; font-weight: 600; }
+        .ant-btn-success:hover { opacity: 0.9; }
+        .ant-btn-warning { background: var(--warning); border-color: var(--warning); color: #fff !important; font-weight: 600; }
+        .ant-btn-danger  { background: var(--danger); border-color: var(--danger); color: #fff !important; font-weight: 600; }
+        .ant-btn-sm { height: 20px; padding: 0 5px; font-size: 9px; }
+
+        /* Filter Panel */
+        .filter-panel {
+            display: flex;
+            padding: 4px 6px;
+            margin-bottom: 4px;
+            gap: 6px;
+            align-items: flex-end;
+            background: var(--bg-filter);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            flex-wrap: wrap;
+        }
+        .filter-col { display: flex; flex-direction: column; gap: 2px; }
+        .filter-col label { font-size: 9px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+        .filter-control {
+            height: 22px;
+            padding: 0 6px;
+            font-size: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            background: var(--bg-card);
+            color: var(--text-main);
+            outline: none;
+        }
+        .filter-control:focus { border-color: var(--primary); }
+
+        /* KPI Chips */
+        .kpi-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 7px;
+            background: rgba(0,0,0,0.03);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-size: 10px;
+        }
+        .kpi-chip .kpi-label { color: var(--text-muted); }
+        .kpi-chip .kpi-val { font-weight: 700; color: var(--text-heading); }
+
+        /* Table Grid */
+        .table-scroll {
+            flex: 1;
+            overflow: auto;
+            border: 1px solid var(--border-table);
+            background: var(--bg-card);
+        }
+        table.excel-grid {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+            white-space: nowrap;
+        }
+        table.excel-grid th {
+            background: var(--table-head-bg);
+            color: var(--text-heading);
+            font-weight: 600;
+            padding: 4px 6px;
+            border: 1px solid var(--border-table);
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            font-size: 9.5px;
+        }
+        table.excel-grid td {
+            padding: 3px 6px;
+            border: 1px solid var(--border-table);
+            color: var(--text-main);
+            vertical-align: middle;
+        }
+        table.excel-grid tbody tr { cursor: pointer; }
+        table.excel-grid tbody tr:hover td:not(.cell-it-inv) {
+            background: var(--row-hover) !important;
+        }
+        table.excel-grid tbody tr.selected-row {
+            outline: 2px solid #ff7a45 !important;
+            outline-offset: -2px !important;
+        }
+        table.excel-grid tbody tr.selected-row td:not(.cell-it-inv) {
+            background: var(--row-selected) !important;
+            color: var(--row-selected-text) !important;
+        }
+
+        /* PowerBuilder Color Rules */
+        td.cell-it-inv {
+            background: #ffff88 !important;
+            color: #000000 !important;
+            font-weight: 600;
+        }
+        tr.row-submitted td:not(.cell-it-inv) {
+            background-color: #bfe0ff !important;
+            color: #002766 !important;
+        }
+        body[data-theme="dark"] tr.row-submitted td:not(.cell-it-inv) {
+            background-color: #112a45 !important;
+            color: #bae7ff !important;
+        }
+
+        /* Tags */
+        .ant-tag {
+            display: inline-block;
+            padding: 1px 5px;
+            font-size: 9.5px;
+            border-radius: 2px;
+            border: 1px solid var(--border-color);
+            line-height: 1.3;
+        }
+        .ant-tag-blue   { background: #e6f7ff; color: #1890ff; border-color: #91d5ff; }
+        .ant-tag-green  { background: #f6ffed; color: #52c41a; border-color: #b7eb8f; }
+        .ant-tag-orange { background: #fff7e6; color: #fa8c16; border-color: #ffd591; }
+        .ant-tag-red    { background: #fff1f0; color: #ff4d4f; border-color: #ffa39e; }
+        .ant-tag-yellow { background: #feffe6; color: #ad8b00; border-color: #fffb8f; }
+
+        /* Detail Pane Tabs */
+        .tab-bar { display: flex; gap: 4px; }
+        .tab-btn {
+            background: none;
+            border: 1px solid transparent;
+            border-bottom: 2px solid transparent;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: rgba(24, 144, 255, 0.05);
+            border-radius: 3px 3px 0 0;
+        }
+        .tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+        .tab-panel.active { display: flex; }
+
+        /* Editable Inputs inside Grid */
+        .grid-input-num {
+            width: 75px;
+            height: 20px;
+            padding: 0 4px;
+            font-size: 10px;
+            text-align: right;
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            background: var(--bg-card);
+            color: var(--text-main);
+            font-weight: 600;
+        }
+        .grid-input-num.diff {
+            border-color: #fa8c16;
+            background: #fff7e6;
+            color: #d46b08;
+        }
+        .grid-input-text {
+            width: 100%;
+            height: 20px;
+            padding: 0 4px;
+            font-size: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 2px;
+            background: var(--bg-card);
+            color: var(--text-main);
+        }
+        .grid-input-text.required-empty {
+            border-color: #ff4d4f;
+            background: #fff1f0;
+        }
+
+        /* Summary bar */
+        .summary-strip {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 14px;
+            padding: 3px 8px;
+            background: var(--table-head-bg);
+            border: 1px solid var(--border-table);
+            border-top: none;
+            font-size: 10px;
+        }
+        .summary-strip strong { font-weight: 700; color: var(--primary); }
     </style>
 </head>
 <body>
 
-    <!-- KPI Metric Cards (Placeholders) -->
-    <div class="kpi-container">
-        <div class="kpi-card">
-            <div>
-                <div class="kpi-title">Delivery Order Hari Ini</div>
-                <div class="kpi-value">0 DO</div>
+    <div class="split-container" id="splitContainer">
+        
+        <!-- PANE TOP: DAFTAR DOKUMEN PENGELUARAN -->
+        <div class="split-pane-top" id="topPane">
+            <div class="ant-card" style="height:100%;">
+                <div class="ant-card-head">
+                    <div class="ant-card-head-title">
+                        <i class="fa-solid fa-truck-ramp-box" style="color:var(--primary); font-size:13px;"></i>
+                        <span>Warehouse - Delivery (Pengeluaran Barang Fisik)</span>
+                        <div class="kpi-chip">
+                            <span class="kpi-label">Total:</span>
+                            <span class="kpi-val" id="kpiTotal">0</span>
+                        </div>
+                        <div class="kpi-chip">
+                            <span class="kpi-label">Belum Dikeluarkan:</span>
+                            <span class="kpi-val" style="color:var(--danger);" id="kpiUnposted">0</span>
+                        </div>
+                        <div class="kpi-chip">
+                            <span class="kpi-label">Sudah Masuk IT Inv:</span>
+                            <span class="kpi-val" style="color:var(--success);" id="kpiPosted">0</span>
+                        </div>
+                    </div>
+                    <div class="ant-card-head-actions">
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" onclick="loadList()" title="Segarkan Data">
+                            <i class="fa-solid fa-arrows-rotate"></i> Muat Ulang
+                        </button>
+                    </div>
+                </div>
+
+                <div class="ant-card-body">
+                    <!-- Filter Toolbar -->
+                    <div class="filter-panel">
+                        <div class="filter-col">
+                            <label>Dokumen Pengeluaran</label>
+                            <select id="filterBc" class="filter-control" onchange="loadList()">
+                                <option value="">Semua Dokumen Keluar</option>
+                                <option value="25">BC 2.5 (Pengeluaran KB ke TLDDP)</option>
+                                <option value="30">BC 3.0 (Ekspor PEB)</option>
+                                <option value="41">BC 4.1 (Pengeluaran TLDDP)</option>
+                                <option value="261">BC 2.6.1 (Subkon Keluar)</option>
+                                <option value="27">BC 2.7 (TPB ke TPB OUT)</option>
+                                <option value="33">BC 3.3 (Ekspor PLB)</option>
+                                <option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option>
+                            </select>
+                        </div>
+                        <div class="filter-col">
+                            <label>Status IT Inventory</label>
+                            <select id="filterStatus" class="filter-control" onchange="loadList()">
+                                <option value="" selected>Semua Status</option>
+                                <option value="unposted">⚠️ Belum Masuk IT Inventory</option>
+                                <option value="it_inv">✅ Sudah Masuk IT Inventory</option>
+                            </select>
+                        </div>
+                        <div class="filter-col">
+                            <label>Periode</label>
+                            <input type="month" id="filterPeriode" class="filter-control" value="<?= date('Y-m') ?>" onchange="loadList()">
+                        </div>
+                        <div class="filter-col" style="flex:1; min-width:200px;">
+                            <label>Pencarian Dokumen / Pembeli / DO</label>
+                            <input type="text" id="filterSearch" class="filter-control" placeholder="Ketik No. AJU, Pembeli, No. Daftar, Invoice/DO lalu tekan Enter..." onkeyup="if(event.key==='Enter') loadList()">
+                        </div>
+                        <div>
+                            <button type="button" class="ant-btn ant-btn-primary ant-btn-sm" onclick="loadList()">
+                                <i class="fa-solid fa-magnifying-glass"></i> Cari
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm" onclick="resetFilters()">Reset</button>
+                        </div>
+                    </div>
+
+                    <!-- Master Table -->
+                    <div class="table-scroll">
+                        <table class="excel-grid" id="hdrTable">
+                            <thead>
+                                <tr>
+                                    <th style="width:30px; text-align:center;">#</th>
+                                    <th style="width:60px; text-align:center;">Dokumen</th>
+                                    <th style="width:215px;">Nomor Pengajuan (AJU)</th>
+                                    <th style="width:75px; text-align:center;">Tgl AJU</th>
+                                    <th style="width:80px; text-align:center;">No. Daftar</th>
+                                    <th style="width:75px; text-align:center;">Tgl Daftar</th>
+                                    <th style="width:230px;">Pembeli / Penerima (Customer)</th>
+                                    <th style="width:130px;">Invoice / DO / SJ Dokumen</th>
+                                    <th style="width:50px; text-align:center;">Valuta</th>
+                                    <th style="width:60px; text-align:right;">Jml Item</th>
+                                    <th style="width:80px; text-align:right;">Bruto (kg)</th>
+                                    <th style="width:120px;">SPPB / NPE / Respon</th>
+                                    <th style="width:115px; text-align:center;">Status IT Inventory</th>
+                                </tr>
+                            </thead>
+                            <tbody id="hdrTbody">
+                                <tr><td colspan="13" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data dokumen keluar...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
-            <i class="fa-solid fa-truck-fast kpi-icon" style="color: #1890ff;"></i>
         </div>
-        <div class="kpi-card">
-            <div>
-                <div class="kpi-title">Pengeluaran Bulan Ini</div>
-                <div class="kpi-value">0 Dok</div>
-            </div>
-            <i class="fa-solid fa-clipboard-check kpi-icon" style="color: #52c41a;"></i>
+
+        <!-- SPLITBAR DIVIDER -->
+        <div class="split-divider" id="splitbar" title="Tarik untuk mengubah ukuran tampilan">
+            <div class="split-handle"></div>
         </div>
-        <div class="kpi-card">
-            <div>
-                <div class="kpi-title">Menunggu Verifikasi Pabean</div>
-                <div class="kpi-value">0 DO</div>
+
+        <!-- PANE BOTTOM: DETAIL DOKUMEN & VERIFIKASI FISIK WAREHOUSE -->
+        <div class="split-pane-bottom" id="bottomPane">
+            <div class="ant-card" style="height:100%;">
+                <div class="ant-card-head">
+                    <div class="ant-card-head-title">
+                        <span style="font-size:9.5px; color:var(--text-muted);">Dokumen:</span>
+                        <strong id="activeAjuBadge" style="color:var(--primary); font-family:monospace; font-size:11px;">PILIH DOKUMEN</strong>
+                        <span id="activeCustomerBadge" style="font-size:10px; color:var(--text-muted);"></span>
+                    </div>
+
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <!-- Action Bar Barang -->
+                        <div id="actionUnposted" style="display:none; align-items:center; gap:4px;">
+                            <button type="button" class="ant-btn ant-btn-sm" onclick="checkAllSesuai()" title="Samakan semua QTY Aktual dengan QTY Dokumen">
+                                <i class="fa-solid fa-check-double" style="color:var(--primary);"></i> Centang Semua Sesuai
+                            </button>
+                            <button type="button" class="ant-btn ant-btn-sm ant-btn-success" onclick="openConfirmModal()" title="Konfirmasi barang fisik keluar dan posting ke IT Inventory">
+                                <i class="fa-solid fa-truck-fast"></i> Konfirmasi Pengeluaran (Posting IT Inv)
+                            </button>
+                        </div>
+                        <div id="actionPosted" style="display:none; align-items:center; gap:6px;">
+                            <span class="ant-tag ant-tag-yellow" id="badgePostedInfo" style="font-weight:600;">
+                                <i class="fa-solid fa-check"></i> Sudah Masuk IT Inventory
+                            </span>
+                            <button type="button" class="ant-btn ant-btn-sm ant-btn-warning" onclick="unpostItInventory()" title="Batalkan posting untuk revisi data fisik">
+                                <i class="fa-solid fa-rotate-left"></i> Batalkan Konfirmasi
+                            </button>
+                        </div>
+
+                        <!-- Tab Switcher -->
+                        <div class="tab-bar">
+                            <button type="button" class="tab-btn active" data-tab="barang" onclick="switchDetailTab('barang')">
+                                <i class="fa-solid fa-boxes-stacked"></i> Verifikasi Barang Fisik (<span id="cntBarang">0</span>)
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="dokumen" onclick="switchDetailTab('dokumen')">
+                                <i class="fa-solid fa-file-invoice"></i> Dokumen Lampiran
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="status" onclick="switchDetailTab('status')">
+                                <i class="fa-solid fa-satellite-dish"></i> Status Pabean
+                            </button>
+                            <button type="button" class="tab-btn" data-tab="respon" onclick="switchDetailTab('respon')">
+                                <i class="fa-solid fa-reply"></i> Respon CEISA
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="ant-card-body">
+                    <!-- Tab Panel 1: Verifikasi Barang Fisik -->
+                    <div class="tab-panel active" id="panel-barang">
+                        <div class="table-scroll">
+                            <table class="excel-grid" id="dtlTableBarang">
+                                <thead>
+                                    <tr>
+                                        <th style="width:30px; text-align:center;">#</th>
+                                        <th style="width:130px;">Kode Barang</th>
+                                        <th>Uraian Barang</th>
+                                        <th style="width:55px; text-align:center;">Satuan</th>
+                                        <th style="width:85px; text-align:right;">Qty Dokumen</th>
+                                        <th style="width:90px; text-align:center;" title="Centang jika jumlah fisik aktual sesuai persis dengan dokumen">
+                                            Centang Sesuai
+                                        </th>
+                                        <th style="width:95px; text-align:right;" title="Isi jumlah aktual fisik yang dikeluarkan dari gudang">
+                                            Qty Aktual Fisik
+                                        </th>
+                                        <th style="width:75px; text-align:center;">Selisih</th>
+                                        <th style="width:240px;" title="Wajib diisi jika Qty Aktual fisik berbeda dengan Qty Dokumen">
+                                            Catatan / Memo Fisik (Wajib jika beda)
+                                        </th>
+                                        <th style="width:110px;">Klasifikasi</th>
+                                        <th style="width:105px; text-align:right;">Nilai Barang</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dtlTbodyBarang">
+                                    <tr><td colspan="11" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih salah satu dokumen di atas untuk memeriksa barang fisik.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="summary-strip" id="summaryBarang">
+                            <div>Total Qty Dokumen: <strong id="sumQtyDok">0.00</strong></div>
+                            <div>Total Qty Aktual Fisik: <strong id="sumQtyAkt">0.00</strong></div>
+                            <div>Status Selisih: <strong id="sumSelisih" style="color:var(--success);">0 (Semua Sesuai)</strong></div>
+                            <div>Total Nilai: <strong id="sumNilai">0.00</strong></div>
+                        </div>
+                    </div>
+
+                    <!-- Tab Panel 2: Dokumen Lampiran -->
+                    <div class="tab-panel" id="panel-dokumen">
+                        <div class="table-scroll">
+                            <table class="excel-grid">
+                                <thead>
+                                    <tr>
+                                        <th style="width:30px; text-align:center;">#</th>
+                                        <th style="width:80px;">Kode Dokumen</th>
+                                        <th style="width:180px;">Nomor Dokumen</th>
+                                        <th style="width:100px;">Tanggal Dokumen</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dtlTbodyDokumen">
+                                    <tr><td colspan="4" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih dokumen terlebih dahulu.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab Panel 3: Status Pabean -->
+                    <div class="tab-panel" id="panel-status">
+                        <div class="table-scroll">
+                            <table class="excel-grid">
+                                <thead>
+                                    <tr>
+                                        <th style="width:130px;">Waktu Status</th>
+                                        <th style="width:80px;">Kode Proses</th>
+                                        <th>Keterangan Status</th>
+                                        <th style="width:100px;">No. Daftar</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dtlTbodyStatus">
+                                    <tr><td colspan="4" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih dokumen terlebih dahulu.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Tab Panel 4: Respon CEISA -->
+                    <div class="tab-panel" id="panel-respon">
+                        <div class="table-scroll">
+                            <table class="excel-grid">
+                                <thead>
+                                    <tr>
+                                        <th style="width:120px;">Tgl Respon</th>
+                                        <th style="width:80px;">Kode Respon</th>
+                                        <th style="width:150px;">No. Respon</th>
+                                        <th>Keterangan Respon</th>
+                                        <th style="width:80px; text-align:center;">PDF</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dtlTbodyRespon">
+                                    <tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);">Pilih dokumen terlebih dahulu.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <i class="fa-solid fa-hourglass-half kpi-icon" style="color: #faad14;"></i>
-        </div>
-        <div class="kpi-card">
-            <div>
-                <div class="kpi-title">Status Modul</div>
-                <div class="kpi-value" style="font-size: 16px; color: var(--success);"><i class="fa-solid fa-circle-check"></i> Siap Dikonfigurasi</div>
-            </div>
-            <i class="fa-solid fa-cubes kpi-icon" style="color: #722ed1;"></i>
         </div>
     </div>
 
-    <!-- Placeholder Center Box -->
-    <div class="placeholder-box">
-        <i class="fa-solid fa-dolly placeholder-icon"></i>
-        <div class="placeholder-title">Warehouse - Delivery Order & Pengeluaran Barang</div>
-        <div class="placeholder-desc">
-            Modul ini dipersiapkan untuk integrasi Surat Jalan (Delivery Order), pemuatan kontainer (stuffing), dan sinkronisasi otomatis pengeluaran barang jadi / sisa (scrap) ke dokumen Pabean (BC 2.5, BC 2.7 OUT, BC 3.0, BC 4.1).
-        </div>
+    <!-- Script Application Logic -->
+    <script>
+        const cmpId = '<?= addslashes($sessionCmpId) ?>';
+        let activeAju = '';
+        let activeDocData = null;
+        let activeItems = [];
+        let isDocPosted = false;
 
-        <div class="feature-grid">
-            <div class="feature-item">
-                <h4><i class="fa-solid fa-file-invoice" style="color: #1890ff;"></i> Surat Jalan / DO Otomatis</h4>
-                <p>Mencatat nomor surat jalan pengiriman barang jadi, tanggal kirim, dan nomor plat truk/kendaraan.</p>
-            </div>
-            <div class="feature-item">
-                <h4><i class="fa-solid fa-link" style="color: #52c41a;"></i> Link ke Dokumen Pabean</h4>
-                <p>Memetakan item pengiriman langsung ke Nomor Aju BC 2.5, BC 2.7 OUT, BC 3.0, atau BC 4.1.</p>
-            </div>
-            <div class="feature-item">
-                <h4><i class="fa-solid fa-barcode" style="color: #faad14;"></i> Integrasi Barcode Scanner</h4>
-                <p>Mendukung pemindaian QR code / barcode karton box saat proses loading pengiriman barang ke armada.</p>
-            </div>
-            <div class="feature-item">
-                <h4><i class="fa-solid fa-database" style="color: #722ed1;"></i> Sinkronisasi IT Inventory</h4>
-                <p>Otomatis memotong saldo stok IT Inventory saat pengiriman telah diverifikasi dan didaftarkan.</p>
-            </div>
-        </div>
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+        function escapeJs(str) {
+            if (str === null || str === undefined) return '';
+            return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+        }
 
-        <button class="btn-primary" onclick="alert('Menu Warehouse - Delivery sudah aktif. Fitur form dan integrasi ERP siap dikembangkan sesuai alur kerja perusahaan.');">
-            <i class="fa-solid fa-circle-info"></i> Informasi Modul
-        </button>
-    </div>
+        // 1. Load Master Documents (Delivery / Pengeluaran)
+        async function loadList() {
+            const bc = document.getElementById('filterBc').value;
+            const stat = document.getElementById('filterStatus').value;
+            const per = document.getElementById('filterPeriode').value;
+            const q = document.getElementById('filterSearch').value.trim();
 
+            const tbody = document.getElementById('hdrTbody');
+            tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data dokumen keluar...</td></tr>`;
+
+            try {
+                const res = await fetch(`warehouse_delivery.php?action=list&cmp_id=${encodeURIComponent(cmpId)}&bc=${encodeURIComponent(bc)}&status=${encodeURIComponent(stat)}&periode=${encodeURIComponent(per)}&q=${encodeURIComponent(q)}`);
+                const result = await res.json();
+
+                if (result.status === 'OK') {
+                    renderMasterKPI(result.kpi);
+                    renderMasterTable(result.data);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:15px; color:var(--danger);">${escapeHtml(result.message)}</td></tr>`;
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:15px; color:var(--danger);">Kesalahan jaringan: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function renderMasterKPI(kpi) {
+            if (!kpi) return;
+            document.getElementById('kpiTotal').textContent = (kpi.total || 0).toLocaleString();
+            document.getElementById('kpiUnposted').textContent = (kpi.unposted || 0).toLocaleString();
+            document.getElementById('kpiPosted').textContent = (kpi.posted || 0).toLocaleString();
+        }
+
+        function resetFilters() {
+            document.getElementById('filterBc').value = '';
+            document.getElementById('filterStatus').value = '';
+            document.getElementById('filterSearch').value = '';
+            loadList();
+        }
+
+        function renderMasterTable(data) {
+            const tbody = document.getElementById('hdrTbody');
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);"><i class="fa-solid fa-inbox" style="font-size:20px;"></i><br>Tidak ada dokumen pengeluaran yang sesuai kriteria.</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            data.forEach((r, idx) => {
+                const aju = r.nomor_aju;
+                const isInv = parseInt(r.is_it_inv) > 0;
+                const isSelected = (aju === activeAju);
+                const hasDaftar = (r.nomor_daftar && r.nomor_daftar !== '-');
+
+                let rowClass = '';
+                if (isSelected) rowClass += ' selected-row';
+                if (hasDaftar && !isInv) rowClass += ' row-submitted';
+
+                let statusBadge = '';
+                if (isInv) {
+                    statusBadge = `<span class="ant-tag ant-tag-yellow"><i class="fa-solid fa-check"></i> Sudah Masuk IT Inv</span>`;
+                } else if (hasDaftar) {
+                    statusBadge = `<span class="ant-tag ant-tag-orange"><i class="fa-solid fa-triangle-exclamation"></i> Belum Masuk IT Inv</span>`;
+                } else {
+                    statusBadge = `<span class="ant-tag ant-tag-blue">Draft Perekaman</span>`;
+                }
+
+                html += `
+                    <tr class="${rowClass}" onclick="selectAju('${escapeJs(aju)}')">
+                        <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
+                        <td style="text-align:center;"><span class="ant-tag ant-tag-blue">BC ${escapeHtml(r.bc)}</span></td>
+                        <td class="${isInv ? 'cell-it-inv' : ''}">
+                            <strong style="font-family:monospace;">${escapeHtml(aju)}</strong>
+                        </td>
+                        <td style="text-align:center;">${escapeHtml(r.tanggal_pernyataan)}</td>
+                        <td style="text-align:center;"><strong>${escapeHtml(r.nomor_daftar)}</strong></td>
+                        <td style="text-align:center;">${escapeHtml(r.tanggal_daftar)}</td>
+                        <td title="${escapeHtml(r.buyer_name)}">${escapeHtml(r.buyer_name)}</td>
+                        <td>${escapeHtml(r.invoice_do)}</td>
+                        <td style="text-align:center;">${escapeHtml(r.valuta)}</td>
+                        <td style="text-align:right;"><strong>${escapeHtml(r.jml_barang)}</strong></td>
+                        <td style="text-align:right;">${parseFloat(r.bruto || 0).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td>${escapeHtml(r.sppb_npe)}</td>
+                        <td style="text-align:center;" class="${isInv ? 'cell-it-inv' : ''}">${statusBadge}</td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+
+            // Auto select first document if none active
+            if (!activeAju && data.length > 0) {
+                selectAju(data[0].nomor_aju);
+            }
+        }
+
+        // 2. Select Document & Load Items
+        async function selectAju(aju) {
+            activeAju = aju;
+            document.querySelectorAll('#hdrTbody tr').forEach(tr => {
+                if (tr.innerHTML.includes(aju)) tr.classList.add('selected-row');
+                else tr.classList.remove('selected-row');
+            });
+
+            document.getElementById('activeAjuBadge').textContent = aju;
+            document.getElementById('dtlTbodyBarang').innerHTML = `<tr><td colspan="11" style="text-align:center; padding:16px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data rincian barang...</td></tr>`;
+
+            try {
+                const res = await fetch(`warehouse_delivery.php?action=detail_barang&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                const result = await res.json();
+
+                if (result.status === 'OK') {
+                    activeDocData = result;
+                    activeItems = result.data || [];
+                    isDocPosted = result.is_posted;
+
+                    document.getElementById('cntBarang').textContent = activeItems.length;
+                    document.getElementById('activeCustomerBadge').textContent = `• Customer: ${result.customer || '-'}`;
+
+                    if (isDocPosted) {
+                        document.getElementById('actionUnposted').style.display = 'none';
+                        document.getElementById('actionPosted').style.display = 'flex';
+                        document.getElementById('badgePostedInfo').innerHTML = `<i class="fa-solid fa-check"></i> Sudah Masuk IT Inv (Tgl: ${escapeHtml(result.posted_info.tgl_proses || '-')} | Dok: ${escapeHtml(result.posted_info.dok || '-')})`;
+                    } else {
+                        document.getElementById('actionUnposted').style.display = 'flex';
+                        document.getElementById('actionPosted').style.display = 'none';
+                    }
+
+                    renderBarangTable();
+                } else {
+                    document.getElementById('dtlTbodyBarang').innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--danger);">${escapeHtml(result.message)}</td></tr>`;
+                }
+            } catch (err) {
+                document.getElementById('dtlTbodyBarang').innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--danger);">Gagal memuat barang: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        // 3. Render Barang Table (with QTY_AKTUAL, SESUAI, MEMO)
+        function renderBarangTable() {
+            const tbody = document.getElementById('dtlTbodyBarang');
+            if (!activeItems || activeItems.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:16px; color:var(--text-muted);">Dokumen ini tidak memiliki rincian barang.</td></tr>`;
+                return;
+            }
+
+            let html = '';
+            let totQtyDok = 0;
+            let totQtyAkt = 0;
+            let selisihCount = 0;
+            let totNilai = 0;
+
+            activeItems.forEach((b, idx) => {
+                const seri = b.seri_barang;
+                const qtyDok = parseFloat(b.qty_dokumen || b.jumlah_satuan || 0);
+                const qtyAkt = parseFloat(b.qty_aktual !== undefined ? b.qty_aktual : qtyDok);
+                const isSesuai = (b.sesuai === 'Y');
+                const memo = b.memo || '';
+                const diff = (qtyAkt - qtyDok);
+                const hasDiff = Math.abs(diff) > 0.0001;
+
+                totQtyDok += qtyDok;
+                totQtyAkt += qtyAkt;
+                const valBarang = parseFloat(b.harga_penyerahan || b.fob || b.cif || 0);
+                totNilai += valBarang;
+                if (hasDiff) selisihCount++;
+
+                let diffBadge = '<span style="color:var(--success); font-weight:600;">Sesuai</span>';
+                if (hasDiff) {
+                    const diffSign = diff > 0 ? `+${diff.toFixed(2)}` : `${diff.toFixed(2)}`;
+                    diffBadge = `<span class="ant-tag ant-tag-red" style="font-weight:700;">${diffSign}</span>`;
+                }
+
+                const memoRequiredClass = (hasDiff && !memo.trim()) ? 'required-empty' : '';
+                const disabledAttr = isDocPosted ? 'disabled' : '';
+
+                html += `
+                    <tr>
+                        <td style="text-align:center; color:var(--text-muted);">${seri}</td>
+                        <td><strong style="color:var(--primary); font-family:monospace;">${escapeHtml(b.kode_barang)}</strong></td>
+                        <td title="${escapeHtml(b.uraian)}">${escapeHtml(b.uraian)}</td>
+                        <td style="text-align:center;"><span class="ant-tag">${escapeHtml(b.kode_satuan)}</span></td>
+                        <td style="text-align:right; font-weight:700;">${qtyDok.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td style="text-align:center;">
+                            <input type="checkbox" id="chk_sesuai_${seri}" ${isSesuai ? 'checked' : ''} ${disabledAttr} onchange="toggleSesuai(${seri}, this.checked)">
+                        </td>
+                        <td style="text-align:right;">
+                            <input type="number" step="any" class="grid-input-num ${hasDiff ? 'diff' : ''}" id="input_qty_${seri}" value="${qtyAkt}" ${disabledAttr} oninput="onQtyAktualChange(${seri}, this.value)">
+                        </td>
+                        <td style="text-align:center;">${diffBadge}</td>
+                        <td>
+                            <input type="text" class="grid-input-text ${memoRequiredClass}" id="input_memo_${seri}" value="${escapeHtml(memo)}" placeholder="${hasDiff ? 'Wajib isi alasan selisih fisik...' : 'Catatan fisik (opsional)...'}" ${disabledAttr} oninput="onMemoChange(${seri}, this.value)">
+                        </td>
+                        <td><span class="ant-tag ant-tag-blue">${escapeHtml(b.klas || 'Barang Jadi')}</span></td>
+                        <td style="text-align:right;">${valBarang.toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                    </tr>
+                `;
+            });
+
+            tbody.innerHTML = html;
+
+            document.getElementById('sumQtyDok').textContent = totQtyDok.toLocaleString(undefined, {minimumFractionDigits:2});
+            document.getElementById('sumQtyAkt').textContent = totQtyAkt.toLocaleString(undefined, {minimumFractionDigits:2});
+            document.getElementById('sumNilai').textContent = totNilai.toLocaleString(undefined, {minimumFractionDigits:2});
+
+            const selisihEl = document.getElementById('sumSelisih');
+            if (selisihCount === 0) {
+                selisihEl.style.color = 'var(--success)';
+                selisihEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> 0 (Semua Sesuai)`;
+            } else {
+                selisihEl.style.color = 'var(--danger)';
+                selisihEl.innerHTML = `<i class="fa-solid fa-triangle-exclamation"></i> ${selisihCount} Item Selisih Fisik!`;
+            }
+        }
+
+        // Live item state changes
+        function toggleSesuai(seri, isChecked) {
+            const item = activeItems.find(i => parseInt(i.seri_barang) === seri);
+            if (!item) return;
+
+            item.sesuai = isChecked ? 'Y' : 'N';
+            if (isChecked) {
+                item.qty_aktual = item.qty_dokumen || item.jumlah_satuan;
+                item.memo = '';
+            }
+            renderBarangTable();
+        }
+
+        function onQtyAktualChange(seri, val) {
+            const item = activeItems.find(i => parseInt(i.seri_barang) === seri);
+            if (!item) return;
+
+            const newQty = parseFloat(val) || 0;
+            item.qty_aktual = newQty;
+            const qtyDok = parseFloat(item.qty_dokumen || item.jumlah_satuan || 0);
+
+            if (Math.abs(newQty - qtyDok) < 0.0001) {
+                item.sesuai = 'Y';
+            } else {
+                item.sesuai = 'N';
+            }
+            renderBarangTable();
+        }
+
+        function onMemoChange(seri, val) {
+            const item = activeItems.find(i => parseInt(i.seri_barang) === seri);
+            if (!item) return;
+            item.memo = val;
+            const input = document.getElementById(`input_memo_${seri}`);
+            if (input) {
+                const qtyDok = parseFloat(item.qty_dokumen || item.jumlah_satuan || 0);
+                const hasDiff = Math.abs(parseFloat(item.qty_aktual) - qtyDok) > 0.0001;
+                if (hasDiff && !val.trim()) {
+                    input.classList.add('required-empty');
+                } else {
+                    input.classList.remove('required-empty');
+                }
+            }
+        }
+
+        function checkAllSesuai() {
+            activeItems.forEach(item => {
+                item.sesuai = 'Y';
+                item.qty_aktual = parseFloat(item.qty_dokumen || item.jumlah_satuan || 0);
+                item.memo = '';
+            });
+            renderBarangTable();
+            Swal.fire({
+                toast: true,
+                position: 'top-end',
+                icon: 'success',
+                title: 'Semua item barang ditandai Sesuai.',
+                showConfirmButton: false,
+                timer: 1500
+            });
+        }
+
+        // 4. Konfirmasi Pengeluaran Dialog & Posting
+        async function openConfirmModal() {
+            if (!activeAju || !activeDocData) {
+                Swal.fire('Peringatan', 'Silakan pilih dokumen terlebih dahulu.', 'warning');
+                return;
+            }
+
+            // Validasi: Cek apakah ada item beda yang kolom memo-nya kosong
+            let invalidItem = null;
+            activeItems.forEach(it => {
+                const qtyDok = parseFloat(it.qty_dokumen || it.jumlah_satuan || 0);
+                const qtyAkt = parseFloat(it.qty_aktual || 0);
+                if (Math.abs(qtyAkt - qtyDok) > 0.0001 && (!it.memo || !it.memo.trim())) {
+                    invalidItem = it;
+                }
+            });
+
+            if (invalidItem) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Memo Wajib Diisi!',
+                    html: `Baris <b>#${invalidItem.seri_barang}</b> (Kode: <code>${escapeHtml(invalidItem.kode_barang)}</code>) memiliki selisih antara Qty Aktual (${invalidItem.qty_aktual}) vs Dokumen (${invalidItem.jumlah_satuan}), namun kolom <b>MEMO</b> masih kosong.<br><br>Silakan isi alasan selisih fisik terlebih dahulu!`
+                });
+                return;
+            }
+
+            const today = new Date().toISOString().split('T')[0];
+            const defaultDok = activeDocData.suggested_dok || '';
+
+            const { value: formValues } = await Swal.fire({
+                title: '<span style="font-size:15px; font-weight:700;"><i class="fa-solid fa-truck-fast" style="color:#52c41a;"></i> Konfirmasi Pengeluaran Barang Keluar (IT Inventory 1B)</span>',
+                html: `
+                    <div style="font-size:11px; text-align:left; background:var(--bg-filter); border:1px solid var(--border-color); padding:10px; border-radius:4px; margin-bottom:12px;">
+                        <div>Nomor AJU: <strong style="font-family:monospace;">${escapeHtml(activeAju)}</strong></div>
+                        <div>Customer: <strong>${escapeHtml(activeDocData.customer || '-')}</strong></div>
+                        <div>No. & Tgl Daftar: <strong>${escapeHtml(activeDocData.header?.nomor_daftar || '-')} (${escapeHtml(activeDocData.header?.tanggal_daftar || '-')})</strong></div>
+                        <div style="margin-top:4px; color:var(--text-muted);">Total Item: <b>${activeItems.length}</b> &bull; Total Qty Fisik: <b>${document.getElementById('sumQtyAkt').textContent}</b></div>
+                    </div>
+                    <div style="text-align:left; display:flex; flex-direction:column; gap:10px; font-size:11px;">
+                        <div>
+                            <label style="font-weight:600; display:block; margin-bottom:3px;">
+                                <i class="fa-regular fa-calendar-check" style="color:var(--primary);"></i> Tanggal Aktual Keluar Warehouse (TANGGAL_PROSES) *
+                            </label>
+                            <input type="date" id="swal_tgl_proses" class="filter-control" style="width:100%; height:28px;" value="${today}">
+                            <small style="color:var(--text-muted); font-size:9.5px;">Tanggal fisik barang dikeluarkan dari gudang (kolom TGL_PROSES di bc_1ab2).</small>
+                        </div>
+                        <div>
+                            <label style="font-weight:600; display:block; margin-bottom:3px;">
+                                <i class="fa-solid fa-file-lines" style="color:var(--primary);"></i> Nomor BUKTI Pengeluaran / DO / Surat Jalan Gudang (DOK) *
+                            </label>
+                            <input type="text" id="swal_dok" class="filter-control" style="width:100%; height:28px;" value="${escapeHtml(defaultDok)}" placeholder="Contoh: DO-2026-10-09, SJ-OUT-1002, BAST-KELUAR-01">
+                            <small style="color:var(--text-muted); font-size:9.5px;">Nomor bukti pengeluaran fisik gudang (kolom DOK di bc_1ab2).</small>
+                        </div>
+                    </div>
+                `,
+                focusConfirm: false,
+                showCancelButton: true,
+                confirmButtonColor: '#52c41a',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: '<i class="fa-solid fa-check"></i> Simpan & Posting ke IT Inventory (1B)',
+                cancelButtonText: 'Batal',
+                preConfirm: () => {
+                    const tgl = document.getElementById('swal_tgl_proses').value;
+                    const dok = document.getElementById('swal_dok').value.trim();
+                    if (!tgl) {
+                        Swal.showValidationMessage('Tanggal Aktual Keluar wajib diisi!');
+                        return false;
+                    }
+                    if (!dok) {
+                        Swal.showValidationMessage('Nomor Bukti Pengeluaran (DOK) wajib diisi!');
+                        return false;
+                    }
+                    return { tgl_proses: tgl, dok: dok };
+                }
+            });
+
+            if (!formValues) return;
+
+            // Eksekusi POST
+            Swal.fire({
+                title: 'Memproses Posting IT Inventory',
+                html: 'Menyimpan rincian fisik pengeluaran barang ke tabel IT Inventory (bc_1ab2)...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            try {
+                const payload = new URLSearchParams();
+                payload.append('action', 'confirm_post');
+                payload.append('nomor_aju', activeAju);
+                payload.append('tanggal_proses', formValues.tgl_proses);
+                payload.append('dok', formValues.dok);
+                payload.append('items', JSON.stringify(activeItems));
+
+                const res = await fetch('warehouse_delivery.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: payload.toString()
+                });
+                const result = await res.json();
+
+                if (result.status === 'OK') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Pengeluaran Berhasil Dikonfirmasi!',
+                        text: result.message,
+                        timer: 2500,
+                        showConfirmButton: false
+                    });
+                    loadList();
+                    selectAju(activeAju);
+                } else {
+                    Swal.fire('Gagal Posting', result.message, 'error');
+                }
+            } catch (err) {
+                Swal.fire('Error Jaringan', err.message, 'error');
+            }
+        }
+
+        // 5. Batalkan Posting (Unposting)
+        async function unpostItInventory() {
+            const confirm = await Swal.fire({
+                title: 'Batalkan Posting IT Inventory?',
+                html: `Apakah Anda yakin ingin membatalkan posting IT Inventory pengeluaran untuk nomor AJU:<br><b>${escapeHtml(activeAju)}</b>?<br><br><span style="color:var(--danger); font-size:11px;">Data barang akan dihapus dari bc_1ab2 sehingga dapat diverifikasi ulang.</span>`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#fa8c16',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: 'Ya, Batalkan Posting',
+                cancelButtonText: 'Batal'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Membatalkan Posting...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
+            });
+
+            try {
+                const payload = new URLSearchParams();
+                payload.append('action', 'unpost_it_inv');
+                payload.append('nomor_aju', activeAju);
+
+                const res = await fetch('warehouse_delivery.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: payload.toString()
+                });
+                const result = await res.json();
+
+                if (result.status === 'OK') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Unposting Berhasil',
+                        text: result.message,
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    loadList();
+                    selectAju(activeAju);
+                } else {
+                    Swal.fire('Gagal', result.message, 'error');
+                }
+            } catch (err) {
+                Swal.fire('Error', err.message, 'error');
+            }
+        }
+
+        // 6. Detail Tabs Switcher
+        function switchDetailTab(tab) {
+            document.querySelectorAll('.tab-btn').forEach(b => {
+                if (b.dataset.tab === tab) b.classList.add('active');
+                else b.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+            document.getElementById(`panel-${tab}`).classList.add('active');
+
+            if (tab === 'dokumen' || tab === 'status' || tab === 'respon') {
+                loadSubTab(tab);
+            }
+        }
+
+        async function loadSubTab(tab) {
+            if (!activeAju) return;
+            const targetTbody = document.getElementById(`dtlTbody${tab.charAt(0).toUpperCase() + tab.slice(1)}`);
+            targetTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data ${tab}...</td></tr>`;
+
+            try {
+                const res = await fetch(`warehouse_delivery.php?action=detail_tab&nomor_aju=${encodeURIComponent(activeAju)}&tab=${encodeURIComponent(tab)}`);
+                const result = await res.json();
+                if (result.status === 'OK') {
+                    const data = result.data || [];
+                    if (data.length === 0) {
+                        targetTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:16px; color:var(--text-muted);">Tidak ada data ${tab}.</td></tr>`;
+                        return;
+                    }
+                    let html = '';
+                    if (tab === 'dokumen') {
+                        data.forEach((r, idx) => {
+                            html += `<tr><td style="text-align:center;">${idx + 1}</td><td><span class="ant-tag">${escapeHtml(r.kode_dokumen)}</span></td><td><strong>${escapeHtml(r.nomor_dokumen)}</strong></td><td>${escapeHtml(r.tanggal_dokumen)}</td></tr>`;
+                        });
+                    } else if (tab === 'status') {
+                        data.forEach(r => {
+                            html += `<tr><td><code>${escapeHtml(r.waktu_status)}</code></td><td><span class="ant-tag">${escapeHtml(r.kode_proses)}</span></td><td><strong>${escapeHtml(r.keterangan)}</strong></td><td>${escapeHtml(r.nomor_daftar)}</td></tr>`;
+                        });
+                    } else if (tab === 'respon') {
+                        data.forEach(r => {
+                            let pdfBtn = '-';
+                            if (r.pdf) pdfBtn = `<a href="pdf.php?aju=${encodeURIComponent(activeAju)}&pdf=${encodeURIComponent(r.pdf)}" target="_blank" class="ant-btn ant-btn-sm" style="color:var(--primary);"><i class="fa-solid fa-file-pdf"></i> Unduh</a>`;
+                            html += `<tr><td>${escapeHtml(r.tanggal_respon)}</td><td><span class="ant-tag ant-tag-blue">${escapeHtml(r.kode_respon)}</span></td><td><strong>${escapeHtml(r.nomor_respon)}</strong></td><td>${escapeHtml(r.keterangan)}</td><td style="text-align:center;">${pdfBtn}</td></tr>`;
+                        });
+                    }
+                    targetTbody.innerHTML = html;
+                }
+            } catch (e) {
+                targetTbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:var(--danger);">Error: ${escapeHtml(e.message)}</td></tr>`;
+            }
+        }
+
+        // Resizable Splitbar Logic
+        (function initSplitbar() {
+            let isDragging = false;
+            const splitbar = document.getElementById('splitbar');
+            const topPane = document.getElementById('topPane');
+            const container = document.getElementById('splitContainer');
+
+            const savedH = localStorage.getItem('ceisa_wh_out_top_h');
+            if (savedH && topPane) {
+                const parsed = parseInt(savedH, 10);
+                if (parsed >= 160 && parsed <= window.innerHeight - 160) {
+                    topPane.style.flex = `0 0 ${parsed}px`;
+                }
+            }
+            if (!splitbar) return;
+
+            splitbar.addEventListener('mousedown', function(e) {
+                isDragging = true;
+                splitbar.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+                document.body.style.cursor = 'row-resize';
+            });
+            window.addEventListener('mousemove', function(e) {
+                if (!isDragging) return;
+                const containerRect = container.getBoundingClientRect();
+                let newH = e.clientY - containerRect.top;
+                if (newH < 160) newH = 160;
+                if (newH > containerRect.height - 140) newH = containerRect.height - 140;
+                topPane.style.flex = `0 0 ${newH}px`;
+                localStorage.setItem('ceisa_wh_out_top_h', newH);
+            });
+            window.addEventListener('mouseup', function() {
+                if (isDragging) {
+                    isDragging = false;
+                    splitbar.classList.remove('dragging');
+                    document.body.style.userSelect = '';
+                    document.body.style.cursor = '';
+                }
+            });
+        })();
+
+        // Theme sync from parent
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.theme) {
+                document.documentElement.setAttribute('data-theme', e.data.theme);
+                document.body.setAttribute('data-theme', e.data.theme);
+            }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadList();
+        });
+    </script>
 </body>
 </html>

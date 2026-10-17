@@ -3881,5 +3881,62 @@ Delapan (8) tabel yang distandardisasi:
    - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
 
 ---
-*Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+---
 
+## 96. Modul Transaksi Warehouse: Incoming & Delivery (Posting IT Inventory Fisik)
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Menu Transaksi Warehouse (Gudang) memerlukan modul khusus untuk PIC Warehouse yang bertugas menerima dan mengeluarkan barang secara fisik aktual.
+   - Sebelumnya, posting IT Inventory (`bc_1ab2`) dilakukan oleh tim Exim/Pabean di halaman Host to Host (`transfer.php`).
+   - Sesuai standar tata kelola IT Inventory Bea Cukai, PIC Warehouse bertindak sebagai verifikator fisik aktual:
+     - Barang masuk aktual dari supplier diverifikasi dan diposting ke IT Inventory (Laporan 1A - Pemasukan).
+     - Barang keluar aktual ke customer diverifikasi dan diposting ke IT Inventory (Laporan 1B - Pengeluaran).
+2. **Kebutuhan Pengguna**:
+   - Membangun 2 antarmuka transaksi gudang khusus:
+     1. **Warehouse - Incoming (`warehouse_incoming.php`)**: Filter khusus dokumen pemasukan (`BC 1.6, 2.0, 2.3, 4.0, 2.6.2, 2.8, 6.1.1, 2.7 IN`), `AB = 'A'`.
+     2. **Warehouse - Delivery (`warehouse_delivery.php`)**: Filter khusus dokumen pengeluaran (`BC 2.5, 2.6.1, 2.7 OUT, 3.0, 4.1, 3.3, 331, 6.1.3`), `AB = 'B'`.
+   - Menghadirkan desain antarmuka split-pane Excel grid yang persis dengan Data Host to Host (`transfer.php`) dengan skema warna PowerBuilder (kuning untuk item yang sudah masuk IT Inventory, biru muda untuk dokumen yang sudah terdaftar pabean).
+   - Validasi ketat selisih fisik:
+     - Operator memeriksa `QTY_AKTUAL` per baris barang.
+     - Default `SESUAI = 'Y'`. Jika ada perbedaan jumlah fisik atau checkbox diubah, `SESUAI = 'N'`.
+     - Jika terdapat selisih antara `QTY_AKTUAL` dan `QTY Dokumen`, kolom **`MEMO` wajib diisi** (alasan selisih fisik / discrepancy reason) sebelum diperbolehkan konfirmasi.
+   - Dialog konfirmasi interaktif:
+     - Operator wajib menginput **Tanggal Aktual Masuk/Keluar** (`TANGGAL_PROSES`).
+     - Operator wajib menginput **Nomor Bukti Pemasukan/Pengeluaran Gudang** (`DOK`, misal Surat Jalan / DO / BAST).
+   - Data tersimpan ke tabel `bc_1ab2` dan memperbarui `bc_ceisa_aju_posted`.
+   - Mendukung fitur pembatalan konfirmasi (*Unposting*) jika diperlukan revisi fisik barang oleh gudang.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`warehouse_incoming.php`](file:///c:/dp/g-ceisa/warehouse_incoming.php) & [`www/warehouse_incoming.php`](file:///c:/dp/g-ceisa/www/warehouse_incoming.php)**:
+   - Modul penerimaan barang fisik gudang & posting ke Laporan 1A - Pemasukan.
+   - Endpoint `action=list`: Menampilkan master dokumen pabean masuk lengkap dengan metrik KPI (Total, Belum Diterima, Sudah Masuk IT Inv).
+   - Endpoint `action=detail_barang`: Menampilkan rincian barang pabean (`bc_ceisa_barang`), status kesesuaian fisik (`SESUAI`), jumlah aktual (`QTY_AKTUAL`), dan memo (`MEMO`).
+   - Endpoint `action=confirm_post`: Validasi wajib memo saat ada selisih kuantitas fisik, input `TANGGAL_PROSES` dan `DOK`, eksekusi penyimpanan ke `bc_1ab2` dengan `AB = 'A'`, dan update tabel `bc_ceisa_aju_posted`.
+   - Endpoint `action=unpost_it_inv`: Pembatalan posting untuk mengembalikan status dokumen ke tahap verifikasi fisik.
+   - Subtab pelengkap: Dokumen Lampiran (`bc_ceisa_dokumen`), Status Pabean (`bc_ceisa_status`), dan Respon Resmi CEISA (`bc_ceisa_respons`).
+2. **[`warehouse_delivery.php`](file:///c:/dp/g-ceisa/warehouse_delivery.php) & [`www/warehouse_delivery.php`](file:///c:/dp/g-ceisa/www/warehouse_delivery.php)**:
+   - Modul pengeluaran barang fisik gudang & posting ke Laporan 1B - Pengeluaran.
+   - Endpoint `action=list`: Menampilkan master dokumen pengeluaran dengan filter dokumen keluar, entitas penerima/pembeli (Customer), invoice/DO, serta respon SPPB/NPE.
+   - Endpoint `action=detail_barang`: Menampilkan rincian barang fisik yang akan dikeluarkan, penghitungan nilai penyerahan/FOB/CIF, serta kalkulasi selisih real-time.
+   - Endpoint `action=confirm_post`: Eksekusi posting ke `bc_1ab2` dengan `AB = 'B'`, menyertakan `TANGGAL_PROSES` pengeluaran aktual dan `DOK` bukti pengeluaran (Surat Jalan/DO Gudang).
+   - Penyesuaian skema query barang: Menghubungkan kode HS pabean dari kolom `b.hs` dan klasifikasi dari master `bc_material`.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_delivery.php` ➔ **No syntax errors detected**.
+2. **Uji Endpoint REST & AJAX**:
+   - `curl -s 'http://127.0.0.1/warehouse_incoming.php?action=list'` ➔ **200 OK** (Data dokumen masuk berhasil dimuat dengan metrik KPI).
+   - `curl -s 'http://127.0.0.1/warehouse_delivery.php?action=list'` ➔ **200 OK** (Data dokumen keluar berhasil dimuat dengan metrik KPI).
+   - `curl -s 'http://127.0.0.1/warehouse_delivery.php?action=detail_barang&nomor_aju=...'` ➔ **200 OK** (Data barang fisik, customer, dan suggested DOK DO/SJ berhasil dimuat).
+   - `curl -s 'http://127.0.0.1/warehouse_incoming.php?action=detail_barang&nomor_aju=...'` ➔ **200 OK**.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
+*Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
