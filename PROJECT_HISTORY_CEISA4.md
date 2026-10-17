@@ -4574,6 +4574,24 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 112. Penghapusan Animasi Berkedip pada Ikon Notifikasi dan Pemulihan Desain Asli Portal CEISA 4.0
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta agar tanda merah berkedip (efek animasi halo/pulse) pada ikon lonceng notifikasi di topbar navbar dihilangkan, dan dikembalikan sesuai desain aslinya portal CEISA 4.0.
+
+### B. Solusi & Implementasi
+1. **Pemulihan Styling Badge Asli (`.notif-header-badge`)**:
+   - Menghapus animasi `@keyframes pulseNotif` dan `box-shadow` ripple yang menyebabkan efek berkedip/membesar.
+   - Mengembalikan styling badge ke ukuran statis asli 5px (`height: 5px; width: 5px; background: #ff5757; border: 1px solid #fff; border-radius: 50%;`).
+   - Ikon lonceng tetap berfungsi membuka modal *Pusat Peringatan & Status Sistem* ketika diklik.
+2. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/index.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

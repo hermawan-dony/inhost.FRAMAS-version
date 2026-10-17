@@ -1322,38 +1322,26 @@ if ($initialTab === 'editor') {
         /* Notification Bell */
         .notif-bell {
             position: relative;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
             cursor: pointer;
             padding: 4px;
             border-radius: 4px;
-            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
         }
         .notif-bell:hover {
             background: rgba(24, 144, 255, 0.12);
-            transform: scale(1.05);
         }
         .notif-header-badge {
-            background: #ff4d4f;
-            height: 7px;
-            width: 7px;
+            background: #ff5757;
+            height: 5px;
+            width: 5px;
             border-radius: 50%;
             position: absolute;
             top: 2px;
             right: 2px;
-            border: 1.5px solid #fff;
-            display: none;
-            box-shadow: 0 0 4px rgba(255, 77, 79, 0.8);
-        }
-        .notif-header-badge.active {
-            display: block;
-            animation: pulseNotif 2s infinite;
-        }
-        @keyframes pulseNotif {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.7); }
-            70% { transform: scale(1.15); box-shadow: 0 0 0 5px rgba(255, 77, 79, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); }
+            border: 1px solid #fff;
         }
 
         /* User Profile Badge */
@@ -4183,14 +4171,12 @@ if ($initialTab === 'editor') {
             try {
                 const res = await fetch(`index.php?action=get_alert_notifications&cmp_id=${encodeURIComponent(currentCmpId)}`);
                 const json = await res.json();
-                const badge = document.getElementById('notifBadge');
-                if (badge && json.status === 'OK') {
+                const bell = document.querySelector('.notif-bell');
+                if (bell && json.status === 'OK') {
                     if (json.total_alerts > 0) {
-                        badge.classList.add('active');
-                        badge.title = `${json.total_alerts} Peringatan Sistem Aktif`;
+                        bell.title = `Pusat Peringatan & Status Sistem (${json.total_alerts} Peringatan Aktif)`;
                     } else {
-                        badge.classList.remove('active');
-                        badge.title = 'Tidak ada peringatan';
+                        bell.title = 'Pusat Peringatan & Status Sistem (Semua Normal)';
                     }
                 }
             } catch(e) {}
@@ -4209,12 +4195,6 @@ if ($initialTab === 'editor') {
                 if (json.status !== 'OK') {
                     Swal.fire({ icon: 'error', title: 'Gagal', text: json.message || 'Terjadi kesalahan sistem.' });
                     return;
-                }
-
-                const badge = document.getElementById('notifBadge');
-                if (badge) {
-                    if (json.total_alerts > 0) badge.classList.add('active');
-                    else badge.classList.remove('active');
                 }
 
                 let alertCardsHtml = '';
