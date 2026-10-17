@@ -135,6 +135,15 @@ class CeisaJsonBuilder
         $escapedAju = "'" . $koneksi->real_escape_string($nomor_aju) . "'";
         $sqlQuery = str_replace(':ls_aju', $escapedAju, $sqlQuery);
 
+        // Isolasi multi-company: filter cmp_id pada setiap klausa WHERE agar data dokumen tidak ganda/tabrakan
+        if (!empty($cmp_id)) {
+            $escapedCmp = "'" . $koneksi->real_escape_string($cmp_id) . "'";
+            $sqlQuery = str_replace('WHERE nomor_aju = ', "WHERE cmp_id = $escapedCmp AND nomor_aju = ", $sqlQuery);
+            $sqlQuery = str_replace('WHERE a.nomor_aju = ', "WHERE a.cmp_id = $escapedCmp AND a.nomor_aju = ", $sqlQuery);
+            $sqlQuery = str_replace('WHERE x.nomor_aju = ', "WHERE x.cmp_id = $escapedCmp AND x.nomor_aju = ", $sqlQuery);
+            $sqlQuery = str_replace('WHERE h.nomor_aju = ', "WHERE h.cmp_id = $escapedCmp AND h.nomor_aju = ", $sqlQuery);
+        }
+
         $resBuilder = $koneksi->query($sqlQuery);
         if (!$resBuilder) {
             return [
