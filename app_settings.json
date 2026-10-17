@@ -1,0 +1,22 @@
+{
+    "app_name": "GSOFT INHOST",
+    "app_subtitle": "Interface Host to Host Ceisa 4.0",
+    "app_logo": "/assets/logo.png",
+    "app_favicon": "/assets/logo.png",
+    "app_footer": "GSOFT INHOST - Ceisa 4.0 \u2022 Single Core System",
+    "login_badge": "Single Core System",
+    "ceisa_env": "production",
+    "ceisa_api_url": "https://apis-gw.beacukai.go.id",
+    "ceisa_sync_batch_size": "100",
+    "tracking_refresh": "300",
+    "api_timeout": "30",
+    "prefix_spp": "SPP-",
+    "prefix_transfer": "TRF-",
+    "lock_inventory_aju": "1",
+    "require_confirm_ya": "1",
+    "default_tahun_buku": "auto",
+    "default_theme": "light",
+    "default_sidebar": "pinned",
+    "default_page_size": "25",
+    "toast_duration": "2600"
+}

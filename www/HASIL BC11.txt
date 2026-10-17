@@ -1,0 +1,80 @@
+
+status	true
+message	sukses
+data	Array
+(
+    [0] => Array
+        (
+            [idBl] => 89913959-ca93-4767-bf74-689586f6c100
+            [idHeader] => 57efb554-9eaa-4137-bc97-bcf5c4ad6196
+            [idNvoccHeader] => 
+            [kodeKelompokPos] => 01
+            #[nomorPos] => 033600000000
+            #[nomorBl] => SSLNSJKTCAA5124
+            #[tanggalBl] => 26-01-2025
+            #[nomorHostBl] => SSLNSJKTCAA5124
+            #[tanggalHostBl] => 26-01-2025
+            [marking] => VENUS / MADE IN INDIA
+            [namaPengirim] => VENUS WIRE INDUSTRIES PVT. LTD.
+            [alamatPengirim] => ENTIRE FLOOR 3RD, MEHTA MAHAL, PLOT NO. 15, MATHEW ROAD, OPERA HOUSE, MUMBAI - 400 004. INDIA
+            [namaPenerima] => PT. VOESTALPINE BOHLER WELDING ASIA PACIFIC
+            [alamatPenerima] => JL. INDUSTRI SELATAN 2 BLOK JJ NO. 7 - 10 KAWASAN INDUSTRI JABABEKA, PASIRSARI CIKARANG - BEKASI - JAWA - BARAT 17530 **
+            [namaNotify] => PT. VOESTALPINE BOHLER
+            [alamatNotify] => WELDING ASIA PACIFIC JL. INDUSTRI SELATAN 2 BLOK JJ NO. 7 - 10 KAWASAN INDUSTRI JABABEKA, PASIRSARI CIKARANG - BEKASI - JAWA - BARAT 17530 **
+            #BRUTO HEADER [berat] => 12649
+            [dimensi] => 0
+            [jumlahContainer] => 1
+            #KEMASAN [jenisKemasan] => PX
+            #KEMASAN [jumlahKemasan] => 12
+            #PENGANGKUT. NAMA [motherVessel] => ONE ARCADIA 071E
+            #[kodePelabuhanAsal] => INNSA
+            #[kodePelabuhanBongkar] => IDTPP
+            [flagPecah] => 
+            [flagTutup] => T4
+            [tanggalTutup] => 19-02-2025 13:59:05
+            [idDokumenTutup] => 08
+            [nomorDokumenTutup] => 001706/KBC.0805/2025
+            [tanggalDokumenTutup] => 17-02-2025
+            [keteranganTutup] => 
+            #[kodePelabuhanTransit] => SGSIN
+            #[kodePelabuhanAkhir] => IDTPP
+            [gudang] => 
+            [flagStatus] => 
+            #PENGANGKUT[nomorVoyage] => 
+            [jumlahContainerTertinggal] => 
+            [jumlahKemasanTertinggal] => 
+            [nipRekam] => SYSTEM
+            [npwpPenerima] => 0018244244055000
+            [npwpNotify] => 
+            [npwpPengirim] => 
+            [flagKonsolidasi] => N
+            [flagPartial] => N
+            [flagPartOf] => N
+            [idNvoccMaster] => null
+            [flagBatal] => 
+            [flagRedress] => 
+            [flagBatalTutup] => 
+            [statusBl] => 
+            [tdJenisRedress] => 
+            [tdManifestBLHs] => 
+            [tdManifestBLPetiKemas] => 
+            [tdManifestBLPetikemasTertinggals] => 
+            [tdManifestBLDokumen] => 
+            [approval] => 
+            [uraianKelompokPos] => 
+            #[namaPelabuhanAsal] => VNSGN
+            #[namaPelabuhanBongkar] => IDTPP
+            #[namaPelabuhanTransit] => 
+            #[namaPelabuhanAkhir] => 
+            [idJenisManifes] => 9
+            [jenisManifes] => Inward (BC 1.1)
+            [kodeKantor] => 040300
+            [nomorDaftar] => 001699
+            [tanggalDaftar] => 2025-02-14
+            [uraian] => 
+            [kemasanTerangkut] => 12
+            [namaSaranaPengangkut] => AN HAI
+        )
+
+)
+

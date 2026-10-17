@@ -1,0 +1,24 @@
+# Archives and dumps
+*.tar.gz
+database/*.sql
+*.sql
+
+# Keep zipped database
+!ceisa0400db.sql.zip
+!database/ceisa0400db.sql.zip
+
+# Local credentials and helper scripts
+pass.txt
+cookie.txt
+ssh_exec.bat
+scp_push.bat
+scp_pull.bat
+run_remote.bat
+dump_db.sh
+pack_project.sh
+test_conn.php
+test_git_cred.ps1
+scratch_*.php
+
+# Local shared / installer directory
+share/
