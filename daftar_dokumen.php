@@ -121,11 +121,11 @@ if ($action === 'list') {
         COALESCE(jml_barang.jml, a.totalCount, 0) AS jml_barang,
         CASE WHEN LOWER(a.namaProses) LIKE '%selesai%' OR posted.jml > 0 THEN 1 ELSE 0 END AS posted,
         COALESCE(DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), '') AS posted_waktu,
-        COALESCE(NULLIF(sppb_tbl.nomorRespon, ''), NULLIF(posted.sppb, ''), NULLIF(a.nomorRespon, ''), '') AS sppb,
-        COALESCE(NULLIF(a.pdf, ''), NULLIF(sppb_tbl.pdf, ''), '') AS pdf,
-        COALESCE(NULLIF(sppb_tbl.nomorRespon, ''), '') AS sppb_nomor_respon,
-        IFNULL(DATE_FORMAT(sppb_tbl.tanggalRespon, '%Y-%m-%d %H:%i:%s'), '') AS sppb_tanggal_respon,
-        COALESCE(NULLIF(sppb_tbl.pdf, ''), '') AS sppb_pdf,
+        COALESCE(NULLIF(sppb_tbl.nomorRespon, ''), NULLIF(resp_sppb.nomor_respon, ''), NULLIF(posted.sppb, ''), NULLIF(a.nomorRespon, ''), '') AS sppb,
+        COALESCE(NULLIF(sppb_tbl.pdf, ''), NULLIF(resp_sppb.pdf, ''), NULLIF(a.pdf, ''), '') AS pdf,
+        COALESCE(NULLIF(sppb_tbl.nomorRespon, ''), NULLIF(resp_sppb.nomor_respon, ''), '') AS sppb_nomor_respon,
+        IFNULL(DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), '') AS sppb_tanggal_respon,
+        COALESCE(NULLIF(sppb_tbl.pdf, ''), NULLIF(resp_sppb.pdf, ''), '') AS sppb_pdf,
         COALESCE(NULLIF(a.namaProses, ''), '') AS namaProses,
         COALESCE(NULLIF(a.namaRespon, ''), '') AS bcd_namaRespon,
         COALESCE(NULLIF(a.nomorRespon, ''), '') AS bcd_nomorRespon,
@@ -148,6 +148,12 @@ if ($action === 'list') {
         FROM bc_ceisa_sppb
         GROUP BY nomorAju
     ) sppb_tbl ON a.nomorAju = sppb_tbl.nomorAju
+    LEFT JOIN (
+        SELECT nomor_aju, MIN(nomor_respon) AS nomor_respon, MAX(tanggal_respon) AS tanggal_respon, MAX(pdf) AS pdf
+        FROM bc_ceisa_respons
+        WHERE pdf IS NOT NULL AND pdf != '' AND (keterangan LIKE '%SPPB%' OR kode_respon LIKE '%03%' OR kode_respon = '860')
+        GROUP BY nomor_aju
+    ) resp_sppb ON a.nomorAju = resp_sppb.nomor_aju
     LEFT JOIN (
         SELECT nomor_aju, COUNT(1) AS jml
         FROM bc_ceisa_barang

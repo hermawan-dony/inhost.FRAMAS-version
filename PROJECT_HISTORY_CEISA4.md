@@ -4644,6 +4644,34 @@ Delapan (8) tabel yang distandardisasi:
    - Linting `php -l` lolos 0 errors.
 
 ---
+
+## 115. Penyelarasan Otomatis Respon SPPB/NPE dari Tabel Respon (`bc_ceisa_respons`) ke Riwayat SPPB Permanen (`bc_ceisa_sppb`)
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [statusaju.php](file:///c:/dp/g-ceisa/statusaju.php), [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/statusaju.php](file:///c:/dp/g-ceisa/www/statusaju.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Masalah & Analisis Kasus (Contoh AJU: `0509270FRM0320261012003127`)
+1. **Gejala**:
+   - Pada tabel staging `bc_ceisa_data`, dokumen tersebut memiliki respon terbaru `SPPD` (`618283/KBC.0804/2026`) dengan kolom PDF kosong (`-`).
+   - Namun, saat pengguna melakukan tarik respon (*Sync Ulang Live*), tabel respon resmi `bc_ceisa_respons` memiliki riwayat lengkap yang mencakup respon **SPPB** (`610584/KBC.0804/2026` tgl 2026-10-12) beserta berkas PDF valid.
+   - Tabel arsip permanen SPPB `bc_ceisa_sppb` (*History SPPB*) sebelumnya belum terisi untuk AJU tersebut karena proses tarik respon hanya memasukkan data ke `bc_ceisa_respons` dan belum menyinkronkannya ke `bc_ceisa_sppb`.
+2. **Kebutuhan Pengguna**:
+   - Pengguna meminta agar respon SPPB yang berhasil ditarik otomatis tersinkronisasi ke riwayat SPPB (`bc_ceisa_sppb`) sehingga dokumen tetap memiliki data SPPB dan tombol unduhan PDF resmi.
+
+### B. Solusi & Implementasi
+1. **Fungsi Sinkronisasi Otomatis `syncSppbRecord()`**:
+   - Ditambahkan pada [statusaju.php](file:///c:/dp/g-ceisa/statusaju.php): fungsi ini memeriksa setiap respon yang masuk (`dataRespon`). Jika terdeteksi merupakan respon SPPB atau Persetujuan Pengeluaran (`keterangan LIKE '%SPPB%'`, kode `*03`, atau `860`), sistem langsung melakukan *upsert* ke tabel `bc_ceisa_sppb`.
+   - Mengambil data pelengkap kantor, entitas, dan jalur secara otomatis dari `bc_ceisa_data`, serta memperbarui kolom `pdf` pada `bc_ceisa_data` jika masih kosong.
+   - Diintegrasikan pada proses `sync_single` dan `syncCompanyDocs`.
+2. **Fallback Join Respon Resmi di `daftar_dokumen.php`**:
+   - Menambahkan `LEFT JOIN resp_sppb` langsung ke `bc_ceisa_respons` pada kueri utama `daftar_dokumen.php`.
+   - Menjamin bahwa nomor SPPB, tanggal SPPB, dan file PDF akan selalu tersedia (`COALESCE(sppb_tbl.pdf, resp_sppb.pdf, a.pdf)`), bahkan sebelum sinkronisasi permanen selesai.
+3. **Migrasi Data Yang Ada**:
+   - Telah dieksekusi sinkronisasi massal seluruh data SPPB dari `bc_ceisa_respons` ke `bc_ceisa_sppb`, sehingga AJU `0509270FRM0320261012003127` dan seluruh dokumen serupa langsung memiliki riwayat SPPB dan tombol PDF yang aktif.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
 
 

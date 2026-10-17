@@ -29,6 +29,92 @@ if (empty($cmp_id) && !empty($aju) && function_exists('ceisa_get_company')) {
 }
 
 /**
+ * Helper: Sinkronisasi Respon SPPB / Persetujuan Pengeluaran ke bc_ceisa_sppb (History SPPB)
+ */
+function syncSppbRecord($koneksi, $cmpId, $nomorAju, $nomorDaftar, $tanggalDaftar, $kodeDokumen, $nomorRespon, $tanggalRespon, $keterangan, $pdf) {
+    if (empty($nomorAju) || !$koneksi) return;
+
+    $isSppb = (
+        stripos($keterangan, 'SPPB') !== false ||
+        stripos($keterangan, 'PERSETUJUAN PENGELUARAN') !== false ||
+        in_array((string)$kodeDokumen . '03', ['2703', '2303', '2003', '2613', '2623', '2803', '3003', '1603']) ||
+        in_array((string)$keterangan, ['SPPB', '860'])
+    );
+    if (!$isSppb) return;
+
+    $escAju = $koneksi->real_escape_string($nomorAju);
+    $d = null;
+    $resD = $koneksi->query("SELECT * FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    if ($resD && $rowD = $resD->fetch_assoc()) {
+        $d = $rowD;
+    }
+
+    $finalCmpId       = !empty($cmpId) ? $cmpId : ($d['cmp_id'] ?? '010816064431000');
+    $finalNoDaftar    = !empty($nomorDaftar) ? $nomorDaftar : ($d['nomorDaftar'] ?? '');
+    $finalTglDaftar   = !empty($tanggalDaftar) ? $tanggalDaftar : (!empty($d['tanggalDaftar']) ? $d['tanggalDaftar'] : null);
+    $finalKdDok       = !empty($kodeDokumen) ? $kodeDokumen : ($d['kodeDokumen'] ?? '');
+    $finalNmDok       = !empty($d['namaDokumen']) ? $d['namaDokumen'] : ('BC ' . $finalKdDok);
+    $finalKdKantor    = $d['kodeKantor'] ?? '';
+    $finalNmKantor    = $d['namaKantorPendek'] ?? '';
+    $finalNmEntitas   = $d['namaEntitas'] ?? '';
+    $finalKdProses    = $d['kodeProses'] ?? '800';
+    $finalKdEntitas   = $d['kodeEntitas'] ?? '';
+    $finalNmProses    = $d['namaProses'] ?? 'Selesai Proses';
+    $finalIdPrsh      = $d['idPerusahaan'] ?? '';
+    $finalNmPrsh      = $d['namaPerusahaan'] ?? '';
+    $finalIdPpjk      = $d['idPpjk'] ?? '';
+    $finalNipPfpd     = $d['nipPfpd'] ?? '';
+    $finalNipPfpb     = $d['nipPfpb'] ?? '';
+    $finalNipAp       = $d['nipAp'] ?? '';
+    $finalKdJalur     = $d['kodeJalur'] ?? 'H';
+    $finalIdRespon    = $d['idRespon'] ?? '';
+    $finalNmRespon    = !empty($keterangan) ? $keterangan : 'SPPB';
+    $finalNoRespon    = $nomorRespon;
+    $finalTglRespon   = !empty($tanggalRespon) ? $tanggalRespon : (!empty($d['tanggalRespon']) ? $d['tanggalRespon'] : null);
+    $finalPdf         = !empty($pdf) ? $pdf : ($d['pdf'] ?? '');
+
+    $sql = "INSERT INTO bc_ceisa_sppb (
+        cmp_id, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
+        kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas,
+        namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb,
+        nipAp, kodeJalur, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf,
+        created_at, upd_time
+    ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?,
+        NOW(), NOW()
+    )
+    ON DUPLICATE KEY UPDATE 
+        nomorDaftar = COALESCE(NULLIF(VALUES(nomorDaftar), ''), bc_ceisa_sppb.nomorDaftar),
+        tanggalDaftar = COALESCE(VALUES(tanggalDaftar), bc_ceisa_sppb.tanggalDaftar),
+        nomorRespon = COALESCE(NULLIF(VALUES(nomorRespon), ''), bc_ceisa_sppb.nomorRespon),
+        tanggalRespon = COALESCE(VALUES(tanggalRespon), bc_ceisa_sppb.tanggalRespon),
+        pdf = COALESCE(NULLIF(VALUES(pdf), ''), bc_ceisa_sppb.pdf),
+        namaRespon = VALUES(namaRespon),
+        upd_time = NOW()";
+
+    $stmt = $koneksi->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param(
+            "ssssssssssssssssssssssss",
+            $finalCmpId, $nomorAju, $finalNoDaftar, $finalTglDaftar, $finalKdDok, $finalNmDok,
+            $finalKdKantor, $finalNmKantor, $finalNmEntitas, $finalKdProses, $finalKdEntitas,
+            $finalNmProses, $finalIdPrsh, $finalNmPrsh, $finalIdPpjk, $finalNipPfpd, $finalNipPfpb,
+            $finalNipAp, $finalKdJalur, $finalIdRespon, $finalNmRespon, $finalNoRespon, $finalTglRespon, $finalPdf
+        );
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    if (!empty($finalPdf)) {
+        $escPdf = $koneksi->real_escape_string($finalPdf);
+        $koneksi->query("UPDATE bc_ceisa_data SET pdf = '$escPdf' WHERE nomorAju = '$escAju' AND (pdf IS NULL OR pdf = '')");
+    }
+}
+
+/**
  * Helper: Sinkronisasi Status & Respon 1 Nomor AJU dari API CEISA 4.0
  */
 function ceisa_sync_single_aju($targetAju, $targetCmpId = '') {
@@ -191,6 +277,9 @@ function ceisa_sync_single_aju($targetAju, $targetCmpId = '') {
                     $stmtRespon->bind_param("ssssssssss", $targetCmpId, $nomorAju, $kodeRespon, $nomorDaftar, $tanggalDaftar, $nomorRespon, $tanggalRespon, $keterangan, $pdf, $kodeDokumen);
                     $stmtRespon->execute();
                     $cntRespon++;
+
+                    // Sinkronisasi otomatis ke tabel history SPPB (bc_ceisa_sppb) jika respon adalah SPPB/Persetujuan Pengeluaran
+                    syncSppbRecord($koneksi, $targetCmpId, $nomorAju, $nomorDaftar, $tanggalDaftar, $kodeDokumen, $nomorRespon, $tanggalRespon, $keterangan, $pdf);
                 }
             }
 
@@ -317,6 +406,9 @@ function ceisa_sync_company_all($targetCmpId, $targetNpwp) {
                     $stmtRespon->bind_param("ssssssssss", $targetCmpId, $nomorAju, $kodeRespon, $nomorDaftar, $tanggalDaftar, $nomorRespon, $tanggalRespon, $keterangan, $pdf, $kodeDokumen);
                     $stmtRespon->execute();
                     $cntRespon++;
+
+                    // Sinkronisasi otomatis ke tabel history SPPB (bc_ceisa_sppb) jika respon adalah SPPB/Persetujuan Pengeluaran
+                    syncSppbRecord($koneksi, $targetCmpId, $nomorAju, $nomorDaftar, $tanggalDaftar, $kodeDokumen, $nomorRespon, $tanggalRespon, $keterangan, $pdf);
                 }
             }
             if ($stmtRespon) $stmtRespon->close();
