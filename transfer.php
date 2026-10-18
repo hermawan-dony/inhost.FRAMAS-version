@@ -4663,6 +4663,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             // Timer aktif detik berjalan & Live Pipeline Stage Updater
             let elapsedSec = 0;
+            let currentStage = 1;
             const timerInterval = setInterval(() => {
                 elapsedSec++;
                 const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
@@ -4678,16 +4679,18 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const line2 = document.getElementById('pipeLine2');
                 const step3 = document.getElementById('pipeStep3');
 
-                if (elapsedSec >= 1 && step2 && !step2.classList.contains('active')) {
+                if (elapsedSec >= 1 && currentStage === 1) {
+                    currentStage = 2;
                     if (step1) { step1.classList.remove('active'); step1.classList.add('done'); }
                     if (line1) line1.classList.add('active');
-                    step2.classList.add('active');
+                    if (step2) step2.classList.add('active');
                     if (statusMsg) statusMsg.innerHTML = 'Melakukan otentikasi Bearer Token & enkripsi sesi Bea Cukai...';
                 }
-                if (elapsedSec >= 2 && step3 && !step3.classList.contains('active')) {
+                if (elapsedSec >= 2 && currentStage === 2) {
+                    currentStage = 3;
                     if (step2) { step2.classList.remove('active'); step2.classList.add('done'); }
                     if (line2) line2.classList.add('active');
-                    step3.classList.add('active');
+                    if (step3) step3.classList.add('active');
                     if (statusMsg) statusMsg.innerHTML = 'Mengirim transmisi ke API Gateway Bea Cukai & memverifikasi respon...';
                 }
             }, 1000);

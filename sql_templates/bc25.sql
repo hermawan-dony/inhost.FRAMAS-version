@@ -247,7 +247,8 @@ FROM (
 										',"seriIjin":', coalesce(nullif(d.seri_izin, ''), 0), '}'
 									) ORDER BY d.seri_dokumen), ']')
 									FROM bc_ceisa_bahanbakudokumen d
-									WHERE d.nomor_aju = y.nomor_aju
+									WHERE d.cmp_id = y.cmp_id
+									  AND d.nomor_aju = y.nomor_aju
 									  AND d.seri_barang = y.seri_barang
 									  AND d.seri_bahan_baku = y.seri_bahan_baku
 									  AND coalesce(d.kode_asal_bahan_baku, '0') = coalesce(y.kode_asal_bahan_baku, '0')
@@ -269,7 +270,7 @@ FROM (
 													',"kodeSatuanBarang":"',   coalesce(q.kode_satuan, '')   , '"',										    
 						 							',"jumlahKemasan":', 0 	   
 													, '}' )  ORDER BY q.kode_pungutan  ),  ']' ) AS json
-													FROM bc_ceisa_bahanbakutarif q WHERE q.nomor_aju = y.nomor_aju AND q.seri_barang = y.seri_barang AND q.seri_bahan_baku = y.seri_bahan_baku AND coalesce(q.kode_asal_bahan_baku, '0') = coalesce(y.kode_asal_bahan_baku, '0') AND not q.kode_pungutan in ('CUKAI', 'PPNBM') ORDER BY q.kode_pungutan 	
+													FROM bc_ceisa_bahanbakutarif q WHERE q.cmp_id = y.cmp_id AND q.nomor_aju = y.nomor_aju AND q.seri_barang = y.seri_barang AND q.seri_bahan_baku = y.seri_bahan_baku AND coalesce(q.kode_asal_bahan_baku, '0') = coalesce(y.kode_asal_bahan_baku, '0') AND not q.kode_pungutan in ('CUKAI', 'PPNBM') ORDER BY q.kode_pungutan 	
 												) ,'[]'),																			
 								'}'
 								)), ']' )  AS json

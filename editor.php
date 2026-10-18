@@ -9789,6 +9789,7 @@ $isEditMode = !empty($selectedAjuParam);
             }
 
             let secondsElapsed = 0;
+            let currentStage = 1;
             const updateTimer = () => {
                 secondsElapsed++;
                 const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
@@ -9804,16 +9805,18 @@ $isEditMode = !empty($selectedAjuParam);
                 const line2 = document.getElementById('editorPipeLine2');
                 const step3 = document.getElementById('editorPipeStep3');
 
-                if (secondsElapsed >= 1 && step2 && !step2.classList.contains('active')) {
+                if (secondsElapsed >= 1 && currentStage === 1) {
+                    currentStage = 2;
                     if (step1) { step1.classList.remove('active'); step1.classList.add('done'); }
                     if (line1) line1.classList.add('active');
-                    step2.classList.add('active');
+                    if (step2) step2.classList.add('active');
                     if (statusMsg) statusMsg.innerHTML = 'Melakukan otentikasi Bearer Token & enkripsi sesi Bea Cukai...';
                 }
-                if (secondsElapsed >= 2 && step3 && !step3.classList.contains('active')) {
+                if (secondsElapsed >= 2 && currentStage === 2) {
+                    currentStage = 3;
                     if (step2) { step2.classList.remove('active'); step2.classList.add('done'); }
                     if (line2) line2.classList.add('active');
-                    step3.classList.add('active');
+                    if (step3) step3.classList.add('active');
                     if (statusMsg) statusMsg.innerHTML = 'Mengirim transmisi ke API Gateway Bea Cukai & memverifikasi respon...';
                 }
             };
