@@ -800,7 +800,9 @@ if ($action === 'load_all') {
         'barangspekkhusus' => "SELECT * FROM bc_ceisa_barangspekkhusus WHERE nomor_aju = %s ORDER BY seri_barang ASC",
         'barangvd'         => "SELECT * FROM bc_ceisa_barangvd WHERE nomor_aju = %s ORDER BY seri_barang ASC",
         'bahanbakudokumen' => "SELECT * FROM bc_ceisa_bahanbakudokumen WHERE nomor_aju = %s ORDER BY seri_barang ASC, seri_bahan_baku ASC, seri_dokumen ASC",
-        'kesiapanbarang'   => "SELECT * FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = %s LIMIT 1"
+        'kesiapanbarang'   => "SELECT * FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = %s LIMIT 1",
+        'barangbom'        => "SELECT * FROM bc_ceisa_barangbom WHERE aju = %s ORDER BY seri ASC, id ASC",
+        'tracebb'          => "SELECT * FROM bc_ceisa_tracebb WHERE aju = %s OR nomor_aju = %s ORDER BY seri_barang ASC, id ASC"
     ];
 
     if (empty($nomor_aju)) {
@@ -813,7 +815,9 @@ if ($action === 'load_all') {
     } else {
         $escaped = "'" . $koneksi->real_escape_string($nomor_aju) . "'";
         foreach ($tables as $key => $sqlTemplate) {
-            $sql = sprintf($sqlTemplate, $escaped);
+            $cnt = substr_count($sqlTemplate, '%s');
+            $args = array_fill(0, $cnt, $escaped);
+            $sql = vsprintf($sqlTemplate, $args);
             $res = $koneksi->query($sql);
             if ($res) {
                 if ($key === 'header' || $key === 'kesiapanbarang') {
@@ -1246,7 +1250,9 @@ if ($action === 'save_table') {
         'barangentitas'    => 'bc_ceisa_barangentitas',
         'barangspekkhusus' => 'bc_ceisa_barangspekkhusus',
         'barangvd'         => 'bc_ceisa_barangvd',
-        'bahanbakudokumen' => 'bc_ceisa_bahanbakudokumen'
+        'bahanbakudokumen' => 'bc_ceisa_bahanbakudokumen',
+        'barangbom'        => 'bc_ceisa_barangbom',
+        'tracebb'          => 'bc_ceisa_tracebb'
     ];
 
     if (!isset($tableMap[$tableKey])) {
@@ -1281,7 +1287,13 @@ if ($action === 'save_table') {
     try {
         // Hapus baris lama untuk nomor_aju ini
         $escAju = $koneksi->real_escape_string($nomor_aju);
-        $koneksi->query("DELETE FROM `$targetTable` WHERE nomor_aju = '$escAju'");
+        if ($tableKey === 'barangbom') {
+            $koneksi->query("DELETE FROM `bc_ceisa_barangbom` WHERE aju = '$escAju'");
+        } elseif ($tableKey === 'tracebb') {
+            $koneksi->query("DELETE FROM `bc_ceisa_tracebb` WHERE aju = '$escAju' OR nomor_aju = '$escAju'");
+        } else {
+            $koneksi->query("DELETE FROM `$targetTable` WHERE nomor_aju = '$escAju'");
+        }
 
         // Insert baris-baris baru
         $insertedCount = 0;
@@ -1307,7 +1319,15 @@ if ($action === 'save_table') {
             }
 
             // Pastikan nomor_aju dan cmp_id selalu konsisten
-            $filteredRow['nomor_aju'] = $nomor_aju;
+            if (isset($validCols['nomor_aju'])) {
+                $filteredRow['nomor_aju'] = $nomor_aju;
+            }
+            if (isset($validCols['aju'])) {
+                $filteredRow['aju'] = $nomor_aju;
+            }
+            if (isset($validCols['id']) && empty($filteredRow['id'])) {
+                $filteredRow['id'] = md5(uniqid(rand(), true));
+            }
             if (isset($validCols['cmp_id']) && !empty($cmp_id)) {
                 $filteredRow['cmp_id'] = $cmp_id;
             }
@@ -1331,6 +1351,13 @@ if ($action === 'save_table') {
         }
 
         $koneksi->commit();
+
+        // Jika tabel barang disimpan, otomatis sinkronkan total CIF & bobot di header
+        if ($tableKey === 'barang') {
+            require_once __DIR__ . '/ceisa_calc_helper.php';
+            ceisa_sync_header_totals($koneksi, $nomor_aju);
+        }
+
         echo json_encode(['status' => 'OK', 'message' => "Tabel $tableKey berhasil disimpan ($insertedCount baris)."]);
     } catch (Exception $e) {
         $koneksi->rollback();
@@ -1728,6 +1755,231 @@ if ($action === 'calc_tarif') {
         'updated_barang' => $updatedBarangTarif,
         'updated_bahanbaku' => $updatedBahanBakuTarif
     ]);
+    exit;
+}
+
+require_once __DIR__ . '/ceisa_calc_helper.php';
+
+// MASTER ACTION: Auto-Generate Semua Tarif & Pungutan
+if ($action === 'auto_generate_all_tarifs') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci."]);
+        exit;
+    }
+    $res = ceisa_auto_generate_all_tarifs($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Generate Barang Tarif
+if ($action === 'generate_barang_tarif') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci."]);
+        exit;
+    }
+    $res = ceisa_generate_barang_tarif($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Generate Bahan Baku Tarif
+if ($action === 'generate_bahanbaku_tarif') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci."]);
+        exit;
+    }
+    $res = ceisa_generate_bahanbaku_tarif($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Fix HS Code
+if ($action === 'fix_hs_code') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_fix_hs_code($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Fix Netto
+if ($action === 'fix_netto') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_fix_netto($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Edit Seri Barang
+if ($action === 'edit_seri') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_edit_seri_barang($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Urutkan Seri Bahan Baku
+if ($action === 'seq_bahanbaku') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_seq_bahanbaku($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Delete ALL Trace
+if ($action === 'delete_all_trace') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_delete_all_trace($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Load ALL BOM Barang
+if ($action === 'load_all_bom') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_load_all_bom($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Transfer Trace Ex-BC ke Bahan Baku
+if ($action === 'transfer_trace_to_bb') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_transfer_trace_to_bb($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Get Recap Tarif (Summary Box)
+if ($action === 'get_recap_tarif') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $rows = [];
+    $q = $koneksi->query("SELECT kode_pungutan, 
+        SUM(COALESCE(nilai_bayar,0)) as nilai_bayar, 
+        SUM(COALESCE(nilai_fasilitas,0)) as nilai_fasilitas, 
+        SUM(COALESCE(nilai_sudah_dilunasi,0)) as nilai_sudah_dilunasi 
+        FROM bc_ceisa_barangtarif 
+        WHERE nomor_aju = '$escAju' 
+        GROUP BY kode_pungutan");
+    if ($q) {
+        while ($r = $q->fetch_assoc()) {
+            $rows[] = [
+                'kode_pungutan' => $r['kode_pungutan'],
+                'nilai_bayar' => floatval($r['nilai_bayar']),
+                'nilai_fasilitas' => floatval($r['nilai_fasilitas']),
+                'nilai_sudah_dilunasi' => floatval($r['nilai_sudah_dilunasi']),
+                'source' => 'Barang'
+            ];
+        }
+    }
+    $qBb = $koneksi->query("SELECT kode_pungutan, 
+        SUM(COALESCE(nilai_bayar,0)) as nilai_bayar, 
+        SUM(COALESCE(nilai_fasilitas,0)) as nilai_fasilitas, 
+        SUM(COALESCE(nilai_sudah_dilunasi,0)) as nilai_sudah_dilunasi 
+        FROM bc_ceisa_bahanbakutarif 
+        WHERE nomor_aju = '$escAju' 
+        GROUP BY kode_pungutan");
+    $bbRows = [];
+    if ($qBb) {
+        while ($r = $qBb->fetch_assoc()) {
+            $bbRows[] = [
+                'kode_pungutan' => $r['kode_pungutan'],
+                'nilai_bayar' => floatval($r['nilai_bayar']),
+                'nilai_fasilitas' => floatval($r['nilai_fasilitas']),
+                'nilai_sudah_dilunasi' => floatval($r['nilai_sudah_dilunasi']),
+                'source' => 'Bahan Baku'
+            ];
+        }
+    }
+    echo json_encode(['status' => 'OK', 'barang' => $rows, 'bahanbaku' => $bbRows]);
+    exit;
+}
+
+// Get List & Save Tarif BM
+if ($action === 'get_tarifbm_list') {
+    header('Content-Type: application/json; charset=utf-8');
+    $q = $koneksi->query("SELECT hs, tarif_bm, tgl_update FROM bc_ceisa_tarifbm ORDER BY hs ASC LIMIT 500");
+    $list = [];
+    if ($q) {
+        while ($r = $q->fetch_assoc()) {
+            $list[] = $r;
+        }
+    }
+    echo json_encode(['status' => 'OK', 'data' => $list]);
+    exit;
+}
+if ($action === 'save_tarifbm') {
+    header('Content-Type: application/json; charset=utf-8');
+    $hs = trim($_POST['hs'] ?? '');
+    $tarif_bm = floatval($_POST['tarif_bm'] ?? 0);
+    if (empty($hs)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Kode HS tidak boleh kosong.']);
+        exit;
+    }
+    $escHs = $koneksi->real_escape_string($hs);
+    $koneksi->query("INSERT INTO bc_ceisa_tarifbm (hs, tarif_bm, tgl_update) VALUES ('$escHs', $tarif_bm, CURDATE()) ON DUPLICATE KEY UPDATE tarif_bm = $tarif_bm, tgl_update = CURDATE()");
+    echo json_encode(['status' => 'OK', 'message' => "Tarif BM untuk HS $hs berhasil disimpan: $tarif_bm%"]);
     exit;
 }
 
@@ -4124,11 +4376,19 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 2. TAB BARANG -->
         <div class="panel" id="panel-barang">
-            <div class="grid-toolbar">
-                <span style="font-size:12px; color:var(--text-muted);">Tabel Rincian Barang <span class="tbl-tech-name">(<code>bc_ceisa_barang</code>)</span></span>
-                <div style="display:flex; gap:8px;">
-                    <button class="btn btn-secondary btn-sm" onclick="addRow('barang')">➕ Tambah Barang</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barang')">💾 Simpan Barang</button>
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Tabel Rincian Barang <span class="tbl-tech-name">(<code>bc_ceisa_barang</code>)</span></span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="autoGenerateAllTarifs()" style="font-weight:700; background:#faad14; border-color:#d48806; color:#000;" title="Otomatis sinkronisasi Total CIF Header, generate Barang Tarif, Bahan Baku Tarif, dan hitung Pungutan sekaligus!">⚡ Auto-Generate Tarif & Pungutan</button>
+                    <button type="button" class="btn btn-info btn-sm" id="btnToggleTrace" onclick="toggleTracePanel()" style="background:#13c2c2; border-color:#08979c; color:#fff;" title="Buka / Tutup panel pelacakan Dokumen Asal / Eks BC Bahan Baku">🔍 Show Trace</button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllTrace()" title="Hapus semua data Trace & BOM pada AJU ini">🗑️ Delete ALL Trace</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="fixHsCode()" title="Isi otomatis Pos Tarif (HS Code) yang kosong dari data historis atau referensi">🔍 FIX HS CODE</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="fixNetto()" title="Isi otomatis Netto yang kosong berdasarkan rasio historis per satuan">⚖️ FIX NETTO</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="editSeriBarang()" title="Tata ulang nomor urut Seri Barang 1..N">🔢 Edit Seri</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow('barang')">➕ Tambah Barang</button>
+                    <button type="button" class="btn btn-success btn-sm" onclick="saveTable('barang')">💾 Simpan Barang</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -4145,6 +4405,67 @@ $isEditMode = !empty($selectedAjuParam);
                         </tr>
                     </tfoot>
                 </table>
+            </div>
+
+            <!-- TRACE & BILL OF MATERIAL CONTAINER -->
+            <div id="traceSubPanel" style="display:none; margin-top:12px; border-top:2px solid var(--border-color); padding-top:10px;">
+                <div style="background:var(--bg-secondary); border-radius:6px; border:1px solid var(--border-color); padding:10px; margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Komponen Bahan Baku / Bill of Material (BOM) ::</span>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()">📥 Load ALL BOM Barang</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('barangbom')">➕ Tambah BOM</button>
+                            <button type="button" class="btn btn-success btn-xs" onclick="saveTable('barangbom')">💾 Simpan BOM</button>
+                        </div>
+                    </div>
+                    <div class="grid-wrap" style="max-height:180px;">
+                        <table class="datagrid" id="table-barangbom">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Seri</th>
+                                    <th style="width:120px;">Kd Brg Induk</th>
+                                    <th style="width:120px;">Kd Komponen</th>
+                                    <th>Uraian Komponen</th>
+                                    <th style="width:70px;">Satuan</th>
+                                    <th style="width:100px;">Qty Dibutuhkan</th>
+                                    <th style="width:40px; text-align:center;">Hapus</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div style="background:var(--bg-secondary); border-radius:6px; border:1px solid var(--border-color); padding:10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Tracking Dokumen Asal / Eks BC ::</span>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="btn btn-success btn-xs" onclick="transferTraceToBahanBaku()" style="font-weight:700;">🔄 Transfer Data Trace ke Bahan Baku</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('tracebb')">➕ Tambah Trace</button>
+                            <button type="button" class="btn btn-success btn-xs" onclick="saveTable('tracebb')">💾 Simpan Trace</button>
+                        </div>
+                    </div>
+                    <div class="grid-wrap" style="max-height:200px;">
+                        <table class="datagrid" id="table-tracebb">
+                            <thead>
+                                <tr>
+                                    <th style="width:50px;">Seri Brg</th>
+                                    <th style="width:110px;">Kd Barang</th>
+                                    <th>Nama Barang</th>
+                                    <th style="width:80px;">Qty Use</th>
+                                    <th style="width:60px;">Sat</th>
+                                    <th style="width:60px;">BC</th>
+                                    <th style="width:150px;">No AJU Asal</th>
+                                    <th style="width:100px;">No Daftar</th>
+                                    <th style="width:90px;">Tgl Daftar</th>
+                                    <th style="width:90px;">HS Code</th>
+                                    <th style="width:40px; text-align:center;">Hapus</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -4206,9 +4527,14 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 5. TAB BAHAN BAKU -->
         <div class="panel" id="panel-bahanbaku">
-            <div class="grid-toolbar">
-                <span style="font-size:12px; color:var(--text-muted);">Tabel Bahan Baku / Subkontrak <span class="tbl-tech-name">(<code>bc_ceisa_bahanbaku</code>)</span></span>
-                <div style="display:flex; gap:8px;">
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Tabel Bahan Baku / Subkontrak <span class="tbl-tech-name">(<code>bc_ceisa_bahanbaku</code>)</span></span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="generateBahanBakuTarif()" style="font-weight:700;" title="Generate otomatis baris tarif untuk seluruh bahan baku (BM, PPH, PPN)">⚡ Generate Bahan Baku Tarif</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="fixHsCode()" title="Isi Pos Tarif (HS Code) kosong pada Bahan Baku">🔍 FIX HS CODE</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="seqBahanBaku()" title="Urutkan Seri Bahan Baku 1..N per Seri Barang">🔢 Urutkan Seri BB</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbaku')">➕ Tambah Bahan Baku</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('bahanbaku')">💾 Simpan Bahan Baku</button>
                 </div>
@@ -4254,14 +4580,39 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 6. TAB BARANG TARIF -->
         <div class="panel" id="panel-barangtarif">
-            <div class="grid-toolbar">
-                <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif & Pungutan Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangtarif</code>)</span></span>
-                <div style="display:flex; gap:8px;">
-                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungTarif('barang')" title="Hitung nilai bayar/fasilitas tarif barang berdasarkan CIF & persentase Tarif (%)">⚡ Hitung Tarif</button>
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif & Pungutan Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangtarif</code>)</span></span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="generateBarangTarif()" style="font-weight:700;" title="Generate otomatis baris tarif barang">⚡ Generate Barang Tarif</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('barang')" title="Hitung ulang nilai bayar/fasilitas tarif barang">⚡ Hitung Tarif</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangtarif')">➕ Tambah Tarif</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('barangtarif')">💾 Simpan Barang Tarif</button>
                 </div>
             </div>
+
+            <!-- SUMMARY BOX TARIF (MATCHING POWERBUILDER INTERFACE) -->
+            <div id="summaryTarifBox" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; padding:10px; margin-bottom:12px; max-width:680px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <span style="font-weight:700; font-size:12px; color:var(--text-color);">📊 Summary Tarif Pabean & Fasilitas</span>
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="loadRecapTarif()">🔄 Refresh</button>
+                </div>
+                <table class="datagrid" id="table-summary-tarif" style="font-size:11px;">
+                    <thead>
+                        <tr>
+                            <th>Sumber</th>
+                            <th>Kode Pungutan</th>
+                            <th style="text-align:right;">Nilai Bayar (Rp)</th>
+                            <th style="text-align:right;">Nilai Fasilitas (Rp)</th>
+                            <th style="text-align:right;">Sudah Dilunasi (Rp)</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+
             <div class="grid-wrap">
                 <table class="datagrid" id="table-barangtarif">
                     <thead>
@@ -4297,10 +4648,14 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 7. TAB BAHAN BAKU TARIF -->
         <div class="panel" id="panel-bahanbakutarif">
-            <div class="grid-toolbar">
-                <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif Bahan Baku <span class="tbl-tech-name">(<code>bc_ceisa_bahanbakutarif</code>)</span></span>
-                <div style="display:flex; gap:8px;">
-                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungTarif('bahanbaku')" title="Hitung nilai bayar/fasilitas tarif bahan baku berdasarkan CIF & persentase Tarif (%)">⚡ Hitung Tarif BB</button>
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif Bahan Baku <span class="tbl-tech-name">(<code>bc_ceisa_bahanbakutarif</code>)</span></span>
+                </div>
+                <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="generateBahanBakuTarif()" style="font-weight:700;" title="Generate ulang seluruh Bahan Baku Tarif">⚡ Generate Bahan Baku Tarif</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('bahanbaku')" title="Hitung ulang nilai bayar/fasilitas tarif bahan baku">⚡ Hitung Tarif BB</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbakutarif')">➕ Tambah Tarif BB</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('bahanbakutarif')">💾 Simpan Tarif BB</button>
                 </div>
@@ -5720,6 +6075,63 @@ $isEditMode = !empty($selectedAjuParam);
                         💾 Simpan Konfigurasi
                     </button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MASTER TARIF BM MODAL -->
+    <div class="modal-overlay" id="modalTarifBm">
+        <div class="modal" style="max-width:700px; width:95vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(245, 158, 11, 0.1), transparent);">
+                <div>
+                    <h3 style="color:#d97706; display:flex; align-items:center; gap:6px;">
+                        <span>⚙️ Master Konfigurasi Tarif Bea Masuk (BM)</span>
+                    </h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                        Tabel referensi persentase Bea Masuk (BM) per Kode HS (bc_ceisa_tarifbm) untuk kalkulasi otomatis barang & bahan baku.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalTarifBm')">✕</button>
+            </div>
+            <div class="modal-body" style="padding:14px;">
+                <!-- BARIS INPUT HS BARU -->
+                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:12px; display:flex; gap:8px; align-items:flex-end;">
+                    <div style="flex:2;">
+                        <label style="font-size:10px; font-weight:700; display:block; margin-bottom:3px;">Kode HS Baru:</label>
+                        <input type="text" id="newBmHs" placeholder="Contoh: 39011012" style="width:100%; font-family:monospace;">
+                    </div>
+                    <div style="flex:1;">
+                        <label style="font-size:10px; font-weight:700; display:block; margin-bottom:3px;">Tarif BM (%):</label>
+                        <input type="number" id="newBmTarif" step="0.01" min="0" max="100" value="5.00" style="width:100%; text-align:right;">
+                    </div>
+                    <div>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="addNewTarifBm()">➕ Tambah / Update</button>
+                    </div>
+                </div>
+
+                <!-- FILTER & REFRESH -->
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <input type="text" id="searchTarifBm" placeholder="Cari Kode HS..." oninput="filterTarifBmTable()" style="width:220px; font-size:11px; padding:4px 8px;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="loadTarifBmList()">🔄 Muat Ulang</button>
+                </div>
+
+                <!-- TABLE LIST TARIF BM -->
+                <div style="max-height:320px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                    <table class="datagrid" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th style="width:140px;">Kode HS</th>
+                                <th style="width:130px;">Tarif BM (%)</th>
+                                <th>Tgl Update</th>
+                                <th style="width:80px; text-align:center;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyTarifBm"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalTarifBm')">Tutup</button>
             </div>
         </div>
     </div>
@@ -7499,6 +7911,26 @@ $isEditMode = !empty($selectedAjuParam);
                 { key: 'kode_asal_bahan_baku', type: 'select', label: 'Asal BB', reff: 'ASAL BAHAN BAKU', width: '110px', minWidth: '110px', maxWidth: '110px' },
                 { key: 'seri_dokumen', type: 'number', label: 'Seri Dokumen', decimals: 0, width: '90px', minWidth: '90px', maxWidth: '90px' },
                 { key: 'seri_izin', type: 'text', label: 'Seri Fasilitas / Izin', minWidth: '120px' }
+            ],
+            barangbom: [
+                { key: 'seri', type: 'number', label: 'Seri', decimals: 0, width: '50px', minWidth: '50px', maxWidth: '50px' },
+                { key: 'kode_barang_parent', type: 'text', label: 'Kd Brg Induk', width: '120px', minWidth: '120px' },
+                { key: 'kode_barang', type: 'text', label: 'Kd Komponen', width: '120px', minWidth: '120px' },
+                { key: 'uraian', type: 'wrap_text', label: 'Uraian Komponen' },
+                { key: 'kode_satuan', type: 'text', label: 'Satuan', reff: 'SATUAN BARANG', width: '70px', minWidth: '70px' },
+                { key: 'qty', type: 'number', label: 'Qty Butuh', decimals: 4, width: '100px', minWidth: '100px' }
+            ],
+            tracebb: [
+                { key: 'seri_barang', type: 'number', label: 'Seri Brg', decimals: 0, width: '50px', minWidth: '50px', maxWidth: '50px' },
+                { key: 'kode_barang', type: 'text', label: 'Kd Barang', width: '110px', minWidth: '110px' },
+                { key: 'nama_barang', type: 'wrap_text', label: 'Nama Barang' },
+                { key: 'qty_use', type: 'number', label: 'Qty Use', decimals: 4, width: '80px', minWidth: '80px' },
+                { key: 'satuan', type: 'text', label: 'Sat', reff: 'SATUAN BARANG', width: '60px', minWidth: '60px' },
+                { key: 'jenis_bc', type: 'text', label: 'BC', width: '60px', minWidth: '60px' },
+                { key: 'nomor_aju', type: 'text', label: 'No AJU Asal', width: '150px', minWidth: '150px' },
+                { key: 'no_daftar', type: 'text', label: 'No Daftar', width: '100px', minWidth: '100px' },
+                { key: 'tgl_daftar', type: 'date', label: 'Tgl Daftar', width: '100px', minWidth: '100px' },
+                { key: 'hs', type: 'text', label: 'HS Code', width: '90px', minWidth: '90px' }
             ]
         };
 
@@ -8269,6 +8701,9 @@ $isEditMode = !empty($selectedAjuParam);
                 requestAnimationFrame(() => {
                     autoResizeAllTextareas(activePnl);
                 });
+            }
+            if (tabName === 'barangtarif' || tabName === 'bahanbakutarif') {
+                loadRecapTarif();
             }
         }
 
@@ -9963,6 +10398,446 @@ $isEditMode = !empty($selectedAjuParam);
             document.fonts.ready.then(() => {
                 document.querySelectorAll('table.datagrid td select.cell-select').forEach(autoSizeSelect);
             });
+        }
+
+        // =============================================================
+        // OTOMASI TARIF, PUNGUTAN & TRACE HELPER FUNCTIONS
+        // =============================================================
+
+        async function autoGenerateAllTarifs() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Silakan buka atau pilih dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            const resConfirm = await Swal.fire({
+                title: '⚡ Auto-Generate Semua Tarif & Pungutan?',
+                html: `Sistem akan otomatis menghitung secara menyeluruh:<br>
+                    <div style="text-align:left; font-size:12px; margin-top:8px; line-height:1.7;">
+                    1. <b>Barang Tarif</b> untuk seluruh seri barang (BM, PPH, PPN).<br>
+                    2. <b>Bahan Baku Tarif</b> (BM, PPN, PPH) untuk seluruh bahan baku impor/lokal.<br>
+                    3. <b>Pungutan Dokumen</b> (bc_ceisa_pungutan) dengan pembulatan ribuan CEISA.<br>
+                    4. <b>Sinkronisasi CIF & Total Header</b> (mencegah error Header CIF tidak sama dengan Barang).
+                    </div><br>
+                    Lanjutkan kalkulasi otomatis?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#3b82f6',
+                confirmButtonText: '⚡ Ya, Jalankan',
+                cancelButtonText: 'Batal'
+            });
+            if (!resConfirm.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Sedang Mengkalkulasi...',
+                text: 'Memproses tarif barang, tarif bahan baku, pungutan, dan rekonsiliasi CIF header...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const resp = await fetch(`editor.php?action=auto_generate_all_tarifs&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    const bt = data.barang_tarif || {};
+                    const bbt = data.bahanbaku_tarif || {};
+                    const pung = data.pungutan || {};
+                    const hdr = data.header_sync || {};
+
+                    let summaryHtml = `<div style="text-align:left; font-size:12px; line-height:1.7;">
+                        <b>✅ Hasil Kalkulasi Otomatis:</b><br>
+                        • <b>Barang Tarif:</b> ${bt.inserted || 0} baris tarif berhasil digenerate.<br>
+                        • <b>Bahan Baku Tarif:</b> ${bbt.inserted || 0} baris tarif berhasil digenerate (${bbt.total_bb || 0} bahan baku).<br>
+                        • <b>Pungutan Terhitung:</b> PPN: Rp ${Number(pung.ppn || 0).toLocaleString('id-ID')}, BM: Rp ${Number(pung.bm || 0).toLocaleString('id-ID')}, PPH: Rp ${Number(pung.pph || 0).toLocaleString('id-ID')}.<br>
+                        • <b>Header CIF Disinkronkan:</b> Rp ${Number(hdr.cif || 0).toLocaleString('id-ID', {minimumFractionDigits: 2})}.
+                    </div>`;
+
+                    await Swal.fire({
+                        title: 'Kalkulasi Berhasil!',
+                        html: summaryHtml,
+                        icon: 'success'
+                    });
+
+                    await reloadCurrentAju();
+                    loadRecapTarif();
+                } else {
+                    Swal.fire('Gagal Kalkulasi', data.message || 'Terjadi kesalahan sistem.', 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message || 'Gagal memanggil API kalkulasi.', 'error');
+            }
+        }
+
+        async function generateBarangTarif() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Silakan buka atau pilih dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            Swal.fire({
+                title: 'Mengkalkulasi Barang Tarif...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            try {
+                const resp = await fetch(`editor.php?action=generate_barang_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    await Swal.fire('Sukses', data.message || 'Barang tarif berhasil digenerate.', 'success');
+                    await reloadCurrentAju();
+                    loadRecapTarif();
+                } else {
+                    Swal.fire('Gagal', data.message || 'Gagal generate barang tarif.', 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function generateBahanBakuTarif() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Silakan buka atau pilih dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            Swal.fire({
+                title: 'Mengkalkulasi Bahan Baku Tarif...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            try {
+                const resp = await fetch(`editor.php?action=generate_bahanbaku_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    await Swal.fire('Sukses', data.message || 'Bahan baku tarif berhasil digenerate.', 'success');
+                    await reloadCurrentAju();
+                    loadRecapTarif();
+                } else {
+                    Swal.fire('Gagal', data.message || 'Gagal generate bahan baku tarif.', 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function fixHsCode() {
+            if (!currentAju) return;
+            Swal.fire({
+                title: 'Membersihkan Format HS Code...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            try {
+                const resp = await fetch(`editor.php?action=fix_hs_code&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Sukses', data.message || 'Format HS Code dibersihkan (hanya digit).', 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', data.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function fixNetto() {
+            if (!currentAju) return;
+            Swal.fire({
+                title: 'Menyesuaikan Netto & Bruto...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            try {
+                const resp = await fetch(`editor.php?action=fix_netto&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Sukses', data.message || 'Netto & Bruto berhasil disinkronkan.', 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', data.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function editSeriBarang() {
+            if (!currentAju) return;
+            const resConfirm = await Swal.fire({
+                title: 'Urutkan Nomor Seri Barang?',
+                text: 'Nomor seri barang akan diurutkan ulang berurutan dari 1 beserta relasi barang tarif dan bahan baku.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Ya, Urutkan'
+            });
+            if (!resConfirm.isConfirmed) return;
+
+            try {
+                const resp = await fetch(`editor.php?action=edit_seri&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Sukses', data.message || 'Seri barang berhasil diurutkan.', 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', data.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function seqBahanBaku() {
+            if (!currentAju) return;
+            try {
+                const resp = await fetch(`editor.php?action=seq_bahanbaku&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Sukses', data.message || 'Seri bahan baku berhasil diurutkan.', 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', data.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function deleteAllTrace() {
+            if (!currentAju) return;
+            const res = await Swal.fire({
+                title: 'Hapus Seluruh Data Trace?',
+                text: 'Semua data tracking BOM dan Dokumen Asal pada dokumen ini akan dihapus permanen!',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#ef4444',
+                confirmButtonText: 'Ya, Hapus Semua'
+            });
+            if (!res.isConfirmed) return;
+
+            try {
+                const resp = await fetch(`editor.php?action=delete_all_trace&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Terhapus', data.message, 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', data.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        function toggleTracePanel() {
+            const pnl = document.getElementById('traceSubPanel');
+            const btn = document.getElementById('btnToggleTrace');
+            if (!pnl) return;
+            if (pnl.style.display === 'none' || pnl.style.display === '') {
+                pnl.style.display = 'block';
+                if (btn) btn.innerHTML = '🔍 Hide Trace';
+            } else {
+                pnl.style.display = 'none';
+                if (btn) btn.innerHTML = '🔍 Show Trace';
+            }
+        }
+
+        async function loadAllBomBarang() {
+            if (!currentAju) return;
+            Swal.fire({
+                title: 'Memuat BOM Seluruh Barang...',
+                text: 'Mengambil data bill of material komponen dari master produk...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            try {
+                const resp = await fetch(`editor.php?action=load_all_bom&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    Swal.fire('Sukses', data.message, 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire(data.status === 'WARNING' ? 'Perhatian' : 'Gagal', data.message, data.status === 'WARNING' ? 'warning' : 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function transferTraceToBahanBaku() {
+            if (!currentAju) return;
+            const confirmRes = await Swal.fire({
+                title: 'Transfer Trace ke Bahan Baku?',
+                text: 'Hasil tracing dokumen asal eks-BC akan dipindahkan ke tabel Bahan Baku dan otomatis mengurutkan seri serta membuat tarif bahan baku!',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '🔄 Ya, Transfer Sekarang'
+            });
+            if (!confirmRes.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Mentransfer & Memproses Data...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const resp = await fetch(`editor.php?action=transfer_trace_to_bb&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    await Swal.fire('Sukses Transfer!', data.message, 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire(data.status === 'WARNING' ? 'Perhatian' : 'Gagal', data.message, data.status === 'WARNING' ? 'warning' : 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function loadRecapTarif() {
+            if (!currentAju) return;
+            const box = document.getElementById('summaryTarifBox');
+            if (!box) return;
+            try {
+                const resp = await fetch(`editor.php?action=get_recap_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    let html = '<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">';
+                    html += '<span style="font-weight:700; color:var(--text-color); font-size:11px;">📊 Rekap Tarif & Pungutan:</span>';
+                    const allItems = [...(data.barang || []), ...(data.bahanbaku || [])];
+                    if (allItems.length === 0) {
+                        html += '<span style="color:var(--text-muted); font-style:italic; font-size:11px;">Belum ada data tarif/pungutan ter-generate. Klik "⚡ Auto-Generate Tarif & Pungutan" untuk menghitung otomatis.</span>';
+                    } else {
+                        const grouped = {};
+                        allItems.forEach(item => {
+                            const k = item.kode_pungutan;
+                            if (!grouped[k]) grouped[k] = { bayar: 0, fasilitas: 0, lunas: 0 };
+                            grouped[k].bayar += Number(item.nilai_bayar || 0);
+                            grouped[k].fasilitas += Number(item.nilai_fasilitas || 0);
+                            grouped[k].lunas += Number(item.nilai_sudah_dilunasi || 0);
+                        });
+                        for (const [pungutan, vals] of Object.entries(grouped)) {
+                            html += `<div style="background:var(--bg-base); padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:11px;">
+                                <span style="font-weight:700; color:var(--primary);">${escapeHtml(pungutan)}:</span> 
+                                Bayar: <b>Rp ${vals.bayar.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b> | 
+                                Fasilitas: <b>Rp ${vals.fasilitas.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b>
+                            </div>`;
+                        }
+                    }
+                    html += '</div>';
+                    box.innerHTML = html;
+                }
+            } catch(e) {
+                console.error('Gagal load recap tarif:', e);
+            }
+        }
+
+        // =============================================================
+        // MASTER TARIF BM MODAL CONTROLLER
+        // =============================================================
+
+        function openTarifBmModal() {
+            document.getElementById('modalTarifBm').style.display = 'flex';
+            loadTarifBmList();
+        }
+
+        let tarifBmCache = [];
+        async function loadTarifBmList() {
+            const tbody = document.getElementById('tbodyTarifBm');
+            if (!tbody) return;
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:15px;">Sedang memuat data master tarif BM...</td></tr>';
+            try {
+                const resp = await fetch('editor.php?action=get_tarifbm_list');
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    tarifBmCache = res.data || [];
+                    renderTarifBmTable(tarifBmCache);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:red; padding:15px;">Gagal: ${res.message}</td></tr>`;
+                }
+            } catch(e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:red; padding:15px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderTarifBmTable(list) {
+            const tbody = document.getElementById('tbodyTarifBm');
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:15px;">Belum ada master tarif BM.</td></tr>';
+                return;
+            }
+            let html = '';
+            list.forEach(r => {
+                const hs = escapeHtml(r.hs || '');
+                const tarif = Number(r.tarif_bm || 0);
+                const tgl = escapeHtml(r.tgl_update || '');
+                html += `<tr>
+                    <td style="font-family:monospace; font-weight:700;">${hs}</td>
+                    <td>
+                        <input type="number" step="0.01" min="0" max="100" class="input-sm" id="input_bm_${hs}" value="${tarif}" style="width:85px; text-align:right;"> %
+                    </td>
+                    <td style="font-size:11px; color:var(--text-muted);">${tgl}</td>
+                    <td style="text-align:center;">
+                        <button type="button" class="btn btn-primary btn-xs" onclick="saveTarifBmRow('${hs}')">💾 Simpan</button>
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function filterTarifBmTable() {
+            const q = (document.getElementById('searchTarifBm')?.value || '').toLowerCase().trim();
+            if (!q) {
+                renderTarifBmTable(tarifBmCache);
+                return;
+            }
+            const filtered = tarifBmCache.filter(r => (r.hs || '').toLowerCase().includes(q));
+            renderTarifBmTable(filtered);
+        }
+
+        async function saveTarifBmRow(hs) {
+            const inp = document.getElementById('input_bm_' + hs);
+            const tarif = inp ? inp.value : 0;
+            try {
+                const fd = new FormData();
+                fd.append('hs', hs);
+                fd.append('tarif_bm', tarif);
+                const resp = await fetch('editor.php?action=save_tarifbm', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    showToast(`Tarif BM untuk ${hs} disimpan: ${tarif}%`);
+                    loadTarifBmList();
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        async function addNewTarifBm() {
+            const hs = (document.getElementById('newBmHs')?.value || '').trim();
+            const tarif = (document.getElementById('newBmTarif')?.value || '0').trim();
+            if (!hs) {
+                Swal.fire('Perhatian', 'Kode HS wajib diisi.', 'warning');
+                return;
+            }
+            try {
+                const fd = new FormData();
+                fd.append('hs', hs);
+                fd.append('tarif_bm', tarif);
+                const resp = await fetch('editor.php?action=save_tarifbm', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    showToast(`Tarif BM untuk ${hs} berhasil ditambahkan!`);
+                    document.getElementById('newBmHs').value = '';
+                    document.getElementById('newBmTarif').value = '5';
+                    loadTarifBmList();
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
         }
 
         window.addEventListener('DOMContentLoaded', init);

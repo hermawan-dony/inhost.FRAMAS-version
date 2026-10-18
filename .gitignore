@@ -21,6 +21,7 @@ test_*.php
 SQLyogTunnel.php
 dp.php
 dp/
+scratch/
 sync_and_push.ps1
 tmp_dump.sh
 
