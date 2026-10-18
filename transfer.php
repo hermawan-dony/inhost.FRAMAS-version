@@ -860,6 +860,23 @@ if ($action === 'set_h2h') {
     exit;
 }
 
+// 4c. RESET STATUS POSTED / CEISA (KEMBALIKAN WARNA MENJADI PUTIH)
+if ($action === 'reset_posted') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $koneksi->query("DELETE FROM bc_ceisa_aju_posted WHERE nomor_aju = '$escAju'");
+    $koneksi->query("DELETE FROM bc_ceisa_data WHERE nomorAju = '$escAju'");
+    $koneksi->query("DELETE FROM bc_ceisa_status WHERE nomor_aju = '$escAju'");
+    $koneksi->query("DELETE FROM bc_ceisa_respons WHERE nomor_aju = '$escAju'");
+    echo json_encode(['status' => 'OK', 'message' => "Status posting AJU $nomor_aju berhasil dibersihkan (warna kembali putih)."]);
+    exit;
+}
+
 // 5. COPY AJU (DEDICATED)
 if ($action === 'copy_aju') {
     header('Content-Type: application/json; charset=utf-8');
@@ -2823,6 +2840,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="context-menu-item" onclick="contextAction('post_insw')" style="color:#722ed1; font-weight:600;"><i class="fa-solid fa-globe" style="color:#722ed1; width:16px;"></i> Posting INSW</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('sync')"><i class="fa-solid fa-cloud-arrow-down" style="color:#52c41a; width:16px;"></i> Tarik / Sync Respon</div>
+        <div class="context-menu-item" onclick="contextAction('reset_posted')"><i class="fa-solid fa-rotate-left" style="color:#fa8c16; width:16px;"></i> Reset Status Kirim (Putih)</div>
         <div class="context-menu-item" onclick="contextAction('manual_respon')" style="font-weight:600; color:#1890ff;"><i class="fa-solid fa-file-pen" style="color:#1890ff; width:16px;"></i> Set Manual Respon</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('post_it')"><i class="fa-solid fa-box-archive" style="color:#faad14; width:16px;"></i> Posting IT Inventory</div>
@@ -3734,6 +3752,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 case 'sync':
                     syncActiveAju(targetAju);
                     break;
+                case 'reset_posted':
+                    resetPostedAju(targetAju);
+                    break;
                 case 'manual_respon':
                     openManualResponModal(targetAju);
                     break;
@@ -3755,6 +3776,36 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         }
 
+        async function resetPostedAju(targetAju) {
+            const aju = targetAju || activeAju;
+            if (!aju) return;
+            const ok = await showConfirm(
+                `Apakah Anda yakin ingin mereset status pengiriman untuk dokumen AJU <strong>${escapeHtml(aju)}</strong>?<br><br>Status tanda kirim (H2H) akan dihapus dan warna baris tabel kembali menjadi <b>putih</b>.`,
+                'Reset Status Kirim (Kembali Putih)',
+                'Ya, Reset ke Putih',
+                'Batal',
+                'warning'
+            );
+            if (!ok) return;
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'reset_posted');
+                fd.append('nomor_aju', aju);
+                const res = await fetch('transfer.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    showSuccess(json.message || 'Status berhasil direset.');
+                    loadList();
+                    if (activeAju === aju) loadActiveDetailTab();
+                } else {
+                    showError(json.message || 'Gagal mereset status.');
+                }
+            } catch (err) {
+                showError('Terjadi kesalahan: ' + err.message);
+            }
+        }
+
         async function syncActiveAju(targetAju) {
             const aju = targetAju || activeAju;
             if (!aju) {
@@ -3763,7 +3814,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
             Swal.fire({
                 title: 'Tarik / Sync Respon CEISA',
-                html: `Menghubungi portal CEISA untuk memeriksa respon dokumen AJU:<br><b>${escapeHtml(aju)}</b>...`,
+                html: `Menghubungi portal CEISA untuk memeriksa respon dokumen AJU:<br><b style="font-family:monospace; color:var(--primary); font-size:14px;">${escapeHtml(aju)}</b>...`,
                 allowOutsideClick: false,
                 didOpen: () => {
                     Swal.showLoading();
@@ -3776,8 +3827,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     Swal.fire({
                         icon: 'success',
                         title: 'Sinkronisasi Berhasil!',
-                        text: 'Status dan respon dokumen berhasil diperbarui dari CEISA 4.0.',
-                        timer: 2000,
+                        html: `<div style="font-size:13px; color:#374151;">Status dan respon kepabeanan untuk dokumen <br><b style="font-family:monospace; color:#1890ff;">${escapeHtml(aju)}</b><br>berhasil diselaraskan dari CEISA 4.0.</div>`,
+                        timer: 2500,
                         showConfirmButton: false
                     });
                     loadList();
@@ -3785,12 +3836,85 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         loadActiveDetailTab();
                     }
                 } else {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'Hasil Respon CEISA',
-                        html: `<div style="max-height:200px; overflow-y:auto; font-size:11px; text-align:left; background:#f5f5f5; padding:8px; border-radius:4px;">${escapeHtml(text)}</div>`
-                    });
+                    let parsed = null;
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (e) {
+                        parsed = null;
+                    }
+
+                    const rawMsg = (parsed && (parsed.message || parsed.status)) ? (parsed.message || parsed.status) : text;
+                    const isNotFound = (
+                        text.toLowerCase().includes('tidak ditemukan') ||
+                        (parsed && typeof parsed.message === 'string' && parsed.message.toLowerCase().includes('tidak ditemukan')) ||
+                        (parsed && typeof parsed.status === 'string' && parsed.status.toLowerCase() === 'failed' && (parsed.message || '').toLowerCase().includes('tidak ditemukan'))
+                    );
+
+                    if (isNotFound) {
+                        // Pastikan di sisi backend status posted telah dibersihkan
+                        try {
+                            const fd = new FormData();
+                            fd.append('action', 'reset_posted');
+                            fd.append('nomor_aju', aju);
+                            await fetch('transfer.php', { method: 'POST', body: fd });
+                        } catch (e) {
+                            console.warn('Fallback reset_posted error:', e);
+                        }
+
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '<span style="font-size:18px; font-weight:700; color:#d97706;">Data Tidak Ditemukan di CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#1e293b; letter-spacing:0.5px;">
+                                        ${escapeHtml(aju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    Portal CEISA 4.0 menyatakan dokumen pengajuan ini <b>tidak ditemukan</b> dalam database server Bea Cukai. Hal ini menunjukkan dokumen belum pernah berhasil dikirim atau proses transfer sebelumnya belum tercatat.
+                                </div>
+                                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #3b82f6; border-radius:6px; padding:12px 14px; text-align:left; font-size:12px; color:#1e40af; margin-bottom:14px; line-height:1.5;">
+                                    <div style="font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                        <i class="fas fa-undo-alt" style="color:#2563eb;"></i> Status Pengiriman Telah Direset
+                                    </div>
+                                    Data pada <code>bc_ceisa_aju_posted</code> telah dibersihkan otomatis. Warna baris dokumen pada tabel kini telah <b>kembali menjadi putih</b> (status Belum Kirim). Anda dapat memeriksa kembali kelengkapan dokumen lalu mengirim ulang via <b>Transfer CEISA</b>.
+                                </div>
+                                <details style="text-align:left; font-size:11px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; cursor:pointer;">
+                                    <summary style="font-weight:600; color:#64748b; outline:none; user-select:none;">Detail Respon Mentah CEISA</summary>
+                                    <pre style="margin:8px 0 0 0; padding:8px; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; font-family:monospace; font-size:11px; color:#334155; white-space:pre-wrap; word-break:break-all; max-height:140px; overflow-y:auto;">${escapeHtml(text)}</pre>
+                                </details>
+                            `,
+                            confirmButtonText: '<i class="fas fa-check" style="margin-right:6px;"></i> Mengerti',
+                            confirmButtonColor: '#3b82f6',
+                            width: '540px'
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: '<span style="font-size:18px; font-weight:700; color:#dc2626;">Respon Gagal dari CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#991b1b; letter-spacing:0.5px;">
+                                        ${escapeHtml(aju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    ${escapeHtml(rawMsg || 'Terjadi kesalahan saat memeriksa status ke server Bea Cukai.')}
+                                </div>
+                                <details style="text-align:left; font-size:11px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; cursor:pointer;">
+                                    <summary style="font-weight:600; color:#64748b; outline:none; user-select:none;">Detail Respon Teknis</summary>
+                                    <pre style="margin:8px 0 0 0; padding:8px; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; font-family:monospace; font-size:11px; color:#334155; white-space:pre-wrap; word-break:break-all; max-height:140px; overflow-y:auto;">${escapeHtml(text)}</pre>
+                                </details>
+                            `,
+                            confirmButtonText: 'Tutup',
+                            confirmButtonColor: '#4b5563',
+                            width: '540px'
+                        });
+                    }
                     loadList();
+                    if (activeAju === aju) {
+                        loadActiveDetailTab();
+                    }
                 }
             } catch (err) {
                 showError('Terjadi kesalahan jaringan: ' + err.message);

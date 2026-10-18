@@ -2567,11 +2567,38 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     openTrackingHistory(activeTrackingAju.nomorAju, activeTrackingAju.cmpId);
                     loadList();
                 } else {
-                    Swal.fire({
-                        icon: 'warning',
-                        title: 'Respon CEISA 4.0',
-                        text: result.message || 'Tidak ada pembaruan status baru dari CEISA 4.0.'
-                    });
+                    const isNotFound = result.is_not_found || (result.message && result.message.toLowerCase().includes('tidak ditemukan'));
+                    if (isNotFound) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '<span style="font-size:18px; font-weight:700; color:#d97706;">Data Tidak Ditemukan di CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#1e293b; letter-spacing:0.5px;">
+                                        ${escapeHtml(activeTrackingAju.nomorAju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    Portal CEISA 4.0 menyatakan dokumen pengajuan ini <b>tidak ditemukan</b> dalam database Bea Cukai.
+                                </div>
+                                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #3b82f6; border-radius:6px; padding:12px 14px; text-align:left; font-size:12px; color:#1e40af; margin-bottom:14px; line-height:1.5;">
+                                    <div style="font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                        <i class="fas fa-undo-alt" style="color:#2563eb;"></i> Status Pengiriman Direset
+                                    </div>
+                                    Tanda status pengiriman (<code>bc_ceisa_aju_posted</code>) telah dibersihkan sehingga status kembali menjadi <b>Belum Kirim (Putih)</b>.
+                                </div>
+                            `,
+                            confirmButtonText: 'Mengerti',
+                            confirmButtonColor: '#3b82f6'
+                        });
+                        loadList();
+                    } else {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Respon CEISA 4.0',
+                            text: result.message || 'Tidak ada pembaruan status baru dari CEISA 4.0.'
+                        });
+                    }
                 }
             } catch (err) {
                 Swal.fire({

@@ -295,11 +295,32 @@ function ceisa_sync_single_aju($targetAju, $targetCmpId = '') {
             'message'      => "Sinkronisasi berhasil! $cntStatus status & $cntRespon respon tersimpan."
         ];
     } else {
+        $rawMsg = $data['message'] ?? '';
+        $isNotFound = (
+            stripos($response, 'Data Tidak Ditemukan') !== false ||
+            stripos($rawMsg, 'tidak ditemukan') !== false ||
+            (isset($data['status']) && strtolower((string)$data['status']) === 'failed' && stripos($rawMsg, 'tidak ditemukan') !== false)
+        );
+
+        $deletedPosted = false;
+        if ($isNotFound && isset($koneksi) && $koneksi) {
+            $escAju = $koneksi->real_escape_string($targetAju);
+            // Hapus dari bc_ceisa_aju_posted agar baris dokumen di transfer.php kembali putih
+            $koneksi->query("DELETE FROM bc_ceisa_aju_posted WHERE nomor_aju = '$escAju'");
+            // Hapus juga record staging status, respon, dan data pabean yang belum terdaftar
+            $koneksi->query("DELETE FROM bc_ceisa_data WHERE nomorAju = '$escAju'");
+            $koneksi->query("DELETE FROM bc_ceisa_status WHERE nomor_aju = '$escAju'");
+            $koneksi->query("DELETE FROM bc_ceisa_respons WHERE nomor_aju = '$escAju'");
+            $deletedPosted = true;
+        }
+
         return [
-            'status'       => 'ERROR',
-            'raw_response' => $response,
-            'data'         => $data,
-            'message'      => $data['message'] ?? 'Data tidak ditemukan atau respon gagal dari CEISA 4.0.'
+            'status'         => $isNotFound ? 'NOT_FOUND' : 'ERROR',
+            'is_not_found'   => $isNotFound,
+            'deleted_posted' => $deletedPosted,
+            'raw_response'   => $response,
+            'data'           => $data,
+            'message'        => !empty($rawMsg) ? $rawMsg : 'Data tidak ditemukan atau respon gagal dari CEISA 4.0.'
         ];
     }
 }
@@ -1888,11 +1909,58 @@ if ($action === 'sync_company') {
                     });
                     loadTrackingData();
                 } else {
-                    Swal.fire({
-                        icon: 'info',
-                        title: 'Hasil Respon CEISA',
-                        html: `<div style="max-height:220px; overflow-y:auto; font-size:11px; text-align:left; background:var(--table-header); padding:10px; border-radius:4px;">${escapeHtml(result.message || JSON.stringify(result))}</div>`
-                    });
+                    const isNotFound = result.is_not_found || (result.message && result.message.toLowerCase().includes('tidak ditemukan'));
+                    if (isNotFound) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '<span style="font-size:18px; font-weight:700; color:#d97706;">Data Tidak Ditemukan di CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#1e293b; letter-spacing:0.5px;">
+                                        ${escapeHtml(aju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    Portal CEISA 4.0 menyatakan dokumen pengajuan ini <b>tidak ditemukan</b> dalam database Bea Cukai (kemungkinan belum terkirim atau pengiriman sebelumnya ditolak/dibatalkan).
+                                </div>
+                                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #3b82f6; border-radius:6px; padding:12px 14px; text-align:left; font-size:12px; color:#1e40af; margin-bottom:14px; line-height:1.5;">
+                                    <div style="font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                        <i class="fas fa-undo-alt" style="color:#2563eb;"></i> Status Pengiriman Telah Direset
+                                    </div>
+                                    Tanda status pengiriman (<code>bc_ceisa_aju_posted</code>) telah dibersihkan otomatis sehingga baris dokumen pada tabel kembali <b>putih</b> (Belum Kirim).
+                                </div>
+                                <details style="text-align:left; font-size:11px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; cursor:pointer;">
+                                    <summary style="font-weight:600; color:#64748b; outline:none; user-select:none;">Detail Respon Mentah CEISA</summary>
+                                    <pre style="margin:8px 0 0 0; padding:8px; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; font-family:monospace; font-size:11px; color:#334155; white-space:pre-wrap; word-break:break-all; max-height:140px; overflow-y:auto;">${escapeHtml(result.raw_response || result.message || JSON.stringify(result))}</pre>
+                                </details>
+                            `,
+                            confirmButtonText: '<i class="fas fa-check" style="margin-right:6px;"></i> Mengerti',
+                            confirmButtonColor: '#3b82f6',
+                            width: '540px'
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'error',
+                            title: '<span style="font-size:18px; font-weight:700; color:#dc2626;">Respon Gagal dari CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#991b1b; letter-spacing:0.5px;">
+                                        ${escapeHtml(aju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    ${escapeHtml(result.message || 'Gagal menyelaraskan status dokumen dari CEISA 4.0.')}
+                                </div>
+                                <details style="text-align:left; font-size:11px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px; cursor:pointer;">
+                                    <summary style="font-weight:600; color:#64748b; outline:none; user-select:none;">Detail Respon Teknis</summary>
+                                    <pre style="margin:8px 0 0 0; padding:8px; background:#ffffff; border:1px solid #e2e8f0; border-radius:4px; font-family:monospace; font-size:11px; color:#334155; white-space:pre-wrap; word-break:break-all; max-height:140px; overflow-y:auto;">${escapeHtml(result.raw_response || result.message || JSON.stringify(result))}</pre>
+                                </details>
+                            `,
+                            confirmButtonText: 'Tutup',
+                            confirmButtonColor: '#4b5563',
+                            width: '540px'
+                        });
+                    }
                     loadTrackingData();
                 }
             } catch (err) {

@@ -5045,7 +5045,65 @@ Delapan (8) tabel yang distandardisasi:
 - Data transaksi uji coba pengguna telah sepenuhnya siap untuk ditransfer ke CEISA 4.0 tanpa kendala tanggal invalid.
 
 ---
+
+## 🚀 15. PERBAIKAN TAMPILAN RESPON CEISA & AUTO-RESET STATUS POSTED (WARNA KEMBALI PUTIH)
+
+> **Tanggal Implementasi:** 18 Oktober 2026  
+> **Status:** Selesai, Teruji & Live di Server Production
+
+### A. Latar Belakang Masalah
+1. **Modal Respon Mentah JSON**:
+   - Ketika pengguna melakukan pengecekan status dokumen ("Tarik / Sync Respon") untuk dokumen yang belum terdaftar di portal CEISA 4.0, antarmuka memunculkan pop-up alert SweetAlert info berisi teks mentah JSON:
+     `{"status":"Failed","message":"Data Tidak Ditemukan"}`.
+   - Tampilan ini terkesan kaku, mentah, dan kurang memberikan konteks tindakan selanjutnya kepada pengguna.
+2. **Baris Tetap Berwarna Biru**:
+   - Pada versi terdahulu, jika CEISA menyatakan *Data Tidak Ditemukan*, dokumen seharusnya direset statusnya menjadi belum kirim sehingga baris data pada tabel yang semula berwarna **biru** (`row-submitted-ceisa`) kembali menjadi **putih**.
+   - Sebelumnya, data di `bc_ceisa_aju_posted` dan `bc_ceisa_data` tidak dibersihkan saat respon "Data Tidak Ditemukan" diterima, sehingga baris tabel tetap dianggap telah dikirim (`isSubmitted = true`) dan tetap berwarna biru.
+
+### B. Solusi & Perubahan yang Diterapkan
+1. **Backend Database Cleanup (`statusaju.php` & `transfer.php`)**:
+   - Di dalam fungsi `ceisa_sync_single_aju()` pada `statusaju.php`:
+     - Menambahkan deteksi kondisi ketika respon CEISA mengandung `"Data Tidak Ditemukan"` atau status `"Failed"` dengan pesan tidak ditemukan.
+     - Mengeksekusi query pembersihan otomatis:
+       ```sql
+       DELETE FROM bc_ceisa_aju_posted WHERE nomor_aju = '$escAju';
+       DELETE FROM bc_ceisa_data WHERE nomorAju = '$escAju';
+       DELETE FROM bc_ceisa_status WHERE nomor_aju = '$escAju';
+       DELETE FROM bc_ceisa_respons WHERE nomor_aju = '$escAju';
+       ```
+     - Mengembalikan flag `is_not_found: true` dan `deleted_posted: true`.
+   - Menambahkan endpoint dedicated baru `action=reset_posted` pada `transfer.php` untuk memfasilitasi reset status pengiriman secara langsung.
+
+2. **Peremajaan Antarmuka Dialog Respon CEISA**:
+   - **`transfer.php` (`syncActiveAju`)**:
+     - Mengganti tampilan pop-up raw JSON dengan dialog modern terstruktur:
+       - **Badge Nomor AJU**: Tampil jelas dalam font monospace berbingkai.
+       - **Pesan Status Jelas**: Menginformasikan bahwa dokumen belum terdaftar / tidak ditemukan pada portal server Bea Cukai CEISA 4.0.
+       - **Pemberitahuan Reset Status (Kembali Putih)**: Menjelaskan bahwa data pada `bc_ceisa_aju_posted` telah dibersihkan otomatis, dan baris tabel telah kembali menjadi **putih** (Belum Kirim).
+       - **Collapsible Technical Details**: JSON asli dari CEISA tetap dapat diinspeksi melalui accordion `<details>` tanpa mengotori dialog utama.
+     - Memanggil `loadList()` secara instan sehingga baris tabel langsung berubah dari warna biru menjadi putih tanpa perlu refresh halaman manual.
+   - **`statusaju.php` (`syncSingleAjuDirect`)**:
+     - Memperbarui dialog respon gagal / not found dengan struktur visual elegan yang seragam.
+   - **`daftar_dokumen.php`**:
+     - Menyesuaikan penanganan status not found agar menampilkan pesan terstruktur dan menyegarkan tabel daftar dokumen.
+
+3. **Menu Klik Kanan (Context Menu)**:
+   - Menambahkan opsi menu baru pada klik kanan tabel `transfer.php`:
+     `Reset Status Kirim (Putih)` (`contextAction('reset_posted')`)
+   - Memungkinkan pengguna untuk mereset status pengiriman suatu dokumen menjadi putih kembali kapan saja secara manual dengan satu klik.
+
+### C. Pengujian & Verifikasi
+- Pengujian langsung dilakukan pada nomor AJU `XXXX25ROQ96720260926001006`:
+  - Respon API CEISA 4.0: `{"status":"Failed","message":"Data Tidak Ditemukan"}`.
+  - Record pada `bc_ceisa_aju_posted` dan `bc_ceisa_data` terhapus dengan sukses.
+  - Verifikasi query `transfer.php?action=list&q=XXXX25ROQ96720260926001006` membuktikan:
+    `posted: "0"`, `posted_waktu: ""`, `namaProses: ""` ➔ `isSubmitted: false`.
+  - Warna baris pada tabel terverifikasi berubah menjadi **putih** (Belum Kirim).
+- File berhasil dideploy ke server remote Alibaba Cloud (`/source/public/`) dan disinkronkan ke lokal `www/`.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
 
 
 
