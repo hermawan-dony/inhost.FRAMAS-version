@@ -143,6 +143,9 @@ class CeisaJsonBuilder
         $cleanStatus = $koneksi->prepare("UPDATE bc_ceisa_entitas SET kode_status = '1' WHERE nomor_aju = ? AND kode_entitas IN ('3', '7') AND (kode_status IS NULL OR TRIM(kode_status) = '' OR TRIM(kode_status) NOT IN ('0','1','2','3','4','5','6','7','8','9','10'))");
         if ($cleanStatus) { $cleanStatus->bind_param("s", $nomor_aju); $cleanStatus->execute(); $cleanStatus->close(); }
 
+        // Normalisasi & Perbaikan Otomatis Bahan Baku Tarif yang Tertukar Seri (misal ke seri 25)
+        self::autoRepairBahanBakuTarif($koneksi, $nomor_aju);
+
         // 4. Pastikan Ukuran Maksimum GROUP_CONCAT Cukup Besar
         $koneksi->query("SET SESSION group_concat_max_len = 100000000");
 
@@ -191,6 +194,18 @@ class CeisaJsonBuilder
 
         // Pastikan seluruh tanggal di dalam JSON bersih dan berformat YYYY-MM-DD
         self::recursiveNormalizeDates($decoded);
+
+        // Pastikan CIF Header sama persis dengan total penjumlahan CIF seluruh barang (mencegah error selisih sen di CEISA 4.0)
+        if (isset($decoded['barang']) && is_array($decoded['barang']) && count($decoded['barang']) > 0) {
+            $sumBarangCif = 0;
+            foreach ($decoded['barang'] as $b) {
+                $sumBarangCif += (float)($b['cif'] ?? 0);
+            }
+            if (isset($decoded['cif'])) {
+                $decoded['cif'] = round($sumBarangCif, 2);
+            }
+        }
+
         $rawJson = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         // 7. Simpan Hasil JSON ke Tabel bc_ceisa_json & File json.txt
@@ -296,6 +311,77 @@ class CeisaJsonBuilder
                 if (strpos($lowerK, 'tanggal') !== false || strpos($lowerK, 'tgl') !== false || $lowerK === 'jatuhtempo' || $lowerK === 'waktu') {
                     $v = self::normalizeDateStr($v);
                 }
+            }
+        }
+    }
+
+    /**
+     * Memperbaiki dan menormalkan integritas relasi baris bahan baku tarif yang tertukar nomor serinya (misal tertumpuk di seri 25)
+     */
+    public static function autoRepairBahanBakuTarif(mysqli $koneksi, string $nomor_aju): void
+    {
+        $escapedAju = $koneksi->real_escape_string($nomor_aju);
+        $resBrg = $koneksi->query("SELECT DISTINCT seri_barang FROM bc_ceisa_barang WHERE nomor_aju='$escapedAju' ORDER BY seri_barang");
+        if (!$resBrg) return;
+
+        while ($bRow = $resBrg->fetch_assoc()) {
+            $brg = (int)$bRow['seri_barang'];
+            $resMissing = $koneksi->query("
+                SELECT bb.seri_bahan_baku, bb.cif 
+                FROM bc_ceisa_bahanbaku bb
+                LEFT JOIN bc_ceisa_bahanbakutarif t 
+                  ON t.nomor_aju = bb.nomor_aju 
+                 AND t.seri_barang = bb.seri_barang 
+                 AND t.seri_bahan_baku = bb.seri_bahan_baku 
+                 AND t.kode_asal_bahan_baku = bb.kode_asal_bahan_baku
+                WHERE bb.nomor_aju = '$escapedAju' 
+                  AND bb.seri_barang = $brg 
+                  AND bb.kode_asal_bahan_baku = '0'
+                  AND t.seri_bahan_baku IS NULL
+                ORDER BY bb.seri_bahan_baku
+            ");
+            if (!$resMissing || $resMissing->num_rows == 0) continue;
+
+            $missing = [];
+            while ($m = $resMissing->fetch_assoc()) {
+                $missing[] = [
+                    'seri' => (int)$m['seri_bahan_baku'],
+                    'ppn'  => round((float)$m['cif'] * 0.11, 2),
+                    'pph'  => round((float)$m['cif'] * 0.025, 2),
+                ];
+            }
+
+            foreach ($missing as $m) {
+                $targetSeri = $m['seri'];
+                $expPpn = $m['ppn'];
+                $expPph = $m['pph'];
+
+                // Update 1 baris PPN yang match
+                $koneksi->query("
+                    UPDATE bc_ceisa_bahanbakutarif 
+                    SET seri_bahan_baku = $targetSeri 
+                    WHERE nomor_aju='$escapedAju' AND seri_barang=$brg AND seri_bahan_baku=25 AND kode_asal_bahan_baku='0' 
+                      AND kode_pungutan='PPN' AND ABS(nilai_sudah_dilunasi - $expPpn) < 0.05
+                    LIMIT 1
+                ");
+
+                // Update 1 baris PPH yang match
+                $koneksi->query("
+                    UPDATE bc_ceisa_bahanbakutarif 
+                    SET seri_bahan_baku = $targetSeri 
+                    WHERE nomor_aju='$escapedAju' AND seri_barang=$brg AND seri_bahan_baku=25 AND kode_asal_bahan_baku='0' 
+                      AND kode_pungutan='PPH' AND ABS(nilai_sudah_dilunasi - $expPph) < 0.05
+                    LIMIT 1
+                ");
+
+                // Update 1 baris BM (tarif 0) yang berlebih
+                $koneksi->query("
+                    UPDATE bc_ceisa_bahanbakutarif 
+                    SET seri_bahan_baku = $targetSeri 
+                    WHERE nomor_aju='$escapedAju' AND seri_barang=$brg AND seri_bahan_baku=25 AND kode_asal_bahan_baku='0' 
+                      AND kode_pungutan='BM'
+                    LIMIT 1
+                ");
             }
         }
     }
