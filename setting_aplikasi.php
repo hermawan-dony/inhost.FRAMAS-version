@@ -17,6 +17,16 @@ require_once __DIR__ . '/app_settings_helper.php';
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_REQUEST['is_admin']) && (string)$_REQUEST['is_admin'] === '1');
 
 if (!$isAdmin) {
+    if (!empty($_REQUEST['action'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode([
+            'status' => 'AUTH_EXPIRED',
+            'message' => 'Sesi login Anda telah berakhir. Silakan login kembali untuk melanjutkan.'
+        ]);
+        exit;
+    }
+
     http_response_code(403);
     echo '<!DOCTYPE html>
     <html lang="id">
@@ -44,6 +54,11 @@ if (!$isAdmin) {
     </body>
     </html>';
     exit;
+}
+
+// Pastikan status admin tersimpan di sesi untuk request berikutnya
+if ($isAdmin && empty($_SESSION['is_admin'])) {
+    $_SESSION['is_admin'] = true;
 }
 
 $sessionUser = $_SESSION['user_name'] ?? ($_SESSION['user'] ?? 'Administrator');
@@ -1071,10 +1086,43 @@ $currentSettings = getAppSettings($koneksi);
             }
         }
 
+        function getSettingsApiUrl() {
+            var search = window.location.search || '';
+            if (!search) {
+                return 'setting_aplikasi.php?is_admin=1';
+            }
+            if (search.indexOf('is_admin=') === -1) {
+                return 'setting_aplikasi.php' + search + '&is_admin=1';
+            }
+            return 'setting_aplikasi.php' + search;
+        }
+
+        function handleSessionExpired() {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Sesi Kedaluwarsa',
+                text: 'Sesi login Anda telah berakhir. Silakan login kembali untuk melanjutkan.',
+                confirmButtonText: 'Login Kembali',
+                confirmButtonColor: '#1890ff',
+                allowOutsideClick: false
+            }).then(() => {
+                try {
+                    if (window.parent && window.parent !== window) {
+                        window.parent.location.reload();
+                    } else {
+                        window.location.reload();
+                    }
+                } catch(e) {
+                    window.location.reload();
+                }
+            });
+        }
+
         async function submitSaveSettings() {
             const form = document.getElementById('formSettings');
             const fd = new FormData(form);
             fd.append('action', 'save');
+            fd.append('is_admin', '1');
 
             Swal.fire({
                 title: 'Menyimpan Pengaturan...',
@@ -1084,11 +1132,28 @@ $currentSettings = getAppSettings($koneksi);
             });
 
             try {
-                const res = await fetch('setting_aplikasi.php', {
+                const res = await fetch(getSettingsApiUrl(), {
                     method: 'POST',
                     body: fd
                 });
-                const json = await res.json();
+
+                if (res.status === 401 || res.status === 403) {
+                    handleSessionExpired();
+                    return;
+                }
+
+                let json;
+                try {
+                    json = await res.json();
+                } catch(pe) {
+                    handleSessionExpired();
+                    return;
+                }
+
+                if (json.status === 'AUTH_EXPIRED') {
+                    handleSessionExpired();
+                    return;
+                }
 
                 if (json.status === 'OK') {
                     Swal.fire({
@@ -1119,7 +1184,7 @@ $currentSettings = getAppSettings($koneksi);
             } catch (err) {
                 Swal.fire({
                     icon: 'error',
-                    title: 'Kesalahan Jaringan',
+                    title: 'Kesalahan Sistem / Jaringan',
                     text: err.message
                 });
             }
@@ -1146,8 +1211,26 @@ $currentSettings = getAppSettings($koneksi);
                     try {
                         const fd = new FormData();
                         fd.append('action', 'reset');
-                        const res = await fetch('setting_aplikasi.php', { method: 'POST', body: fd });
-                        const json = await res.json();
+                        fd.append('is_admin', '1');
+                        const res = await fetch(getSettingsApiUrl(), { method: 'POST', body: fd });
+
+                        if (res.status === 401 || res.status === 403) {
+                            handleSessionExpired();
+                            return;
+                        }
+
+                        let json;
+                        try {
+                            json = await res.json();
+                        } catch(pe) {
+                            handleSessionExpired();
+                            return;
+                        }
+
+                        if (json.status === 'AUTH_EXPIRED') {
+                            handleSessionExpired();
+                            return;
+                        }
 
                         if (json.status === 'OK') {
                             Swal.fire({
@@ -1168,10 +1251,10 @@ $currentSettings = getAppSettings($koneksi);
                                 } catch(e) {}
                             });
                         } else {
-                            Swal.fire({ icon: 'error', title: 'Gagal', text: json.message });
+                            Swal.fire({ icon: 'error', title: 'Gagal Mereset', text: json.message || 'Terjadi kesalahan.' });
                         }
                     } catch(e) {
-                        Swal.fire({ icon: 'error', title: 'Error', text: e.message });
+                        Swal.fire({ icon: 'error', title: 'Kesalahan Sistem / Jaringan', text: e.message });
                     }
                 }
             });

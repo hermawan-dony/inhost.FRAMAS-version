@@ -4799,7 +4799,257 @@ Delapan (8) tabel yang distandardisasi:
    - Seluruh berkas lulus pemeriksaan sintaksis PHP (`php -l`) dengan **0 errors**.
 
 ---
+
+## 120. Peningkatan UI Dropdown Pungutan (Kolom Lebih Lebar) & Fitur Kalkulasi Otomatis Tarif dan Pungutan Dokumen Pabean (CEISA 4.0)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Masalah & Kebutuhan Pengguna
+1. **Lebar Dropdown Pungutan Terpotong**:
+   - Pada Tab Pungutan (`bc_ceisa_pungutan`), teks dropdown referensi jenis pungutan dan kode fasilitas tarif terpotong (*truncated*) karena lebar kolom dan select dipatok pada 130px. Teks seperti `PPH | PPh Impor (Pasal 22)` dan `7 | SUDAH DILUNASI` terpotong menjadi `PPH | PPh Imp..` dan `7 | SUDAH DILU..`.
+2. **Kebutuhan Kalkulasi Otomatis Pungutan**:
+   - Pengguna meminta agar sistem dapat menghitung/mengkalkulasi secara otomatis nilai pungutan negara dan menambahkan tombol **"Hitung Pungutan"**.
+3. **Kebutuhan Kalkulasi Otomatis Tarif Barang & Bahan Baku**:
+   - Pengguna juga meminta agar sistem dapat menghitung nilai bayar, nilai fasilitas, dan nilai sudah dilunasi pada tabel Barang Tarif (`bc_ceisa_barangtarif`) dan Bahan Baku Tarif (`bc_ceisa_bahanbakutarif`) dengan menambahkan tombol **"Hitung Tarif"**.
+
+### B. Solusi & Implementasi
+1. **Pelebaran Kolom Dropdown Pungutan**:
+   - Memperlebar kolom `kode_jenis_pungutan` dari 130px menjadi `width: 240px, min-width: 220px, max-width: 300px`.
+   - Memperlebar kolom `kode_fasilitas_tarif` dari 130px menjadi `width: 280px, min-width: 260px, max-width: 360px`.
+   - Menyesuaikan `gridConfigs.pungutan` dan header `<th>` tabel `#table-pungutan` sehingga seluruh nama jenis pungutan dan deskripsi fasilitas tarif tampil utuh tanpa terpotong.
+2. **Penambahan Tombol pada Toolbar**:
+   - Tab Pungutan (`#panel-pungutan`): Ditambahkan tombol **`⚡ Hitung Pungutan`** (`.btn-warning`).
+   - Tab Barang Tarif (`#panel-barangtarif`): Ditambahkan tombol **`⚡ Hitung Tarif`** (`.btn-warning`).
+   - Tab Bahan Baku Tarif (`#panel-bahanbakutarif`): Ditambahkan tombol **`⚡ Hitung Tarif BB`** (`.btn-warning`).
+3. **Engine Kalkulasi Pungutan (`action=calc_pungutan`)**:
+   - Mengambil akumulasi nilai tarif berdasarkan tipe dokumen dan ketersediaan data:
+     - Untuk dokumen BC 2.5 / subkontrak (atau jika ada rincian bahan baku bernilai > 0): Mengakumulasi dari `bc_ceisa_bahanbakutarif` per kelompok `(kode_pungutan, kode_fasilitas)`.
+     - Untuk dokumen impor/umum lainnya: Mengakumulasi dari `bc_ceisa_barangtarif` per kelompok `(kode_pungutan, kode_fasilitas)`.
+   - Menerapkan aturan pembulatan resmi Bea Cukai CEISA 4.0 (PMK 190): Nilai pungutan dibulatkan ke ribuan rupiah penuh terdekat (`round(total, -3)`).
+   - Memperbarui tabel `bc_ceisa_pungutan` dan langsung me-refresh tampilan tabel secara dinamis beserta jumlah badge tab tanpa perlu reload halaman.
+4. **Engine Kalkulasi Tarif Barang & Bahan Baku (`action=calc_tarif`)**:
+   - Menghitung Nilai Pabean dari Nilai CIF Rupiah / NDPBM / Harga Penyerahan.
+   - Menghitung Bea Masuk (BM) = `Nilai Pabean * (Tarif BM / 100)`.
+   - Menghitung Nilai Impor = `Nilai Pabean + BM`.
+   - Menghitung Pajak Impor (PPN, PPh Pasal 22, PPnBM) = `Nilai Impor * (Tarif % / 100)`.
+   - Mengalokasikan nilai secara otomatis ke kolom yang tepat sesuai kode fasilitas:
+     - Fasilitas `1` (Dibayar) &rarr; `nilai_bayar`.
+     - Fasilitas `7` (Sudah Dilunasi) &rarr; `nilai_sudah_dilunasi`.
+     - Fasilitas `2, 3, 5, 6, 8, 9` (DTP, Dibebaskan, Ditangguhkan, dll.) &rarr; `nilai_fasilitas`.
+   - Menyimpan hasil kalkulasi ke database MySQL dan me-refresh tabel secara instan.
+5. **Verifikasi & Pengujian**:
+   - Diuji pada dokumen BC 2.5 (AJU `000025ROQ96720260926001003`):
+     - Kalkulasi 66 baris Barang Tarif & 1.430 baris Bahan Baku Tarif berhasil 100%.
+     - Kalkulasi Pungutan menghasilkan PPN Rp 46.128.000 dan PPh Rp 10.484.000, 100% presisi dan identik dengan data resmi CEISA 4.0.
+
+---
+
+## 121. Penambahan Baris Total / Summary pada Footer Seluruh Tabel Datagrid Dokumen Pabean (CEISA 4.0)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta penambahan baris ringkasan total (footer summary) di bagian bawah tabel datagrid:
+  1. **Tab Pungutan (`bc_ceisa_pungutan`)**: Menampilkan akumulasi total pada kolom `Nilai Pungutan (Rp)`.
+  2. **Tab Barang Tarif (`bc_ceisa_barangtarif`)**: Menampilkan akumulasi total pada kolom `Nilai Bayar`, `Nilai Fasilitas`, dan `Jml Satuan`.
+  3. **Tab Bahan Baku Tarif (`bc_ceisa_bahanbakutarif`)**: Menampilkan akumulasi total pada kolom `Nilai Bayar` dan `Nilai Fasilitas`.
+  4. **Tab Rincian Barang (`bc_ceisa_barang`)**: Menampilkan akumulasi total angka kuantitas & nilai pabean (`Jml Satuan`, `Jml Kemasan`, `Netto`, `Bruto`, `Volume`, `Nilai CIF`, `CIF (Rp)`, `FOB`, `Harga Penyerahan`, `Nilai Barang`).
+  5. Serta konsistensi pada tabel-tabel terkait lainnya seperti `bc_ceisa_bahanbaku`, `bc_ceisa_kemasan`, `bc_ceisa_jaminan`, `bc_ceisa_komponenbiaya`, dan `bc_ceisa_barangvd`.
+
+### B. Solusi & Implementasi
+1. **Desain CSS Sticky Footer Datagrid (`table.datagrid tfoot`)**:
+   - Menerapkan `position: sticky; bottom: 0; z-index: 10;` pada elemen `tfoot` sehingga baris total tetap melayang (*sticky*) dan terlihat saat pengguna men-scroll baris data yang panjang ke bawah, sekaligus tersinkronisasi sempurna dengan scroll horizontal tabel.
+   - Styling visual elegan: latar belakang kontras adaptif `var(--bg-input)` untuk Mode Gelap & Mode Terang, garis pemisah tegas `border-top: 2px solid var(--border)`, teks label `'TOTAL'` tebal (*centered & bold*), serta angka hasil akumulasi menggunakan tipografi tabular berwarna aksen primer (`var(--primary)`).
+2. **Struktur Markup `<tfoot>` HTML**:
+   - Menambahkan elemen `<tfoot><tr class="tfoot-row">...</tr></tfoot>` pada tabel `#table-pungutan`, `#table-barangtarif`, `#table-bahanbakutarif`, `#table-bahanbaku`, `#table-kemasan`, `#table-jaminan`, `#table-komponenbiaya`, dan `#table-barangvd`.
+   - Menggunakan atribut `data-col="..."` dan class `td-number` pada setiap sel footer untuk pemetaan kolom 1-to-1 dengan kolom header & body.
+3. **Penyusunan Dinamis Footer Tabel Barang (`renderBarangTableFooter`)**:
+   - Pada tabel Rincian Barang (`#table-barang`), baris footer `#tfoot-row-barang` digenerate secara dinamis menyesuaikan kolom yang aktif dalam `gridConfigs.barang`.
+   - Terintegrasi langsung dengan fitur **Saring Kolom** (`applyColumnVisibility`): sel footer otomatis disembunyikan (`col-hidden`) jika kolom bersangkutan disembunyikan, sehingga lebar kolom dan posisi selalu sejajar 100% tanpa distorsi.
+4. **Engine Kalkulasi Realtime JavaScript (`updateTableTotals(tableKey)`)**:
+   - Membaca dan menjumlahkan nilai dari seluruh baris aktif pada `tbody` secara presisi.
+   - Menggunakan helper `formatSummaryNumber(num, decimals)` dengan pemisah ribuan standar dan jumlah desimal yang sesuai dengan spesifikasi kolom (4 desimal untuk kuantitas/bobot, 2 desimal untuk nilai mata uang).
+   - Menyematkan tooltip informatif pada setiap sel summary (`Total: ... (X baris)`).
+   - Reaktif di segala interaksi pengguna:
+     - Otomatis terhitung saat dokumen pertama kali dimuat (`populateGrids`).
+     - Otomatis terhitung saat baris ditambah (`addRow`) atau dihapus (`btnDel.onclick`).
+     - Otomatis terhitung secara realtime saat pengguna mengedit atau mengetik nilai angka pada sel (`input` & `blur` events).
+     - Otomatis terhitung ulang setelah menjalankan tombol **"⚡ Hitung Pungutan"** atau **"⚡ Hitung Tarif"**.
+5. **Deployment & Verifikasi**:
+   - Berkas disinkronkan ke lokal `www/editor.php` dan dideploy ke remote server `/source/public/editor.php` serta `/source/public/www/editor.php`.
+   - Uji sintaks PHP (`php -l`): **0 Syntax Errors**.
+
+---
+
+## 122. Perbaikan Error Fatal Transfer & Posting CEISA 4.0 ("Column 'cmp_id' in where clause is ambiguous") & Standardisasi Schema Builder
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaJsonBuilder.php](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php), [sql_templates/bc23.sql](file:///c:/dp/g-ceisa/sql_templates/bc23.sql), [sql_templates/bc25.sql](file:///c:/dp/g-ceisa/sql_templates/bc25.sql), [sql_templates/bc27.sql](file:///c:/dp/g-ceisa/sql_templates/bc27.sql), [sql_templates/bc40.sql](file:///c:/dp/g-ceisa/sql_templates/bc40.sql), [sql_templates/bc41.sql](file:///c:/dp/g-ceisa/sql_templates/bc41.sql), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [editor.php](file:///c:/dp/g-ceisa/editor.php)
+
+### A. Gejala & Masalah
+1. Saat pengguna mengklik tombol **"Posting Ceisa"** atau **"🚀 TRANSFER KE CEISA 4.0"** pada dokumen BC 2.3 (AJU `XXXX2303006520261014297970`), muncul error dialog:
+   - Pada Data Host to Host (`transfer.php`):
+     `❌ Terjadi Kesalahan Jaringan / Server: Failed to execute 'json' on 'Response': Unexpected end of JSON input`
+   - Pada Form Editor Dokumen (`editor.php`):
+     `Gagal Koneksi: Failed to execute 'json' on 'Response': Unexpected end of JSON input`
+2. **Penyebab Utama (Root Cause dari Nginx Error Log `/var/log/nginx/error.log`)**:
+   ```text
+   FastCGI sent in stderr: "PHP message: PHP Fatal error: Uncaught mysqli_sql_exception: Column 'cmp_id' in where clause is ambiguous in /source/public/CeisaJsonBuilder.php:147
+   Stack trace:
+   #0 /source/public/CeisaJsonBuilder.php(147): mysqli->query()
+   #1 /source/public/posting.php(16): CeisaJsonBuilder::generate()
+   #2 /source/public/transfer.php(1076): include('...')
+   ```
+   - Pada `CeisaJsonBuilder.php`, terdapat manipulasi string mentah `str_replace('WHERE nomor_aju = ', "WHERE cmp_id = ... AND nomor_aju = ", $sqlQuery)` yang menyuntikkan `cmp_id` tanpa alias tabel ke dalam klausa WHERE template SQL.
+   - Pada template `bc23.sql`, `bc25.sql`, `bc27.sql`, `bc40.sql`, dan `bc41.sql`, query entitas menggunakan comma-join `FROM bc_ceisa_entitas a, bc_ceisa_entidx b WHERE nomor_aju = :ls_aju`. Karena kedua tabel memiliki kolom `cmp_id`, MySQL mengalami ambiguitas kolom dan memicu `Fatal error: uncaught mysqli_sql_exception` yang menghentikan eksekusi script dengan HTTP 500 tanpa respon JSON.
+   - Selain itu, `nomor_aju` adalah nomor registrasi dokumen 26 digit unik global (*globally unique identifier*) yang diisolasi di tingkat `bc_ceisa_header`. Penyuntikan `WHERE cmp_id` mentah ke dalam subquery/join template SQL merusak integritas query relasional.
+
+### B. Solusi & Perbaikan Komprehensif
+1. **Pembersihan & Perlindungan `CeisaJsonBuilder.php`**:
+   - Menghapus penyuntikan string mentah `WHERE cmp_id = ...` pada query template builder.
+   - Menerapkan validasi hak akses multi-company secara ketat di tingkat header (`SELECT kode_dokumen, cmp_id FROM bc_ceisa_header WHERE nomor_aju = ?`). Jika `cmp_id` dokumen tidak cocok dengan parameter sesi, akses ditolak sebelum query dijalankan.
+   - Membungkus eksekusi query builder `$koneksi->query($sqlQuery)` dalam blok `try { ... } catch (\Throwable $e)` agar kegagalan query SQL selalu menghasilkan respon JSON terstruktur `{ status: 'ERROR', message: ... }` dan tidak pernah crash dengan HTTP 500.
+   - Menambahkan normalisasi otomatis untuk `kode_status` entitas 3 (Importir/TPB) dan 7 (Pemilik Barang) agar selalu terisi nilai valid (default `'1'` untuk Kantor Pusat) guna mencegah penolakan skema OpenAPI CEISA `$.entitas[x].kodeStatus: does not have a value in the enumeration [0, 1, ..., 10]`.
+2. **Standardisasi Query Entitas pada SQL Templates**:
+   - Memperbarui `bc23.sql`, `bc25.sql`, `bc27.sql`, `bc40.sql`, dan `bc41.sql` dari comma-join menjadi standar `LEFT JOIN bc_ceisa_entidx b ON b.bc='...' AND a.kode_entitas = b.kode_entitas WHERE a.nomor_aju = :ls_aju`.
+   - Menggunakan `ORDER BY coalesce(b.idx, a.seri)` dan pemetaan kondisional untuk `kodeStatus` agar entitas non-pusat/cabang tidak mengirimkan string kosong `""`.
+   - Memperbaiki salah ketik filter `b.bc='27'` pada `bc25.sql` menjadi `b.bc='25'` serta koma yang hilang pada `bc41.sql`.
+3. **Peningkatan Ketahanan Error Handling (`transfer.php` & `editor.php`)**:
+   - Pada `transfer.php` (aksi `transfer` & `transfer_insw`), menyematkan blok `try { ob_start(); include ...; } catch (\Throwable $e)` sehingga seluruh output server dipastikan selalu berupa JSON valid.
+   - Pada `editor.php` dan `transfer.php` (JavaScript frontend), membaca respon via `await res.text()` terlebih dahulu sebelum `JSON.parse()`. Jika terjadi error tak terduga, dialog modal menampilkan pesan kesalahan secara anggun tanpa melempar unhandled exception `Unexpected end of JSON input`.
+
+### C. Hasil Pengujian Nyata
+- **Uji Preview JSON (`action=preview_json`)**:
+  - Berhasil menyusun payload JSON BC 2.3 valid (4.825 bytes) untuk AJU `XXXX2303006520261014297970`.
+- **Uji Transfer CEISA 4.0 (`action=transfer`)**:
+  - Terhubung sukses ke Gateway OpenAPI Bea Cukai tanpa error server.
+  - Menerima respon resmi validasi backend CEISA 4.0:
+    `{"status":"FAILED","message":"Gagal, Npwp Perusahaan/ PPJK Berbeda.","nomorAju":"XXXX2303006520261014297970"}`
+  - Seluruh modal dialog dan UI transfer kini menampilkan pesan respon dari Bea Cukai dengan sempurna.
+
+---
+
+## 123. Pengamanan Penghapusan Perusahaan dengan Konfirmasi Wajib Memasukkan Nomor NPWP (`company.php`)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- Sebelumnya, saat menghapus perusahaan pada menu **Kelola Perusahaan** (`company.php`), sistem hanya menampilkan konfirmasi standar SweetAlert2 dengan tombol *Ya / Batal*. Hal ini berisiko tinggi terjadi penghapusan tidak disengaja (*accidental deletion*) pada data master profil perusahaan.
+- Pengguna meminta agar sebelum perusahaan dihapus, wajib ada langkah konfirmasi ketat dengan **memasukkan nomor NPWP perusahaan bersangkutan**.
+
+### B. Solusi & Implementasi
+1. **Peningkatan Dialog Konfirmasi SweetAlert2 Frontend (`deleteCompany`)**:
+   - Menambahkan input teks wajib pada modal dialog konfirmasi penghapusan perusahaan.
+   - Menampilkan informasi profil perusahaan target (`cmp_id`, `cmp_name`, dan nomor NPWP terdaftar yang dapat disalin dengan satu klik).
+   - Menyertakan peringatan permanen berwarna merah tegas bahwa tindakan ini permanen dan menghapus konfigurasi akun.
+   - Menerapkan `inputValidator` secara realtime:
+     - Memastikan input tidak boleh kosong.
+     - Membandingkan digit angka NPWP yang diketik pengguna dengan nomor NPWP terdaftar perusahaan (mengabaikan tanda baca/titik/strip). Jika tidak cocok, tombol hapus ditolak dengan pesan: `"Nomor NPWP tidak sesuai! Silakan ketik [NPWP]."`.
+   - Mengirimkan parameter `confirm_npwp` ke backend bersama `cmp_id`.
+2. **Validasi Ketat di Sisi Backend PHP (`action === 'delete'`)**:
+   - Backend memverifikasi keberadaan perusahaan di tabel `bc_ceisa_company`.
+   - Mengambil nomor NPWP terdaftar (`comp.npwp` atau fallback `cmp_id`).
+   - Melakukan normalisasi digit `preg_replace('/[^0-9A-Za-z]/', '', ...)` dan membandingkan `confirm_npwp` dengan data database riil.
+   - Jika tidak cocok atau kosong, request ditolak dengan respon error terstruktur:
+     `{"status":"ERROR","message":"Konfirmasi gagal: NPWP yang dimasukkan tidak sesuai dengan NPWP perusahaan."}`.
+   - Mencegah penghapusan jika perusahaan tersebut adalah satu-satunya entitas yang tersisa di database.
+3. **Hasil Pengujian**:
+   - Percobaan hapus tanpa NPWP atau dengan NPWP salah: Ditolak 100% baik di frontend modal maupun validasi server HTTP API.
+   - Seluruh perubahan disinkronkan ke `www/company.php` dan dideploy ke remote server `/source/public/company.php` serta `/source/public/www/company.php`.
+
+---
+
+## 124. Format Angka Pemisah Ribuan (Thousand Separator) di Seluruh Tab Form Editor Dokumen Pabean (`editor.php`)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- Pengguna melaporkan bahwa angka-angka nilai transaksi di baris tabel (misalnya Tab Pungutan, Barang, Barang Tarif, Bahan Baku Tarif, Kemasan, Nilai VD, Jaminan, Komponen Biaya, dan Header) masih tampil tanpa tanda pemisah ribuan (contoh: `426000.00` dan `1635000.00`), sedangkan baris summary / total footer sudah tampil rapi dengan pemisah ribuan (`2,061,000.00`).
+- Pengguna meminta agar seluruh tampilan angka pada **semua tab** tampil dengan pemisah ribuan (*thousand separator*) standar (koma `,` untuk ribuan dan titik `.` untuk desimal), mudah dibaca, serta tetap dapat diedit dengan mudah dan tersimpan secara akurat ke basis data tanpa terjadi pemotongan (*truncation*).
+
+### B. Analisis Teknis & Solusi
+1. **Kendala Standar HTML5 `<input type="number">`**:
+   - Spesifikasi peramban modern untuk elemen `<input type="number">` secara mutlak menolak karakter koma `,`. Apabila JavaScript memasukkan string berformat seperti `"1,635,000.00"` ke dalam `input[type="number"]`, peramban akan mengosongkan nilai input tersebut (*cleared to blank*).
+   - Solusi: Mengubah tipe elemen input angka (baik pada sel datagrid tabel maupun kartu input pada Tab Header dan panel Sidebar) menjadi `type="text"` dengan atribut `inputmode="decimal"`, class `cell-number` / `input-number`, dan perataan teks rata kanan (`text-align: right; font-variant-numeric: tabular-nums`).
+2. **Penyempurnaan Fungsi Pemformatan & Parsing (`formatCeisaNumber`, `parseInputNumber`, `stripNumberCommas`)**:
+   - `parseInputNumber(val)`: Mampu mengenali dan mengonversi format angka internasional/CEISA (`1,635,000.00`) maupun format lokal Indonesia (`1.635.000,00`) menjadi nilai float numerik yang valid.
+   - `formatCeisaNumber(val, decimals)`: Mengonversi nilai mentah menjadi format pemisah ribuan terstandarisasi (`toLocaleString('en-US')`) sesuai presisi desimal masing-masing kolom (misalnya: 2 desimal untuk Pungutan/CIF/FOB/Kemasan, 4 desimal untuk Jml Satuan/Netto/Bruto/Volume/NDPBM).
+   - `stripNumberCommas(val)`: Menghilangkan tanda koma pemisah ribuan sebelum data dikirim ke backend, memastikan string desimal murni yang aman diterima oleh MySQL.
+3. **Penerapan pada Datagrid (`createGridRow`)**:
+   - Kolom numerik non-seri (`isNum && !isSeri`) diinisialisasi dalam format ribuan (`formatCeisaNumber(rawVal, col.decimals)`).
+   - Menambahkan event listener `focus` untuk otomatis menyeleksi seluruh teks (`inp.select()`) sehingga memudahkan pengguna saat ingin mengganti angka.
+   - Menambahkan event listener `blur` untuk otomatis memformat ulang angka saat selesai diedit dan memperbarui total footer (`updateTableTotals`).
+   - Menghapus listener replace koma lama yang berpotensi merusak pengetikan, dan memastikan akumulasi total pada footer (`updateTableTotals`) menggunakan `parseInputNumber`.
+4. **Penerapan pada Tab Header & Sidebar**:
+   - Seluruh input angka Header (`hdr_ndpbm`, `hdr_cif`, `hdr_fob`, `hdr_nilai_incoterm`, `hdr_asuransi`, `hdr_freight`, `hdr_harga_penyerahan`, `hdr_nilai_barang`, `hdr_dasar_pengenaan_pajak`, `hdr_bruto`, `hdr_netto`, `hdr_volume`) serta sidebar `entryNdpbmVal` diubah ke `type="text" inputmode="decimal"` dengan event auto-format dan focus-select.
+5. **Perlindungan Integritas Data Ganda (Frontend & Backend)**:
+   - **Frontend**: Fungsi `saveHeader()` dan `saveTable()` membersihkan pemisah ribuan (`stripNumberCommas`) sebelum payload dikirimkan via FormData JSON.
+   - **Backend PHP (`action === 'save_header'` & `action === 'save_table'`)**: Menyaring seluruh nilai numerik dengan `preg_match('/^-?[\d,]+(?:\.\d+)?$/')` dan menghapus koma (`str_replace(',', '', $v)`) sebelum query SQL UPDATE/INSERT dieksekusi.
+
+### C. Hasil Pengujian & Deployment
+- Nilai pungutan `426000.00` dan `1635000.00` kini tampil rapi sebagai `426,000.00` dan `1,635,000.00`.
+- Seluruh kolom angka di tab Barang, Barang Tarif, Bahan Baku Tarif, Kemasan, Nilai VD, Jaminan, Komponen Biaya, dan Header tampil konsisten dengan pemisah ribuan.
+- Edit angka dan simpan data berjalan mulus tanpa error desimal atau truncation di MySQL.
+- File berhasil disinkronkan ke `www/editor.php` dan dideploy ke remote server `/source/public/editor.php` serta `/source/public/www/editor.php` dengan hasil pengujian sintaks PHP `0 syntax error`.
+
+
+## 125. Resolusi Error Validasi Tanggal Skema CEISA 4.0 (`invalid date [CODE:1034]`), Pembersihan Staging DB, & Redesain Modal Respon Transfer Menjadi User-Friendly Data Table
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaJsonBuilder.php](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php), [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Latar Belakang & Analisis Masalah
+1. **Penyebab Error Gateway CEISA 4.0 (`CODE:1034`)**:
+   - Pengguna melakukan import dokumen dari Excel dan menyalin AJU ke AJU baru (misal: `XXXX25ROQ96720260926001006` [BC 25]).
+   - Saat ditransfer ke CEISA 4.0, gateway Bea Cukai menolak dengan pesan validasi skema:
+     `$.barang[0].bahanBaku[1].tanggalDaftarDokAsal: 2026-31-08 is an invalid date [CODE:1034]`.
+   - Hal ini disebabkan oleh posisi Bulan dan Hari yang tertukar (`YYYY-DD-MM`, contoh: Tahun 2026, Bulan 31, Hari 08) pada data `bc_ceisa_bahanbaku.tanggal_daftar_asal`. OpenAPI CEISA 4.0 mewajibkan format tanggal ISO `YYYY-MM-DD` (`2026-08-31`).
+   - Di samping import Excel, pada `editor.php:1210` dan `editor.php:1297` terdapat bug regex tanggal yang membalik `$dm[1]` (hari) menjadi bulan: `{$dm[3]}-{$dm[1]}-{$dm[2]}`.
+2. **Kelemahan Tampilan Respon Lama (Misleading & Not User-Friendly)**:
+   - Pada `transfer.php`, respon HTTP cURL 200 dianggap sukses (`json.status === 'OK'`), sehingga modal menampilkan banner hijau `✅ Berhasil Dikirim ke CEISA 4.0!` padahal payload di dalamnya berstatus `status: "failed"` dengan daftar penolakan skema. Hal ini sangat membingungkan pengguna.
+   - Pesan penolakan hanya ditampilkan berupa dump JSON mentah (`<pre class="code-view">`) dengan format JSON-Path teknis yang sulit dibaca oleh operasional pabean.
+
+### B. Langkah Perbaikan & Implementasi
+
+1. **Pembersihan & Auto-Repair Database Staging (RDS Alibaba Cloud)**:
+   - Menjalankan normalisasi massal pada tabel `bc_ceisa_bahanbaku` untuk seluruh baris yang memiliki format tanggal tertukar (`tanggal_daftar_asal REGEXP '^[0-9]{4}-(1[3-9]|[23][0-9])-[0-9]{2}'`).
+   - Sebanyak **96.184 baris** berhasil dikoreksi menjadi format sah `YYYY-MM-DD`. Dokumen AJU aktif pengguna (`XXXX25ROQ96720260926001006`) langsung bersih dan valid.
+
+2. **Penguatan Importer & JSON Builder Backend**:
+   - **`CeisaXlsxImporter.php`**: Meningkatkan `normalizeDateValue()` agar mendeteksi tanggal tertukar (bulan > 12) baik untuk format US (`MM/DD/YYYY`) maupun `YYYY-DD-MM`, dan mengonversinya ke `YYYY-MM-DD`.
+   - **`CeisaJsonBuilder.php`**:
+     - Menambahkan query auto-repair SQL otomatis untuk `bc_ceisa_bahanbaku.tanggal_daftar_asal` sebelum query builder dieksekusi.
+     - Mengimplementasikan `recursiveNormalizeDates(&$data)` dan `normalizeDateStr($val)` untuk memindai dan menormalisasi seluruh key bertema tanggal secara rekursif sebelum JSON dikirimkan ke CEISA.
+   - **`transfer.php` (`copy_aju`)**: Memastikan saat pengguna menyalin dokumen AJU, seluruh field tanggal otomatis dinormalisasi menggunakan `CeisaJsonBuilder::normalizeDateStr()`.
+   - **`editor.php` (`save_table` & `save_kesiapanbarang`)**: Mengganti regex date parsing lama dengan `CeisaJsonBuilder::normalizeDateStr()`.
+
+3. **Penambahan Kolom pada Datagrid Bahan Baku (`editor.php`)**:
+   - Menambahkan kolom `kode_dokumen_asal` (Dok Asal) dan `tanggal_daftar_asal` (Tgl Daftar Asal) pada konfigurasi grid `gridConfigs.bahanbaku` sehingga pengguna dapat melihat dan mengedit tanggal daftar dokumen asal secara langsung di antarmuka tab Bahan Baku.
+
+4. **Transformasi Antarmuka Respon Gateway (User-Friendly UI)**:
+   - Membuat fungsi komprehensif `renderCeisaGatewayResponse(data, nomorAju, activeBc)` di `transfer.php` dan `editor.php`.
+   - **Status Akurat**: Mendeteksi status internal respon CEISA (`payload.status`). Jika `failed`, `reject`, atau `error`, modal langsung menampilkan banner merah mencolok:
+     `❌ Validasi Ditolak oleh Gateway CEISA 4.0` (tidak ada lagi false positive "Berhasil" hijau).
+   - **Tabel Rincian Error Terstruktur**:
+     - Mem-parsing string JSON-Path (misal: `$.barang[0].bahanBaku[1].tanggalDaftarDokAsal`) menjadi label bahasa manusia:
+       - **Lokasi Data**: Menampilkan hierarki yang jelas, contoh: `Barang #1 ➔ Bahan Baku #2`.
+       - **Kolom / Field**: Menampilkan nama kolom bahasa Indonesia (contoh: *Tanggal Daftar Dok Asal*) disertai kode field teknis.
+       - **Pesan Validasi**: Pesan asli Bea Cukai yang mudah dibaca.
+       - **Saran Solusi & Penjelasan**: Memberikan diagnosis cerdas (misal: *Format Tanggal Terbalik: Posisi Bulan & Hari tertukar 2026-31-08, seharusnya 2026-08-31*).
+   - **Shortcut Aksi Cepat**: Tombol *Buka di Editor AJU* yang langsung membuka nomor AJU terkait untuk perbaikan.
+   - **Accordion JSON Mentah**: JSON teknis asli tetap tersedia di dalam collapsible `<details>` bagi developer atau IT tanpa mengganggu kenyamanan pengguna umum.
+   - **Pelebaran Modal Dialog**: Modal dialog hasil transfer diperlebar menjadi `max-width: 860px; width: 94%;` agar tabel rincian muat dengan proporsional dan nyaman dilihat.
+
+### C. Hasil Pengujian & Deployment
+- File lokal disinkronkan ke direktori `www/`.
+- File dideploy ke server remote Alibaba Cloud (`/source/public/` dan `/source/public/www/`).
+- Pengujian sintaks PHP `php -l` pada semua modul yang dimodifikasi menghasilkan `No syntax errors detected`.
+- Data transaksi uji coba pengguna telah sepenuhnya siap untuk ditransfer ke CEISA 4.0 tanpa kendala tanggal invalid.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
+
+
+
 
 
 

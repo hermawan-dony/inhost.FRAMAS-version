@@ -42,8 +42,18 @@ class CeisaJsonBuilder
         }
 
         $kode_dokumen = trim((string)$header['kode_dokumen']);
+        $headerCmp    = trim((string)($header['cmp_id'] ?? ''));
+
+        // Isolasi multi-company: jika cmp_id spesifik diberikan, pastikan dokumen memang milik cmp_id tersebut
+        if (!empty($cmp_id) && !empty($headerCmp) && $headerCmp !== $cmp_id) {
+            return [
+                'status' => 'ERROR',
+                'message' => "Akses ditolak: Dokumen AJU '$nomor_aju' terdaftar untuk perusahaan '$headerCmp', bukan '$cmp_id'."
+            ];
+        }
+
         if (empty($cmp_id)) {
-            $cmp_id = trim((string)($header['cmp_id'] ?? ''));
+            $cmp_id = $headerCmp;
         }
 
         // Jika cmp_id masih kosong, deteksi dari fungsi ceisa_get_company
@@ -125,6 +135,14 @@ class CeisaJsonBuilder
         $cleanDate = $koneksi->prepare("UPDATE bc_ceisa_entitas SET tanggal_ijin_entitas = STR_TO_DATE(SUBSTRING(tanggal_ijin_entitas, 1, 10), '%m-%d-%Y') WHERE nomor_aju = ? AND tanggal_ijin_entitas IS NOT NULL AND tanggal_ijin_entitas LIKE '__-__-____%'");
         if ($cleanDate) { $cleanDate->bind_param("s", $nomor_aju); $cleanDate->execute(); $cleanDate->close(); }
 
+        // Normalisasi format tanggal YYYY-DD-MM (misal: 2026-31-08) di tabel bc_ceisa_bahanbaku ke YYYY-MM-DD
+        $cleanBbDate = $koneksi->prepare("UPDATE bc_ceisa_bahanbaku SET tanggal_daftar_asal = CONCAT(SUBSTRING(tanggal_daftar_asal, 1, 4), '-', SUBSTRING(tanggal_daftar_asal, 9, 2), '-', SUBSTRING(tanggal_daftar_asal, 6, 2)) WHERE nomor_aju = ? AND tanggal_daftar_asal REGEXP '^[0-9]{4}-(1[3-9]|[23][0-9])-[0-9]{2}'");
+        if ($cleanBbDate) { $cleanBbDate->bind_param("s", $nomor_aju); $cleanBbDate->execute(); $cleanBbDate->close(); }
+
+        // Normalisasi kode_status pada entitas 3 (Pengusaha TPB/Importir) & 7 (Pemilik Barang) jika kosong/invalid
+        $cleanStatus = $koneksi->prepare("UPDATE bc_ceisa_entitas SET kode_status = '1' WHERE nomor_aju = ? AND kode_entitas IN ('3', '7') AND (kode_status IS NULL OR TRIM(kode_status) = '' OR TRIM(kode_status) NOT IN ('0','1','2','3','4','5','6','7','8','9','10'))");
+        if ($cleanStatus) { $cleanStatus->bind_param("s", $nomor_aju); $cleanStatus->execute(); $cleanStatus->close(); }
+
         // 4. Pastikan Ukuran Maksimum GROUP_CONCAT Cukup Besar
         $koneksi->query("SET SESSION group_concat_max_len = 100000000");
 
@@ -135,20 +153,19 @@ class CeisaJsonBuilder
         $escapedAju = "'" . $koneksi->real_escape_string($nomor_aju) . "'";
         $sqlQuery = str_replace(':ls_aju', $escapedAju, $sqlQuery);
 
-        // Isolasi multi-company: filter cmp_id pada setiap klausa WHERE agar data dokumen tidak ganda/tabrakan
-        if (!empty($cmp_id)) {
-            $escapedCmp = "'" . $koneksi->real_escape_string($cmp_id) . "'";
-            $sqlQuery = str_replace('WHERE nomor_aju = ', "WHERE cmp_id = $escapedCmp AND nomor_aju = ", $sqlQuery);
-            $sqlQuery = str_replace('WHERE a.nomor_aju = ', "WHERE a.cmp_id = $escapedCmp AND a.nomor_aju = ", $sqlQuery);
-            $sqlQuery = str_replace('WHERE x.nomor_aju = ', "WHERE x.cmp_id = $escapedCmp AND x.nomor_aju = ", $sqlQuery);
-            $sqlQuery = str_replace('WHERE h.nomor_aju = ', "WHERE h.cmp_id = $escapedCmp AND h.nomor_aju = ", $sqlQuery);
-        }
-
-        $resBuilder = $koneksi->query($sqlQuery);
-        if (!$resBuilder) {
+        // Eksekusi query dengan proteksi exception
+        try {
+            $resBuilder = $koneksi->query($sqlQuery);
+            if (!$resBuilder) {
+                return [
+                    'status' => 'ERROR',
+                    'message' => 'Gagal mengeksekusi query builder BC ' . $kode_dokumen . ': ' . $koneksi->error
+                ];
+            }
+        } catch (\Throwable $e) {
             return [
                 'status' => 'ERROR',
-                'message' => 'Gagal mengeksekusi query builder BC ' . $kode_dokumen . ': ' . $koneksi->error
+                'message' => 'Gagal mengeksekusi query builder BC ' . $kode_dokumen . ': ' . $e->getMessage()
             ];
         }
 
@@ -162,7 +179,7 @@ class CeisaJsonBuilder
             ];
         }
 
-        // 6. Validasi Integritas JSON
+        // 6. Validasi Integritas JSON & Normalisasi Tanggal Global
         $decoded = json_decode($rawJson, true);
         if ($decoded === null) {
             return [
@@ -171,6 +188,10 @@ class CeisaJsonBuilder
                 'raw_sample' => substr($rawJson, 0, 500)
             ];
         }
+
+        // Pastikan seluruh tanggal di dalam JSON bersih dan berformat YYYY-MM-DD
+        self::recursiveNormalizeDates($decoded);
+        $rawJson = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         // 7. Simpan Hasil JSON ke Tabel bc_ceisa_json & File json.txt
         $delJson = $koneksi->prepare("DELETE FROM bc_ceisa_json WHERE cmp_id = ? OR cmp_id IS NULL OR cmp_id = ''");
@@ -213,5 +234,69 @@ class CeisaJsonBuilder
             'output_file'  => $outputFile,
             'message'      => "JSON BC $kode_dokumen berhasil disusun (" . strlen($rawJson) . " bytes)."
         ];
+    }
+
+    /**
+     * Normalisasi string tanggal ke YYYY-MM-DD (memperbaiki format YYYY-DD-MM atau format bertanda baca)
+     */
+    public static function normalizeDateStr($val) {
+        if ($val === null || !is_string($val)) return $val;
+        $vTrim = trim($val);
+        if ($vTrim === '' || $vTrim === '0000-00-00' || strpos($vTrim, '0000-00-00') === 0) return '';
+
+        // YYYY-DD-MM -> YYYY-MM-DD
+        if (preg_match('/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})(?:\s+.*)?$/', $vTrim, $m)) {
+            $y = $m[1];
+            $p2 = (int)$m[2];
+            $p3 = (int)$m[3];
+            if ($p2 > 12 && $p3 <= 12) {
+                $month = str_pad($p3, 2, '0', STR_PAD_LEFT);
+                $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+            } else {
+                $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                $day = str_pad($p3, 2, '0', STR_PAD_LEFT);
+            }
+            return "{$y}-{$month}-{$day}";
+        }
+
+        // DD-MM-YYYY or MM-DD-YYYY or DD/MM/YYYY
+        if (preg_match('/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})(\s+\d{1,2}:\d{2}(?::\d{2})?)?$/', $vTrim, $m)) {
+            $p1 = (int)$m[1];
+            $p2 = (int)$m[2];
+            $y = $m[3];
+            $hasTime = !empty($m[4]);
+            if ($p1 > 12 && $p2 <= 12) {
+                $day = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+            } elseif ($p1 <= 12 && $p2 > 12) {
+                $month = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+            } elseif ($hasTime) {
+                // CEISA export resmi dengan jam (MM-DD-YYYY HH:mm:ss)
+                $month = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+            } else {
+                // Standar manual input Indonesia tanpa jam (DD-MM-YYYY)
+                $day = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+            }
+            return "{$y}-{$month}-{$day}";
+        }
+
+        return $vTrim;
+    }
+
+    private static function recursiveNormalizeDates(&$data) {
+        if (!is_array($data)) return;
+        foreach ($data as $k => &$v) {
+            if (is_array($v)) {
+                self::recursiveNormalizeDates($v);
+            } elseif (is_string($v)) {
+                $lowerK = strtolower((string)$k);
+                if (strpos($lowerK, 'tanggal') !== false || strpos($lowerK, 'tgl') !== false || $lowerK === 'jatuhtempo' || $lowerK === 'waktu') {
+                    $v = self::normalizeDateStr($v);
+                }
+            }
+        }
     }
 }

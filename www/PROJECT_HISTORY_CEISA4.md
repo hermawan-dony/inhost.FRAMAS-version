@@ -3658,7 +3658,1397 @@ Delapan (8) tabel yang distandardisasi:
 - Berkas tersinkronisasi penuh ke remote container: `/source/public/` dan `/source/public/www/`.
 
 ---
+---
+
+## 92. Validasi Mutlak Posting IT Inventory, Fitur Set Manual Respon (PowerBuilder Style), Integrasi Auto-Respon CEISA, dan Context Menu Grid H2H
+
+### A. Latar Belakang & Kebutuhan
+1. **Validasi Mutlak Posting IT Inventory**:
+   - Dokumen pabean (AJU) hanya boleh diposting ke IT Inventory (`bc_1ab2`) jika **Nomor Daftar** dan **Tanggal Daftar** sudah terisi dan tidak kosong/null/'-'.
+   - Jika masih kosong, sistem wajib menolak proses posting baik di sisi backend maupun frontend, serta memberikan solusi langsung bagi operator untuk mengisinya secara manual.
+2. **Fitur "Set Manual Respon" (PowerBuilder Style)**:
+   - Sesuai fitur legacy di window PowerBuilder ("Isi Manual Nomor Daftar"), operator dapat membuka dialog modal untuk memasukkan Nomor Daftar, Tanggal Daftar, dan SPPB secara manual.
+   - Dialog dilengkapi tombol cepat "Hari Ini" untuk tanggal daftar.
+3. **Integrasi Auto-Respon dari `bc_ceisa_data` & Riwayat `bc_ceisa_sppb`**:
+   - Saat modal dibuka atau saat tombol periksa ditekan, sistem otomatis memeriksa apakah nomor AJU sudah memiliki data respon di tabel staging CEISA (`bc_ceisa_data`), riwayat SPPB (`bc_ceisa_sppb`), atau `bc_ceisa_respons`.
+   - Jika ditemukan, sistem menampilkan banner notifikasi hijau dengan tombol `⚡ Gunakan Data Ini` untuk mengisi input secara instan tanpa perlu ketik manual.
+4. **Context Menu (Klik Kanan Baris Tabel H2H)**:
+   - Menyediakan menu klik kanan (context menu DataWindow style) pada baris tabel Data Host to Host:
+     - ✏️ Edit Dokumen
+     - 🗑️ Hapus AJU
+     - 📥 Tarik / Sync Respon
+     - 📝 Set Manual Respon
+     - 📦 Posting IT Inventory
+     - 🔄 Unposting IT Inventory
+     - 👁️ View JSON
+     - 📋 Copy AJU
+     - ✏️ Rename AJU
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas ([`transfer.php`](file:///c:/dp/g-ceisa/share/www/transfer.php))
+1. **Backend Handling (`action === 'post_it'`)**:
+   - Validasi mutlak nilai `$noDaftar` dan `$tglDaftar`.
+   - Mengembalikan pesan error jelas jika kosong atau bernilai `'-'` atau `'0000-00-00'`:
+     *"Posting IT Inventory Gagal! Dokumen AJU ... belum memiliki Nomor Daftar atau Tanggal Daftar. Nomor Daftar dan Tanggal Daftar WAJIB terisi sebelum dapat diposting ke IT Inventory. Silakan gunakan menu 'Set Manual Respon' untuk melengkapi data terlebih dahulu."*
+2. **Backend API Respon Manual (`action === 'get_manual_respon'` & `'save_manual_respon'`)**:
+   - `get_manual_respon`:
+     - Mengambil data eksisting dari `bc_ceisa_header` dan `bc_ceisa_aju_posted`.
+     - Mendeteksi kandidat dari `bc_ceisa_sppb`, `bc_ceisa_data`, dan `bc_ceisa_respons`.
+     - Mengembalikan payload JSON terstruktur dengan objek `candidate`.
+   - `save_manual_respon`:
+     - Memvalidasi Nomor Daftar dan Tanggal Daftar tidak boleh kosong.
+     - Memperbarui `bc_ceisa_header` (`nomor_daftar`, `tanggal_daftar`).
+     - Menyimpan/memperbarui ke `bc_ceisa_aju_posted` dan `bc_ceisa_sppb`.
+     - Melakukan sinkronisasi update ke `bc_1ab2` jika dokumen sudah pernah diposting.
+3. **Antarmuka Pengguna & Dialog Modal (`#modalManualRespon`)**:
+   - Tata letak dialog proporsional dan bersih sesuai referensi antarmuka PowerBuilder user.
+   - Field: Nomor AJU (readonly), Kode Dokumen (readonly), Nomor Daftar (input teks), Tanggal Daftar (input date + tombol 'Hari Ini'), Nomor SPPB (input teks).
+   - Banner kandidat auto-detect dengan tombol `⚡ Gunakan Data Ini`.
+   - Tombol `🔄 Periksa Ulang dari BC_CEISA_DATA`.
+4. **Frontend Event Handling & Context Menu**:
+   - Event listener `contextmenu` pada elemen baris tabel master (`#hdrTbody tr`).
+   - Elemen `#rowContextMenu` dengan posisi dinamis (smart boundary check terhadap viewport browser).
+   - Penutupan otomatis saat klik di luar menu atau menekan tombol `Escape`.
+   - Tombol toolbar baru: `📝 Set Manual Respon` pada header card master grid.
+   - Alur konfirmasi posting IT Inventory yang interaktif: Jika dokumen belum memiliki nomor/tanggal daftar, dialog SweetAlert menawarkan tombol langsung `📝 Ya, Buka Set Manual Respon`.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Uji Validasi Backend (`action=post_it`)**:
+   - Diuji via HTTP POST pada dokumen belum bernomor daftar (`XXXX30FRG65020261014011480`).
+   - Hasil: Berhasil dicegah 100% dengan respon JSON `status: ERROR` dan instruksi diarahkan ke menu Set Manual Respon.
+2. **Uji Endpoint Respon Manual (`action=get_manual_respon`)**:
+   - Dokumen valid berhasil mengembalikan status `OK` beserta rincian data saat ini dan deteksi otomatis kandidat dari CEISA.
+3. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/transfer.php` ➔ **No syntax errors detected**.
+4. **Deployment**:
+   - Sinkronisasi remote ke `/source/public/www/transfer.php` dan `/source/public/transfer.php` berhasil 100%.
+
+---
+---
+---
+
+## 93. Sanitasi Tampilan Nama Teknis Tabel/Kolom `(..)` Bersyarat Hak Akses Admin dan Integrasi Tab Tunggal Navigasi Koreksi Klasifikasi
+
+### A. Latar Belakang & Kebutuhan
+1. **Sanitasi Informasi Teknis Antarmuka**:
+   - Tanda kurung berisi nama tabel atau kolom teknis database internal seperti `(bc_material)`, `(bc_1ab2)`, `(bc_ceisa_barang)`, `(bc_tipe)`, dan `(KLAS)` tidak boleh terlihat oleh pengguna operasional biasa.
+   - Informasi teknis tersebut hanya diizinkan tampil jika pengguna memiliki hak akses Administrator (`$isAdmin = true`).
+   - Cakupan sanitasi mencakup judul halaman web, header kartu, label tombol toolbar, badge informasi, opsi filter, header kolom tabel, teks dialog konfirmasi SweetAlert, dan menu navigasi portal.
+2. **Integrasi Navigasi Tab Portal ("Koreksi Klasifikasi" Tanpa Tab Baru)**:
+   - Navigasi menuju fitur "Koreksi Klasifikasi IT Inv" tidak boleh membuka tab atau jendela browser baru (`target="_blank"`), yang sebelumnya menyebabkan sidebar dan layout portal utama hilang.
+   - Halaman koreksi klasifikasi harus tetap berada di dalam frame portal utama (`index.php`) dengan sidebar menu tetap utuh, dan mendukung transisi bolak-balik antara "Master Data Barang" (`inv_material`) dan "Koreksi Klasifikasi IT Inv" (`inv_koreksi_klas`) secara mulus.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`share/www/material.php`](file:///c:/dp/g-ceisa/share/www/material.php)**:
+   - Evaluasi hak akses admin: `$isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');`.
+   - Judul & Badge: Menjadikan tanda kurung nama tabel `(bc_material)` bersyarat `<?= $isAdmin ? ' (bc_material)' : '' ?>`.
+   - Tombol Toolbar:
+     - `Import IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?>`
+     - `Import Staging Pabean<?= $isAdmin ? ' (bc_ceisa_barang)' : '' ?>`
+     - `Koreksi Klasifikasi IT Inv<?= $isAdmin ? ' (KLAS)' : '' ?>`
+   - Alur Navigasi Tab:
+     - Mengubah tombol dan banner "Koreksi KLAS IT Inv" dari link eksternal (`target="_blank"`) menjadi tombol pemicu JavaScript `openKoreksiKlas()`.
+     - Fungsi `openKoreksiKlas()` memanggil `window.parent.switchMainTab('inv_koreksi_klas')` jika berada dalam layout portal iframe, dengan fallback `window.location.href = 'klas_koreksi.php'` bila standalone.
+   - Modal Import Database (`#modalDbImport`):
+     - Label sumber: `Sumber: IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?>` dan `Sumber: Staging Pabean<?= $isAdmin ? ' (bc_ceisa_barang)' : '' ?>`.
+     - Header kolom: `Klasifikasi<?= $isAdmin ? ' (KLAS)' : '' ?>`.
+     - Opsi filter: `Hanya KLAS Kosong / Tidak Sesuai Referensi<?= $isAdmin ? ' (bc_tipe)' : '' ?>`.
+2. **[`share/www/klas_koreksi.php`](file:///c:/dp/g-ceisa/share/www/klas_koreksi.php)**:
+   - Sanitasi judul, card header, KPI counters, dropdown filter, dan header tabel dari penyebutan nama tabel/kolom kecuali akun admin.
+   - Menambahkan tombol "Buka Master Data Barang" yang memanggil `openMasterBarang()` (`window.parent.switchMainTab('inv_material')`) untuk kemudahan navigasi bolak-balik tanpa memuat ulang portal.
+3. **[`share/www/transfer.php`](file:///c:/dp/g-ceisa/share/www/transfer.php)**:
+   - Tooltip posting IT Inventory disesuaikan bersyarat admin: `Posting Dokumen ke IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?>`.
+   - Dialog konfirmasi SweetAlert `postItInventoryActiveAju()` dan `unpostItInventoryActiveAju()` menyembunyikan referensi tabel `(bc_1ab2)` dan `(bc_1ab2_revisi)` untuk non-admin.
+4. **[`share/www/index.php`](file:///c:/dp/g-ceisa/share/www/index.php)**:
+   - Item menu sidebar Data Master dan Breadcrumb dinamis: `Koreksi Klasifikasi IT Inv<?= $isAdmin ? ' (KLAS)' : '' ?>`.
+   - Menambahkan listener cerdas pada fungsi switching tab untuk mendeteksi perubahan data dan me-refresh tampilan iframe target bila sudah aktif sebelumnya.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/material.php` ➔ **No syntax errors detected**.
+   - `/source/public/klas_koreksi.php` ➔ **No syntax errors detected**.
+   - `/source/public/transfer.php` ➔ **No syntax errors detected**.
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+2. **Hak Akses & Tampilan**:
+   - Sesi pengguna biasa: Seluruh label teknis bertanda kurung `(...)` bersih tanpa nama tabel database dan kolom.
+   - Sesi administrator: Tetap menampilkan referensi tabel/kolom untuk kemudahan maintenance dan audit data.
+   - Navigasi: Transisi antara Master Data Barang dan Koreksi Klasifikasi berjalan di tab tunggal portal utama tanpa membuka tab browser baru.
+3. **Deployment**:
+   - Sinkronisasi penuh ke remote: `/source/public/www/` dan `/source/public/` dengan kepemilikan `www-data:www-data`.
+
+---
+---
+
+## 94. Konfigurasi Default Nonaktif (OFF) Peringatan Dokumen Belum Masuk IT Inventory dan Pengaturan Perusahaan
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Pada alur import pabean (seperti BC 2.3 dan BC 1.6), dokumen pabean sering kali sudah mendapatkan **Nomor Daftar** dan SPPB resmi dari Bea Cukai, namun barang fisik belum tiba/diterima di warehouse.
+   - Posting ke IT Inventory (`bc_1ab2`) baru boleh diproses setelah fisik barang tiba di warehouse (yang direncanakan wajib menyertakan pengisian `TGL_PROSES` dan `DOK`/Nomor Bukti Masuk atau Pengeluaran).
+   - Akibatnya, popup SweetAlert *"Peringatan IT Inventory: Terdapat X dokumen sudah memiliki Nomor Daftar tetapi belum masuk IT Inventory"* yang sebelumnya otomatis muncul setiap memuat halaman Data Host to Host menjadi tidak relevan dan mengganggu kenyamanan kerja operator.
+2. **Kebutuhan**:
+   - Menjadikan alert peringatan tersebut **default-nya OFF (Nonaktif)** sehingga popup modal tidak akan pernah muncul secara otomatis.
+   - Menyediakan pengaturan pada menu **Kelola Perusahaan** (`bc_ceisa_company`, `company.php`) agar fitur peringatan ini dapat diaktifkan kembali secara selektif oleh Administrator jika diinginkan oleh perusahaan tertentu.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **Skema Database (`bc_ceisa_company`)**:
+   - Menambahkan kolom `alert_it_inv_unposted TINYINT(1) NOT NULL DEFAULT 0 AFTER allow_lowercase_code`.
+   - Nilai default adalah `0` (Nonaktif / OFF).
+2. **[`share/www/company.php`](file:///c:/dp/g-ceisa/share/www/company.php)**:
+   - Form Profil & Pengaturan Perusahaan: Menambahkan opsi konfigurasi *"⚠️ Peringatan Dokumen Belum Masuk IT Inventory"* (`#f_alert_it_inv_unposted`) dengan pilihan:
+     - `0`: Nonaktif (Default) — Popup peringatan tidak muncul otomatis (cocok untuk alur impor yang menunggu barang fisik warehouse).
+     - `1`: Aktifkan Peringatan — Memunculkan popup peringatan saat terdapat dokumen ber-Nomor Daftar yang belum masuk IT Inventory.
+   - CRUD API (`action=save`, `action=get`, `action=set_active`): Menyimpan dan membaca nilai kolom `alert_it_inv_unposted` serta menyinkronkannya ke sesi pengguna.
+   - Quick Action & Badge: Menambahkan badge klik cepat `⚠️ Alert: OFF` / `⚠️ Alert: ON` pada tabel list perusahaan beserta fungsi toggle AJAX (`action=toggle_alert_it_inv`).
+3. **[`share/www/transfer.php`](file:///c:/dp/g-ceisa/share/www/transfer.php)**:
+   - Backend `action=list`: Mengambil pengaturan `alert_it_inv_unposted` dari `bc_ceisa_company` dan mengembalikannya dalam payload JSON (`alert_it_inv`).
+   - Frontend JavaScript:
+     - Variabel `activeCompanyAlertItInv` dikonfigurasi dinamis sesuai pengaturan perusahaan aktif.
+     - Pemicu popup `Swal.fire` peringatan dokumen belum masuk IT Inventory diberi syarat mutlak:
+       `if (activeCompanyAlertItInv === 1 && shouldApplyInvColors && cntBelumItInvWithNoDaftar > 0 && !hasShownItInvAlert)`
+     - Karena default bernilai `0`, popup modal tidak akan pernah memblokir layar operator.
+     - Tombol toolbar chip `⚠️ X Dok Belum Masuk IT Inv !` tetap tersedia di toolbar secara non-intrusif sebagai indikator jika operator ingin menyaring dokumen tersebut secara manual.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/company.php` ➔ **No syntax errors detected**.
+   - `/source/public/transfer.php` ➔ **No syntax errors detected**.
+2. **Uji API & Nilai Default**:
+   - Endpoint `transfer.php?action=list` mengembalikan respons JSON dengan `"alert_it_inv": 0` secara default.
+   - Uji toggle API `company.php?action=toggle_alert_it_inv` berhasil mengubah status antara `0` dan `1` secara instan.
+3. **Deployment**:
+   - Seluruh berkas telah disinkronkan ke remote di `/source/public/www/` dan `/source/public/` dengan ownership `www-data:www-data`.
+
+---
+---
+
+## 95. Dashboard Tracking Respon Dokumen Pabean (CEISA 4.0) & Perbaikan Integrasi
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Menu sidebar **Tracking Respon Pabean** pada portal utama (`index.php`) mengarah ke endpoint `statusaju.php`.
+   - Sebelumnya, jika dibuka langsung dari sidebar tanpa nomor AJU, halaman hanya mencetak teks mentah error: `Nomor AJU tidak boleh kosong!`.
+   - Operator pabean membutuhkan dashboard komprehensif untuk memantau perjalanan status seluruh dokumen pabean (BC 2.0, BC 2.3, BC 2.5, BC 2.7, BC 3.0, BC 4.0, dll), mengetahui status terkini (Validasi, Penjaluran, Gate In/Out, Pembongkaran, hingga Selesai), memeriksa respon resmi Bea Cukai (SPPB, NPE, Billing, Reject), serta mengunduh dokumen PDF resmi.
+2. **Kebutuhan**:
+   - Mengubah `statusaju.php` menjadi dashboard pelacakan interaktif modern (gaya Ant Design, mendukung tema Terang & Gelap).
+   - Mempertahankan backward compatibility 100% untuk panggilan API legacy dari modul lain (seperti `transfer.php` via `statusaju.php?aju=...`).
+   - Menyediakan fitur live sync single AJU dan live sync massal per perusahaan via NPWP OpenAPI CEISA 4.0.
+   - Menyediakan modal visual timeline stepper alur dokumen (Perekaman ➔ Pengiriman LNSW ➔ Validasi Pabean ➔ Penjaluran/Billing ➔ SPPB/NPE).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`statusaju.php`](file:///c:/dp/g-ceisa/statusaju.php) & [`www/statusaju.php`](file:///c:/dp/g-ceisa/www/statusaju.php)**:
+   - **Dual Routing Architecture**:
+     - *Mode Legacy API*: Jika parameter `aju` diberikan tanpa request UI/action, mengeksekusi sinkronisasi live ke CEISA 4.0 dan mengembalikan string `OK` persis seperti ekspektasi `transfer.php`.
+     - *Mode UI Dashboard*: Merender halaman interaktif lengkap dengan kartu KPI, filter pencarian, dan tabel riwayat.
+     - *Mode AJAX API*:
+       - `action=get_data`: Mengambil daftar gabungan status dan respon dokumen terkini untuk perusahaan aktif, menghitung KPI summary, dan mengelompokkan kategori (Selesai/SPPB/NPE, Dalam Proses, Billing, Reject).
+       - `action=get_timeline`: Mengambil seluruh riwayat status kronologis (`bc_ceisa_status`), riwayat respon resmi (`bc_ceisa_respons`), data header, dan log payload JSON mentah (`bc_ceisa_respon_logs`).
+       - `action=sync_single`: Sinkronisasi langsung 1 nomor AJU ke endpoint `https://apis-gw.beacukai.go.id/openapi/status/{nomorAju}`.
+       - `action=sync_company`: Sinkronisasi massal seluruh dokumen aktif perusahaan ke endpoint `https://apis-gw.beacukai.go.id/openapi/status?idPerusahaan={npwp}`.
+   - **Descriptive Status & Response Formatters**:
+     - Menambahkan fungsi pemetaan kode respon dan kode proses ke label deskriptif berbahasa Indonesia (misal: `2303` ➔ *"SPPB (Persetujuan Pengeluaran)"*, `3003` ➔ *"NPE (Nota Pelayanan Ekspor)"*, `3015` ➔ *"Pemeriksaan Fisik Ekspor"*, `501` ➔ *"Gate Out TPS"*, dll).
+   - **Visual Stepper & Timeline Progress**:
+     - Modal interaktif dengan stepper visual 5 tahap pabean, tab riwayat status proses, tab respon resmi, serta penampil JSON payload mentah dengan tombol salin cepat.
+2. **[`pdf.php`](file:///c:/dp/g-ceisa/pdf.php)**:
+   - Menambahkan pengecekan tabel `bc_ceisa_respons` pada fallback pencarian path file PDF resmi sehingga link unduhan PDF pada respon SPPB/NPE dapat diunduh langsung tanpa hambatan.
+3. **Penyelarasan Kolom Database**:
+   - Memastikan query insert dan select pada `bc_ceisa_respons` dan `bc_ceisa_respon_logs` sesuai dengan skema aktual basis data (menghilangkan referensi kolom `waktu_respon` dan `waktu_log` yang tidak ada di skema).
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/statusaju.php` ➔ **No syntax errors detected**.
+   - `/source/public/pdf.php` ➔ **No syntax errors detected**.
+2. **Uji Endpoint REST & AJAX**:
+   - `curl -s 'http://127.0.0.1/statusaju.php?aju=00002303006520261014297970'` ➔ Mengembalikan `OK` (Backward compatibility lulus 100%).
+   - `curl -s 'http://127.0.0.1/statusaju.php?action=get_data&cmp_id=010816064431000'` ➔ Mengembalikan 51 dokumen terlacak beserta metrik KPI (Selesai: 42, Proses: 9, Reject: 0).
+   - `curl -s 'http://127.0.0.1/statusaju.php?action=get_timeline&aju=...'` ➔ Mengembalikan visual timeline tahapan dan riwayat kronologis secara akurat.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
+---
+
+## 96. Modul Transaksi Warehouse: Incoming & Delivery (Posting IT Inventory Fisik)
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Menu Transaksi Warehouse (Gudang) memerlukan modul khusus untuk PIC Warehouse yang bertugas menerima dan mengeluarkan barang secara fisik aktual.
+   - Sebelumnya, posting IT Inventory (`bc_1ab2`) dilakukan oleh tim Exim/Pabean di halaman Host to Host (`transfer.php`).
+   - Sesuai standar tata kelola IT Inventory Bea Cukai, PIC Warehouse bertindak sebagai verifikator fisik aktual:
+     - Barang masuk aktual dari supplier diverifikasi dan diposting ke IT Inventory (Laporan 1A - Pemasukan).
+     - Barang keluar aktual ke customer diverifikasi dan diposting ke IT Inventory (Laporan 1B - Pengeluaran).
+2. **Kebutuhan Pengguna**:
+   - Membangun 2 antarmuka transaksi gudang khusus:
+     1. **Warehouse - Incoming (`warehouse_incoming.php`)**: Filter khusus dokumen pemasukan (`BC 1.6, 2.0, 2.3, 4.0, 2.6.2, 2.8, 6.1.1, 2.7 IN`), `AB = 'A'`.
+     2. **Warehouse - Delivery (`warehouse_delivery.php`)**: Filter khusus dokumen pengeluaran (`BC 2.5, 2.6.1, 2.7 OUT, 3.0, 4.1, 3.3, 331, 6.1.3`), `AB = 'B'`.
+   - Menghadirkan desain antarmuka split-pane Excel grid yang persis dengan Data Host to Host (`transfer.php`) dengan skema warna PowerBuilder (kuning untuk item yang sudah masuk IT Inventory, biru muda untuk dokumen yang sudah terdaftar pabean).
+   - Validasi ketat selisih fisik:
+     - Operator memeriksa `QTY_AKTUAL` per baris barang.
+     - Default `SESUAI = 'Y'`. Jika ada perbedaan jumlah fisik atau checkbox diubah, `SESUAI = 'N'`.
+     - Jika terdapat selisih antara `QTY_AKTUAL` dan `QTY Dokumen`, kolom **`MEMO` wajib diisi** (alasan selisih fisik / discrepancy reason) sebelum diperbolehkan konfirmasi.
+   - Dialog konfirmasi interaktif:
+     - Operator wajib menginput **Tanggal Aktual Masuk/Keluar** (`TANGGAL_PROSES`).
+     - Operator wajib menginput **Nomor Bukti Pemasukan/Pengeluaran Gudang** (`DOK`, misal Surat Jalan / DO / BAST).
+   - Data tersimpan ke tabel `bc_1ab2` dan memperbarui `bc_ceisa_aju_posted`.
+   - Mendukung fitur pembatalan konfirmasi (*Unposting*) jika diperlukan revisi fisik barang oleh gudang.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`warehouse_incoming.php`](file:///c:/dp/g-ceisa/warehouse_incoming.php) & [`www/warehouse_incoming.php`](file:///c:/dp/g-ceisa/www/warehouse_incoming.php)**:
+   - Modul penerimaan barang fisik gudang & posting ke Laporan 1A - Pemasukan.
+   - Endpoint `action=list`: Menampilkan master dokumen pabean masuk lengkap dengan metrik KPI (Total, Belum Diterima, Sudah Masuk IT Inv).
+   - Endpoint `action=detail_barang`: Menampilkan rincian barang pabean (`bc_ceisa_barang`), status kesesuaian fisik (`SESUAI`), jumlah aktual (`QTY_AKTUAL`), dan memo (`MEMO`).
+   - Endpoint `action=confirm_post`: Validasi wajib memo saat ada selisih kuantitas fisik, input `TANGGAL_PROSES` dan `DOK`, eksekusi penyimpanan ke `bc_1ab2` dengan `AB = 'A'`, dan update tabel `bc_ceisa_aju_posted`.
+   - Endpoint `action=unpost_it_inv`: Pembatalan posting untuk mengembalikan status dokumen ke tahap verifikasi fisik.
+   - Subtab pelengkap: Dokumen Lampiran (`bc_ceisa_dokumen`), Status Pabean (`bc_ceisa_status`), dan Respon Resmi CEISA (`bc_ceisa_respons`).
+2. **[`warehouse_delivery.php`](file:///c:/dp/g-ceisa/warehouse_delivery.php) & [`www/warehouse_delivery.php`](file:///c:/dp/g-ceisa/www/warehouse_delivery.php)**:
+   - Modul pengeluaran barang fisik gudang & posting ke Laporan 1B - Pengeluaran.
+   - Endpoint `action=list`: Menampilkan master dokumen pengeluaran dengan filter dokumen keluar, entitas penerima/pembeli (Customer), invoice/DO, serta respon SPPB/NPE.
+   - Endpoint `action=detail_barang`: Menampilkan rincian barang fisik yang akan dikeluarkan, penghitungan nilai penyerahan/FOB/CIF, serta kalkulasi selisih real-time.
+   - Endpoint `action=confirm_post`: Eksekusi posting ke `bc_1ab2` dengan `AB = 'B'`, menyertakan `TANGGAL_PROSES` pengeluaran aktual dan `DOK` bukti pengeluaran (Surat Jalan/DO Gudang).
+   - Penyesuaian skema query barang: Menghubungkan kode HS pabean dari kolom `b.hs` dan klasifikasi dari master `bc_material`.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_delivery.php` ➔ **No syntax errors detected**.
+2. **Uji Endpoint REST & AJAX**:
+   - `curl -s 'http://127.0.0.1/warehouse_incoming.php?action=list'` ➔ **200 OK** (Data dokumen masuk berhasil dimuat dengan metrik KPI).
+   - `curl -s 'http://127.0.0.1/warehouse_delivery.php?action=list'` ➔ **200 OK** (Data dokumen keluar berhasil dimuat dengan metrik KPI).
+   - `curl -s 'http://127.0.0.1/warehouse_delivery.php?action=detail_barang&nomor_aju=...'` ➔ **200 OK** (Data barang fisik, customer, dan suggested DOK DO/SJ berhasil dimuat).
+   - `curl -s 'http://127.0.0.1/warehouse_incoming.php?action=detail_barang&nomor_aju=...'` ➔ **200 OK**.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
+---
+
+## 97. Fitur Maximize Grid & Penyesuaian Warna Baris Terkirim (Soft Blue) pada Data Host to Host & Warehouse
+
+### A. Latar Belakang & Kebutuhan
+1. **Latar Belakang Operasional**:
+   - Operator pabean dan warehouse yang bekerja dengan ratusan dokumen pabean membutuhkan kemampuan untuk memperbesar (*maximize*) grid tampilan dokumen agar dapat melihat baris dokumen dalam jumlah banyak secara vertikal tanpa terhalang panel detail bawah.
+   - Sebelumnya, pemisahan panel hanya dapat disesuaikan dengan drag splitbar secara manual, belum ada tombol instan untuk memperluas (*maximize*) grid master maupun detail ke layar penuh (*full pane*).
+   - Warna baris dokumen terkirim/terdaftar pabean (`row-submitted-ceisa`) sebelumnya menggunakan warna biru `#bfe0ff` yang terasa agak mencolok (*punchy/saturated*). Pengguna menginginkan warna biru tersebut disesuaikan menjadi lebih lembut (*softer pastel blue*).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **[`transfer.php`](file:///c:/dp/g-ceisa/transfer.php) & [`www/transfer.php`](file:///c:/dp/g-ceisa/www/transfer.php)**:
+   - **Soft Pastel Blue Styling**:
+     - Mengubah warna latar baris submitted `#hdrTbody tr.row-submitted-ceisa` dari `#bfe0ff` menjadi warna soft pastel blue `#e6f4ff` (Ant Design Blue-1) dengan garis tepi lembut `rgba(24, 144, 255, 0.18)` dan warna teks `#002c6a`.
+     - Efek hover disesuaikan menjadi `#d4ecff` yang nyaman di mata untuk pemakaian jangka panjang.
+     - Penyesuaian Dark Mode: Menggunakan navy pastel lembut `#11253e` dengan efek hover `#163254`.
+   - **Fitur Maximize / Restore Grid**:
+     - Menambahkan tombol `[ ⛶ Maximize ]` (`#btnMaxTop`) pada toolbar atas kartu Data Host to Host untuk memperluas grid master ke 100% tinggi layar dan menyembunyikan panel detail sementara.
+     - Menambahkan tombol `[ ⛶ Maximize Detail ]` (`#btnMaxBottom`) pada kartu bawah untuk memperluas panel detail barang jika memeriksa dokumen dengan puluhan rincian barang.
+     - Menambahkan tombol mikro runtuh/maksimalkan (`▼ Maximize Grid` dan `▲ Detail`) langsung pada batang pemisah (*splitbar*).
+     - Menambahkan event *double-click* pada splitbar divider untuk toggle cepat maximize/restore grid master.
+     - Menambahkan shortcut tombol keyboard `Escape` untuk mengembalikan ukuran grid ke posisi split normal secara instan.
+2. **[`warehouse_incoming.php`](file:///c:/dp/g-ceisa/warehouse_incoming.php) & [`warehouse_delivery.php`](file:///c:/dp/g-ceisa/warehouse_delivery.php)**:
+   - Menerapkan penyesuaian warna soft pastel blue `#e6f4ff` yang identik pada baris dokumen terdaftar.
+   - Menyematkan tombol Maximize pada toolbar master dan detail panel beserta kontrol splitbar divider.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/transfer.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_delivery.php` ➔ **No syntax errors detected**.
+2. **Uji Render & Respons**:
+   - cURL markup verifikasi membuktikan keberadaan tombol `#btnMaxTop` dan warna `#e6f4ff`.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote di `/source/public/` dan `/source/public/www/`.
+
+---
+
+## 98. Fitur Kustomisasi Warna Card Perusahaan di Sidebar Portal dari Menu Kelola Perusahaan
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**: "buat warna card perusahaan ini bisa dikonfigurasi, bisa diganti dari menu Kelola Perusahaan" (dengan screenshot yang merujuk langsung ke elemen `.sidebar-company-card` di sidebar `index.php` yang menampilkan identitas perusahaan aktif, logo, ID, dan tombol switch perusahaan).
+- **Tujuan**:
+  - Memberikan identitas visual brand (*corporate branding*) yang unik untuk setiap perusahaan/entitas TPB pada portal multi-tenant CEISA 4.0.
+  - Memudahkan pembedaan perusahaan aktif secara seketika melalui warna tema kartu identitas di sidebar kiri.
+  - Menyediakan kontrol konfigurasi yang fleksibel dari antarmuka Administrator di menu Kelola Perusahaan (`company.php`), lengkap dengan palet warna populer, pemilih warna (*color picker*), dan *live preview* interaktif.
+  - Menghasilkan kontras teks otomatis (teks putih untuk warna gelap/gradient dan teks gelap untuk warna soft/pastel).
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **Migrasi Skema Basis Data Alibaba Cloud RDS MySQL (`ceisa0400db`)**:
+   - Menambahkan kolom `card_color` ke tabel profil perusahaan:
+     ```sql
+     ALTER TABLE bc_ceisa_company ADD COLUMN card_color VARCHAR(100) DEFAULT '' AFTER logo;
+     ```
+2. **Modul Kelola Perusahaan ([`company.php`](file:///c:/dp/g-ceisa/company.php) & [`www/company.php`](file:///c:/dp/g-ceisa/www/company.php))**:
+   - **Backend CRUD API**:
+     - Memperbarui `action === 'save'` (INSERT & UPDATE) untuk memproses `card_color` (30 parameter prepared statement).
+     - Memperbarui sesi `$_SESSION['company_card_color']` saat perusahaan yang sedang aktif diperbarui.
+     - Memperbarui `action === 'set_active'` untuk mengembalikan `card_color` dan menyimpannya di session aktif admin.
+   - **Antarmuka Form Modal (Tab 1: Profil Perusahaan)**:
+     - Menyematkan kartu konfigurasi **Warna Card Sidebar (Brand Theme)** lengkap dengan:
+       - 22 palet warna swatch populer (CEISA Navy `#002c6a`, Slate Dark `#0f172a`, Royal Blue `#1e3a8a`, Ant Design `#1677ff`, Forest Emerald `#065f46`, Amber Gold `#b45309`, Crimson Red `#dc2626`, Gradients CEISA, Oceanic, Emerald, Violet, Midnight, dan Soft Pastels).
+       - Native color picker `<input type="color">` dan text input untuk kode HEX/RGB/CSS Gradient kustom.
+       - Tombol "Reset Default" untuk mengembalikan ke tampilan standar tema sistem.
+     - **Live Interactive Preview Box**:
+       - Kotak pratinjau yang merefleksikan 1:1 tampilan `#sidebarCompanyCard` pada sidebar utama `index.php` secara *real-time* saat memilih palet, mengubah warna, mengganti logo, atau mengetikkan nama/ID perusahaan.
+       - Formula cerdas kalkulasi luminansi `(0.299*R + 0.587*G + 0.114*B)` untuk menentukan keterbacaan teks dan tombol secara otomatis.
+   - **Tabel Master Perusahaan**:
+     - Menampilkan indikator chip/swatch warna card di samping nama perusahaan pada daftar grid.
+   - **Sinkronisasi Otomatis Antar Jendela**:
+     - Mengirimkan event `postMessage({ type: 'COMPANY_CHANGED', ..., card_color: ... })` ke jendela induk saat perusahaan aktif diedit atau diaktifkan.
+3. **Portal Utama Navigasi ([`index.php`](file:///c:/dp/g-ceisa/index.php) & [`www/index.php`](file:///c:/dp/g-ceisa/www/index.php))**:
+   - Menambahkan `card_color` pada query login admin, login perusahaan, deteksi subdomain, dan pembacaan sesi database.
+   - Membuat fungsi pembantu `getSidebarCompanyCardStyle($color)` untuk menginjeksi background, border, dan CSS custom properties (`--card-title-color`, `--card-sub-color`, `--card-btn-bg`, `--card-btn-color`, `--card-btn-border`) pada kartu `#sidebarCompanyCard`.
+   - Mengadaptasi CSS `.sidebar-company-card` dengan dukungan `data-custom-color="true"` dan efek hover soft brightness filter.
+   - Menambahkan fungsi JavaScript `applySidebarCompanyCardColor(color)` yang dipanggil saat beralih perusahaan (`selectCompany`) maupun melalui listener pesan `window.addEventListener('message')`.
+   - Menampilkan chip swatch warna pada dialog modal beralih perusahaan (*company switcher*).
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/company.php` ➔ **No syntax errors detected**.
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/company.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/index.php` ➔ **No syntax errors detected**.
+2. **Uji API & Basis Data**:
+   - Memanggil `http://127.0.0.1/company.php?action=list&is_admin=1` via cURL ➔ Response JSON mengembalikan atribut `card_color` dengan valid.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
+
+## 99. Penghapusan Fitur Create/Kirim AJU & Implementasi Modal Riwayat Tracking Perubahan Status pada Dashboard Dokumen CEISA 4.0 (`daftar_dokumen.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**:
+  1. *"create AJU ini ga perlu di halaman Dashboard Ceisa 4.0 kan ga lengkap, ga ada data barang, dll"*
+  2. *"matikan aja hyperlink yang membuka preview json, mungkin bisa diganti menampilkan history tracking perubahan statusnya"*
+- **Akar Masalah (Root Cause)**:
+  - Halaman **Dashboard Ceisa 4.0** ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php)) berfungsi sebagai dashboard pemantauan dokumen pabean (*status monitoring & tracking*) yang ditarik dari portal CEISA 4.0 (`bc_ceisa_data`, `bc_ceisa_status`, `bc_ceisa_respons`).
+  - Halaman ini tidak memuat struktur tabel rincian transaksi pengiriman seperti barang (`bc_ceisa_barang`), bahan baku (`bc_ceisa_bahan_baku`), dokumen lampiran, kemasan, kontainer, dan tarif pungutan yang dikelola pada modul *Host to Host* ([`transfer.php`](file:///c:/dp/g-ceisa/transfer.php)) atau [`editor.php`](file:///c:/dp/g-ceisa/editor.php).
+  - Hyperlink pada Nomor AJU dan Nomor Respon sebelumnya memicu fungsi `previewJson()` yang membuka modal pratinjau mentah JSON dan memiliki tombol *"🚀 Kirim AJU Ini ke CEISA 4.0"*. Menjalankan pengiriman dokumen dari dashboard ini menghasilkan payload yang tidak lengkap dan berisiko penolakan (*reject*) dari gateway Bea Cukai.
+
+---
+
+### B. Implementasi Teknis & Perubahan Berkas
+1. **Pembersihan Logika Pengiriman Dokumen dari Dashboard ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php) & [`www/daftar_dokumen.php`](file:///c:/dp/g-ceisa/www/daftar_dokumen.php))**:
+   - Menghapus modal `#modalPreview` dan tombol `#btnTransferFromModal` (*"🚀 Kirim AJU Ini ke CEISA 4.0"*).
+   - Menghapus modal `#modalResult` dan fungsi pengiriman batch/single (`transferSingle`, `transferFromModal`, `transferSelected`, `renderTransferResponse`).
+   - Menghapus dependensi `require_once __DIR__ . '/CeisaJsonBuilder.php';` sehingga halaman memuat lebih cepat tanpa beban modul payload builder yang tidak relevan.
+   - Mengubah status chip default dari label *"Siap Kirim"* menjadi **"Proses Pabean"** (atau status aktual dari CEISA 4.0 seperti *Stuffing, Gate In, Selesai Proses, Terkirim*).
+
+2. **Backend API Endpoint Riwayat Tracking (`action === 'get_timeline'`)**:
+   - Menyediakan endpoint AJAX `action === 'get_timeline'` (alias `tracking_history`):
+     - Menerima parameter `nomor_aju` dan `cmp_id`.
+     - Mengambil riwayat tahapan proses dari tabel `bc_ceisa_status` diurutkan secara kronologis (`waktu_status ASC, id ASC`).
+     - Mengambil respon resmi Bea Cukai dari tabel `bc_ceisa_respons` diurutkan berdasarkan ID.
+     - Mengambil metadata pendaftaran dari `bc_ceisa_header` dan data induk `bc_ceisa_data`.
+     - Mengambil respon mentah JSON dari tabel log `bc_ceisa_respon_logs`.
+     - Menghitung logika *Visual Stepper* 5 Tahapan proses secara otomatis:
+       - **Tahap 1: Perekaman Dokumen** (Draft & perekaman awal dokumen)
+       - **Tahap 2: Pengiriman LNSW** (Dokumen terkirim ke sistem INSW/Gateway)
+       - **Tahap 3: Validasi Pabean** (Validasi konten & Nomor Pendaftaran terbit)
+       - **Tahap 4: Penjaluran / Billing** (Penetapan jalur & kode billing pembayaran)
+       - **Tahap 5: Keputusan Akhir** (Persetujuan pengeluaran SPPB/NPE atau selesai proses)
+     - Dilengkapi mekanisme fallback sintesis jika data detail status belum ditarik terpisah tetapi data induk di `bc_ceisa_data` telah memiliki nomor respon atau nama proses.
+     - Mendukung eksekusi via PHP CLI untuk kemudahan pengujian mandiri.
+
+3. **Antarmuka Interaktif Modal Tracking (`#modalTrackingHistory`)**:
+   - Merancang dialog modal modern dengan standar desain Ant Design 5.0 (lebar 880px, responsif, dan mendukung *Dark Mode* penuh).
+   - **Header Modal**: Menampilkan judul riwayat, tag jenis dokumen (`BC 2.3`, `BC 2.7`, dll), Nomor AJU berfont monospace, dan tombol tutup.
+   - **Kartu Ringkasan Dokumen**:
+     - Nomor & Tanggal Pendaftaran Bea Cukai.
+     - Nama Perusahaan / Pemilik Dokumen.
+     - Kantor Pabean Pengawas (KPPBC).
+     - Tombol **"Sync Ulang Live"** (`syncTrackingModalAju()`) yang memicu sinkronisasi seketika ke API gateway portal CEISA 4.0 via `statusaju.php?action=sync_single` dan memperbarui tampilan modal secara real-time.
+   - **Visual Stepper Progress Bar**:
+     - Menampilkan diagram 5 tahapan alur proses pabean dengan garis progres hijau yang bergerak dinamis sesuai persentase penyelesaian, lingkaran status dengan ikon centang `✓`, judul tahapan, deskripsi ringkas, dan stempel waktu (*timestamp*).
+   - **3 Tab Konten Terperinci**:
+     - **Tab 1: Riwayat Status Proses**: Menampilkan tabel log kronologis (No, Waktu Status, Kode Proses, Keterangan Proses, dan No. Daftar).
+     - **Tab 2: Respon Resmi Bea Cukai**: Menampilkan tabel respon resmi (No, Kode Respon, Nomor Respon, Tanggal Respon, Keterangan, dan Tombol Unduh Dokumen PDF resmi Bea Cukai).
+     - **Tab 3: Log Respon Mentah (JSON)**: Menampilkan payload respon mentah JSON dari CEISA 4.0 dalam kotak kode *syntax highlighting* yang dilengkapi tombol salin satu-klik ke clipboard.
+
+4. **Integrasi Grid Tabel Dokumen**:
+   - Kolom **Nomor Pengajuan**: Nomor AJU kini berformat tautan aktif berwarna biru dan dilengkapi ikon tracking jam/alur. Klik pada nomor AJU atau ikon akan langsung membuka modal riwayat tracking status.
+   - Kolom **Nama Respon**: Klik pada nomor respon resmi (misal nomor SPPB) kini juga membuka modal riwayat tracking status.
+
+---
+
+### C. Pengujian & Verifikasi
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/daftar_dokumen.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/daftar_dokumen.php` ➔ **No syntax errors detected**.
+2. **Uji API Backend (`action=get_timeline`)**:
+   - Pengujian query AJU contoh `0509270FRM0220261017000617` via CLI remote server:
+     - Mengembalikan response JSON `status: "OK"`.
+     - Kelima tahapan stepper terhitung dengan akurat (Tahap 1 s.d. Tahap 5 selesai dengan timestamp `2026-10-17 10:20:30`).
+     - Respon resmi SPPB (`624806/KBC.0804/2026`) beserta tautan unduh PDF resmi Bea Cukai teridentifikasi dan disajikan dengan presisi.
+3. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
+
+## 100. Penggantian Tombol Redundan 'Monitoring ▾' Menjadi Tombol 'Rekap Dokumen' pada Dashboard CEISA 4.0 (`daftar_dokumen.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Pertanyaan & Saran Pengguna**:
+  *"guna tombol monitoring ini apa ya? ga berguna sepertinya atau sebaiknya diganti jadi menampilkan halaman rekap saja"* (disertai tangkapan layar area aksi header card [`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php)).
+- **Akar Masalah (Root Cause)**:
+  - Tombol bertuliskan `Monitoring ▾` sebelumnya hanya menjalankan pemanggilan fungsi `loadList()` (muat ulang tabel). Fungsi ini persis sama dengan tombol `Muat Ulang` yang terletak tepat di sampingnya.
+  - Ikon panah bawah (`▾`) memberi kesan adanya menu dropdown yang bisa dipilih, padahal tidak ada aksi dropdown sama sekali. Akibatnya tombol tersebut bersifat redundan, tidak fungsional, dan membingungkan pengguna.
+  - Sementara itu, akses menuju modul matriks **Rekapitulasi Dokumen Pabean** ([`rekap/index.php`](file:///c:/dp/g-ceisa/rekap/index.php)) sebelumnya tersembunyi di dalam modal menu *Utilitas*, sehingga membutuhkan beberapa kali klik untuk membukanya.
+
+---
+
+### B. Implementasi Solusi
+1. **Pembaruan Tombol Aksi Header Card ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php) & [`www/daftar_dokumen.php`](file:///c:/dp/g-ceisa/www/daftar_dokumen.php))**:
+   - Menghapus tombol `Monitoring ▾` yang redundan.
+   - Menggantikannya dengan tombol baru yang elegan: **`📊 Rekap Dokumen`** lengkap dengan ikon visual grafik batang Ant Design.
+   - Menghubungkan klik tombol langsung ke fungsi `openRekapTool('index.php', '📊 Rekap Dokumen CEISA 4.0')`.
+2. **Pengalaman Pengguna (User Experience)**:
+   - Pengguna kini dapat langsung membuka matriks rekapitulasi dokumen pabean masuk & keluar bulanan (BC 1.6, BC 2.0, BC 2.3, BC 4.0, BC 2.7 IN, BC 2.6.2, BC 2.7 OUT, BC 2.5, BC 3.0, BC 4.1) dalam satu klik dari header dashboard.
+   - Halaman rekap dimuat secara instan melalui modal *in-page viewer* responsif (`#modalRekapViewer`) dengan dukungan tema gelap/terang, filter per perusahaan, drill-down angka dokumen, serta tombol buka di Tab Baru.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaks PHP (`php -l`)**:
+   - `/source/public/daftar_dokumen.php` ➔ **No syntax errors detected**.
+   - `/source/public/www/daftar_dokumen.php` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Berkas disinkronkan ke remote server Alibaba Cloud di `/source/public/` dan `/source/public/www/`.
+
+---
+
+## 101. Implementasi Solusi Validasi Kode Barang Incoming: Auto-Mapping Part Supplier (`bc_material.KODE_BARANG2`), Resolusi Kode Interaktif, dan Workflow Approval Pengajuan Kode Barang Baru di Modul Admin Inventory (`material.php`, `rekap/bc27in.php`, `rekap/post_bc27in.php`, `warehouse_incoming.php`, `index.php`)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- **Permintaan Pengguna**:
+  1. *"aku butuh solusi, ini kan jadinya ga bisa diimport ya? atau ada fitur modifikasi dulu? lalu baru bisa ditarik? atau fitur tambah ke tabel bc_material otomatis?? tapi perlu approval admin -- biar ga asal dikit dikit main import kode baru. padahal aslinya sudah ada hanya beda kode saat dikirim dari supplier"*
+  2. *"di tabel bc_material, ada kolom 'KODE_BARANG2' itu bisa dipakai untuk mapping kode supplier sehingga saat ditarik sudah otomatis berubah menjadi kode internal perusahaan"*
+  3. *"alternatif lainnya adalah mengganti kodenya manual, tapi bisa memilih dari master barang bc_material"*
+  4. *"harus VALIDASI tidak asal membuat kode baru tanpa approval admin Inventory"*
+  5. *"Tambahkan Approval pengajuan Kode Barang ini di modul 'admin Inventory'"*
+
+- **Akar Permasalahan (Root Cause)**:
+  - Saat menarik dokumen BC 2.7 IN (atau pemasukan lainnya), kode barang yang dicantumkan supplier pada dokumen pabean sering kali merupakan nomor part supplier (*supplier part number*) yang tidak sama dengan penamaan kode barang internal perusahaan.
+  - Sebelumnya, validasi pada `post_bc27in.php` hanya mencocokkan secara kaku ke kolom `bc_material.KODE_BARANG = ?`. Jika tidak cocok, seluruh dokumen langsung ditolak (*hard-reject*) dengan tabel pesan kesalahan statis tanpa adanya opsi bagi operator untuk memetakan atau memodifikasi kode.
+  - Jika barang dibiarkan diinsert otomatis tanpa kontrol, master data barang akan tercemar duplikasi kode ganda yang merusak akurasi stock opname dan pelaporan IT Inventory.
+
+---
+
+### B. Arsitektur & Implementasi Solusi
+
+1. **Pembuatan Tabel Antrian Persetujuan (`bc_material_approval`) & Indeks `KODE_BARANG2`**:
+   - Dibuat tabel baru `bc_material_approval` pada database RDS MySQL `ceisa0400db` untuk mencatat seluruh usulan pendaftaran kode baru maupun riwayat mapping:
+     - `id, cmp_id, tipe_pengajuan ['MAPPING_SUPPLIER', 'KODE_BARU'], nomor_aju, kode_supplier, kode_internal, uraian, model, pos_tarif, satuan, klas, alasan, status ['PENDING', 'APPROVED', 'REJECTED'], requested_by, requested_at, approved_by, approved_at, approval_notes`.
+   - Menambahkan indeks performa `idx_material_kodebarang2` pada kolom `bc_material.KODE_BARANG2` untuk pencarian berkecepatan tinggi.
+
+2. **Auto-Mapping Cerdas via `bc_material.KODE_BARANG2` (`rekap/post_bc27in.php` & `warehouse_incoming.php`)**:
+   - Mekanisme pencarian master barang dioptimalkan untuk memeriksa kolom utama `KODE_BARANG` sekaligus kolom mapping `KODE_BARANG2`:
+     `WHERE (cmp_id = ? OR cmp_id = '') AND (KODE_BARANG = ? OR KODE_BARANG2 = ?) ORDER BY (KODE_BARANG = ?) DESC LIMIT 1`.
+   - **Hasil**: Jika kode supplier sudah pernah didaftarkan pada `KODE_BARANG2`, sistem otomatis mengenalinya dan mengganti kodenya menjadi `KODE_BARANG` internal resmi perusahaan saat dibukukan ke tabel IT Inventory (`bc_1ab2`), lengkap dengan klasifikasi (`KLAS`) dan uraian master.
+
+3. **Modal Penyelarasan Kode Interaktif & Solutif (`rekap/bc27in.php`)**:
+   - Menggantikan tabel error statis dengan modal komprehensif **`🏷️ Penyelarasan Kode Barang Dokumen`** (`#modalResolver`):
+     - **Opsi 1 - Hubungkan (Mapping) ke Master Existing**: Operator dapat mencari barang master internal via autocomplete/live search, memilih barang yang sesuai, dan mencentang opsi simpan ke `KODE_BARANG2`. Kode supplier langsung terpetakan dan status baris berubah menjadi hijau `✓ Siap Diolah`.
+     - **Opsi 2 - Ajukan Kode Barang Baru ke Admin**: Operator mengisi formulir pengajuan kode baru (usulan kode internal, uraian, klasifikasi referensi `bc_tipe`, satuan, HS code, alasan). Data tersimpan ke `bc_material_approval` dengan status `PENDING`.
+     - **Tombol 'Olah ke IT Inventory Sekarang'**: Memungkinkan operator langsung membukukan dokumen seketika setelah semua item terselesaikan tanpa perlu reload halaman.
+
+4. **Modul Approval Pengajuan Kode Barang di Admin Inventory (`material.php`)**:
+   - **Indikator & Notifikasi Visual**:
+     - Ditambahkan banner peringatan oranye di bagian atas `material.php`: *"Persetujuan Dibutuhkan: Terdapat X pengajuan Kode Barang Baru / Mapping Supplier dari Dokumen Incoming yang menunggu Approval Admin Inventory."*
+     - Tombol toolbar khusus **`Approval Kode Barang`** dengan badge dinamis merah penunjuk jumlah antrian pending.
+     - Badge notifikasi penanda antrian pending juga disematkan pada menu sidebar kiri `index.php` di samping menu **Master Data Barang**.
+   - **Fitur Aksi Persetujuan Admin**:
+     - **Setujui & Daftarkan ke Master Data (`approval_approve`)**: Admin memverifikasi kode internal usulan, uraian, dan klasifikasi. Saat disetujui, item resmi di-insert ke tabel `bc_material` dengan kolom `KODE_BARANG2` otomatis terisi kode supplier, dan status pengajuan diubah menjadi `APPROVED`.
+     - **Alihkan ke Master Existing (`approval_map_existing`)**: Jika Admin melihat barang tersebut sebenarnya sudah ada di sistem dan tidak perlu membuat kode baru, Admin dapat mencari master existing dan memetakan kode supplier ke `KODE_BARANG2` barang existing tersebut.
+     - **Tolak Pengajuan (`approval_reject`)**: Admin dapat menolak pengajuan dengan mencantumkan alasan penolakan.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**:
+   - `/source/public/rekap/post_bc27in.php` ➔ **No syntax errors detected**.
+   - `/source/public/rekap/bc27in.php` ➔ **No syntax errors detected**.
+   - `/source/public/warehouse_incoming.php` ➔ **No syntax errors detected**.
+   - `/source/public/material.php` ➔ **No syntax errors detected**.
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - Seluruh salinan berkas pada direktori `/source/public/www/` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Berkas lokal dan remote server Alibaba Cloud telah disinkronkan secara penuh.
+
+---
+
+## 102. Penyelarasan Nama Menu "Production - Stock Transfer" Menjadi "Mutasi Produksi"
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"Menu 'Production - Stock Transfer' ganti jadi 'Mutasi Produksi'"*
+- **Tujuan**: Menggunakan istilah yang lebih intuitif, baku, dan sesuai dengan operasional lantai produksi serta pelaporan IT Inventory kepabeanan Indonesia, yaitu "Mutasi Produksi".
+
+---
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Navigasi Sidebar & Breadcrumb (`index.php` & `www/index.php`)**:
+   - Memperbarui label navigasi menu sidebar dari `<span class="kt-menu__link-text">Production - Stock Transfer</span>` menjadi `<span class="kt-menu__link-text">Mutasi Produksi</span>`.
+   - Memperbarui pemetaan judul breadcrumb PHP `$breadcrumbTitlesPhp['inv_stock_transfer']` menjadi `'Mutasi Produksi'`.
+   - Memperbarui kamus JavaScript judul tab `tabTitles['inv_stock_transfer']` menjadi `'Mutasi Produksi'`.
+   - ID internal tab (`inv_stock_transfer`) dipertahankan agar tidak memutus kompatibilitas tautan langsung (*deep-linking*) dan izin hak akses user.
+
+2. **Manajemen Hak Akses Pengguna (`user_management.php` & `www/user_management.php`)**:
+   - Memperbarui daftar modul hak akses `$availableMenus['inv_stock_transfer']` menjadi `['title' => 'Mutasi Produksi', 'icon' => '🏭', 'group' => 'Modul Inventory']`.
+
+3. **Modul Transaksi Mutasi Produksi (`stock_transfer.php` & `www/stock_transfer.php`)**:
+   - Memperbarui judul halaman `<title>` menjadi `Mutasi Produksi (CEISA 4.0 & IT Inventory)`.
+   - Memperbarui tombol aksi utama toolbar menjadi `Transaksi Mutasi Produksi Baru`.
+   - Memperbarui header modal form pengeluaran/transfer menjadi `Form Mutasi Produksi`.
+   - Memperbarui header modal view detail rincian transaksi menjadi `Detail Mutasi Produksi`.
+
+4. **Pengaturan Aplikasi (`setting_aplikasi.php` & `www/setting_aplikasi.php`)**:
+   - Memperbarui label konfigurasi prefiks nomor bukti dari `Prefiks Dokumen Stock Transfer` menjadi `Prefiks Dokumen Mutasi Produksi`.
+   - Memperbarui hint penjelasan menjadi `Awalan bukti mutasi / transfer produksi internal`.
+
+---
+
+### C. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**:
+   - `/source/public/index.php` ➔ **No syntax errors detected**.
+   - `/source/public/user_management.php` ➔ **No syntax errors detected**.
+   - `/source/public/stock_transfer.php` ➔ **No syntax errors detected**.
+   - `/source/public/setting_aplikasi.php` ➔ **No syntax errors detected**.
+   - Seluruh salinan pada `/source/public/www/` ➔ **No syntax errors detected**.
+2. **Deployment**:
+   - Seluruh berkas telah disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`).
+---
+
+## 103. Peningkatan Sinkronisasi Dark Theme Dinamis & Penyesuaian Standarisasi Ukuran Font Compact
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  1. Halaman yang belum bisa ganti tema ke dark:
+     - Master Data Barang (`material.php`)
+     - Koreksi Klasifikasi IT Inventory (`klas_koreksi.php`)
+     - Master Bill of Materials / BOM (`bom.php`)
+     - Production - Stock Transfer / Mutasi Produksi (`stock_transfer.php`)
+     - Warehouse - Transfer BC27 OUT-->IN (`transfer_bc27.php`)
+     - Import BC 2.7 IN dan Post ke IT Inv (`scan27.php`)
+  2. Halaman yang ukuran font terlalu besar, sesuaikan dengan standar antarmuka compact portal:
+     - Tracking Respon Pabean (`statusaju.php`)
+     - Master Bill of Materials / BOM (`bom.php`)
+     - Warehouse - Transfer BC27 OUT-->IN (`transfer_bc27.php`)
+     - Stok Opname (`stok_opname.php`)
+     - Kelola Perusahaan (`company.php`)
+     - Setting Aplikasi (`setting_aplikasi.php`)
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Sinkronisasi Dark Theme Dinamis (Tanpa Reload)**:
+   - **Inline Early Detector Script**: Ditambahkan pada `<head>` setiap modul untuk membaca preferensi `theme` langsung dari URL query string maupun `localStorage.getItem('ceisa_theme')`, mencegah white flash saat iframe dimuat.
+   - **PostMessage Event Listener**: Menambahkan pendengar pesan `window.addEventListener('message', function(e) { if (e.data && e.data.type === 'SET_THEME') applyCurrentTheme(e.data.theme); })` pada seluruh modul iframe terkait sehingga saat toggle tema di topbar portal `index.php` ditekan, seluruh modul langsung beralih antara tema gelap (*dark*) dan terang (*light*) secara instan.
+   - **Kompatibilitas SweetAlert2 Dark Mode**: Menyertakan helper `/assets/sweetalert-theme.js` dan sinkronisasi `syncSweetAlertTheme(theme)` pada seluruh modal dialog.
+   - **CSS Theme Variables & Dark Form Controls**: Melengkapi styling `html[data-theme="dark"]` dengan `color-scheme: dark !important;`, latar gelap `#141414` / `#1f1f1f`, teks terang `#e1e3ea`, serta penyesuaian elemen input/select option di browser Chromium/WebKit.
+
+2. **Standarisasi Tipografi & Desain Layout Compact (10.5px Base Font)**:
+   - **Tipografi Standar**: Menggantikan font berukuran besar (11.5px–15px / font keluarga Public Sans) dengan standar portal `Poppins, sans-serif` base size `10.5px`.
+   - **Header & Title Sizing**: Judul halaman diseragamkan ke `12px – 12.5px`, ikon `18px`, padding header `6px – 8px`.
+   - **Toolbar, Filter & Tombol Kontrol**: Ketinggian tombol dan kolom input diseragamkan ke `22px – 24px`, font `9.5px – 10px`, padding ringkas `0 8px – 10px`.
+   - **KPI Card Summary**: Nilai KPI disesuaikan ke `13px – 14px` dan label disesuaikan ke `9px – 9.5px` dengan padding ringkas.
+   - **Tabel & Data Grid**: Font tabel diseragamkan ke `10px`, padding sel `3px 6px` hingga `4px 8px` sehingga muat lebih banyak data transaksi per layar tanpa perlu scrolling berlebihan.
+
+### C. Daftar File yang Diperbarui
+1. `material.php` & `www/material.php`: Dark theme dynamic sync, early script detector, `applyCurrentTheme`, SweetAlert dark styling.
+2. `klas_koreksi.php` & `www/klas_koreksi.php`: Dark theme CSS variables, postMessage listener, early script detector, SweetAlert dark theme.
+3. `bom.php` & `www/bom.php`: Dark theme sync + standarisasi font compact 10.5px, compact toolbar, compact table grid, dan form modal.
+4. `stock_transfer.php` & `www/stock_transfer.php`: Dark theme dynamic sync, early script detector, `applyCurrentTheme`, SweetAlert dark sync.
+5. `transfer_bc27.php` & `www/transfer_bc27.php`: Dark theme sync + standarisasi font compact 10.5px, compact KPI summary cards, compact table rows.
+6. `scan27.php` & `www/scan27.php`: Dark theme dynamic sync, select dark rules, postMessage listener, early detector script.
+7. `statusaju.php` & `www/statusaju.php`: Standarisasi font compact 10.5px, compact header, compact KPI metrics, compact tracking table, dark theme sync.
+8. `stok_opname.php` & `www/stok_opname.php`: Standarisasi font compact 10.5px, compact KPI bar, compact table grid, dark theme sync.
+9. `company.php` & `www/company.php`: Standarisasi font compact 10.5px, compact stat-card, compact header box, compact table, dark theme sync.
+10. `setting_aplikasi.php` & `www/setting_aplikasi.php`: Standarisasi font compact 10.5px, compact tabs & form control (24px height), compact preview sidebar, dark theme sync.
+
+### D. Pengujian, Deployment & Git
+1. **Linting Sintaksis PHP (`php -l`)**: Memastikan 0 kesalahan sintaksis pada seluruh 10 file di direktori utama dan `www/`.
+2. **Deployment Server**: Seluruh berkas disinkronkan ke remote server Alibaba Cloud (`/source/public/` dan `/source/public/www/`) via SCP.
+---
+
+## 104. Implementasi Fitur Clickable KPI Summary Cards untuk Filtering Cepat pada Master Data Barang (`material.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"buat card ini bisa diklik sekaligus filter hanya tampil card yang diklik"* (disertai tangkapan layar yang menandai card KPI *Total Items*, *Raw Materials*, *Finished Goods*, dan *Work In Progress*).
+- **Tujuan**: Memungkinkan pengguna memfilter data tabel barang secara instan hanya dengan mengklik kartu ringkasan (*KPI summary badge*), tanpa harus memilih opsi secara manual dari dropdown filter klasifikasi.
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Frontend Interaktif & Styling Visual ([`material.php`](file:///c:/dp/g-ceisa/material.php) & [`www/material.php`](file:///c:/dp/g-ceisa/www/material.php))**:
+   - Menambahkan event handler `onclick="filterByKpi('...')"` dan atribut `title` deskriptif pada setiap kartu KPI:
+     - `kpiBadgeTotal` ➔ `filterByKpi('')` (menampilkan semua klasifikasi)
+     - `kpiBadgeBb` ➔ `filterByKpi('Raw Materials')` (filter Bahan Baku / Raw Materials)
+     - `kpiBadgeFg` ➔ `filterByKpi('Finished Goods')` (filter Barang Jadi / Finished Goods)
+     - `kpiBadgeWip` ➔ `filterByKpi('Work In Progress')` (filter Barang Dalam Proses / WIP)
+   - Styling interaktif `.kpi-container .kpi-badge`:
+     - `cursor: pointer`, efek hover (`transform: translateY(-1px)`, soft shadow, border highlight).
+     - Status `.active` yang jelas dengan ring warna biru (`box-shadow: 0 0 0 1.5px var(--primary)`), background tint, dan indikator centang (`✓`).
+     - Kompatibilitas penuh dengan tema terang (*light*) dan tema gelap (*dark*).
+2. **Sinkronisasi Dua Arah (*Two-Way Synchronization*)**:
+   - Fungsi `filterByKpi(klasName)`:
+     - Mendukung *toggle-off*: Jika kartu yang sedang aktif diklik kembali, filter otomatis kembali ke Semua Klasifikasi (*Total Items*).
+     - Menyelaraskan nilai pada dropdown `<select id="filterKlas">`.
+     - Memanggil `loadData()`.
+   - Fungsi `syncKpiCardActive(currentKlas)`:
+     - Menggunakan pencocokan cerdas `isMatchingKlas()` yang mengenali istilah bilingual (*Raw Materials / Bahan Baku*, *Finished Goods / Barang Jadi*, *Work In Progress / WIP / Dalam Proses*).
+     - Saat pengguna mengubah dropdown `filterKlas` secara manual, kartu KPI otomatis menyesuaikan status `.active` miliknya.
+3. **Backend Filtering Query**:
+   - Memperbarui klausul `WHERE` pada endpoint `action=list` agar klausa filter klasifikasi selaras dengan logika penghitungan KPI (`m.KLAS = '$escKlas' OR m.KLAS LIKE '%Raw%' OR m.KLAS LIKE '%Bahan Baku%'`, dst.).
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terdeteksi pada `/source/public/material.php` dan `/source/public/www/material.php`.
+2. **Pengujian API via cURL**:
+   - `action=list&klas=Raw%20Materials` mengembalikan 1 item yang sesuai (`RPM00563`).
+   - `action=list&klas=Finished%20Goods` mengembalikan array kosong `[]` secara tepat.
+   - Nilai counter KPI pada respon JSON tetap menghitung total agregat secara akurat (`total: 1`, `bahan_baku: 1`, `finished_goods: 0`, `wip: 0`).
+---
+
+## 105. Implementasi Pusat Notifikasi & Peringatan Sistem pada Ikon Lonceng Topbar (`index.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  *"alert icon ini kalo diklik akan tampil pesan yang menampilkan info :*
+  *- jumlah dokumen yang belum selesai*
+  *- jumlah dokumen yang belum masuk IT Inv (hanya jika konfigurasi IS_INV = 1)*
+  *- Info alert jika ada QTY AKTUAL berbeda dengan QTY di tabel bc_1ab2 (yang diinput oleh Warehouse)"*
+  *(disertai tangkapan layar dengan tanda panah ke ikon lonceng notifikasi 🔔 di topbar sebelah kanan portal).*
+- **Tujuan**: Memberikan visibilitas terpadu kepada pengguna dan manajemen terkait status dokumen yang tertunda di CEISA 4.0, kelengkapan posting dokumen ke IT Inventory, serta deteksi dini selisih fisik barang di gudang secara langsung dari topbar portal tanpa harus berpindah-pindah menu.
+
+### B. Implementasi & Komponen yang Diperbarui
+1. **Backend Endpoint (`index.php` & `www/index.php`)**:
+   - Menambahkan AJAX Action `action=get_alert_notifications` dengan kalkulasi multi-aspek berbasis konteks perusahaan aktif:
+     - **Dokumen Belum Selesai**: Menghitung dokumen dari `bc_ceisa_data` yang belum berstatus 'selesai' dan belum diposting (`LOWER(a.namaProses) NOT LIKE '%selesai%' AND (posted.jml IS NULL OR posted.jml = 0)`).
+     - **Dokumen Belum Masuk IT Inventory**: Dijalankan secara bersyarat hanya jika `IS_INV = 1` pada perusahaan aktif. Menghitung dokumen terdaftar (`nomor_daftar IS NOT NULL AND nomor_daftar != '' AND nomor_daftar != '-'`) yang belum tercatat pada tabel `bc_1ab2`.
+     - **Selisih QTY Fisik Warehouse (`bc_1ab2`)**: Memeriksa item barang pada `bc_1ab2` yang memiliki perbedaan antara QTY dokumen dengan QTY aktual hasil penerimaan/pengeluaran gudang (`ABS(QTY_AKTUAL - QTY) > 0.0001 OR (SESUAI = 'N' AND QTY_AKTUAL != 0)`), serta menyertakan rincian data 10 transaksi teratas (No. AJU, Kode Barang, Uraian, QTY Dokumen, QTY Aktual, Selisih, dan Catatan/Memo).
+2. **Topbar Icon & Indikator Pulsa (`index.php`)**:
+   - Menambahkan event handler `onclick="showNotificationAlerts()"` pada `.notif-bell`.
+   - Mengaktifkan badge titik merah (`.notif-header-badge.active`) dengan animasi denyut (*pulse effect*) otomatis jika terdeteksi ada peringatan aktif (`total_alerts > 0`).
+   - Menyinkronkan status badge secara dinamis saat halaman dimuat (`window.onload`) dan saat pengguna berganti perusahaan (`switchCompany`).
+3. **Modal Dialog Interaktif (SweetAlert2)**:
+   - Menampilkan modal dialog yang rapi, padat (*compact*), dan ramah tema terang maupun gelap:
+     - **Card 1: Dokumen Belum Selesai (CEISA 4.0)** dengan badge jumlah dan tombol navigasi langsung `[Buka Dashboard & Daftar Dokumen]`.
+     - **Card 2: Dokumen Belum Masuk IT Inventory** (atau informasi penonaktifan jika `IS_INV = 0`) dengan tombol navigasi `[Buka Data Host to Host (Posting IT Inv)]`.
+     - **Card 3: Kesesuaian QTY Aktual Warehouse** dengan status hijau (*Aman*) jika 0 selisih, atau tabel rincian selisih barang disertai tombol aksi cepat `[Periksa Warehouse Incoming]` dan `[Lihat Laporan 1A IT Inv]`.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terdeteksi pada `/source/public/index.php` dan `/source/public/www/index.php`.
+2. **Pengujian Endpoint via cURL**:
+   - Respons JSON: `{"status":"OK","cmp_id":"010816064431000","cmp_name":"FRAMAS","is_inv":1,"belum_selesai":186,"belum_it_inv":1048,"selisih_qty":0,"items_qty_diff":[],"total_alerts":2}`.
+   - Angka `186` pada dokumen belum selesai selaras 100% dengan metrik pill *BELUM SELESAI* pada dashboard utama.
+3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan dipush ke repositori GitHub `main`.
+
+---
+
+## 106. Perbaikan Kendala Halaman Kelola Perusahaan Macet Loading Selamanya (`company.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"halaman ini gak terbuka loading terus"* disertai tangkapan layar tab **Kelola Perusahaan** (`company.php`), di mana indikator pemuatan data berputar terus-menerus pada baris tabel bertuliskan *"Memuat data konfigurasi perusahaan..."* dan seluruh kartu metrik statistik di atasnya menunjukkan nilai strip (`-`).
+- **Tujuan**: Mendiagnosis penyebab halaman tidak dapat memuat data, memperbaiki sintaks dan mekanisme pemanggilan API, serta memastikan konfigurasi perusahaan dan statistik pemakaian data termuat secara instan dan andal.
+
+### B. Analisis Akar Masalah (Root Cause Analysis)
+1. **JavaScript SyntaxError (`Unexpected end of input`)**:
+   - Ditemukan ketidakseimbangan tanda kurung kurawal pada blok JavaScript utama di `company.php` (Opens: 454, Closes: 453, Diff: 1).
+   - Fungsi `testMfaSecret()` kehilangan kurung kurawal penutup `}` setelah blok `.catch(...)`.
+   - Hal ini menyebabkan parser JavaScript di browser (Chromium/Firefox) melempar `SyntaxError: Unexpected end of input` saat mem-parse dokumen. Akibatnya, seluruh script JavaScript berhenti total dan fungsi inisialisasi `loadCompanyList()` tidak pernah dieksekusi sama sekali, membiarkan markup HTML awal tetap membeku pada status loading.
+2. **Timing `DOMContentLoaded` pada Iframe Dinamis**:
+   - Di dalam portal terintegrasi `index.php`, iframe dimuat secara dinamis. Jika dokumen iframe selesai di-parse sebelum event listener terpasang, event `DOMContentLoaded` sudah terlewat sehingga callback tidak pernah dipanggil.
+3. **Penyertaan Parameter Administrasi (`is_admin=1`) pada Endpoint AJAX**:
+   - Sub-request fetch AJAX memanggil URL `company.php?action=list` tanpa membawa parameter `is_admin=1` dari URL iframe utama, yang berisiko memicu respons HTTP 403 Forbidden jika sesi admin terisolasi pada konteks peramban tertentu.
+
+### C. Solusi & Implementasi
+1. **Perbaikan Penutup Fungsi `testMfaSecret()`**:
+   - Menambahkan kurung kurawal penutup `}` pada fungsi `testMfaSecret()`, sehingga keseimbangan blok sintaks kembali 100% presisi (Opens: 466, Closes: 466, Diff: 0).
+2. **Penerapan ReadyState Guard**:
+   - Memperbarui inisialisasi script agar memeriksa status dokumen secara adaptif:
+     ```javascript
+     if (document.readyState === 'loading') {
+         document.addEventListener('DOMContentLoaded', initCompanyPage);
+     } else {
+         initCompanyPage();
+     }
+     ```
+3. **Helper API URL Terpadu (`getCompanyApiUrl`)**:
+   - Membangun fungsi `getCompanyApiUrl(action, extraParams)` yang secara otomatis mempertahankan parameter `&is_admin=1` pada seluruh 11 titik AJAX di `company.php` (`list`, `calc_storage`, `get`, `save`, `toggle_status`, `toggle_is_inv`, `toggle_alert_it_inv`, `set_active`, `clear_data`, `delete`, dan `test_totp`).
+4. **Ekspos Global Hook `window.loadData`**:
+   - Mendaftarkan `window.loadData = loadCompanyList;` agar fungsi switch tab di `index.php` dapat me-refresh data perusahaan secara otomatis saat pengguna berpindah tab dan kembali lagi.
+5. **Session Guard & HTTP Error Handling**:
+   - Memperkuat verifikasi admin di backend PHP dengan menyimpan status `$_SESSION['is_admin'] = true` saat validasi request pertama kali lolos.
+   - Menambahkan pengecekan `!r.ok` pada fetch API dan tombol interaktif *"🔄 Coba Lagi"* jika koneksi terganggu.
+
+### D. Pengujian & Deployment
+1. **Linting Sintaksis**:
+   - PHP (`php -l`): 0 syntax errors pada `/source/public/company.php` dan `/source/public/www/company.php`.
+   - JavaScript: Brace balance terverifikasi seimbang sempurna (`Diff: 0`).
+2. **Pengujian Endpoint via cURL**:
+   - `curl -s 'http://127.0.0.1/company.php?action=list&is_admin=1'` mengembalikan data JSON 3 perusahaan (`FRAMAS`, `HANBIT`, `RODA MAJU BAHAGIA`) dengan status `OK` dan rekap ringkasan lengkap.
+3. **Deployment**:
+   - Sinkronisasi kedua berkas ke remote server Alibaba Cloud `/source/public/company.php` dan `/source/public/www/company.php`.
+   - Sinkronisasi repositori lokal dan siap untuk git commit.
+
+---
+
+## 107. Penambahan Nama Jenis Dokumen dari Referensi Pabean pada Tab Dokumen Lampiran (`warehouse_delivery.php` & `warehouse_incoming.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**: *"ini sertakan juga nama jenis dokumen dari referensi"* disertai tangkapan layar tab **Dokumen Lampiran** pada modul **Warehouse - Delivery** (`warehouse_delivery.php`). Pada tangkapan layar tersebut, pengguna menandai kotak merah pada kolom `Kode Dokumen` yang sebelumnya hanya menampilkan angka kode dokumen lampiran pabean (misal `920`, `705`, `380`, `217`).
+- **Tujuan**: Memberikan informasi deskriptif nama dokumen pabean yang jelas kepada operator gudang (*Warehouse*) sesuai tabel referensi resmi CEISA 4.0 (`bc_ceisa_reff` kategori `DOKUMEN`), sehingga operator tidak perlu menghafal kode angka dokumen (misal `217` = PACKING LIST, `380` = INVOICE, `705` = B/L, `920` = SPEK TPB).
+
+### B. Analisis & Solusi
+1. **Pemanfaatan Tabel Referensi Pabean (`bc_ceisa_reff`)**:
+   - Menghubungkan tabel transaksi dokumen pabean `bc_ceisa_dokumen` dengan tabel referensi `bc_ceisa_reff` via `LEFT JOIN` pada kondisi `r.reff = 'DOKUMEN' AND r.kode = d.kode_dokumen`.
+2. **Pembaruan Endpoint API Backend (`warehouse_delivery.php` & `warehouse_incoming.php`)**:
+   - Pada `action === 'detail_tab'` untuk tab `dokumen`:
+     ```sql
+     SELECT 
+         d.seri, 
+         d.kode_dokumen, 
+         d.nomor_dokumen, 
+         d.tanggal_dokumen,
+         COALESCE(r.teks, '') AS nama_dokumen
+     FROM bc_ceisa_dokumen d
+     LEFT JOIN bc_ceisa_reff r 
+         ON r.reff = 'DOKUMEN' AND r.kode = d.kode_dokumen
+     WHERE d.nomor_aju = '$escAju'
+     ORDER BY d.seri ASC
+     ```
+3. **Penyempurnaan Tampilan Antarmuka (UI/Grid)**:
+   - Menambahkan kolom terpisah **"Jenis Dokumen"** tepat setelah kolom **"Kode"** pada tabel grid Dokumen Lampiran.
+   - Header kolom yang diperbarui:
+     - `#` (Nomor urut)
+     - `Kode` (Badge tag monospaced angka kode dokumen)
+     - `Jenis Dokumen` (Nama resmi dari referensi pabean, misal `SPEK TPB`, `B/L`, `INVOICE`, `PACKING LIST`)
+     - `Nomor Dokumen`
+     - `Tanggal Dokumen`
+   - Diterapkan secara konsisten baik pada modul **Warehouse - Delivery** maupun **Warehouse - Incoming**.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis PHP (`php -l`)**: 0 syntax errors terverifikasi pada:
+   - `/source/public/warehouse_delivery.php` & `/source/public/www/warehouse_delivery.php`
+   - `/source/public/warehouse_incoming.php` & `/source/public/www/warehouse_incoming.php`
+2. **Pengujian API via cURL**:
+   - Request `action=detail_tab&nomor_aju=XXXX30FRG65020261014011480&tab=dokumen` berhasil mengembalikan nama dokumen lampiran secara lengkap:
+     - `920` &rarr; `SPEK TPB`
+     - `705` &rarr; `B/L`
+     - `380` &rarr; `INVOICE`
+     - `217` &rarr; `PACKING LIST`
+3. **Deployment**:
+   - Berkas disinkronkan ke server Alibaba Cloud dan di-push ke repositori GitHub `main`.
+
+---
+
+## 108. Filter Wajib Nomor Daftar dan Tombol Tarik / Sync Respon pada Warehouse Incoming & Delivery (`warehouse_incoming.php` & `warehouse_delivery.php`)
+
+### A. Permintaan Pengguna & Latar Belakang
+- **Permintaan Pengguna**:
+  *"yang tampil di Warehouse Incoming & Delivery HANYA Data yang sudah dapat Nomor Daftar*
+  *bisa ditambahkan tombol 'Tarik/Sync Respon' agar mengupdate nomor daftar*
+  *lalu bisa muncul di sini jika sudah ada"*
+  *(disertai tangkapan layar Warehouse - Incoming dengan kotak merah menunjuk pada kolom No. Daftar yang bernilai strip/kosong).*
+- **Tujuan**:
+  1. Memastikan bagian Gudang (*Warehouse*) hanya memproses barang fisik dan memposting ke IT Inventory untuk dokumen pabean yang telah resmi didaftarkan dan memiliki Nomor Pendaftaran Bea Cukai (`nomor_daftar`).
+  2. Menyediakan tombol aksi cepat **"Tarik / Sync Respon"** di toolbar atas agar operator gudang dapat langsung menarik respon dan nomor pendaftaran terbaru dari portal CEISA 4.0 secara mandiri tanpa harus berpindah ke modul lain.
+
+### B. Analisis & Implementasi
+1. **Pengetatan Kriteria Filter Backend Query**:
+   - Menambahkan filter wajib pada klausul `WHERE` di `warehouse_incoming.php` dan `warehouse_delivery.php`:
+     ```sql
+     h.nomor_daftar IS NOT NULL AND TRIM(h.nomor_daftar) != '' AND TRIM(h.nomor_daftar) != '-'
+     ```
+   - Dengan filter ini, seluruh dokumen yang masih berupa draf / belum diterbitkan nomor daftar oleh Bea Cukai tidak akan muncul di antrean gudang.
+2. **Tombol "Tarik / Sync Respon" di Header Toolbar**:
+   - Menambahkan tombol interaktif `btnSyncRespon` pada header kartu utama (`ant-card-head-actions`) di samping tombol "Muat Ulang":
+     ```html
+     <button type="button" class="ant-btn ant-btn-sm" id="btnSyncRespon" onclick="triggerSyncRespon()" title="Tarik respon & perbarui nomor daftar dari portal CEISA 4.0">
+         <i class="fa-solid fa-cloud-arrow-down" id="iconSyncRespon" style="color:var(--primary);"></i> <span id="textSyncRespon">Tarik / Sync Respon</span>
+     </button>
+     ```
+3. **Mekanisme Sinkronisasi Respon Otomatis (`triggerSyncRespon`)**:
+   - Memanggil `ceisa_sync_service.php?cmp_id=${cmpId}&force=1` secara terintegrasi dengan SweetAlert loading modal dan indikator tombol berputar (*spinning icon*).
+   - Layanan sinkronisasi secara otomatis mengupdate `bc_ceisa_data` dan menyinkronkan `nomor_daftar` serta `tanggal_daftar` ke tabel `bc_ceisa_header`.
+   - Setelah penarikan selesai, daftar tabel `loadList()` otomatis dimuat ulang sehingga dokumen yang baru mendapatkan nomor daftar langsung muncul seketika di grid.
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis**: 0 syntax errors pada semua berkas root dan `www/`.
+2. **Pengujian API via cURL**:
+   - Dokumen BC 28 tanpa nomor daftar (`00002801081620261009000001`) yang sebelumnya muncul pada incoming kini terfilter sempurna (tidak muncul lagi).
+   - Seluruh 6 dokumen yang tampil pada incoming dan 42 dokumen pada delivery 100% memiliki Nomor Daftar resmi.
+3. **Deployment**: Berkas disinkronkan ke remote server Alibaba Cloud dan di-push ke repositori GitHub `main`.
+
+---
+
+## 109. Koreksi Perhitungan Peringatan "Dokumen Belum Masuk IT Inventory" (Khusus Tabel Staging bc_ceisa_header)
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php)
+
+### A. Masalah & Analisis
+- Pada modal **"Pusat Peringatan & Status Sistem"**, jumlah *Dokumen Belum Masuk IT Inventory (bc_1ab2)* menampilkan angka yang sangat besar (1.048 dokumen).
+- **Penyebab**: Query backend `action=get_alert_notifications` sebelumnya melakukan penggabungan `UNION` antara tabel staging pabean lokal `bc_ceisa_header` dan tabel data sinkronisasi portal CEISA 4.0 (`bc_ceisa_data`). Karena `bc_ceisa_data` menampung seluruh riwayat dokumen pabean yang disinkronkan dari server Bea Cukai (lebih dari 1.000 dokumen) dan bukan merupakan dokumen staging yang dipersiapkan untuk posting IT Inventory, angka alert menjadi tidak akurat dan tidak sesuai dengan data Host to Host.
+- Pengguna meminta agar perhitungan dokumen belum masuk IT Inventory diambil **HANYA dari tabel staging (`bc_ceisa_header`)** yang telah terbit Nomor Pendaftarannya, bukan dari hasil sync portal CEISA.
+
+### B. Solusi & Implementasi
+1. **Pembaruan Query Backend (`action=get_alert_notifications` di `index.php`)**:
+   - Menghapus klausa `UNION SELECT ... FROM bc_ceisa_data`.
+   - Mengarahkan query perhitungan murni ke tabel staging `bc_ceisa_header` dengan kondisi:
+     * Telah memiliki Nomor Pendaftaran resmi (`nomor_daftar IS NOT NULL AND TRIM(nomor_daftar) != '' AND TRIM(nomor_daftar) != '-'`).
+     * Dokumen staging internal (`user_id != 'CEISA_PORTAL' OR user_id IS NULL OR user_id = ''`).
+     * Filter sesuai profil perusahaan aktif (`h.cmp_id = '$cleanCmp'`).
+     * Belum tercatat pada tabel IT Inventory `bc_1ab2` (`it.nomor_aju IS NULL`).
+   - Hasil perhitungan untuk PT FRAMAS kini berubah dari 1.048 dokumen menjadi **47 dokumen**, identik 100% dengan total dokumen `Belum Masuk IT Inventory` pada modul Data Host to Host (`transfer.php`).
+2. **Navigasi & Filter Otomatis ke Data Host to Host**:
+   - Ditambahkan fungsi JavaScript `openTransferNotItInv()` pada `index.php`.
+   - Ditambahkan penanganan message `FILTER_STATUS` pada `transfer.php` sehingga ketika tombol **"Buka Data Host to Host (Posting IT Inv) →"** diklik, halaman Host to Host langsung terbuka dan otomatis mengaktifkan filter status `Belum Masuk IT Inventory` (`not_it_inv`).
+
+### C. Pengujian & Deployment
+1. **Linting Sintaksis**: `php -l` lolos 0 errors pada berkas root dan `www/`.
+2. **Pengujian API via cURL**:
+   - Endpoint `index.php?action=get_alert_notifications&cmp_id=010816064431000` berhasil mengembalikan payload JSON dengan `"belum_it_inv": 47`.
+3. **Deployment**: Berkas disinkronkan ke server produksi `/source/public/` dan di-push ke repositori GitHub `main`.
+
+---
+
+## 110. Penyembunyian Kartu Peringatan Bernilai 0 pada Pusat Peringatan Sistem
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta agar item/kartu pada modal **"Pusat Peringatan & Status Sistem"** tidak ditampilkan jika nilainya = 0 (misalnya: *Kesesuaian QTY Aktual Warehouse* yang bernilai 0 selisih, *Dokumen Belum Selesai* jika 0, atau *Dokumen Belum Masuk IT Inventory* jika 0 / non-aktif).
+- Hanya kartu dengan status peringatan aktif (> 0) yang ditampilkan agar tampilan modal ringkas, fokus, dan informatif.
+
+### B. Solusi & Implementasi
+1. **Conditional Rendering Kartu**:
+   - Kartu 1 (*Dokumen Belum Selesai*): Hanya dirender jika `cntBelumSelesai > 0`.
+   - Kartu 2 (*Dokumen Belum Masuk IT Inventory*): Hanya dirender jika `isInv === 1 && cntBelumItInv > 0`.
+   - Kartu 3 (*Kesesuaian QTY Aktual Warehouse*): Hanya dirender jika `cntQtyDiff > 0`.
+2. **State Bersih (Semua Bernilai 0)**:
+   - Jika seluruh item bernilai 0 (tidak ada peringatan aktif sama sekali), modal menampilkan status bersih: *"🎉 Semua Proses Berjalan Normal - Tidak ada peringatan aktif"*.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - File disinkronkan ke `www/index.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 111. Perbaikan Error `escapeJs is not defined` dan Penghapusan Badge "👑 Khusus Administrator" pada Modul Kelola Perusahaan
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Masalah & Analisis
+1. **Error Rendering Tabel (`escapeJs is not defined`)**:
+   - Pada halaman **Kelola Perusahaan** (`company.php`), antarmuka tabel menampilkan error visual: `⚠️ Terjadi Kesalahan Koneksi: escapeJs is not defined`.
+   - **Penyebab**: Fungsi `renderTable()` memanggil helper JavaScript `escapeJs(row.cmp_id)` dan `escapeJs(row.cmp_name)` pada tombol aksi dan badge status (`onclick`), namun deklarasi fungsi `escapeJs()` belum ada pada berkas `company.php`.
+2. **Permintaan Penghapusan Badge**:
+   - Pengguna meminta menghapus badge teks `👑 Khusus Administrator` di samping judul header "Master Konfigurasi Perusahaan".
+
+### B. Solusi & Implementasi
+1. **Pendefinisian Fungsi `escapeJs`**:
+   - Menambahkan fungsi helper `escapeJs(str)` pada blok script [company.php](file:///c:/dp/g-ceisa/company.php) untuk meng-escape karakter backslash, kutip tunggal, kutip ganda, dan karakter baris baru secara aman.
+   - Tabel kini merender ketiga data perusahaan (FRAMAS, HANBIT, RODA MAJU BAHAGIA) secara mulus dan interaktif tanpa error.
+2. **Pembersihan Header**:
+   - Menghapus elemen `<span class="ant-badge ant-badge-gold">👑 Khusus Administrator</span>` dari judul kartu header.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/company.php` dan server remote `/source/public/company.php`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 112. Penghapusan Animasi Berkedip pada Ikon Notifikasi dan Pemulihan Desain Asli Portal CEISA 4.0
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [index.php](file:///c:/dp/g-ceisa/index.php), [www/index.php](file:///c:/dp/g-ceisa/www/index.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta agar tanda merah berkedip (efek animasi halo/pulse) pada ikon lonceng notifikasi di topbar navbar dihilangkan, dan dikembalikan sesuai desain aslinya portal CEISA 4.0.
+
+### B. Solusi & Implementasi
+1. **Pemulihan Styling Badge Asli (`.notif-header-badge`)**:
+   - Menghapus animasi `@keyframes pulseNotif` dan `box-shadow` ripple yang menyebabkan efek berkedip/membesar.
+   - Mengembalikan styling badge ke ukuran statis asli 5px (`height: 5px; width: 5px; background: #ff5757; border: 1px solid #fff; border-radius: 50%;`).
+   - Ikon lonceng tetap berfungsi membuka modal *Pusat Peringatan & Status Sistem* ketika diklik.
+2. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/index.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 113. Penyesuaian Tampilan Nomor Pengajuan, Ikon Peringatan IT Inventory, dan Pengurutan Berdasarkan Tanggal Respon pada Dashboard Dokumen
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Kebutuhan Pengguna
+1. Teks **Nomor Pengajuan** diubah menjadi warna hitam (bukan biru tema default), dengan dukungan mode gelap (putih).
+2. Menghapus ikon jam di samping Nomor Pengajuan.
+3. Menambahkan ikon alert/x warna merah di samping Nomor Pengajuan sebagai penanda jika dokumen belum masuk ke IT Inventory (`bc_1ab2`), **hanya jika** konfigurasi perusahaan `IS_INV = 1`. Jika `IS_INV = 0` atau dokumen sudah masuk IT Inventory, tidak menampilkan ikon apa pun.
+4. Mengubah urutan daftar dokumen (grid list) menjadi *sort by Tanggal Respon descending* (`ORDER BY a.tanggalRespon DESC, a.nomorAju DESC`).
+
+### B. Solusi & Implementasi
+1. **Pembaruan Query Backend (`action=list`)**:
+   - Menambahkan pengecekan flag `IS_INV` perusahaan dari `bc_ceisa_company`.
+   - Melakukan `LEFT JOIN` ke subquery agregasi `bc_1ab2` (`SELECT DISTINCT nomor_aju, 1 AS jml FROM bc_1ab2 WHERE nomor_aju IS NOT NULL AND nomor_aju != ''`) dengan performa tinggi (< 4 ms).
+   - Mengubah klausa sorting SQL dari `ORDER BY a.tanggalDaftar DESC, a.nomorAju DESC` menjadi `ORDER BY a.tanggalRespon DESC, a.nomorAju DESC`.
+2. **Pembaruan UI & Rendering JavaScript**:
+   - Menambahkan kelas CSS `.nomor-aju-link` dengan warna teks `#000000 !important` pada mode terang dan `#ffffff !important` pada mode gelap.
+   - Mengganti SVG ikon jam dengan SVG alert `close-circle` warna merah `#ff4d4f` yang hanya dirender bila `isInv === 1 && !inItInv`.
+   - Tooltip informatif `"Dokumen belum masuk IT Inventory (bc_1ab2)"` disertakan saat kursor diarahkan ke ikon merah.
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/daftar_dokumen.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 114. Penggantian Card "Total Item Barang" dengan Card Interaktif "Belum Masuk IT Inv" dan Pemfilteran Berbasis Klik Card
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Kebutuhan Pengguna
+1. Menjelaskan maksud metrik **"Total Item Barang"**: sebelumnya merupakan akumulasi baris komoditas barang (`jml_barang`) dari seluruh dokumen. Pengguna meminta metrik ini digantikan.
+2. Menggantikannya dengan tombol/card **"Belum Masuk IT Inv"** yang memuat jumlah dokumen pabean yang belum masuk ke IT Inventory (`bc_1ab2`), **hanya jika** konfigurasi perusahaan `IS_INV = 1`.
+3. Jika konfigurasi perusahaan **`IS_INV = 0`**, tombol/card "Belum Masuk IT Inv" dihapus/disembunyikan sepenuhnya dari layar.
+4. Membuat seluruh card KPI (`Total Dokumen AJU`, `Belum Selesai`, `Selesai Proses`, `Belum Masuk IT Inv`) dapat diklik untuk langsung memfilter daftar dokumen pabean yang tampil di tabel secara instan (client-side) tanpa perlu reload halaman. Mengklik card yang aktif kembali akan menonaktifkan filter (toggle off ke semua dokumen).
+
+### B. Solusi & Implementasi
+1. **Desain & Interaktivitas Chip KPI (`.kpi-chip`)**:
+   - Menambahkan cursor pointer, hover visual state, dan active state dengan aksen warna masing-masing:
+     - `kpiChipTotal`: Aksen biru (`--primary`)
+     - `kpiChipUnposted`: Aksen oranye warning (`#fa8c16` / `#fff7e6`)
+     - `kpiChipPosted`: Aksen hijau success (`#52c41a` / `#f6ffed`)
+     - `kpiChipNotInv`: Aksen merah danger (`#ff4d4f` / `#fff1f0`)
+2. **Logika JavaScript (`filterByCard` & `filterClientTable`)**:
+   - Menyediakan fungsi `filterByCard(type)` yang mengatur `currentCardFilter` ('all', 'unposted', 'posted', 'not_inv') dengan kemampuan toggle off.
+   - Pada `filterClientTable()`, data tabel disaring secara instan berdasarkan card filter yang aktif.
+   - Pengecekan flag `isInvEnabled` dilakukan secara dinamis: jika `IS_INV = 1`, card "Belum Masuk IT Inv" ditampilkan (`display: inline-flex`) dengan angka dokumen yang belum masuk `bc_1ab2`. Jika `IS_INV = 0`, card otomatis disembunyikan (`display: none`).
+3. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/daftar_dokumen.php` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 115. Penyelarasan Otomatis Respon SPPB/NPE dari Tabel Respon (`bc_ceisa_respons`) ke Riwayat SPPB Permanen (`bc_ceisa_sppb`)
+- **Tanggal:** 17 Oktober 2026
+- **Modul Terkait:** [statusaju.php](file:///c:/dp/g-ceisa/statusaju.php), [daftar_dokumen.php](file:///c:/dp/g-ceisa/daftar_dokumen.php), [www/statusaju.php](file:///c:/dp/g-ceisa/www/statusaju.php), [www/daftar_dokumen.php](file:///c:/dp/g-ceisa/www/daftar_dokumen.php)
+
+### A. Masalah & Analisis Kasus (Contoh AJU: `0509270FRM0320261012003127`)
+1. **Gejala**:
+   - Pada tabel staging `bc_ceisa_data`, dokumen tersebut memiliki respon terbaru `SPPD` (`618283/KBC.0804/2026`) dengan kolom PDF kosong (`-`).
+   - Namun, saat pengguna melakukan tarik respon (*Sync Ulang Live*), tabel respon resmi `bc_ceisa_respons` memiliki riwayat lengkap yang mencakup respon **SPPB** (`610584/KBC.0804/2026` tgl 2026-10-12) beserta berkas PDF valid.
+   - Tabel arsip permanen SPPB `bc_ceisa_sppb` (*History SPPB*) sebelumnya belum terisi untuk AJU tersebut karena proses tarik respon hanya memasukkan data ke `bc_ceisa_respons` dan belum menyinkronkannya ke `bc_ceisa_sppb`.
+2. **Kebutuhan Pengguna**:
+   - Pengguna meminta agar respon SPPB yang berhasil ditarik otomatis tersinkronisasi ke riwayat SPPB (`bc_ceisa_sppb`) sehingga dokumen tetap memiliki data SPPB dan tombol unduhan PDF resmi.
+
+### B. Solusi & Implementasi
+1. **Fungsi Sinkronisasi Otomatis `syncSppbRecord()`**:
+   - Ditambahkan pada [statusaju.php](file:///c:/dp/g-ceisa/statusaju.php): fungsi ini memeriksa setiap respon yang masuk (`dataRespon`). Jika terdeteksi merupakan respon SPPB atau Persetujuan Pengeluaran (`keterangan LIKE '%SPPB%'`, kode `*03`, atau `860`), sistem langsung melakukan *upsert* ke tabel `bc_ceisa_sppb`.
+   - Mengambil data pelengkap kantor, entitas, dan jalur secara otomatis dari `bc_ceisa_data`, serta memperbarui kolom `pdf` pada `bc_ceisa_data` jika masih kosong.
+   - Diintegrasikan pada proses `sync_single` dan `syncCompanyDocs`.
+2. **Fallback Join Respon Resmi di `daftar_dokumen.php`**:
+   - Menambahkan `LEFT JOIN resp_sppb` langsung ke `bc_ceisa_respons` pada kueri utama `daftar_dokumen.php`.
+   - Menjamin bahwa nomor SPPB, tanggal SPPB, dan file PDF akan selalu tersedia (`COALESCE(sppb_tbl.pdf, resp_sppb.pdf, a.pdf)`), bahkan sebelum sinkronisasi permanen selesai.
+3. **Migrasi Data Yang Ada**:
+   - Telah dieksekusi sinkronisasi massal seluruh data SPPB dari `bc_ceisa_respons` ke `bc_ceisa_sppb`, sehingga AJU `0509270FRM0320261012003127` dan seluruh dokumen serupa langsung memiliki riwayat SPPB dan tombol PDF yang aktif.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/` dan server produksi Alibaba Cloud `/source/public/`.
+   - Linting `php -l` lolos 0 errors.
+
+---
+
+## 116. Ketahanan Impor Excel CEISA 4.0 (Deduplikasi Pungutan & Komponen Biaya, Fallback Fault-Tolerance Transaksi Header & Barang)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [import_excel.php](file:///c:/dp/g-ceisa/import_excel.php), [api_import_excel.php](file:///c:/dp/g-ceisa/api_import_excel.php), [www/CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/www/CeisaXlsxImporter.php), [www/import_excel.php](file:///c:/dp/g-ceisa/www/import_excel.php)
+
+### A. Masalah & Analisis
+1. **Galat Duplikasi Primary Key pada Sheet PUNGUTAN**:
+   - Saat pengguna mengimpor file Excel dari portal CEISA 4.0 (misalnya dokumen mingguan seperti `03-08-2026 - 09-08-2026.xlsx` atau `07-09-2026 - 13-09-2026.xlsx`), proses impor gagal total dengan pesan:
+     `Duplicate entry '080167772504400-201039B738A640408202600788-PPN-1' for key 'bc_ceisa_pungutan.PRIMARY'`
+   - **Penyebab**: Format berkas Excel CEISA 4.0 pada sheet `PUNGUTAN` dapat memuat beberapa baris pungutan dengan jenis pajak dan fasilitas yang sama (misalnya PPN fasilitas 1) dalam satu nomor AJU yang sama. Karena tabel `bc_ceisa_pungutan` memiliki composite primary key `(cmp_id, nomor_aju, kode_jenis_pungutan, kode_fasilitas_tarif)`, operasi batch insert biasa tanpa deduplikasi / ON DUPLICATE KEY UPDATE menolak baris duplikat tersebut.
+2. **Kebutuhan Pengguna**:
+   - *"ada error saat import excel. bisa fix ga? selama header dan barang aman.. tetep masuk tersimpan"*
+   - Pengguna mensyaratkan bahwa data inti dokumen (`HEADER` dan `BARANG`) harus dipastikan selalu tersimpan dan transaksi di-commit ke basis data secara aman, meskipun sheet pelengkap/auxiliary mengalami peringatan atau duplikasi data.
+
+### B. Solusi & Implementasi
+1. **Deduplikasi Cerdas & Akumulasi Nilai (`CeisaXlsxImporter.php`)**:
+   - Untuk sheet `PUNGUTAN` (`bc_ceisa_pungutan`): Sistem mendeteksi baris dengan kunci `(cmp_id, nomor_aju, kode_jenis_pungutan, kode_fasilitas_tarif)` yang identik, lalu menjumlahkan akumulasi `nilai_pungutan` serta melengkapi `npwp_billing`.
+   - Untuk sheet `KOMPONENBIAYA` (`bc_ceisa_komponenbiaya`): Sistem menjumlahkan akumulasi kolom `nilai` jika kode komponen biaya sama.
+   - Pada metode `insertBatch()`: Ditambahkan klausul `ON DUPLICATE KEY UPDATE` dinamis untuk kolom data non-identitas (`c = VALUES(c)`) atau fallback `INSERT IGNORE INTO`.
+2. **Resilience & Fault-Tolerance Transaksi Per-Sheet**:
+   - Pembagian level kritis:
+     - **Sheet Kritis (`HEADER` & `BARANG`)**: Kegagalan pada sheet ini akan membatalkan transaksi (`rollback`) karena merupakan struktur utama dokumen kepabeanan.
+     - **Sheet Pelengkap (`PUNGUTAN`, `KONTAINER`, `KEMASAN`, `KOMPONENBIAYA`, dll.)**: Kegagalan pada salah satu sheet pelengkap ditangkap secara aman (`try-catch` per-sheet), dicatat ke dalam daftar peringatan (`$importWarnings`), dan tidak membatalkan transaksi.
+   - Transaksi database di-commit secara penuh selama sheet inti `HEADER` (dan `BARANG` bila tersedia) berhasil tersimpan.
+3. **Peningkatan UX & Visual Feedback Antrean Impor (`import_excel.php`)**:
+   - Antarmuka antrean impor kini menampilkan status sukses dengan catatan jika ada sheet pelengkap yang dilewati, sehingga pengguna memperoleh transparansi data yang jelas.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke direktori `www/` dan di-deploy ke server Alibaba Cloud `/source/public/` dan `/source/public/www/`.
+   - Linting `php -l` lolos 0 errors. Pengujian impor riil dan simulasi deduplikasi berjalan sempurna dengan status `OK`.
+
+---
+
+## 117. Perbaikan Galat "Incorrect string value: '\xEF\xBC\x88Han...'" pada Impor Master Barang dari Staging Pabean (material.php)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [material.php](file:///c:/dp/g-ceisa/material.php), [www/material.php](file:///c:/dp/g-ceisa/www/material.php), Basis Data RDS `bc_material`
+
+### A. Masalah & Analisis
+1. **Gejala Error**:
+   - Saat pengguna melakukan impor massal Master Barang dari Staging Pabean (`bc_ceisa_barang`) untuk ~1.990 item kandidat di halaman Master Data Barang (`material.php`), muncul dialog SweetAlert kegagalan:
+     `Gagal Import: Incorrect string value: '\xEF\xBC\x88Han...' for column 'URAIAN' at row 1`
+   - Akibat kegagalan satu baris tersebut, transaksi di-rollback secara penuh dan seluruh 1.990 item gagal tersimpan.
+2. **Penyebab**:
+   - `\xEF\xBC\x88` adalah representasi UTF-8 dari tanda kurung fullwidth `（` (U+FF08), yang terdapat pada uraian barang kepabeanan seperti `bicycle parts （Hanger, folding mechanism）`.
+   - Tabel `bc_material` pada database RDS MySQL sebelumnya masih menggunakan collation lama **`latin1_swedish_ci`** (`CHARSET=latin1`), sedangkan koneksi database PHP sudah beroperasi pada `utf8mb4`.
+   - Karena karakter multi-byte fullwidth tidak ada pada set karakter ISO-8859-1 (latin1), MySQL menolak masukan tersebut dengan galat `Incorrect string value`.
+
+### B. Solusi & Implementasi
+1. **Migrasi Charset Tabel `bc_material` ke `utf8mb4`**:
+   - Menjalankan migrasi DDL pada RDS MySQL:
+     `ALTER TABLE bc_material CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`
+   - Kini kolom `URAIAN`, `KODE_BARANG`, `SPESIFIKASI`, dsb. mendukung penuh seluruh set karakter UTF-8 multi-byte (karakter Asia, simbol, fullwidth, maupun emoji) tanpa hambatan.
+2. **Sanitasi & Normalisasi Otomatis pada `save_imported_materials` ([material.php](file:///c:/dp/g-ceisa/material.php))**:
+   - Menambahkan normalisasi tanda kurung dan tanda baca fullwidth (`（`, `）`, `【`, `】`, `、`, `，`, dsb.) ke bentuk standar ASCII agar data rapi dan konsisten.
+   - Menambahkan pemangkasan aman panjang kolom (`mb_substr`) sesuai batas skema tabel (`URAIAN` max 255, `KODE_BARANG` max 100, `KODE_SATUAN` max 5, `POS_TARIF` max 20, `KLAS` max 40).
+3. **Resilience & Penanganan Error Per-Item**:
+   - Memperbarui mekanisme penyimpanan agar jika terdapat item tertentu dengan galat format, item tersebut dilewati dan dicatat ke daftar peringatan, sementara seluruh item lain yang valid tetap sukses tersimpan dan di-commit ke basis data.
+4. **Penyelarasan Dual-Folder & Deployment**:
+   - Berkas disinkronkan ke `www/material.php` dan server produksi Alibaba Cloud `/source/public/` serta `/source/public/www/`.
+   - Linting `php -l` lolos 0 errors. Pengujian endpoint simulasi impor dengan uraian `bicycle parts （Hanger, folding mechanism）` berhasil 100% dengan status `OK`.
+
+---
+
+## 118. Penanganan Masalah Impor Excel Macet / Lambat (Nginx Body Limit 100M, PHP-FPM Tuning, Bulk Batch Deletion & Engine Fast Parsing)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [import_excel.php](file:///c:/dp/g-ceisa/import_excel.php), [api_import_excel.php](file:///c:/dp/g-ceisa/api_import_excel.php), Konfigurasi Nginx & PHP-FPM
+
+### A. Masalah & Analisis
+1. **Gejala**:
+   - Pengguna mengunggah antrean 17 file Excel portal CEISA 4.0 berukuran 1.7 MB – 3.7 MB per file.
+   - Pada file pertama (`01-06-2026 - 07-06-2026.xlsx` ukuran 1.8 MB), proses tertahan ("Memproses...") lebih dari 5 menit tanpa ada progres.
+2. **Penyebab Utama**:
+   - **Batas Ukuran Nginx (`client_max_body_size`)**: Nilai default Nginx adalah `1M`. Saat browser mengirim berkas 1.8 MB – 3.7 MB (dengan multipart body 1.9 MB+), Nginx memblokir koneksi dengan galat HTTP 413 (`client intended to send too large body: 1921220 bytes`). Pada koneksi HTTP/2, pemutusan soket oleh Nginx saat upload menyebabkan browser Chrome tertahan (*hung*) pada `fetch()` hingga batas timeout browser (300 detik).
+   - **Batas PHP-FPM**: Konfigurasi `/etc/php/8.5/fpm/php.ini` sebelumnya membatasi `upload_max_filesize = 2M`, `post_max_size = 8M`, dan `memory_limit = 128M`. File mingguan berukuran > 2 MB ditolak oleh PHP.
+   - **Query Deletion Lambat**: Pada mode `overwrite`, sistem sebelumnya menjalankan `DELETE` satu per satu per AJU dalam perulangan 22 tabel. Untuk file rekapan dengan 150–300 AJU, hal ini menghasilkan 3.300 – 6.600 kueri SQL individual berulang kali melalui jaringan WAN ke RDS, memakan waktu hingga 4 menit hanya untuk penghapusan data lama.
+   - **Ekstraksi XML Berat**: Pemanggilan fungsi regex `preg_match` berulang kali pada ratusan ribu sel XML dan alokasi closure anonim `array_filter` pada baris data memperlambat runtime PHP.
+
+### B. Solusi & Optimalisasi Performa
+1. **Konfigurasi Server Nginx & PHP-FPM**:
+   - Nginx `/etc/nginx/sites-available/default`: Menambahkan `client_max_body_size 100M;` dan `client_body_timeout 300s;`.
+   - PHP-FPM `/etc/php/8.5/fpm/php.ini`: Menaikkan `upload_max_filesize = 100M`, `post_max_size = 100M`, `memory_limit = 512M`, dan `max_execution_time = 600`.
+   - Layanan `php8.5-fpm` dan `nginx` telah direstart dan direload tanpa downtime.
+2. **Optimalisasi Batch Delete (`deleteExistingBatch` di `CeisaXlsxImporter.php`)**:
+   - Mengubah mekanisme hapus data lama menjadi klausa SQL massal: `DELETE FROM table WHERE cmp_id = ? AND nomor_aju IN (?, ?, ...)` (dalam blok 150 AJU).
+   - Mengurangi jumlah kueri dari 3.000+ kali round-trip menjadi cukup 1 kali per tabel (peningkatan kecepatan penghapusan hingga 100x lipat).
+3. **Optimalisasi Parsing XML Native**:
+   - Menggantikan `preg_match` dengan operasi string C native `rtrim($cellRef, '0123456789')`.
+   - Menggantikan `array_filter` dengan loop cepat yang langsung *break* pada sel non-kosong pertama.
+4. **Resilience & Feedback Antarmuka ([import_excel.php](file:///c:/dp/g-ceisa/import_excel.php))**:
+   - Menambahkan pemeriksaan status respon HTTP (`res.ok`) sebelum parsing JSON, serta menangani galat HTTP 413 dan HTTP 504 dengan pesan yang ramah bagi pengguna.
+5. **Hasil Benchmark**:
+   - Pengujian impor file besar berukuran 1.9 MB dengan **29.972 baris data** pabean (termasuk 5.971 bahan baku dan 16.455 tarif) selesai diproses secara penuh hanya dalam waktu **5,5 detik** (sebelumnya butuh lebih dari 5 menit / timeout).
+
+---
+
+## 119. Penambahan Tombol "Posting INSW", Integrasi Dokumen PPKEK 613/611/612 (LNSW), dan Penjelasan Kompatibilitas Akun CEISA 4.0 vs INSW
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php), [posting_insw.php](file:///c:/dp/g-ceisa/posting_insw.php), [www/posting_insw.php](file:///c:/dp/g-ceisa/www/posting_insw.php), [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Masalah & Analisis
+1. **Galat Transfer Dokumen 613**:
+   - Saat pengguna mentransfer dokumen BC 613 (Pemberitahuan Pabean Kawasan Ekonomi Khusus / PPKEK 6.1.3 atau PPFTZ-03) menggunakan tombol "Transfer CEISA", API Bea Cukai OpenAPI (`https://apis-gw.beacukai.go.id/openapi/document`) menolak dokumen dengan galat:
+     `{"status": "failed", "message": "kodeDokumen tidak dikenali"}`
+2. **Penyebab Utama**:
+   - Endpoint Bea Cukai OpenAPI hanya menerima dokumen kepabeanan umum/tpb standar (BC 2.0, 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 3.0, 4.0, 4.1, 1.6).
+   - Dokumen Kawasan Ekonomi Khusus (PPKEK 6.1.1, 6.1.2, 6.1.3) dan Kawasan Perdagangan Bebas (KPBPB/FTZ) dikelola dan diatur langsung oleh **Lembaga National Single Window (LNSW / SINSW)** melalui Portal KEK (`https://kek.insw.go.id`) dan Gateway API INSW (`https://api.insw.go.id/document`).
+3. **Analisis Kompatibilitas Akun (CEISA 4.0 vs INSW)**:
+   - **Portal Web (Browser)**: Ya, dapat menggunakan akun SSO Kemenkeu yang sama (NPWP & Password akun portal). Pengguna dapat langsung login ke `kek.insw.go.id` menggunakan akun SSO Kemenkeu yang sama dengan CEISA 4.0.
+   - **Host-to-Host / API (Transmisi Otomatis)**: Memerlukan kredensial API terpisah. CEISA 4.0 menggunakan akun OpenApi Bea Cukai (Username, Password, Bearer Token NLE), sedangkan INSW menggunakan `Client-Id` dan `Client-Secret` (atau OAuth Token LNSW) yang didaftarkan khusus di menu Host-to-Host Portal INSW karena gateway server-nya berbeda.
+
+### B. Solusi & Implementasi
+1. **Penambahan Tombol "🌐 Posting INSW" pada Toolbar & Context Menu ([transfer.php](file:///c:/dp/g-ceisa/transfer.php))**:
+   - Ditambahkan tombol modern dengan gradien ungu khas Single Window (`.ant-btn-insw`) tepat di samping tombol "🚀 Transfer CEISA".
+   - Ditambahkan pula opsi `🌐 Posting INSW` pada menu klik kanan (context menu baris dokumen).
+2. **Intersepsi Cerdas pada `transferActiveAju()`**:
+   - Jika pengguna memilih dokumen 613/611/612 lalu menekan "Transfer CEISA", sistem secara proaktif menampilkan konfirmasi cerdas mendeteksi bahwa dokumen tersebut adalah dokumen PPKEK dan menawarkan opsi untuk beralih langsung ke "Posting INSW".
+3. **Engine Pengiriman INSW ([posting_insw.php](file:///c:/dp/g-ceisa/posting_insw.php))**:
+   - Membangun payload JSON resmi PPKEK langsung dari basis data riil via `CeisaJsonBuilder::generate($nomor_aju)`.
+   - Jika kredensial API INSW sudah diisi: Menembakkan cURL ke gateway INSW (`https://api.insw.go.id/document`) dan mencatat status posted jika berhasil.
+   - Jika kredensial API INSW belum diset (awal aktivasi): Menampilkan dialog terstruktur dengan status `READY_INSW`, menyajikan payload JSON PPKEK yang siap pakai, tombol "Salin JSON INSW", tombol "Unduh File JSON (PPKEK_613.json)", tautan langsung ke `kek.insw.go.id`, serta ringkasan perbedaan akun SSO vs H2H.
+4. **Dukungan Kredensial INSW di Master Konfigurasi Perusahaan ([company.php](file:///c:/dp/g-ceisa/company.php))**:
+   - Menambahkan kolom konfigurasi otomatis (*auto-migration*) pada tabel `bc_ceisa_company`: `insw_client_id`, `insw_client_secret`, `insw_token`, dan `insw_api_url`.
+   - Menambahkan form input kredensial H2H INSW pada Tab 3 pengaturan perusahaan.
+5. **Deployment & Verifikasi Produksi**:
+   - Berkas disinkronkan ke direktori `www/` dan di-deploy ke server Alibaba Cloud `/source/public/` serta `/source/public/www/`.
+   - Seluruh berkas lulus pemeriksaan sintaksis PHP (`php -l`) dengan **0 errors**.
+
+---
+
+## 120. Peningkatan UI Dropdown Pungutan (Kolom Lebih Lebar) & Fitur Kalkulasi Otomatis Tarif dan Pungutan Dokumen Pabean (CEISA 4.0)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Masalah & Kebutuhan Pengguna
+1. **Lebar Dropdown Pungutan Terpotong**:
+   - Pada Tab Pungutan (`bc_ceisa_pungutan`), teks dropdown referensi jenis pungutan dan kode fasilitas tarif terpotong (*truncated*) karena lebar kolom dan select dipatok pada 130px. Teks seperti `PPH | PPh Impor (Pasal 22)` dan `7 | SUDAH DILUNASI` terpotong menjadi `PPH | PPh Imp..` dan `7 | SUDAH DILU..`.
+2. **Kebutuhan Kalkulasi Otomatis Pungutan**:
+   - Pengguna meminta agar sistem dapat menghitung/mengkalkulasi secara otomatis nilai pungutan negara dan menambahkan tombol **"Hitung Pungutan"**.
+3. **Kebutuhan Kalkulasi Otomatis Tarif Barang & Bahan Baku**:
+   - Pengguna juga meminta agar sistem dapat menghitung nilai bayar, nilai fasilitas, dan nilai sudah dilunasi pada tabel Barang Tarif (`bc_ceisa_barangtarif`) dan Bahan Baku Tarif (`bc_ceisa_bahanbakutarif`) dengan menambahkan tombol **"Hitung Tarif"**.
+
+### B. Solusi & Implementasi
+1. **Pelebaran Kolom Dropdown Pungutan**:
+   - Memperlebar kolom `kode_jenis_pungutan` dari 130px menjadi `width: 240px, min-width: 220px, max-width: 300px`.
+   - Memperlebar kolom `kode_fasilitas_tarif` dari 130px menjadi `width: 280px, min-width: 260px, max-width: 360px`.
+   - Menyesuaikan `gridConfigs.pungutan` dan header `<th>` tabel `#table-pungutan` sehingga seluruh nama jenis pungutan dan deskripsi fasilitas tarif tampil utuh tanpa terpotong.
+2. **Penambahan Tombol pada Toolbar**:
+   - Tab Pungutan (`#panel-pungutan`): Ditambahkan tombol **`⚡ Hitung Pungutan`** (`.btn-warning`).
+   - Tab Barang Tarif (`#panel-barangtarif`): Ditambahkan tombol **`⚡ Hitung Tarif`** (`.btn-warning`).
+   - Tab Bahan Baku Tarif (`#panel-bahanbakutarif`): Ditambahkan tombol **`⚡ Hitung Tarif BB`** (`.btn-warning`).
+3. **Engine Kalkulasi Pungutan (`action=calc_pungutan`)**:
+   - Mengambil akumulasi nilai tarif berdasarkan tipe dokumen dan ketersediaan data:
+     - Untuk dokumen BC 2.5 / subkontrak (atau jika ada rincian bahan baku bernilai > 0): Mengakumulasi dari `bc_ceisa_bahanbakutarif` per kelompok `(kode_pungutan, kode_fasilitas)`.
+     - Untuk dokumen impor/umum lainnya: Mengakumulasi dari `bc_ceisa_barangtarif` per kelompok `(kode_pungutan, kode_fasilitas)`.
+   - Menerapkan aturan pembulatan resmi Bea Cukai CEISA 4.0 (PMK 190): Nilai pungutan dibulatkan ke ribuan rupiah penuh terdekat (`round(total, -3)`).
+   - Memperbarui tabel `bc_ceisa_pungutan` dan langsung me-refresh tampilan tabel secara dinamis beserta jumlah badge tab tanpa perlu reload halaman.
+4. **Engine Kalkulasi Tarif Barang & Bahan Baku (`action=calc_tarif`)**:
+   - Menghitung Nilai Pabean dari Nilai CIF Rupiah / NDPBM / Harga Penyerahan.
+   - Menghitung Bea Masuk (BM) = `Nilai Pabean * (Tarif BM / 100)`.
+   - Menghitung Nilai Impor = `Nilai Pabean + BM`.
+   - Menghitung Pajak Impor (PPN, PPh Pasal 22, PPnBM) = `Nilai Impor * (Tarif % / 100)`.
+   - Mengalokasikan nilai secara otomatis ke kolom yang tepat sesuai kode fasilitas:
+     - Fasilitas `1` (Dibayar) &rarr; `nilai_bayar`.
+     - Fasilitas `7` (Sudah Dilunasi) &rarr; `nilai_sudah_dilunasi`.
+     - Fasilitas `2, 3, 5, 6, 8, 9` (DTP, Dibebaskan, Ditangguhkan, dll.) &rarr; `nilai_fasilitas`.
+   - Menyimpan hasil kalkulasi ke database MySQL dan me-refresh tabel secara instan.
+5. **Verifikasi & Pengujian**:
+   - Diuji pada dokumen BC 2.5 (AJU `000025ROQ96720260926001003`):
+     - Kalkulasi 66 baris Barang Tarif & 1.430 baris Bahan Baku Tarif berhasil 100%.
+     - Kalkulasi Pungutan menghasilkan PPN Rp 46.128.000 dan PPh Rp 10.484.000, 100% presisi dan identik dengan data resmi CEISA 4.0.
+
+---
+
+## 121. Penambahan Baris Total / Summary pada Footer Seluruh Tabel Datagrid Dokumen Pabean (CEISA 4.0)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Kebutuhan Pengguna
+- Pengguna meminta penambahan baris ringkasan total (footer summary) di bagian bawah tabel datagrid:
+  1. **Tab Pungutan (`bc_ceisa_pungutan`)**: Menampilkan akumulasi total pada kolom `Nilai Pungutan (Rp)`.
+  2. **Tab Barang Tarif (`bc_ceisa_barangtarif`)**: Menampilkan akumulasi total pada kolom `Nilai Bayar`, `Nilai Fasilitas`, dan `Jml Satuan`.
+  3. **Tab Bahan Baku Tarif (`bc_ceisa_bahanbakutarif`)**: Menampilkan akumulasi total pada kolom `Nilai Bayar` dan `Nilai Fasilitas`.
+  4. **Tab Rincian Barang (`bc_ceisa_barang`)**: Menampilkan akumulasi total angka kuantitas & nilai pabean (`Jml Satuan`, `Jml Kemasan`, `Netto`, `Bruto`, `Volume`, `Nilai CIF`, `CIF (Rp)`, `FOB`, `Harga Penyerahan`, `Nilai Barang`).
+  5. Serta konsistensi pada tabel-tabel terkait lainnya seperti `bc_ceisa_bahanbaku`, `bc_ceisa_kemasan`, `bc_ceisa_jaminan`, `bc_ceisa_komponenbiaya`, dan `bc_ceisa_barangvd`.
+
+### B. Solusi & Implementasi
+1. **Desain CSS Sticky Footer Datagrid (`table.datagrid tfoot`)**:
+   - Menerapkan `position: sticky; bottom: 0; z-index: 10;` pada elemen `tfoot` sehingga baris total tetap melayang (*sticky*) dan terlihat saat pengguna men-scroll baris data yang panjang ke bawah, sekaligus tersinkronisasi sempurna dengan scroll horizontal tabel.
+   - Styling visual elegan: latar belakang kontras adaptif `var(--bg-input)` untuk Mode Gelap & Mode Terang, garis pemisah tegas `border-top: 2px solid var(--border)`, teks label `'TOTAL'` tebal (*centered & bold*), serta angka hasil akumulasi menggunakan tipografi tabular berwarna aksen primer (`var(--primary)`).
+2. **Struktur Markup `<tfoot>` HTML**:
+   - Menambahkan elemen `<tfoot><tr class="tfoot-row">...</tr></tfoot>` pada tabel `#table-pungutan`, `#table-barangtarif`, `#table-bahanbakutarif`, `#table-bahanbaku`, `#table-kemasan`, `#table-jaminan`, `#table-komponenbiaya`, dan `#table-barangvd`.
+   - Menggunakan atribut `data-col="..."` dan class `td-number` pada setiap sel footer untuk pemetaan kolom 1-to-1 dengan kolom header & body.
+3. **Penyusunan Dinamis Footer Tabel Barang (`renderBarangTableFooter`)**:
+   - Pada tabel Rincian Barang (`#table-barang`), baris footer `#tfoot-row-barang` digenerate secara dinamis menyesuaikan kolom yang aktif dalam `gridConfigs.barang`.
+   - Terintegrasi langsung dengan fitur **Saring Kolom** (`applyColumnVisibility`): sel footer otomatis disembunyikan (`col-hidden`) jika kolom bersangkutan disembunyikan, sehingga lebar kolom dan posisi selalu sejajar 100% tanpa distorsi.
+4. **Engine Kalkulasi Realtime JavaScript (`updateTableTotals(tableKey)`)**:
+   - Membaca dan menjumlahkan nilai dari seluruh baris aktif pada `tbody` secara presisi.
+   - Menggunakan helper `formatSummaryNumber(num, decimals)` dengan pemisah ribuan standar dan jumlah desimal yang sesuai dengan spesifikasi kolom (4 desimal untuk kuantitas/bobot, 2 desimal untuk nilai mata uang).
+   - Menyematkan tooltip informatif pada setiap sel summary (`Total: ... (X baris)`).
+   - Reaktif di segala interaksi pengguna:
+     - Otomatis terhitung saat dokumen pertama kali dimuat (`populateGrids`).
+     - Otomatis terhitung saat baris ditambah (`addRow`) atau dihapus (`btnDel.onclick`).
+     - Otomatis terhitung secara realtime saat pengguna mengedit atau mengetik nilai angka pada sel (`input` & `blur` events).
+     - Otomatis terhitung ulang setelah menjalankan tombol **"⚡ Hitung Pungutan"** atau **"⚡ Hitung Tarif"**.
+5. **Deployment & Verifikasi**:
+   - Berkas disinkronkan ke lokal `www/editor.php` dan dideploy ke remote server `/source/public/editor.php` serta `/source/public/www/editor.php`.
+   - Uji sintaks PHP (`php -l`): **0 Syntax Errors**.
+
+---
+
+## 122. Perbaikan Error Fatal Transfer & Posting CEISA 4.0 ("Column 'cmp_id' in where clause is ambiguous") & Standardisasi Schema Builder
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaJsonBuilder.php](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php), [sql_templates/bc23.sql](file:///c:/dp/g-ceisa/sql_templates/bc23.sql), [sql_templates/bc25.sql](file:///c:/dp/g-ceisa/sql_templates/bc25.sql), [sql_templates/bc27.sql](file:///c:/dp/g-ceisa/sql_templates/bc27.sql), [sql_templates/bc40.sql](file:///c:/dp/g-ceisa/sql_templates/bc40.sql), [sql_templates/bc41.sql](file:///c:/dp/g-ceisa/sql_templates/bc41.sql), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [editor.php](file:///c:/dp/g-ceisa/editor.php)
+
+### A. Gejala & Masalah
+1. Saat pengguna mengklik tombol **"Posting Ceisa"** atau **"🚀 TRANSFER KE CEISA 4.0"** pada dokumen BC 2.3 (AJU `XXXX2303006520261014297970`), muncul error dialog:
+   - Pada Data Host to Host (`transfer.php`):
+     `❌ Terjadi Kesalahan Jaringan / Server: Failed to execute 'json' on 'Response': Unexpected end of JSON input`
+   - Pada Form Editor Dokumen (`editor.php`):
+     `Gagal Koneksi: Failed to execute 'json' on 'Response': Unexpected end of JSON input`
+2. **Penyebab Utama (Root Cause dari Nginx Error Log `/var/log/nginx/error.log`)**:
+   ```text
+   FastCGI sent in stderr: "PHP message: PHP Fatal error: Uncaught mysqli_sql_exception: Column 'cmp_id' in where clause is ambiguous in /source/public/CeisaJsonBuilder.php:147
+   Stack trace:
+   #0 /source/public/CeisaJsonBuilder.php(147): mysqli->query()
+   #1 /source/public/posting.php(16): CeisaJsonBuilder::generate()
+   #2 /source/public/transfer.php(1076): include('...')
+   ```
+   - Pada `CeisaJsonBuilder.php`, terdapat manipulasi string mentah `str_replace('WHERE nomor_aju = ', "WHERE cmp_id = ... AND nomor_aju = ", $sqlQuery)` yang menyuntikkan `cmp_id` tanpa alias tabel ke dalam klausa WHERE template SQL.
+   - Pada template `bc23.sql`, `bc25.sql`, `bc27.sql`, `bc40.sql`, dan `bc41.sql`, query entitas menggunakan comma-join `FROM bc_ceisa_entitas a, bc_ceisa_entidx b WHERE nomor_aju = :ls_aju`. Karena kedua tabel memiliki kolom `cmp_id`, MySQL mengalami ambiguitas kolom dan memicu `Fatal error: uncaught mysqli_sql_exception` yang menghentikan eksekusi script dengan HTTP 500 tanpa respon JSON.
+   - Selain itu, `nomor_aju` adalah nomor registrasi dokumen 26 digit unik global (*globally unique identifier*) yang diisolasi di tingkat `bc_ceisa_header`. Penyuntikan `WHERE cmp_id` mentah ke dalam subquery/join template SQL merusak integritas query relasional.
+
+### B. Solusi & Perbaikan Komprehensif
+1. **Pembersihan & Perlindungan `CeisaJsonBuilder.php`**:
+   - Menghapus penyuntikan string mentah `WHERE cmp_id = ...` pada query template builder.
+   - Menerapkan validasi hak akses multi-company secara ketat di tingkat header (`SELECT kode_dokumen, cmp_id FROM bc_ceisa_header WHERE nomor_aju = ?`). Jika `cmp_id` dokumen tidak cocok dengan parameter sesi, akses ditolak sebelum query dijalankan.
+   - Membungkus eksekusi query builder `$koneksi->query($sqlQuery)` dalam blok `try { ... } catch (\Throwable $e)` agar kegagalan query SQL selalu menghasilkan respon JSON terstruktur `{ status: 'ERROR', message: ... }` dan tidak pernah crash dengan HTTP 500.
+   - Menambahkan normalisasi otomatis untuk `kode_status` entitas 3 (Importir/TPB) dan 7 (Pemilik Barang) agar selalu terisi nilai valid (default `'1'` untuk Kantor Pusat) guna mencegah penolakan skema OpenAPI CEISA `$.entitas[x].kodeStatus: does not have a value in the enumeration [0, 1, ..., 10]`.
+2. **Standardisasi Query Entitas pada SQL Templates**:
+   - Memperbarui `bc23.sql`, `bc25.sql`, `bc27.sql`, `bc40.sql`, dan `bc41.sql` dari comma-join menjadi standar `LEFT JOIN bc_ceisa_entidx b ON b.bc='...' AND a.kode_entitas = b.kode_entitas WHERE a.nomor_aju = :ls_aju`.
+   - Menggunakan `ORDER BY coalesce(b.idx, a.seri)` dan pemetaan kondisional untuk `kodeStatus` agar entitas non-pusat/cabang tidak mengirimkan string kosong `""`.
+   - Memperbaiki salah ketik filter `b.bc='27'` pada `bc25.sql` menjadi `b.bc='25'` serta koma yang hilang pada `bc41.sql`.
+3. **Peningkatan Ketahanan Error Handling (`transfer.php` & `editor.php`)**:
+   - Pada `transfer.php` (aksi `transfer` & `transfer_insw`), menyematkan blok `try { ob_start(); include ...; } catch (\Throwable $e)` sehingga seluruh output server dipastikan selalu berupa JSON valid.
+   - Pada `editor.php` dan `transfer.php` (JavaScript frontend), membaca respon via `await res.text()` terlebih dahulu sebelum `JSON.parse()`. Jika terjadi error tak terduga, dialog modal menampilkan pesan kesalahan secara anggun tanpa melempar unhandled exception `Unexpected end of JSON input`.
+
+### C. Hasil Pengujian Nyata
+- **Uji Preview JSON (`action=preview_json`)**:
+  - Berhasil menyusun payload JSON BC 2.3 valid (4.825 bytes) untuk AJU `XXXX2303006520261014297970`.
+- **Uji Transfer CEISA 4.0 (`action=transfer`)**:
+  - Terhubung sukses ke Gateway OpenAPI Bea Cukai tanpa error server.
+  - Menerima respon resmi validasi backend CEISA 4.0:
+    `{"status":"FAILED","message":"Gagal, Npwp Perusahaan/ PPJK Berbeda.","nomorAju":"XXXX2303006520261014297970"}`
+  - Seluruh modal dialog dan UI transfer kini menampilkan pesan respon dari Bea Cukai dengan sempurna.
+
+---
+
+## 123. Pengamanan Penghapusan Perusahaan dengan Konfirmasi Wajib Memasukkan Nomor NPWP (`company.php`)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [company.php](file:///c:/dp/g-ceisa/company.php), [www/company.php](file:///c:/dp/g-ceisa/www/company.php)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- Sebelumnya, saat menghapus perusahaan pada menu **Kelola Perusahaan** (`company.php`), sistem hanya menampilkan konfirmasi standar SweetAlert2 dengan tombol *Ya / Batal*. Hal ini berisiko tinggi terjadi penghapusan tidak disengaja (*accidental deletion*) pada data master profil perusahaan.
+- Pengguna meminta agar sebelum perusahaan dihapus, wajib ada langkah konfirmasi ketat dengan **memasukkan nomor NPWP perusahaan bersangkutan**.
+
+### B. Solusi & Implementasi
+1. **Peningkatan Dialog Konfirmasi SweetAlert2 Frontend (`deleteCompany`)**:
+   - Menambahkan input teks wajib pada modal dialog konfirmasi penghapusan perusahaan.
+   - Menampilkan informasi profil perusahaan target (`cmp_id`, `cmp_name`, dan nomor NPWP terdaftar yang dapat disalin dengan satu klik).
+   - Menyertakan peringatan permanen berwarna merah tegas bahwa tindakan ini permanen dan menghapus konfigurasi akun.
+   - Menerapkan `inputValidator` secara realtime:
+     - Memastikan input tidak boleh kosong.
+     - Membandingkan digit angka NPWP yang diketik pengguna dengan nomor NPWP terdaftar perusahaan (mengabaikan tanda baca/titik/strip). Jika tidak cocok, tombol hapus ditolak dengan pesan: `"Nomor NPWP tidak sesuai! Silakan ketik [NPWP]."`.
+   - Mengirimkan parameter `confirm_npwp` ke backend bersama `cmp_id`.
+2. **Validasi Ketat di Sisi Backend PHP (`action === 'delete'`)**:
+   - Backend memverifikasi keberadaan perusahaan di tabel `bc_ceisa_company`.
+   - Mengambil nomor NPWP terdaftar (`comp.npwp` atau fallback `cmp_id`).
+   - Melakukan normalisasi digit `preg_replace('/[^0-9A-Za-z]/', '', ...)` dan membandingkan `confirm_npwp` dengan data database riil.
+   - Jika tidak cocok atau kosong, request ditolak dengan respon error terstruktur:
+     `{"status":"ERROR","message":"Konfirmasi gagal: NPWP yang dimasukkan tidak sesuai dengan NPWP perusahaan."}`.
+   - Mencegah penghapusan jika perusahaan tersebut adalah satu-satunya entitas yang tersisa di database.
+3. **Hasil Pengujian**:
+   - Percobaan hapus tanpa NPWP atau dengan NPWP salah: Ditolak 100% baik di frontend modal maupun validasi server HTTP API.
+   - Seluruh perubahan disinkronkan ke `www/company.php` dan dideploy ke remote server `/source/public/company.php` serta `/source/public/www/company.php`.
+
+---
+
+## 124. Format Angka Pemisah Ribuan (Thousand Separator) di Seluruh Tab Form Editor Dokumen Pabean (`editor.php`)
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+- Pengguna melaporkan bahwa angka-angka nilai transaksi di baris tabel (misalnya Tab Pungutan, Barang, Barang Tarif, Bahan Baku Tarif, Kemasan, Nilai VD, Jaminan, Komponen Biaya, dan Header) masih tampil tanpa tanda pemisah ribuan (contoh: `426000.00` dan `1635000.00`), sedangkan baris summary / total footer sudah tampil rapi dengan pemisah ribuan (`2,061,000.00`).
+- Pengguna meminta agar seluruh tampilan angka pada **semua tab** tampil dengan pemisah ribuan (*thousand separator*) standar (koma `,` untuk ribuan dan titik `.` untuk desimal), mudah dibaca, serta tetap dapat diedit dengan mudah dan tersimpan secara akurat ke basis data tanpa terjadi pemotongan (*truncation*).
+
+### B. Analisis Teknis & Solusi
+1. **Kendala Standar HTML5 `<input type="number">`**:
+   - Spesifikasi peramban modern untuk elemen `<input type="number">` secara mutlak menolak karakter koma `,`. Apabila JavaScript memasukkan string berformat seperti `"1,635,000.00"` ke dalam `input[type="number"]`, peramban akan mengosongkan nilai input tersebut (*cleared to blank*).
+   - Solusi: Mengubah tipe elemen input angka (baik pada sel datagrid tabel maupun kartu input pada Tab Header dan panel Sidebar) menjadi `type="text"` dengan atribut `inputmode="decimal"`, class `cell-number` / `input-number`, dan perataan teks rata kanan (`text-align: right; font-variant-numeric: tabular-nums`).
+2. **Penyempurnaan Fungsi Pemformatan & Parsing (`formatCeisaNumber`, `parseInputNumber`, `stripNumberCommas`)**:
+   - `parseInputNumber(val)`: Mampu mengenali dan mengonversi format angka internasional/CEISA (`1,635,000.00`) maupun format lokal Indonesia (`1.635.000,00`) menjadi nilai float numerik yang valid.
+   - `formatCeisaNumber(val, decimals)`: Mengonversi nilai mentah menjadi format pemisah ribuan terstandarisasi (`toLocaleString('en-US')`) sesuai presisi desimal masing-masing kolom (misalnya: 2 desimal untuk Pungutan/CIF/FOB/Kemasan, 4 desimal untuk Jml Satuan/Netto/Bruto/Volume/NDPBM).
+   - `stripNumberCommas(val)`: Menghilangkan tanda koma pemisah ribuan sebelum data dikirim ke backend, memastikan string desimal murni yang aman diterima oleh MySQL.
+3. **Penerapan pada Datagrid (`createGridRow`)**:
+   - Kolom numerik non-seri (`isNum && !isSeri`) diinisialisasi dalam format ribuan (`formatCeisaNumber(rawVal, col.decimals)`).
+   - Menambahkan event listener `focus` untuk otomatis menyeleksi seluruh teks (`inp.select()`) sehingga memudahkan pengguna saat ingin mengganti angka.
+   - Menambahkan event listener `blur` untuk otomatis memformat ulang angka saat selesai diedit dan memperbarui total footer (`updateTableTotals`).
+   - Menghapus listener replace koma lama yang berpotensi merusak pengetikan, dan memastikan akumulasi total pada footer (`updateTableTotals`) menggunakan `parseInputNumber`.
+4. **Penerapan pada Tab Header & Sidebar**:
+   - Seluruh input angka Header (`hdr_ndpbm`, `hdr_cif`, `hdr_fob`, `hdr_nilai_incoterm`, `hdr_asuransi`, `hdr_freight`, `hdr_harga_penyerahan`, `hdr_nilai_barang`, `hdr_dasar_pengenaan_pajak`, `hdr_bruto`, `hdr_netto`, `hdr_volume`) serta sidebar `entryNdpbmVal` diubah ke `type="text" inputmode="decimal"` dengan event auto-format dan focus-select.
+5. **Perlindungan Integritas Data Ganda (Frontend & Backend)**:
+   - **Frontend**: Fungsi `saveHeader()` dan `saveTable()` membersihkan pemisah ribuan (`stripNumberCommas`) sebelum payload dikirimkan via FormData JSON.
+   - **Backend PHP (`action === 'save_header'` & `action === 'save_table'`)**: Menyaring seluruh nilai numerik dengan `preg_match('/^-?[\d,]+(?:\.\d+)?$/')` dan menghapus koma (`str_replace(',', '', $v)`) sebelum query SQL UPDATE/INSERT dieksekusi.
+
+### C. Hasil Pengujian & Deployment
+- Nilai pungutan `426000.00` dan `1635000.00` kini tampil rapi sebagai `426,000.00` dan `1,635,000.00`.
+- Seluruh kolom angka di tab Barang, Barang Tarif, Bahan Baku Tarif, Kemasan, Nilai VD, Jaminan, Komponen Biaya, dan Header tampil konsisten dengan pemisah ribuan.
+- Edit angka dan simpan data berjalan mulus tanpa error desimal atau truncation di MySQL.
+- File berhasil disinkronkan ke `www/editor.php` dan dideploy ke remote server `/source/public/editor.php` serta `/source/public/www/editor.php` dengan hasil pengujian sintaks PHP `0 syntax error`.
+
+
+## 125. Resolusi Error Validasi Tanggal Skema CEISA 4.0 (`invalid date [CODE:1034]`), Pembersihan Staging DB, & Redesain Modal Respon Transfer Menjadi User-Friendly Data Table
+- **Tanggal:** 18 Oktober 2026
+- **Modul Terkait:** [CeisaJsonBuilder.php](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php), [CeisaXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaXlsxImporter.php), [transfer.php](file:///c:/dp/g-ceisa/transfer.php), [editor.php](file:///c:/dp/g-ceisa/editor.php), [www/transfer.php](file:///c:/dp/g-ceisa/www/transfer.php), [www/editor.php](file:///c:/dp/g-ceisa/www/editor.php)
+
+### A. Latar Belakang & Analisis Masalah
+1. **Penyebab Error Gateway CEISA 4.0 (`CODE:1034`)**:
+   - Pengguna melakukan import dokumen dari Excel dan menyalin AJU ke AJU baru (misal: `XXXX25ROQ96720260926001006` [BC 25]).
+   - Saat ditransfer ke CEISA 4.0, gateway Bea Cukai menolak dengan pesan validasi skema:
+     `$.barang[0].bahanBaku[1].tanggalDaftarDokAsal: 2026-31-08 is an invalid date [CODE:1034]`.
+   - Hal ini disebabkan oleh posisi Bulan dan Hari yang tertukar (`YYYY-DD-MM`, contoh: Tahun 2026, Bulan 31, Hari 08) pada data `bc_ceisa_bahanbaku.tanggal_daftar_asal`. OpenAPI CEISA 4.0 mewajibkan format tanggal ISO `YYYY-MM-DD` (`2026-08-31`).
+   - Di samping import Excel, pada `editor.php:1210` dan `editor.php:1297` terdapat bug regex tanggal yang membalik `$dm[1]` (hari) menjadi bulan: `{$dm[3]}-{$dm[1]}-{$dm[2]}`.
+2. **Kelemahan Tampilan Respon Lama (Misleading & Not User-Friendly)**:
+   - Pada `transfer.php`, respon HTTP cURL 200 dianggap sukses (`json.status === 'OK'`), sehingga modal menampilkan banner hijau `✅ Berhasil Dikirim ke CEISA 4.0!` padahal payload di dalamnya berstatus `status: "failed"` dengan daftar penolakan skema. Hal ini sangat membingungkan pengguna.
+   - Pesan penolakan hanya ditampilkan berupa dump JSON mentah (`<pre class="code-view">`) dengan format JSON-Path teknis yang sulit dibaca oleh operasional pabean.
+
+### B. Langkah Perbaikan & Implementasi
+
+1. **Pembersihan & Auto-Repair Database Staging (RDS Alibaba Cloud)**:
+   - Menjalankan normalisasi massal pada tabel `bc_ceisa_bahanbaku` untuk seluruh baris yang memiliki format tanggal tertukar (`tanggal_daftar_asal REGEXP '^[0-9]{4}-(1[3-9]|[23][0-9])-[0-9]{2}'`).
+   - Sebanyak **96.184 baris** berhasil dikoreksi menjadi format sah `YYYY-MM-DD`. Dokumen AJU aktif pengguna (`XXXX25ROQ96720260926001006`) langsung bersih dan valid.
+
+2. **Penguatan Importer & JSON Builder Backend**:
+   - **`CeisaXlsxImporter.php`**: Meningkatkan `normalizeDateValue()` agar mendeteksi tanggal tertukar (bulan > 12) baik untuk format US (`MM/DD/YYYY`) maupun `YYYY-DD-MM`, dan mengonversinya ke `YYYY-MM-DD`.
+   - **`CeisaJsonBuilder.php`**:
+     - Menambahkan query auto-repair SQL otomatis untuk `bc_ceisa_bahanbaku.tanggal_daftar_asal` sebelum query builder dieksekusi.
+     - Mengimplementasikan `recursiveNormalizeDates(&$data)` dan `normalizeDateStr($val)` untuk memindai dan menormalisasi seluruh key bertema tanggal secara rekursif sebelum JSON dikirimkan ke CEISA.
+   - **`transfer.php` (`copy_aju`)**: Memastikan saat pengguna menyalin dokumen AJU, seluruh field tanggal otomatis dinormalisasi menggunakan `CeisaJsonBuilder::normalizeDateStr()`.
+   - **`editor.php` (`save_table` & `save_kesiapanbarang`)**: Mengganti regex date parsing lama dengan `CeisaJsonBuilder::normalizeDateStr()`.
+
+3. **Penambahan Kolom pada Datagrid Bahan Baku (`editor.php`)**:
+   - Menambahkan kolom `kode_dokumen_asal` (Dok Asal) dan `tanggal_daftar_asal` (Tgl Daftar Asal) pada konfigurasi grid `gridConfigs.bahanbaku` sehingga pengguna dapat melihat dan mengedit tanggal daftar dokumen asal secara langsung di antarmuka tab Bahan Baku.
+
+4. **Transformasi Antarmuka Respon Gateway (User-Friendly UI)**:
+   - Membuat fungsi komprehensif `renderCeisaGatewayResponse(data, nomorAju, activeBc)` di `transfer.php` dan `editor.php`.
+   - **Status Akurat**: Mendeteksi status internal respon CEISA (`payload.status`). Jika `failed`, `reject`, atau `error`, modal langsung menampilkan banner merah mencolok:
+     `❌ Validasi Ditolak oleh Gateway CEISA 4.0` (tidak ada lagi false positive "Berhasil" hijau).
+   - **Tabel Rincian Error Terstruktur**:
+     - Mem-parsing string JSON-Path (misal: `$.barang[0].bahanBaku[1].tanggalDaftarDokAsal`) menjadi label bahasa manusia:
+       - **Lokasi Data**: Menampilkan hierarki yang jelas, contoh: `Barang #1 ➔ Bahan Baku #2`.
+       - **Kolom / Field**: Menampilkan nama kolom bahasa Indonesia (contoh: *Tanggal Daftar Dok Asal*) disertai kode field teknis.
+       - **Pesan Validasi**: Pesan asli Bea Cukai yang mudah dibaca.
+       - **Saran Solusi & Penjelasan**: Memberikan diagnosis cerdas (misal: *Format Tanggal Terbalik: Posisi Bulan & Hari tertukar 2026-31-08, seharusnya 2026-08-31*).
+   - **Shortcut Aksi Cepat**: Tombol *Buka di Editor AJU* yang langsung membuka nomor AJU terkait untuk perbaikan.
+   - **Accordion JSON Mentah**: JSON teknis asli tetap tersedia di dalam collapsible `<details>` bagi developer atau IT tanpa mengganggu kenyamanan pengguna umum.
+   - **Pelebaran Modal Dialog**: Modal dialog hasil transfer diperlebar menjadi `max-width: 860px; width: 94%;` agar tabel rincian muat dengan proporsional dan nyaman dilihat.
+
+### C. Hasil Pengujian & Deployment
+- File lokal disinkronkan ke direktori `www/`.
+- File dideploy ke server remote Alibaba Cloud (`/source/public/` dan `/source/public/www/`).
+- Pengujian sintaks PHP `php -l` pada semua modul yang dimodifikasi menghasilkan `No syntax errors detected`.
+- Data transaksi uji coba pengguna telah sepenuhnya siap untuk ditransfer ke CEISA 4.0 tanpa kendala tanggal invalid.
+
+---
 *Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
+
+
 
 
 

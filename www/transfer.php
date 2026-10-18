@@ -900,7 +900,14 @@ if ($action === 'copy_aju') {
     }
     $koneksi->query("INSERT INTO bc_ceisa_header (" . implode(',', $hdrCols) . ") VALUES (" . implode(',', $hdrVals) . ")");
 
-    $childs = ['bc_ceisa_barang', 'bc_ceisa_entitas', 'bc_ceisa_dokumen', 'bc_ceisa_kemasan', 'bc_ceisa_pengangkut', 'bc_ceisa_kontainer', 'bc_ceisa_pungutan', 'bc_ceisa_bahanbaku', 'bc_ceisa_bankdevisa', 'bc_ceisa_barangtarif', 'bc_ceisa_bahanbakutarif', 'bc_ceisa_jaminan', 'bc_ceisa_kesiapanbarang'];
+    $childs = [
+        'bc_ceisa_barang', 'bc_ceisa_entitas', 'bc_ceisa_dokumen', 'bc_ceisa_kemasan', 
+        'bc_ceisa_pengangkut', 'bc_ceisa_kontainer', 'bc_ceisa_pungutan', 'bc_ceisa_bahanbaku', 
+        'bc_ceisa_bankdevisa', 'bc_ceisa_barangtarif', 'bc_ceisa_bahanbakutarif', 'bc_ceisa_jaminan', 
+        'bc_ceisa_kesiapanbarang', 'bc_ceisa_bahanbakudokumen', 'bc_ceisa_barangdokumen', 
+        'bc_ceisa_barangentitas', 'bc_ceisa_barangspekkhusus', 'bc_ceisa_barangvd', 
+        'bc_ceisa_komponenbiaya', 'bc_ceisa_versi'
+    ];
     foreach ($childs as $tb) {
         $chkTable = $koneksi->query("SHOW TABLES LIKE '$tb'");
         if ($chkTable && $chkTable->num_rows > 0) {
@@ -910,6 +917,10 @@ if ($action === 'copy_aju') {
                     $row['nomor_aju'] = $new_aju;
                     $cols = []; $vals = [];
                     foreach ($row as $k => $v) {
+                        if ($v !== null && (strpos($k, 'tanggal') !== false || strpos($k, 'tgl') !== false || $k === 'jatuh_tempo')) {
+                            require_once __DIR__ . '/CeisaJsonBuilder.php';
+                            $v = CeisaJsonBuilder::normalizeDateStr($v);
+                        }
                         $cols[] = "`$k`";
                         $vals[] = ($v === null) ? "NULL" : "'" . $koneksi->real_escape_string($v) . "'";
                     }
@@ -952,6 +963,8 @@ if ($action === 'rename_aju') {
         'bc_ceisa_header', 'bc_ceisa_barang', 'bc_ceisa_dokumen', 'bc_ceisa_entitas', 
         'bc_ceisa_bankdevisa', 'bc_ceisa_kemasan', 'bc_ceisa_pengangkut', 'bc_ceisa_kontainer', 
         'bc_ceisa_pungutan', 'bc_ceisa_barangtarif', 'bc_ceisa_bahanbakutarif', 'bc_ceisa_bahanbaku', 
+        'bc_ceisa_bahanbakudokumen', 'bc_ceisa_barangdokumen', 'bc_ceisa_barangentitas', 
+        'bc_ceisa_barangspekkhusus', 'bc_ceisa_barangvd', 'bc_ceisa_komponenbiaya', 'bc_ceisa_versi',
         'bc_ceisa_jaminan', 'bc_ceisa_kesiapanbarang', 'bc_ceisa_aju_posted', 'bc_1ab2', 'bc_ceisa_status', 'bc_ceisa_respons'
     ];
 
@@ -1072,15 +1085,20 @@ if ($action === 'transfer') {
     $_REQUEST['nomor_aju'] = $nomor_aju;
     $_REQUEST['cmp_id']    = $cmp_id;
 
-    ob_start();
-    include __DIR__ . '/posting.php';
-    $postOutput = ob_get_clean();
+    try {
+        ob_start();
+        include __DIR__ . '/posting.php';
+        $postOutput = ob_get_clean();
 
-    $decoded = json_decode($postOutput, true);
-    if ($decoded !== null) {
-        echo json_encode(['status' => 'OK', 'nomor_aju' => $nomor_aju, 'response' => $decoded]);
-    } else {
-        echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+        $decoded = json_decode($postOutput, true);
+        if ($decoded !== null) {
+            echo json_encode(['status' => 'OK', 'nomor_aju' => $nomor_aju, 'response' => $decoded]);
+        } else {
+            echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+        }
+    } catch (\Throwable $e) {
+        if (ob_get_level() > 0) ob_end_clean();
+        echo json_encode(['status' => 'ERROR', 'nomor_aju' => $nomor_aju, 'message' => 'Transfer Error: ' . $e->getMessage()]);
     }
     exit;
 }
@@ -1099,15 +1117,20 @@ if ($action === 'transfer_insw') {
     $_REQUEST['nomor_aju'] = $nomor_aju;
     $_REQUEST['cmp_id']    = $cmp_id;
 
-    ob_start();
-    include __DIR__ . '/posting_insw.php';
-    $postOutput = ob_get_clean();
+    try {
+        ob_start();
+        include __DIR__ . '/posting_insw.php';
+        $postOutput = ob_get_clean();
 
-    $decoded = json_decode($postOutput, true);
-    if ($decoded !== null) {
-        echo json_encode($decoded);
-    } else {
-        echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+        $decoded = json_decode($postOutput, true);
+        if ($decoded !== null) {
+            echo json_encode($decoded);
+        } else {
+            echo json_encode(['status' => 'RAW', 'nomor_aju' => $nomor_aju, 'raw_response' => $postOutput]);
+        }
+    } catch (\Throwable $e) {
+        if (ob_get_level() > 0) ob_end_clean();
+        echo json_encode(['status' => 'ERROR', 'nomor_aju' => $nomor_aju, 'message' => 'Transfer INSW Error: ' . $e->getMessage()]);
     }
     exit;
 }
@@ -1870,6 +1893,402 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             background: var(--border-table);
             margin: 4px 0;
         }
+
+        /* ========================================================
+           GLOBAL MODERN LOADER & PROGRESS ANIMATIONS
+           ======================================================== */
+        /* ========================================================
+           GLOBAL ULTRA-MODERN CYBER LOADER & PIPELINE ANIMATIONS
+           ======================================================== */
+        .app-loader-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 20px 20px 20px;
+            text-align: center;
+            position: relative;
+        }
+
+        .app-loader-icon-wrap {
+            position: relative;
+            width: 86px;
+            height: 86px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 18px;
+        }
+
+        .app-loader-aura {
+            position: absolute;
+            inset: -12px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(24, 144, 255, 0.22) 0%, rgba(0, 210, 255, 0.08) 50%, transparent 70%);
+            animation: app-aura-pulse 2.2s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .app-loader-aura.insw {
+            background: radial-gradient(circle, rgba(114, 46, 209, 0.22) 0%, rgba(19, 194, 194, 0.08) 50%, transparent 70%);
+        }
+
+        .app-loader-orbit {
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 1.5px dashed rgba(24, 144, 255, 0.35);
+            animation: app-orbit 14s linear infinite;
+        }
+
+        .app-loader-orbit.insw {
+            border-color: rgba(114, 46, 209, 0.35);
+        }
+
+        .app-loader-spinner {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 3.5px solid transparent;
+            border-top-color: #1890ff;
+            border-right-color: #00d2ff;
+            animation: app-spin 0.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+            box-sizing: border-box;
+            filter: drop-shadow(0 0 6px rgba(24, 144, 255, 0.4));
+        }
+
+        .app-loader-spinner.insw {
+            border-top-color: #722ed1;
+            border-right-color: #13c2c2;
+            filter: drop-shadow(0 0 6px rgba(114, 46, 209, 0.4));
+        }
+
+        .app-loader-spinner.itinv {
+            border-top-color: #52c41a;
+            border-right-color: #faad14;
+        }
+
+        .app-loader-spinner-inner {
+            position: absolute;
+            inset: 7px;
+            border-radius: 50%;
+            border: 2.5px solid transparent;
+            border-bottom-color: #52c41a;
+            border-left-color: #13c2c2;
+            animation: app-spin-reverse 1.3s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+            box-sizing: border-box;
+        }
+
+        .app-loader-spinner-inner.insw {
+            border-bottom-color: #eb2f96;
+            border-left-color: #722ed1;
+        }
+
+        .app-loader-center-disc {
+            position: relative;
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #ffffff, #e6f7ff);
+            box-shadow: 0 4px 14px rgba(24, 144, 255, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+
+        html[data-theme="dark"] .app-loader-center-disc {
+            background: radial-gradient(circle at 30% 30%, #1f2a37, #111827);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+
+        .app-loader-center-icon {
+            font-size: 24px;
+            color: #1890ff;
+            animation: app-rocket-float 2s ease-in-out infinite;
+            display: inline-block;
+            filter: drop-shadow(0 2px 8px rgba(24, 144, 255, 0.4));
+        }
+
+        @keyframes app-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes app-spin-reverse {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+
+        @keyframes app-orbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes app-aura-pulse {
+            0%, 100% { transform: scale(0.95); opacity: 0.6; }
+            50% { transform: scale(1.15); opacity: 1; }
+        }
+
+        @keyframes app-rocket-float {
+            0%, 100% { transform: translateY(0) rotate(-4deg); }
+            50% { transform: translateY(-4px) rotate(4deg); }
+        }
+
+        .app-loader-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-heading, #1f1f1f);
+            margin-bottom: 8px;
+            letter-spacing: -0.3px;
+        }
+
+        .app-loader-desc {
+            font-size: 12px;
+            color: var(--text-muted, #595959);
+            max-width: 480px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+            min-height: 20px;
+            transition: all 0.3s ease;
+        }
+
+        /* Modern Document Meta Card */
+        .app-loader-doc-card {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 14px;
+            background: rgba(24, 144, 255, 0.06);
+            border: 1px solid rgba(24, 144, 255, 0.22);
+            border-radius: 20px;
+            margin-bottom: 16px;
+            font-size: 11.5px;
+        }
+
+        html[data-theme="dark"] .app-loader-doc-card {
+            background: rgba(24, 144, 255, 0.12);
+            border-color: rgba(24, 144, 255, 0.3);
+        }
+
+        .app-loader-doc-card .meta-bc {
+            background: #1890ff;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 10px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            letter-spacing: 0.3px;
+        }
+
+        .app-loader-doc-card .meta-bc.insw {
+            background: #722ed1;
+        }
+
+        .app-loader-doc-card .meta-aju {
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-weight: 600;
+            color: var(--text-heading, #1f1f1f);
+            letter-spacing: 0.5px;
+        }
+
+        /* 3-Step Live Pipeline Visualizer */
+        .app-pipeline-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 16px;
+            max-width: 440px;
+            width: 100%;
+        }
+
+        .app-pipeline-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            opacity: 0.45;
+            transition: all 0.4s ease;
+            flex: 1;
+        }
+
+        .app-pipeline-step.active {
+            opacity: 1;
+            transform: scale(1.04);
+        }
+
+        .app-pipeline-step.done {
+            opacity: 0.95;
+        }
+
+        .pipeline-circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-card, #ffffff);
+            border: 2px solid #d9d9d9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            color: #8c8c8c;
+            transition: all 0.4s ease;
+        }
+
+        .app-pipeline-step.active .pipeline-circle {
+            border-color: #1890ff;
+            color: #1890ff;
+            box-shadow: 0 0 12px rgba(24, 144, 255, 0.45);
+            background: rgba(24, 144, 255, 0.08);
+            animation: pulse-ring 1.8s infinite;
+        }
+
+        .app-pipeline-step.done .pipeline-circle {
+            border-color: #52c41a;
+            background: #52c41a;
+            color: #ffffff;
+        }
+
+        .pipeline-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted, #8c8c8c);
+            white-space: nowrap;
+        }
+
+        .app-pipeline-step.active .pipeline-label {
+            color: #1890ff;
+            font-weight: 700;
+        }
+
+        .app-pipeline-step.done .pipeline-label {
+            color: #52c41a;
+        }
+
+        .app-pipeline-line {
+            flex: 1;
+            height: 2.5px;
+            background: rgba(0, 0, 0, 0.08);
+            border-radius: 2px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+
+        html[data-theme="dark"] .app-pipeline-line {
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .app-pipeline-line .line-flow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #1890ff, #52c41a);
+            transition: width 0.6s ease;
+        }
+
+        .app-pipeline-line.active .line-flow {
+            width: 100%;
+        }
+
+        @keyframes pulse-ring {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.5); }
+            50% { box-shadow: 0 0 0 6px rgba(24, 144, 255, 0); }
+        }
+
+        /* Glowing Progress Track */
+        .app-loader-progress-track {
+            width: 100%;
+            max-width: 380px;
+            height: 6px;
+            background: rgba(0, 0, 0, 0.06);
+            border-radius: 999px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 14px;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+        }
+
+        html[data-theme="dark"] .app-loader-progress-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .app-loader-progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 50%;
+            background: linear-gradient(90deg, #1890ff 0%, #00d2ff 40%, #52c41a 80%, #1890ff 100%);
+            background-size: 200% 100%;
+            border-radius: 999px;
+            animation: app-bar-indeterminate 1.4s ease-in-out infinite;
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+        }
+
+        .app-loader-progress-bar.insw {
+            background: linear-gradient(90deg, #722ed1 0%, #13c2c2 40%, #52c41a 80%, #722ed1 100%);
+            background-size: 200% 100%;
+            box-shadow: 0 0 10px rgba(114, 46, 209, 0.5);
+        }
+
+        @keyframes app-bar-indeterminate {
+            0% { left: -50%; }
+            50% { left: 40%; }
+            100% { left: 100%; }
+        }
+
+        /* Live Cyber Timer Badge */
+        .app-loader-cyber-timer {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.04);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            font-size: 11px;
+            color: var(--text-muted, #8c8c8c);
+        }
+
+        html[data-theme="dark"] .app-loader-cyber-timer {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #52c41a;
+            box-shadow: 0 0 8px #52c41a;
+            animation: live-blink 1.2s ease-in-out infinite;
+        }
+
+        @keyframes live-blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.7); }
+        }
+
+        /* Universal Spinner */
+        .spinner, .app-spinner-sm {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(24, 144, 255, 0.25);
+            border-radius: 50%;
+            border-top-color: #1890ff;
+            animation: app-spin 0.75s linear infinite;
+            vertical-align: middle;
+            box-sizing: border-box;
+        }
+        .ant-btn-primary .spinner, .btn-primary .spinner {
+            border-color: rgba(255, 255, 255, 0.35);
+            border-top-color: #ffffff;
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -1919,7 +2338,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn" onclick="openManualResponModal()" title="Set Manual Respon / Isi Nomor & Tanggal Daftar / SPPB">
                             <span>📝 Set Manual Respon</span>
                         </button>
-                        <button type="button" class="ant-btn" onclick="viewJsonActiveAju()" title="Lihat Payload JSON CEISA">
+                        <button type="button" class="ant-btn" onclick="viewJsonActiveAju()" title="Lihat Data JSON CEISA 4.0">
                             <span>&#128065;&#65039; View JSON</span>
                         </button>
                         <button type="button" class="ant-btn" onclick="openEditorForm()" title="Buka Form Entri AJU Baru">
@@ -2304,10 +2723,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <div class="modal-overlay" id="modalPreviewJson">
         <div class="modal" style="max-width: 760px;">
             <div class="modal-header">
-                <h3>&#128065;&#65039; Preview JSON Payload CEISA 4.0 (<span id="previewAjuTitle">-</span>)</h3>
+                <h3>&#128065;&#65039; Preview Data JSON CEISA 4.0 (<span id="previewAjuTitle">-</span>)</h3>
                 <button type="button" class="ant-btn ant-btn-sm" onclick="closeModal('modalPreviewJson')">&times;</button>
             </div>
             <div class="modal-body">
+                <div id="jsonLoadingBox" style="display:none;"></div>
                 <pre class="code-view" id="jsonCodeView">Memuat data JSON...</pre>
             </div>
             <div class="modal-footer">
@@ -2319,16 +2739,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
     <!-- MODAL 4: HASIL TRANSFER -->
     <div class="modal-overlay" id="modalTransferResult">
-        <div class="modal" style="max-width: 600px;">
+        <div class="modal" style="max-width: 860px; width: 94%;">
             <div class="modal-header">
-                <h3>&#128640; Hasil Transfer ke Portal CEISA 4.0</h3>
-                <button type="button" class="ant-btn ant-btn-sm" onclick="closeModal('modalTransferResult')">&times;</button>
+                <h3 id="modalTransferTitle">&#128640; Hasil Transfer ke Portal CEISA 4.0</h3>
+                <button type="button" id="btnTransferCloseX" class="ant-btn ant-btn-sm" onclick="closeModal('modalTransferResult')">&times;</button>
             </div>
             <div class="modal-body">
                 <div id="transferResultContent" style="font-size:10.5px; line-height:1.5;"></div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="ant-btn ant-btn-primary" onclick="closeModal('modalTransferResult'); loadList();">Selesai</button>
+                <button type="button" id="btnTransferFinish" class="ant-btn ant-btn-primary" onclick="closeModal('modalTransferResult'); loadList();">Selesai</button>
             </div>
         </div>
     </div>
@@ -2639,7 +3059,20 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
         async function loadList() {
             const tbody = document.getElementById('hdrTbody');
-            tbody.innerHTML = '<tr><td colspan="13" style="text-align:center; padding: 20px; color:var(--text-muted);"><span class="spinner"></span> Memuat data dokumen...</td></tr>';
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="13" style="text-align:center; padding: 36px 20px;">
+                        <div class="app-loader-container" style="padding:0;">
+                            <div class="app-loader-icon-wrap" style="width:48px; height:48px; margin-bottom:10px;">
+                                <div class="app-loader-spinner"></div>
+                                <i class="fa-solid fa-database app-loader-center-icon" style="font-size:18px; color:#1890ff;"></i>
+                            </div>
+                            <div style="font-size:12.5px; font-weight:600; color:var(--text-heading);">Memuat Data Host to Host...</div>
+                            <div style="font-size:11px; color:var(--text-muted); margin-top:3px;">Mengambil daftar dokumen staging sesuai filter...</div>
+                        </div>
+                    </td>
+                </tr>
+            `;
 
             const bc = document.getElementById('filterBc').value;
             const status = document.getElementById('filterStatus').value;
@@ -2905,6 +3338,20 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         async function loadActiveDetailTab() {
             if (!activeAju) return;
 
+            const tabMap = {
+                'barang': { tbodyId: 'dtlTbodyBarang', cols: 9, label: 'Barang' },
+                'dokumen': { tbodyId: 'dtlTbodyDokumen', cols: 5, label: 'Dokumen' },
+                'status': { tbodyId: 'dtlTbodyStatus', cols: 6, label: 'Status Pabean' },
+                'respon': { tbodyId: 'dtlTbodyRespon', cols: 6, label: 'Respon CEISA' }
+            };
+            const currentTabInfo = tabMap[activeTab];
+            if (currentTabInfo) {
+                const tb = document.getElementById(currentTabInfo.tbodyId);
+                if (tb) {
+                    tb.innerHTML = `<tr><td colspan="${currentTabInfo.cols}" style="text-align:center; padding:22px 14px;"><span class="spinner"></span> <span style="margin-left:7px; font-size:11px; color:var(--text-muted);">Memuat data ${currentTabInfo.label}...</span></td></tr>`;
+                }
+            }
+
             try {
                 const res = await fetch(`transfer.php?action=detail_tab&nomor_aju=${encodeURIComponent(activeAju)}&tab=${encodeURIComponent(activeTab)}`);
                 const json = await res.json();
@@ -3091,12 +3538,33 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             );
             if (!ok) return;
 
+            Swal.fire({
+                title: 'Mengatur Status H2H...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner" style="border-top-color:#faad14; border-right-color:#faad14;"></div>
+                            <i class="fa-solid fa-bolt app-loader-center-icon" style="font-size:20px; color:#faad14;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Menandai dokumen <b>${escapeHtml(activeAju)}</b> siap untuk ditransfer ke CEISA...
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:240px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'set_h2h');
             formData.append('nomor_aju', activeAju);
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message);
                     loadList();
@@ -3104,6 +3572,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Koneksi gagal: ' + err.message);
             }
         }
@@ -3149,12 +3618,33 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             );
             if (!ok) return;
 
+            Swal.fire({
+                title: 'Posting ke IT Inventory...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner itinv"></div>
+                            <i class="fa-solid fa-box-archive app-loader-center-icon" style="font-size:20px; color:#52c41a;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Memproses mutasi stok barang dan mengunci dokumen AJU <b>${escapeHtml(ajuToPost)}</b>...
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:240px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'post_it');
             formData.append('nomor_aju', ajuToPost);
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message, 'Berhasil Diposting');
                     loadList();
@@ -3162,6 +3652,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Koneksi gagal: ' + err.message);
             }
         }
@@ -3427,6 +3918,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
+            Swal.fire({
+                title: 'Menyimpan Manual Respon...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner"></div>
+                            <i class="fa-solid fa-file-signature app-loader-center-icon" style="font-size:20px; color:#1890ff;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Menyimpan Nomor & Tanggal Daftar / SPPB ke database...
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:240px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'save_manual_respon');
             formData.append('nomor_aju', nomor_aju);
@@ -3437,6 +3948,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message, 'Manual Respon Disimpan');
                     closeModal('modalManualRespon');
@@ -3448,6 +3960,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Koneksi gagal: ' + err.message);
             }
         }
@@ -3466,12 +3979,33 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             );
             if (!ok) return;
 
+            Swal.fire({
+                title: 'Unposting Dokumen...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner" style="border-top-color:#faad14; border-right-color:#faad14;"></div>
+                            <i class="fa-solid fa-lock-open app-loader-center-icon" style="font-size:20px; color:#faad14;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Membuka kunci pengeditan dan mengarsipkan mutasi revisi dokumen AJU <b>${escapeHtml(activeAju)}</b>...
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:240px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'unpost_it');
             formData.append('nomor_aju', activeAju);
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message, 'Berhasil Unposting');
                     loadList();
@@ -3479,6 +4013,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Koneksi gagal: ' + err.message);
             }
         }
@@ -3489,23 +4024,50 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
             document.getElementById('previewAjuTitle').innerText = activeAju;
-            document.getElementById('jsonCodeView').innerText = 'Membuat JSON payload...';
+            const loadingBox = document.getElementById('jsonLoadingBox');
+            const codeView = document.getElementById('jsonCodeView');
+            if (loadingBox && codeView) {
+                loadingBox.innerHTML = `
+                    <div class="app-loader-container" style="padding: 28px 10px;">
+                        <div class="app-loader-icon-wrap" style="width:50px; height:50px; margin-bottom:12px;">
+                            <div class="app-loader-spinner"></div>
+                            <i class="fa-solid fa-code app-loader-center-icon" style="font-size:18px; color:#1890ff;"></i>
+                        </div>
+                        <div class="app-loader-title" style="font-size:13.5px;">Menyiapkan Dokumen JSON CEISA 4.0...</div>
+                        <div class="app-loader-desc" style="font-size:11px; margin-bottom:10px;">Mengompilasi header, barang, entitas, dan tarif bahan baku dari database...</div>
+                        <div class="app-loader-progress-track" style="max-width:260px; height:4px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `;
+                loadingBox.style.display = 'block';
+                codeView.style.display = 'none';
+            }
             document.getElementById('modalPreviewJson').style.display = 'flex';
 
             const cmpId = document.getElementById('filterCmp')?.value || '';
             try {
                 const res = await fetch(`transfer.php?action=preview_json&nomor_aju=${encodeURIComponent(activeAju)}&cmp_id=${encodeURIComponent(cmpId)}`);
                 const json = await res.json();
-                document.getElementById('jsonCodeView').innerText = JSON.stringify(json, null, 2);
+                if (codeView) {
+                    codeView.innerText = JSON.stringify(json, null, 2);
+                }
             } catch (err) {
-                document.getElementById('jsonCodeView').innerText = 'Gagal memuat JSON: ' + err.message;
+                if (codeView) {
+                    codeView.innerText = 'Gagal memuat JSON: ' + err.message;
+                }
+            } finally {
+                if (loadingBox && codeView) {
+                    loadingBox.style.display = 'none';
+                    codeView.style.display = 'block';
+                }
             }
         }
 
         function copyJsonToClipboard() {
             const txt = document.getElementById('jsonCodeView').innerText;
             navigator.clipboard.writeText(txt).then(() => {
-                showSuccess('JSON payload berhasil disalin ke clipboard!', 'Tersalin');
+                showSuccess('Data JSON berhasil disalin ke clipboard!', 'Tersalin');
             }).catch(() => {
                 showInfo('Salin teks JSON secara manual dari kotak preview.');
             });
@@ -3536,6 +4098,27 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
+            Swal.fire({
+                title: 'Menyalin Dokumen AJU...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner"></div>
+                            <i class="fa-solid fa-copy app-loader-center-icon" style="font-size:20px; color:#1890ff;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Menduplikasi seluruh data header, barang, bahan baku, tarif, dan dokumen ke:<br>
+                            <b style="color:var(--text-heading); font-size:13px;">${escapeHtml(newAju)}</b>
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:260px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'copy_aju');
             formData.append('old_aju', oldAju);
@@ -3545,6 +4128,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message);
                     closeModal('modalCopyAju');
@@ -3553,6 +4137,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Terjadi kesalahan: ' + err.message);
             }
         }
@@ -3590,6 +4175,27 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             );
             if (!ok) return;
 
+            Swal.fire({
+                title: 'Mengubah Nomor AJU...',
+                html: `
+                    <div class="app-loader-container" style="padding:15px 0;">
+                        <div class="app-loader-icon-wrap" style="width:52px; height:52px; margin-bottom:12px;">
+                            <div class="app-loader-spinner"></div>
+                            <i class="fa-solid fa-pen app-loader-center-icon" style="font-size:20px; color:#1890ff;"></i>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
+                            Memperbarui nomor AJU di seluruh tabel staging database...<br>
+                            <b style="color:var(--text-heading); font-size:13px;">${escapeHtml(newAju)}</b>
+                        </div>
+                        <div class="app-loader-progress-track" style="margin-top:12px; max-width:260px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `,
+                allowOutsideClick: false,
+                showConfirmButton: false
+            });
+
             const formData = new FormData();
             formData.append('action', 'rename_aju');
             formData.append('old_aju', oldAju);
@@ -3598,6 +4204,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
+                Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message);
                     closeModal('modalRenameAju');
@@ -3606,6 +4213,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     showError(json.message);
                 }
             } catch (err) {
+                Swal.close();
                 showError('Terjadi kesalahan: ' + err.message);
             }
         }
@@ -3695,6 +4303,306 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             });
         }
 
+        // -------------------------------------------------------------
+        // RENDER CEISA GATEWAY RESPONSE (USER FRIENDLY & ERROR TABLE)
+        // -------------------------------------------------------------
+        function renderCeisaGatewayResponse(data, nomorAju, activeBc) {
+            let payload = data;
+            if (data && typeof data === 'object' && data.response !== undefined && data.response !== null) {
+                payload = data.response;
+            }
+
+            // Status check
+            let isSuccess = false;
+            let statusBadgeText = 'UNKNOWN';
+
+            // Check if inner payload has status
+            const innerStatus = (payload && typeof payload === 'object' && payload.status) ? String(payload.status).toLowerCase().trim() : '';
+            const outerStatus = (data && typeof data === 'object' && data.status) ? String(data.status).toLowerCase().trim() : '';
+
+            if (innerStatus === 'ok' || innerStatus === 'success' || innerStatus === 'saved' || innerStatus === 'receive') {
+                isSuccess = true;
+                statusBadgeText = (payload.status || 'BERHASIL').toUpperCase();
+            } else if (innerStatus === 'failed' || innerStatus === 'reject' || innerStatus === 'error' || outerStatus === 'error') {
+                isSuccess = false;
+                statusBadgeText = (payload?.status || data?.status || 'GAGAL / REJECT').toUpperCase();
+            } else if (outerStatus === 'ok' && !innerStatus) {
+                const msgStr = JSON.stringify(payload || '');
+                if (msgStr.includes('invalid') || msgStr.includes('error') || msgStr.includes('failed') || msgStr.includes('is required')) {
+                    isSuccess = false;
+                    statusBadgeText = 'DITOLAK';
+                } else {
+                    isSuccess = true;
+                    statusBadgeText = 'BERHASIL';
+                }
+            } else if (outerStatus === 'raw') {
+                isSuccess = false;
+                statusBadgeText = 'RESPON MENTAH';
+            }
+
+            // Extract message(s)
+            let rawMessages = [];
+            if (payload && payload.message) {
+                if (Array.isArray(payload.message)) {
+                    rawMessages = payload.message;
+                } else {
+                    rawMessages = [String(payload.message)];
+                }
+            } else if (data && data.message) {
+                if (Array.isArray(data.message)) {
+                    rawMessages = data.message;
+                } else {
+                    rawMessages = [String(data.message)];
+                }
+            } else if (data && data.raw_response) {
+                rawMessages = [String(data.raw_response)];
+            }
+
+            if (rawMessages.length === 0) {
+                rawMessages = [isSuccess ? 'Dokumen berhasil diterima oleh CEISA 4.0' : 'Tidak ada rincian pesan dari server.'];
+            }
+
+            // Dictionary for CEISA fields -> Indonesian
+            const fieldDict = {
+                'tanggalDaftarDokAsal': 'Tanggal Daftar Dok Asal',
+                'nomorDaftarDokAsal': 'Nomor Daftar Dok Asal',
+                'kodeDokumenAsal': 'Kode Dokumen Asal',
+                'nomorAjuDokAsal': 'Nomor AJU Dok Asal',
+                'seriBahanBaku': 'Seri Bahan Baku',
+                'seriBarang': 'Seri Barang',
+                'seri': 'Nomor Seri',
+                'kodeBarang': 'Kode Barang',
+                'uraianBarang': 'Uraian Barang',
+                'uraian': 'Uraian Barang',
+                'posTarif': 'HS Code / Pos Tarif',
+                'kodeSatuanBarang': 'Kode Satuan Barang',
+                'kodeSatuan': 'Kode Satuan',
+                'jumlahSatuan': 'Jumlah Satuan',
+                'hargaPenyerahan': 'Harga Penyerahan',
+                'hargaCif': 'Nilai CIF',
+                'cif': 'Nilai CIF',
+                'fob': 'Nilai FOB',
+                'asuransi': 'Nilai Asuransi',
+                'freight': 'Nilai Freight',
+                'nilaiBarang': 'Nilai Barang',
+                'nomorDokumen': 'Nomor Dokumen',
+                'tanggalDokumen': 'Tanggal Dokumen',
+                'kodeDokumen': 'Jenis / Kode Dokumen',
+                'kodeEntitas': 'Kode Peran Entitas',
+                'nomorIdentitas': 'Nomor NPWP / NIK Entitas',
+                'namaEntitas': 'Nama Perusahaan / Entitas',
+                'alamatEntitas': 'Alamat Entitas',
+                'kodeKantor': 'Kantor Bea Cukai',
+                'kodeKantorBongkar': 'Kantor Bongkar',
+                'kodeKantorTujuan': 'Kantor Tujuan',
+                'kodeValuta': 'Valuta / Mata Uang',
+                'ndpbm': 'Kurs NDPBM',
+                'bruto': 'Berat Kotor (Bruto)',
+                'netto': 'Berat Bersih (Netto)',
+                'volume': 'Volume',
+                'kodeNegara': 'Negara',
+                'kodeCaraAngkut': 'Cara Pengangkutan',
+                'namaPengangkut': 'Nama Sarana Pengangkut',
+                'nomorPengangkut': 'Nomor Pengangkut (Voyage/Flight)'
+            };
+
+            function humanizeField(f) {
+                if (!f) return '-';
+                if (fieldDict[f]) return fieldDict[f];
+                return f.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+            }
+
+            function humanizePath(pathStr) {
+                if (!pathStr || pathStr === '$') return 'Dokumen Utama (Header)';
+                let clean = pathStr.replace(/^\$\.?/, '');
+                let parts = clean.split('.');
+                let labels = [];
+                for (let p of parts) {
+                    let m = p.match(/^([a-zA-Z0-9_]+)(?:\[(\d+)\])?$/);
+                    if (m) {
+                        let name = m[1];
+                        let idx = m[2] !== undefined ? (parseInt(m[2]) + 1) : null;
+                        let lbl = name;
+                        if (name === 'barang') lbl = 'Barang #' + idx;
+                        else if (name === 'bahanBaku') lbl = 'Bahan Baku #' + idx;
+                        else if (name === 'dokumen') lbl = 'Dokumen #' + idx;
+                        else if (name === 'entitas') lbl = 'Entitas #' + idx;
+                        else if (name === 'kemasan') lbl = 'Kemasan #' + idx;
+                        else if (name === 'kontainer') lbl = 'Kontainer #' + idx;
+                        else if (name === 'pengangkut') lbl = 'Pengangkut #' + idx;
+                        else if (name === 'header') lbl = 'Header';
+                        else lbl = humanizeField(name) + (idx ? ' #' + idx : '');
+                        labels.push(lbl);
+                    } else {
+                        labels.push(p);
+                    }
+                }
+                return labels.join(' <span style="color:#bfbfbf;">➔</span> ');
+            }
+
+            function parseMessage(raw) {
+                let text = String(raw).trim();
+                let m = text.match(/^\$?\.?([a-zA-Z0-9_\[\].]+?)(?:\.([a-zA-Z0-9_]+))?:\s*(.*)$/);
+                if (m) {
+                    let path = m[1];
+                    let field = m[2] || '';
+                    let detail = m[3] || '';
+                    if (!field && !path.endsWith(']')) {
+                        let parts = path.split('.');
+                        field = parts.pop();
+                        path = parts.join('.');
+                    }
+                    return {
+                        location: humanizePath(path),
+                        fieldRaw: field,
+                        fieldName: humanizeField(field),
+                        detail: detail
+                    };
+                }
+                return {
+                    location: 'Gateway CEISA',
+                    fieldRaw: '',
+                    fieldName: '-',
+                    detail: text
+                };
+            }
+
+            function analyzeSolution(issue) {
+                let d = issue.detail.toLowerCase();
+                let f = (issue.fieldRaw || '').toLowerCase();
+
+                if (d.includes('invalid date')) {
+                    let dateMatch = issue.detail.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+                    if (dateMatch && parseInt(dateMatch[2]) > 12) {
+                        return `<span style="color:#cf1322; font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> Format Tanggal Terbalik:</span> Posisi Bulan & Hari tertukar (<code>${dateMatch[0]}</code>). Seharusnya <code>${dateMatch[1]}-${dateMatch[3].padStart(2,'0')}-${dateMatch[2].padStart(2,'0')}</code>. Tanggal di database telah dinormalisasi secara otomatis.`;
+                    }
+                    return '<span style="color:#cf1322; font-weight:600;">Format Tanggal Salah:</span> Gunakan format standar <code>YYYY-MM-DD</code> (contoh: <code>2026-08-31</code>).';
+                }
+                if (d.includes('is missing but it is required') || d.includes('is required')) {
+                    return `Kolom <strong>${issue.fieldName}</strong> wajib diisi dan tidak boleh dikosongkan.`;
+                }
+                if (d.includes('kodedokumen tidak dikenali') && (activeBc === '613' || activeBc === '611' || activeBc === '612')) {
+                    return `<strong>Khusus Dokumen PPKEK (${activeBc}):</strong> CEISA OpenAPI hanya menerima BC standar. Gunakan menu <strong>Posting INSW</strong> untuk dokumen ini.`;
+                }
+                if (d.includes('unauthorized') || d.includes('token expired') || d.includes('invalid token')) {
+                    return 'Token sesi Bea Cukai telah kedaluwarsa. Sistem perlu melakukan refresh token login CEISA.';
+                }
+                if (d.includes('enum') || d.includes('is not one of')) {
+                    return `Nilai pada kolom <strong>${issue.fieldName}</strong> tidak sesuai dengan tabel referensi resmi Bea Cukai.`;
+                }
+                return 'Periksa kembali data pada tab terkait di Editor AJU.';
+            }
+
+            // Build HTML
+            let html = '';
+
+            if (isSuccess) {
+                html += `
+                    <div style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:8px; padding:16px 18px; margin-bottom:14px; display:flex; align-items:flex-start; gap:12px;">
+                        <div style="font-size:26px; line-height:1; color:#52c41a;">&#9989;</div>
+                        <div style="flex:1;">
+                            <div style="font-size:14px; font-weight:700; color:#276722; margin-bottom:4px;">Berhasil Terkirim ke Portal CEISA 4.0!</div>
+                            <div style="font-size:11.5px; color:#595959; margin-bottom:6px;">
+                                <strong>Nomor AJU:</strong> <code style="color:#096dd9; font-size:12px;">${escapeHtml(nomorAju || '-')}</code>
+                                &nbsp;&nbsp;|&nbsp;&nbsp; <strong>Status:</strong> <span style="background:#52c41a; color:#fff; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600;">${statusBadgeText}</span>
+                            </div>
+                            <div style="font-size:11.5px; color:#389e0d; background:#fff; border:1px solid #d9f7be; border-radius:4px; padding:8px 10px;">
+                                ${escapeHtml(rawMessages.join(' | '))}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div style="background:#fff2f0; border:1px solid #ffccc7; border-radius:8px; padding:16px 18px; margin-bottom:14px; display:flex; align-items:flex-start; gap:12px;">
+                        <div style="font-size:26px; line-height:1; color:#ff4d4f;">&#10060;</div>
+                        <div style="flex:1;">
+                            <div style="font-size:14px; font-weight:700; color:#cf1322; margin-bottom:4px;">Validasi Ditolak oleh Gateway CEISA 4.0</div>
+                            <div style="font-size:11.5px; color:#595959; margin-bottom:6px;">
+                                <strong>Nomor AJU:</strong> <code style="color:#d4380d; font-size:12px;">${escapeHtml(nomorAju || '-')}</code>
+                                &nbsp;&nbsp;|&nbsp;&nbsp; <strong>Respon Gateway:</strong> <span style="background:#ff4d4f; color:#fff; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600;">${statusBadgeText}</span>
+                            </div>
+                            <div style="font-size:11px; color:#8c8c8c;">
+                                Ditemukan <strong style="color:#cf1322;">${rawMessages.length} kendala validasi data</strong> yang belum memenuhi aturan skema Bea Cukai.
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Render error table
+                html += `
+                    <div style="border:1px solid #f0f0f0; border-radius:6px; overflow:hidden; margin-bottom:12px; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                        <div style="background:#fafafa; padding:8px 12px; border-bottom:1px solid #e8e8e8; font-weight:700; font-size:11.5px; color:#262626; display:flex; align-items:center; justify-content:space-between;">
+                            <span><i class="fa-solid fa-list-check" style="color:#1890ff; margin-right:5px;"></i> Rincian Kesalahan Validasi (${rawMessages.length} Item)</span>
+                            <span style="font-size:10.5px; color:#8c8c8c; font-weight:normal;">Periksa dan perbaiki kolom di bawah ini</span>
+                        </div>
+                        <div style="max-height:260px; overflow-y:auto;">
+                            <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:left;">
+                                <thead>
+                                    <tr style="background:#f5f5f5; color:#595959; border-bottom:1px solid #e8e8e8;">
+                                        <th style="padding:6px 8px; width:30px; text-align:center;">#</th>
+                                        <th style="padding:6px 8px; width:160px;">Lokasi Data</th>
+                                        <th style="padding:6px 8px; width:140px;">Kolom / Field</th>
+                                        <th style="padding:6px 8px;">Pesan Validasi</th>
+                                        <th style="padding:6px 8px; width:240px;">Saran Solusi & Penjelasan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                rawMessages.forEach((msg, idx) => {
+                    const parsed = parseMessage(msg);
+                    const solution = analyzeSolution(parsed);
+                    const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                    html += `
+                        <tr style="background:${rowBg}; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <td style="padding:7px 8px; text-align:center; color:#8c8c8c; font-weight:600;">${idx + 1}</td>
+                            <td style="padding:7px 8px; font-weight:600; color:#1890ff;">${parsed.location}</td>
+                            <td style="padding:7px 8px;">
+                                <div style="font-weight:600; color:#262626;">${escapeHtml(parsed.fieldName)}</div>
+                                ${parsed.fieldRaw ? `<code style="font-size:9.5px; color:#8c8c8c;">${escapeHtml(parsed.fieldRaw)}</code>` : ''}
+                            </td>
+                            <td style="padding:7px 8px; color:#cf1322; word-break:break-word;">
+                                ${escapeHtml(parsed.detail)}
+                            </td>
+                            <td style="padding:7px 8px; color:#595959; line-height:1.4;">
+                                ${solution}
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+
+                html += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                        <a href="editor.php?nomor_aju=${encodeURIComponent(nomorAju || '')}" target="_blank" class="ant-btn ant-btn-sm" style="display:inline-flex; align-items:center; gap:5px; background:#1890ff; color:#fff; border:none; text-decoration:none; padding:4px 10px; border-radius:4px; font-size:11px; font-weight:600;">
+                            <i class="fa-solid fa-pen-to-square"></i> Buka di Editor AJU
+                        </a>
+                        <span style="font-size:10.5px; color:#8c8c8c;">💡 Setelah diedit, simpan lalu ulangi proses transfer.</span>
+                    </div>
+                `;
+            }
+
+            // Collapsible raw JSON
+            const rawDisplay = typeof payload === 'object' ? JSON.stringify(payload, null, 2) : String(payload);
+            html += `
+                <details style="background:#f9f9f9; border:1px solid #e8e8e8; border-radius:6px; padding:6px 10px; margin-top:8px;">
+                    <summary style="cursor:pointer; font-size:11px; font-weight:600; color:#595959; outline:none;">
+                        <i class="fa-solid fa-code" style="color:#8c8c8c; margin-right:4px;"></i> Lihat Respon Teknis Asli (JSON Gateway)
+                    </summary>
+                    <pre class="code-view" style="margin-top:6px; max-height:200px; font-size:10.5px; background:#1e1e1e; color:#d4d4d4; padding:8px; border-radius:4px; overflow-x:auto;">${escapeHtml(rawDisplay)}</pre>
+                </details>
+            `;
+
+            return html;
+        }
+
         async function transferActiveAju() {
             if (!activeAju) {
                 showWarning('Silakan pilih salah satu dokumen yang akan ditransfer.');
@@ -3733,11 +4641,114 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const modal = document.getElementById('modalTransferResult');
             const content = document.getElementById('transferResultContent');
             const headerTitle = modal.querySelector('.modal-header h3');
+            const btnFinish = document.getElementById('btnTransferFinish');
+            const btnCloseX = document.getElementById('btnTransferCloseX');
+
             if (headerTitle) {
-                headerTitle.innerHTML = '&#128640; Hasil Transfer ke Portal CEISA 4.0';
+                headerTitle.innerHTML = '&#128640; Transfer Dokumen ke Portal CEISA 4.0';
             }
 
-            content.innerHTML = '<div style="text-align:center; padding:20px;"><span class="spinner"></span> Mengirim payload ke CEISA 4.0... Mohon tunggu...</div>';
+            // Atur status loading pada tombol modal agar tidak bisa ditutup sebelum respon selesai
+            if (btnFinish) {
+                btnFinish.disabled = true;
+                btnFinish.style.opacity = '0.65';
+                btnFinish.style.cursor = 'not-allowed';
+                btnFinish.innerHTML = '<span class="spinner"></span> Memproses Transfer...';
+            }
+            if (btnCloseX) {
+                btnCloseX.disabled = true;
+                btnCloseX.style.opacity = '0.35';
+                btnCloseX.style.pointerEvents = 'none';
+            }
+
+            // Timer aktif detik berjalan & Live Pipeline Stage Updater
+            let elapsedSec = 0;
+            const timerInterval = setInterval(() => {
+                elapsedSec++;
+                const mm = String(Math.floor(elapsedSec / 60)).padStart(2, '0');
+                const ss = String(elapsedSec % 60).padStart(2, '0');
+                const timerEl = document.getElementById('transferTimerCounter');
+                if (timerEl) timerEl.innerText = `${mm}:${ss}`;
+
+                // Live dynamic pipeline stages
+                const statusMsg = document.getElementById('transferStatusMessage');
+                const step1 = document.getElementById('pipeStep1');
+                const line1 = document.getElementById('pipeLine1');
+                const step2 = document.getElementById('pipeStep2');
+                const line2 = document.getElementById('pipeLine2');
+                const step3 = document.getElementById('pipeStep3');
+
+                if (elapsedSec >= 1 && step2 && !step2.classList.contains('active')) {
+                    if (step1) { step1.classList.remove('active'); step1.classList.add('done'); }
+                    if (line1) line1.classList.add('active');
+                    step2.classList.add('active');
+                    if (statusMsg) statusMsg.innerHTML = 'Melakukan otentikasi Bearer Token & enkripsi sesi Bea Cukai...';
+                }
+                if (elapsedSec >= 2 && step3 && !step3.classList.contains('active')) {
+                    if (step2) { step2.classList.remove('active'); step2.classList.add('done'); }
+                    if (line2) line2.classList.add('active');
+                    step3.classList.add('active');
+                    if (statusMsg) statusMsg.innerHTML = 'Mengirim transmisi ke API Gateway Bea Cukai & memverifikasi respon...';
+                }
+            }, 1000);
+
+            content.innerHTML = `
+                <div class="app-loader-container">
+                    <div class="app-loader-icon-wrap">
+                        <div class="app-loader-aura"></div>
+                        <div class="app-loader-orbit"></div>
+                        <div class="app-loader-spinner"></div>
+                        <div class="app-loader-spinner-inner"></div>
+                        <div class="app-loader-center-disc">
+                            <i class="fa-solid fa-rocket app-loader-center-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-title">Transmisi Dokumen ke Portal CEISA 4.0</div>
+
+                    <div class="app-loader-doc-card">
+                        <span class="meta-bc">BC ${escapeHtml(activeBc || '25')}</span>
+                        <span class="meta-aju">${escapeHtml(activeAju)}</span>
+                    </div>
+
+                    <div class="app-pipeline-container">
+                        <div class="app-pipeline-step active" id="pipeStep1">
+                            <div class="pipeline-circle"><i class="fa-solid fa-file-shield"></i></div>
+                            <span class="pipeline-label">1. Validasi Data</span>
+                        </div>
+                        <div class="app-pipeline-line" id="pipeLine1">
+                            <div class="line-flow"></div>
+                        </div>
+                        <div class="app-pipeline-step" id="pipeStep2">
+                            <div class="pipeline-circle"><i class="fa-solid fa-key"></i></div>
+                            <span class="pipeline-label">2. Otentikasi Sesi</span>
+                        </div>
+                        <div class="app-pipeline-line" id="pipeLine2">
+                            <div class="line-flow"></div>
+                        </div>
+                        <div class="app-pipeline-step" id="pipeStep3">
+                            <div class="pipeline-circle"><i class="fa-solid fa-satellite-dish"></i></div>
+                            <span class="pipeline-label">3. Transmisi Gateway</span>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-desc" id="transferStatusMessage">
+                        Mempersiapkan struktur data dokumen, verifikasi entitas & tarif pabean...
+                    </div>
+
+                    <div class="app-loader-progress-track">
+                        <div class="app-loader-progress-bar"></div>
+                    </div>
+
+                    <div class="app-loader-cyber-timer">
+                        <span class="live-dot"></span>
+                        <span style="font-size:10px; font-weight:700; letter-spacing:0.5px;">LIVE TRANSMISSION</span>
+                        <span style="opacity:0.4;">|</span>
+                        <i class="fa-regular fa-clock" style="font-size:11px;"></i>
+                        <span id="transferTimerCounter" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-weight:700;">00:00</span>
+                    </div>
+                </div>
+            `;
             modal.style.display = 'flex';
 
             const cmpId = document.getElementById('filterCmp')?.value || '';
@@ -3748,31 +4759,29 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
-                const json = await res.json();
-                if (json.status === 'OK') {
-                    content.innerHTML = `
-                        <div style="color:#52c41a; font-weight:700; margin-bottom:8px;">&#9989; Berhasil Dikirim ke CEISA 4.0!</div>
-                        <p><strong>Nomor AJU:</strong> ${escapeHtml(json.nomor_aju)}</p>
-                        <pre class="code-view" style="max-height:260px;">${JSON.stringify(json.response, null, 2)}</pre>
-                    `;
-                } else {
-                    let helperHint = '';
-                    if (String(json.raw_response || json.message || '').includes('kodeDokumen tidak dikenali') && (activeBc === '613' || activeBc === '611')) {
-                        helperHint = `
-                            <div style="background:#fffbe6; border:1px solid #ffe58f; border-radius:4px; padding:8px 10px; margin-top:10px; font-size:11px; color:#ad6800;">
-                                💡 <strong>Petunjuk Dokumen ${escapeHtml(activeBc)}:</strong> Error ini muncul karena API CEISA 4.0 OpenAPI hanya menerima dokumen kepabeanan standar (BC 2.0, 2.3, 4.0, dll). Dokumen PPKEK ${escapeHtml(activeBc)} diproses melalui <strong>Posting INSW</strong>.
-                            </div>
-                        `;
-                    }
-                    content.innerHTML = `
-                        <div style="color:#f5222d; font-weight:700; margin-bottom:8px;">&#9888;&#65039; Respon Transfer:</div>
-                        <p><strong>Nomor AJU:</strong> ${escapeHtml(json.nomor_aju || activeAju)}</p>
-                        <pre class="code-view" style="max-height:260px;">${escapeHtml(json.raw_response || json.message || JSON.stringify(json, null, 2))}</pre>
-                        ${helperHint}
-                    `;
+                const text = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    json = { status: 'ERROR', message: text || 'Respon server tidak valid' };
                 }
+                content.innerHTML = renderCeisaGatewayResponse(json, activeAju, activeBc);
             } catch (err) {
-                content.innerHTML = `<div style="color:#f5222d; font-weight:700;">&#10060; Terjadi Kesalahan Jaringan / Server:</div><p>${err.message}</p>`;
+                content.innerHTML = renderCeisaGatewayResponse({ status: 'ERROR', message: err.message }, activeAju, activeBc);
+            } finally {
+                clearInterval(timerInterval);
+                if (btnFinish) {
+                    btnFinish.disabled = false;
+                    btnFinish.style.opacity = '1';
+                    btnFinish.style.cursor = 'pointer';
+                    btnFinish.innerHTML = 'Selesai';
+                }
+                if (btnCloseX) {
+                    btnCloseX.disabled = false;
+                    btnCloseX.style.opacity = '1';
+                    btnCloseX.style.pointerEvents = 'auto';
+                }
             }
         }
 
@@ -3804,11 +4813,85 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const modal = document.getElementById('modalTransferResult');
             const content = document.getElementById('transferResultContent');
             const headerTitle = modal.querySelector('.modal-header h3');
+            const btnFinish = document.getElementById('btnTransferFinish');
+            const btnCloseX = document.getElementById('btnTransferCloseX');
+
             if (headerTitle) {
                 headerTitle.innerHTML = '&#127760; Hasil Posting Dokumen ke Portal INSW (PPKEK / LNSW)';
             }
 
-            content.innerHTML = '<div style="text-align:center; padding:25px;"><span class="spinner"></span> Menghubungkan ke Portal INSW (LNSW)... Memvalidasi payload JSON PPKEK...</div>';
+            // Atur status loading pada tombol modal agar tidak bisa ditutup sebelum respon selesai
+            if (btnFinish) {
+                btnFinish.disabled = true;
+                btnFinish.style.opacity = '0.65';
+                btnFinish.style.cursor = 'not-allowed';
+                btnFinish.innerHTML = '<span class="spinner"></span> Menghubungi INSW...';
+            }
+            if (btnCloseX) {
+                btnCloseX.disabled = true;
+                btnCloseX.style.opacity = '0.35';
+                btnCloseX.style.pointerEvents = 'none';
+            }
+
+            let elapsedInswSec = 0;
+            const timerInswInterval = setInterval(() => {
+                elapsedInswSec++;
+                const mm = String(Math.floor(elapsedInswSec / 60)).padStart(2, '0');
+                const ss = String(elapsedInswSec % 60).padStart(2, '0');
+                const timerEl = document.getElementById('inswTimerCounter');
+                if (timerEl) timerEl.innerText = `${mm}:${ss}`;
+            }, 1000);
+
+            content.innerHTML = `
+                <div class="app-loader-container">
+                    <div class="app-loader-icon-wrap">
+                        <div class="app-loader-aura insw"></div>
+                        <div class="app-loader-orbit insw"></div>
+                        <div class="app-loader-spinner insw"></div>
+                        <div class="app-loader-spinner-inner insw"></div>
+                        <div class="app-loader-center-disc">
+                            <i class="fa-solid fa-globe app-loader-center-icon" style="color:#722ed1;"></i>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-title" style="color:#722ed1;">Transmisi Dokumen ke Portal INSW (LNSW)</div>
+
+                    <div class="app-loader-doc-card">
+                        <span class="meta-bc insw">PPKEK ${escapeHtml(activeBc || '613')}</span>
+                        <span class="meta-aju">${escapeHtml(activeAju)}</span>
+                    </div>
+
+                    <div class="app-pipeline-container">
+                        <div class="app-pipeline-step active" id="inswPipeStep1">
+                            <div class="pipeline-circle"><i class="fa-solid fa-file-invoice"></i></div>
+                            <span class="pipeline-label">1. Validasi PPKEK</span>
+                        </div>
+                        <div class="app-pipeline-line active" id="inswPipeLine1">
+                            <div class="line-flow" style="width:100%; background:linear-gradient(90deg, #722ed1, #13c2c2);"></div>
+                        </div>
+                        <div class="app-pipeline-step active" id="inswPipeStep2">
+                            <div class="pipeline-circle" style="border-color:#722ed1; color:#722ed1;"><i class="fa-solid fa-network-wired"></i></div>
+                            <span class="pipeline-label" style="color:#722ed1;">2. Gateway LNSW</span>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-desc">
+                        Sedang memvalidasi struktur dokumen PPKEK/FTZ dan transmisi ke API Gateway INSW...
+                    </div>
+
+                    <div class="app-loader-progress-track">
+                        <div class="app-loader-progress-bar insw"></div>
+                    </div>
+
+                    <div class="app-loader-cyber-timer">
+                        <span class="live-dot" style="background:#722ed1; box-shadow:0 0 8px #722ed1;"></span>
+                        <span style="font-size:10px; font-weight:700; letter-spacing:0.5px;">INSW GATEWAY</span>
+                        <span style="opacity:0.4;">|</span>
+                        <i class="fa-regular fa-clock" style="font-size:11px;"></i>
+                        <span id="inswTimerCounter" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-weight:700;">00:00</span>
+                    </div>
+                </div>
+            `;
             modal.style.display = 'flex';
 
             const cmpId = document.getElementById('filterCmp')?.value || '';
@@ -3819,7 +4902,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
-                const json = await res.json();
+                const text = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    json = { status: 'ERROR', message: text || 'Respon server tidak valid' };
+                }
 
                 if (json.status === 'OK') {
                     content.innerHTML = `
@@ -3842,7 +4931,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             </div>
                             <div style="font-size:11px; color:#595959; line-height:1.5;">
                                 Dokumen ini dikelola langsung oleh <strong>Lembaga National Single Window (LNSW)</strong>.<br>
-                                Payload JSON resmi PPKEK telah berhasil dibangun langsung dari database.
+                                Data JSON resmi PPKEK telah berhasil dibangun langsung dari database.
                             </div>
                         </div>
 
@@ -3866,7 +4955,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             </a>
                         </div>
 
-                        <p style="margin-bottom:4px;"><strong>Preview Payload JSON PPKEK (${escapeHtml(json.nomor_aju || activeAju)}):</strong></p>
+                        <p style="margin-bottom:4px;"><strong>Preview Data JSON PPKEK (${escapeHtml(json.nomor_aju || activeAju)}):</strong></p>
                         <pre class="code-view" style="max-height:220px; font-size:10px;">${escapeHtml(rawJsonStr)}</pre>
                     `;
                 } else {
@@ -3886,6 +4975,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <p style="margin-top:4px;">${escapeHtml(err.message)}</p>
                     </div>
                 `;
+            } finally {
+                clearInterval(timerInswInterval);
+                if (btnFinish) {
+                    btnFinish.disabled = false;
+                    btnFinish.style.opacity = '1';
+                    btnFinish.style.cursor = 'pointer';
+                    btnFinish.innerHTML = 'Selesai';
+                }
+                if (btnCloseX) {
+                    btnCloseX.disabled = false;
+                    btnCloseX.style.opacity = '1';
+                    btnCloseX.style.pointerEvents = 'auto';
+                }
             }
         }
 

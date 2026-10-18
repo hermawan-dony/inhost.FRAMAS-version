@@ -256,22 +256,54 @@ class CeisaXlsxImporter {
         // Normalisasi format tanggal jika kolom bertipe tanggal
         if (strpos($colName, 'tanggal') !== false || strpos($colName, 'tgl') !== false || $colName === 'waktu' || $colName === 'jatuh_tempo') {
             $vTrim = trim($val);
+            if ($vTrim === '' || $vTrim === '0000-00-00' || strpos($vTrim, '0000-00-00') === 0) return null;
+
             // Format Excel integer date (misal: 45445)
             if (is_numeric($vTrim) && (int)$vTrim > 30000 && (int)$vTrim < 60000) {
                 $unixDate = ((int)$vTrim - 25569) * 86400;
                 return gmdate("Y-m-d", $unixDate);
             }
-            // Format DD-MM-YYYY atau DD/MM/YYYY
-            if (preg_match('/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})(?:\s+.*)?$/', $vTrim, $dm)) {
-                $d = str_pad($dm[1], 2, '0', STR_PAD_LEFT);
-                $m = str_pad($dm[2], 2, '0', STR_PAD_LEFT);
-                return "{$dm[3]}-{$m}-{$d}";
+
+            // Format YYYY-MM-DD atau YYYY-DD-MM atau YYYY/MM/DD atau YYYY/DD/MM
+            if (preg_match('/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})(?:\s+.*)?$/', $vTrim, $m)) {
+                $y = $m[1];
+                $p2 = (int)$m[2];
+                $p3 = (int)$m[3];
+                if ($p2 > 12 && $p3 <= 12) {
+                    // YYYY-DD-MM -> balik ke YYYY-MM-DD
+                    $month = str_pad($p3, 2, '0', STR_PAD_LEFT);
+                    $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                } else {
+                    $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                    $day = str_pad($p3, 2, '0', STR_PAD_LEFT);
+                }
+                return "{$y}-{$month}-{$day}";
             }
-            // Format YYYY-MM-DD
-            if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?:\s+.*)?$/', $vTrim, $dm)) {
-                $m = str_pad($dm[2], 2, '0', STR_PAD_LEFT);
-                $d = str_pad($dm[3], 2, '0', STR_PAD_LEFT);
-                return "{$dm[1]}-{$m}-{$d}";
+
+            // Format DD-MM-YYYY atau MM-DD-YYYY atau DD/MM/YYYY atau MM/DD/YYYY
+            if (preg_match('/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})(\s+\d{1,2}:\d{2}(?::\d{2})?)?$/', $vTrim, $m)) {
+                $p1 = (int)$m[1];
+                $p2 = (int)$m[2];
+                $y = $m[3];
+                $hasTime = !empty($m[4]);
+                if ($p1 > 12 && $p2 <= 12) {
+                    // Pasti DD-MM-YYYY (karena p1 > 12 tidak mungkin bulan)
+                    $day = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                    $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                } elseif ($p1 <= 12 && $p2 > 12) {
+                    // Pasti MM-DD-YYYY (karena p2 > 12 tidak mungkin bulan)
+                    $month = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                    $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                } elseif ($hasTime) {
+                    // Format CEISA export resmi dengan jam (MM-DD-YYYY HH:mm:ss)
+                    $month = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                    $day = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                } else {
+                    // Standar manual input Indonesia tanpa jam (DD-MM-YYYY)
+                    $day = str_pad($p1, 2, '0', STR_PAD_LEFT);
+                    $month = str_pad($p2, 2, '0', STR_PAD_LEFT);
+                }
+                return "{$y}-{$month}-{$day}";
             }
         }
 

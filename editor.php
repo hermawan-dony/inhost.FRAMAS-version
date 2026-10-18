@@ -280,6 +280,40 @@ if ($action === 'get_filter_settings') {
         }
     }
 
+    // FORMAT DESIMAL (bc_ceisa_setting_desimal)
+    $companyDecSetting = [];
+    $hasCompanyDecCustom = false;
+    if (!empty($cmpId)) {
+        $qdC = $koneksi->query("SELECT category, decimals FROM bc_ceisa_setting_desimal WHERE cmp_id = '$escCmp'");
+        if ($qdC && $qdC->num_rows > 0) {
+            $hasCompanyDecCustom = true;
+            while ($r = $qdC->fetch_assoc()) {
+                $companyDecSetting[$r['category']] = (int)$r['decimals'];
+            }
+        }
+    }
+
+    $globalDecSetting = [];
+    $qdG = $koneksi->query("SELECT category, decimals FROM bc_ceisa_setting_desimal WHERE cmp_id = ''");
+    if ($qdG && $qdG->num_rows > 0) {
+        while ($r = $qdG->fetch_assoc()) {
+            $globalDecSetting[$r['category']] = (int)$r['decimals'];
+        }
+    }
+
+    $defaultDecSetting = [
+        'qty' => 2,
+        'kemasan' => 0,
+        'uang' => 2,
+        'berat' => 4,
+        'harga_satuan' => 4,
+        'tarif' => 2
+    ];
+    $currentDecSetting = array_merge($defaultDecSetting, $globalDecSetting);
+    if ($hasCompanyDecCustom) {
+        $currentDecSetting = array_merge($currentDecSetting, $companyDecSetting);
+    }
+
     echo json_encode([
         'status' => 'OK',
         'bc' => $bc,
@@ -294,6 +328,13 @@ if ($action === 'get_filter_settings') {
             'has_company_custom' => $hasCompanyColCustom,
             'has_global_custom' => $hasGlobalColCustom,
             'columns' => $columns
+        ],
+        'desimal' => [
+            'has_company_custom' => $hasCompanyDecCustom,
+            'company_rules' => $companyDecSetting,
+            'global_rules' => $globalDecSetting,
+            'current' => $currentDecSetting,
+            'defaults' => $defaultDecSetting
         ]
     ]);
     exit;
@@ -340,10 +381,23 @@ if ($action === 'save_filter_settings') {
         }
     }
 
+    // 3. Simpan FORMAT DESIMAL jika diminta
+    if (($saveType === 'all' || $saveType === 'desimal') && isset($payload['decimals']) && is_array($payload['decimals'])) {
+        $stmtDec = $koneksi->prepare("INSERT INTO bc_ceisa_setting_desimal (cmp_id, category, decimals, updated_by) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE decimals = VALUES(decimals), updated_by = VALUES(updated_by)");
+        $validCats = ['qty', 'kemasan', 'uang', 'berat', 'harga_satuan', 'tarif'];
+        foreach ($validCats as $cat) {
+            if (isset($payload['decimals'][$cat])) {
+                $decVal = max(0, min(6, (int)$payload['decimals'][$cat]));
+                $stmtDec->bind_param("ssis", $cmpId, $cat, $decVal, $user);
+                $stmtDec->execute();
+            }
+        }
+    }
+
     $targetName = !empty($cmpId) ? "Perusahaan [$cmpId]" : "Global (Default Semua Perusahaan)";
     echo json_encode([
         'status' => 'OK',
-        'message' => "Pengaturan saring {$targetName} untuk BC {$bc} berhasil disimpan."
+        'message' => "Pengaturan {$targetName} untuk BC {$bc} berhasil disimpan."
     ]);
     exit;
 }
@@ -370,9 +424,13 @@ if ($action === 'reset_filter_settings') {
         $koneksi->query("DELETE FROM bc_ceisa_setting_kolom WHERE cmp_id = '$escCmp' AND bc = '$escBc'");
     }
 
+    if ($resetType === 'all' || $resetType === 'desimal') {
+        $koneksi->query("DELETE FROM bc_ceisa_setting_desimal WHERE cmp_id = '$escCmp'");
+    }
+
     echo json_encode([
         'status' => 'OK',
-        'message' => "Pengaturan Perusahaan [$cmpId] untuk BC {$bc} telah berhasil direset dan kembali mengikuti Pengaturan Global."
+        'message' => "Pengaturan Perusahaan [$cmpId] telah berhasil direset dan kembali mengikuti Pengaturan Global."
     ]);
     exit;
 }
@@ -966,6 +1024,41 @@ if ($action === 'load_all') {
     $response['col_source'] = $colSource;
     $response['active_cmp_id'] = $activeCmp;
 
+    // 3. Resolusi Aturan FORMAT DESIMAL: Company -> Global -> Bawaan
+    $defaultDecimals = [
+        'qty' => 2,
+        'kemasan' => 0,
+        'uang' => 2,
+        'berat' => 4,
+        'harga_satuan' => 4,
+        'tarif' => 2
+    ];
+    $activeDecimals = $defaultDecimals;
+    $decimalSource = 'default';
+
+    // Ambil Global
+    $qGlobDec = $koneksi->query("SELECT category, decimals FROM bc_ceisa_setting_desimal WHERE cmp_id = ''");
+    if ($qGlobDec && $qGlobDec->num_rows > 0) {
+        $decimalSource = 'global';
+        while ($dr = $qGlobDec->fetch_assoc()) {
+            $activeDecimals[$dr['category']] = (int)$dr['decimals'];
+        }
+    }
+
+    // Ambil Company jika ada
+    if (!empty($activeCmp)) {
+        $qCmpDec = $koneksi->query("SELECT category, decimals FROM bc_ceisa_setting_desimal WHERE cmp_id = '$escCmp'");
+        if ($qCmpDec && $qCmpDec->num_rows > 0) {
+            $decimalSource = 'company';
+            while ($dr = $qCmpDec->fetch_assoc()) {
+                $activeDecimals[$dr['category']] = (int)$dr['decimals'];
+            }
+        }
+    }
+
+    $response['decimal_settings'] = $activeDecimals;
+    $response['decimal_source'] = $decimalSource;
+
     echo json_encode($response);
     exit;
 }
@@ -1106,6 +1199,9 @@ if ($action === 'save_header') {
         if ($v === '' || $v === null) {
             $setPairs[] = "`$k` = NULL";
         } else {
+            if (is_string($v) && preg_match('/^-?[\d,]+(?:\.\d+)?$/', trim($v)) && strpos($v, ',') !== false) {
+                $v = str_replace(',', '', trim($v));
+            }
             $valEsc = $koneksi->real_escape_string($v);
             $setPairs[] = "`$k` = '$valEsc'";
         }
@@ -1196,14 +1292,14 @@ if ($action === 'save_table') {
                     if ($v === '' || $v === null) {
                         $filteredRow[$k] = null;
                     } else {
+                        // Bersihkan pemisah ribuan (koma) pada string angka sebelum disimpan ke MySQL
+                        if (is_string($v) && preg_match('/^-?[\d,]+(?:\.\d+)?$/', trim($v)) && strpos($v, ',') !== false) {
+                            $v = str_replace(',', '', trim($v));
+                        }
                         // Normalisasi tanggal
-                        if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'tgl') !== false)) {
-                            $vTrim = trim($v);
-                            if (preg_match('/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+.*)?$/', $vTrim, $dm)) {
-                                $v = "{$dm[3]}-{$dm[1]}-{$dm[2]}";
-                            } elseif (preg_match('/^(\d{4})[-\/](\d{2})[-\/](\d{2})(?:\s+.*)?$/', $vTrim, $dm)) {
-                                $v = "{$dm[1]}-{$dm[2]}-{$dm[3]}";
-                            }
+                        if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'tgl') !== false || $k === 'jatuh_tempo')) {
+                            require_once __DIR__ . '/CeisaJsonBuilder.php';
+                            $v = CeisaJsonBuilder::normalizeDateStr($v);
                         }
                         $filteredRow[$k] = $v;
                     }
@@ -1284,13 +1380,9 @@ if ($action === 'save_kesiapanbarang') {
         if ($v === '' || $v === null) {
             $filteredRow[$k] = null;
         } else {
-            if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'waktu') !== false || strpos($k, 'tgl') !== false)) {
-                $vTrim = trim($v);
-                if (preg_match('/^(\d{2})[-\/](\d{2})[-\/](\d{4})(?:\s+.*)?$/', $vTrim, $dm)) {
-                    $v = "{$dm[3]}-{$dm[1]}-{$dm[2]}";
-                } elseif (preg_match('/^(\d{4})[-\/](\d{2})[-\/](\d{2})(?:\s+.*)?$/', $vTrim, $dm)) {
-                    $v = "{$dm[1]}-{$dm[2]}-{$dm[3]}";
-                }
+            if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'waktu') !== false || strpos($k, 'tgl') !== false || $k === 'jatuh_tempo')) {
+                require_once __DIR__ . '/CeisaJsonBuilder.php';
+                $v = CeisaJsonBuilder::normalizeDateStr($v);
             }
             $filteredRow[$k] = $v;
         }
@@ -1315,6 +1407,327 @@ if ($action === 'save_kesiapanbarang') {
     } else {
         echo json_encode(['status' => 'ERROR', 'message' => 'Query error: ' . $koneksi->error]);
     }
+    exit;
+}
+
+if ($action === 'calc_pungutan') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci."]);
+        exit;
+    }
+
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $hRes = $koneksi->query("SELECT cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+    $cmp_id = '';
+    $kode_dokumen = '';
+    if ($hRes && $hr = $hRes->fetch_assoc()) {
+        $cmp_id = $hr['cmp_id'];
+        $kode_dokumen = trim($hr['kode_dokumen']);
+    }
+
+    $existingNpwp = '';
+    $pCheck = $koneksi->query("SELECT npwp_billing FROM bc_ceisa_pungutan WHERE nomor_aju = '$escAju' AND npwp_billing IS NOT NULL AND npwp_billing != '' LIMIT 1");
+    if ($pCheck && $pr = $pCheck->fetch_assoc()) {
+        $existingNpwp = $pr['npwp_billing'];
+    }
+
+    // Ambil rekap dari bc_ceisa_bahanbakutarif
+    $bbSummary = [];
+    $bbSumTotal = 0;
+    $resBb = $koneksi->query("SELECT kode_pungutan, kode_fasilitas, 
+        SUM(COALESCE(nilai_bayar,0)) as total_bayar, 
+        SUM(COALESCE(nilai_fasilitas,0)) as total_fasilitas, 
+        SUM(COALESCE(nilai_sudah_dilunasi,0)) as total_lunas 
+        FROM bc_ceisa_bahanbakutarif 
+        WHERE nomor_aju = '$escAju' 
+        GROUP BY kode_pungutan, kode_fasilitas");
+    if ($resBb) {
+        while ($r = $resBb->fetch_assoc()) {
+            $tot = floatval($r['total_bayar']) + floatval($r['total_fasilitas']) + floatval($r['total_lunas']);
+            if ($tot > 0) {
+                $bbSummary[] = [
+                    'kode_pungutan' => trim($r['kode_pungutan']),
+                    'kode_fasilitas' => trim($r['kode_fasilitas']),
+                    'total' => $tot
+                ];
+                $bbSumTotal += $tot;
+            }
+        }
+    }
+
+    // Ambil rekap dari bc_ceisa_barangtarif
+    $btSummary = [];
+    $btSumTotal = 0;
+    $resBt = $koneksi->query("SELECT kode_pungutan, kode_fasilitas, 
+        SUM(COALESCE(nilai_bayar,0)) as total_bayar, 
+        SUM(COALESCE(nilai_fasilitas,0)) as total_fasilitas, 
+        SUM(COALESCE(nilai_sudah_dilunasi,0)) as total_lunas 
+        FROM bc_ceisa_barangtarif 
+        WHERE nomor_aju = '$escAju' 
+        GROUP BY kode_pungutan, kode_fasilitas");
+    if ($resBt) {
+        while ($r = $resBt->fetch_assoc()) {
+            $tot = floatval($r['total_bayar']) + floatval($r['total_fasilitas']) + floatval($r['total_lunas']);
+            if ($tot > 0) {
+                $btSummary[] = [
+                    'kode_pungutan' => trim($r['kode_pungutan']),
+                    'kode_fasilitas' => trim($r['kode_fasilitas']),
+                    'total' => $tot
+                ];
+                $btSumTotal += $tot;
+            }
+        }
+    }
+
+    // Tentukan sumber data
+    $source = '';
+    $finalSummary = [];
+    if (($kode_dokumen === '25' || $kode_dokumen === '261' || $kode_dokumen === '262') && $bbSumTotal > 0) {
+        $finalSummary = $bbSummary;
+        $source = 'Bahan Baku Tarif';
+    } elseif ($btSumTotal > 0) {
+        $finalSummary = $btSummary;
+        $source = 'Barang Tarif';
+    } elseif ($bbSumTotal > 0) {
+        $finalSummary = $bbSummary;
+        $source = 'Bahan Baku Tarif';
+    }
+
+    if (empty($finalSummary)) {
+        echo json_encode([
+            'status' => 'WARNING', 
+            'message' => 'Tidak ditemukan data tarif bernilai > 0 pada Barang Tarif maupun Bahan Baku Tarif. Silakan klik "Hitung Tarif" terlebih dahulu!'
+        ]);
+        exit;
+    }
+
+    // Dibulatkan ke ribuan penuh sesuai aturan CEISA (PMK 190)
+    $newPungutan = [];
+    foreach ($finalSummary as $item) {
+        $kp = strtoupper($item['kode_pungutan']);
+        if ($kp === 'PPNLOKAL' && $item['total'] == 0) continue;
+
+        $rounded = round($item['total'], -3);
+        if ($rounded < 1000 && $item['total'] > 0) {
+            $rounded = ceil($item['total']);
+        }
+        $newPungutan[] = [
+            'cmp_id' => $cmp_id,
+            'nomor_aju' => $nomor_aju,
+            'kode_jenis_pungutan' => $item['kode_pungutan'],
+            'kode_fasilitas_tarif' => $item['kode_fasilitas'],
+            'nilai_pungutan' => $rounded,
+            'npwp_billing' => $existingNpwp ?: null
+        ];
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        $koneksi->query("DELETE FROM bc_ceisa_pungutan WHERE nomor_aju = '$escAju'");
+        $insStmt = $koneksi->prepare("INSERT INTO bc_ceisa_pungutan (cmp_id, nomor_aju, kode_jenis_pungutan, kode_fasilitas_tarif, nilai_pungutan, npwp_billing) VALUES (?, ?, ?, ?, ?, ?)");
+        foreach ($newPungutan as $np) {
+            $valStr = (string)$np['nilai_pungutan'];
+            $insStmt->bind_param('ssssss', $np['cmp_id'], $np['nomor_aju'], $np['kode_jenis_pungutan'], $np['kode_fasilitas_tarif'], $valStr, $np['npwp_billing']);
+            $insStmt->execute();
+        }
+        $insStmt->close();
+        $koneksi->commit();
+
+        echo json_encode([
+            'status' => 'OK',
+            'message' => "Kalkulasi pungutan sukses! Dihitung " . count($newPungutan) . " jenis pungutan dari $source (dibulatkan ke ribuan penuh sesuai aturan CEISA).",
+            'source' => $source,
+            'rows' => $newPungutan
+        ]);
+    } catch (Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan kalkulasi pungutan: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+if ($action === 'calc_tarif') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    $target = trim($_REQUEST['target'] ?? 'all');
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci."]);
+        exit;
+    }
+
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $hRes = $koneksi->query("SELECT cmp_id, kode_dokumen, ndpbm, cif, harga_penyerahan, nilai_barang FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+    if (!$hRes || !($hdr = $hRes->fetch_assoc())) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Header dokumen tidak ditemukan.']);
+        exit;
+    }
+    $cmp_id = $hdr['cmp_id'];
+    $ndpbm = floatval($hdr['ndpbm'] ?? 1);
+    if ($ndpbm <= 0) $ndpbm = 1;
+
+    $updatedBarangTarif = 0;
+    $updatedBahanBakuTarif = 0;
+
+    // 1. HITUNG BARANG TARIF
+    if ($target === 'barang' || $target === 'all') {
+        $bRes = $koneksi->query("SELECT seri_barang, cif, cif_rupiah, harga_penyerahan, nilai_barang, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' ORDER BY seri_barang ASC");
+        $barangList = [];
+        while ($b = $bRes->fetch_assoc()) {
+            $seri = intval($b['seri_barang']);
+            $cifRupiah = floatval($b['cif_rupiah'] ?? 0);
+            if ($cifRupiah <= 0) {
+                $cif = floatval($b['cif'] ?? 0);
+                if ($cif > 0) $cifRupiah = $cif * $ndpbm;
+                elseif (floatval($b['harga_penyerahan'] ?? 0) > 0) $cifRupiah = floatval($b['harga_penyerahan']);
+                elseif (floatval($b['nilai_barang'] ?? 0) > 0) $cifRupiah = floatval($b['nilai_barang']);
+            }
+            $barangList[$seri] = [
+                'cif_rupiah' => $cifRupiah,
+                'hs' => trim($b['hs'] ?? '')
+            ];
+        }
+
+        $btRes = $koneksi->query("SELECT * FROM bc_ceisa_barangtarif WHERE nomor_aju = '$escAju' ORDER BY seri_barang ASC, kode_pungutan ASC");
+        $btRows = [];
+        while ($r = $btRes->fetch_assoc()) {
+            $btRows[] = $r;
+        }
+
+        if (!empty($btRows)) {
+            foreach ($btRows as $row) {
+                $seri = intval($row['seri_barang']);
+                $cifRupiah = $barangList[$seri]['cif_rupiah'] ?? 0;
+                $kp = strtoupper(trim($row['kode_pungutan']));
+                $tarifPct = floatval($row['tarif'] ?? 0);
+                $fas = trim($row['kode_fasilitas'] ?? '1');
+
+                $val = 0;
+                if ($kp === 'BM') {
+                    $val = round($cifRupiah * ($tarifPct / 100), 2);
+                } else {
+                    $bmTarifPct = 0;
+                    foreach ($btRows as $otherRow) {
+                        if (intval($otherRow['seri_barang']) === $seri && strtoupper(trim($otherRow['kode_pungutan'])) === 'BM') {
+                            $bmTarifPct = floatval($otherRow['tarif'] ?? 0);
+                            break;
+                        }
+                    }
+                    $nilaiBm = round($cifRupiah * ($bmTarifPct / 100), 2);
+                    $nilaiImpor = $cifRupiah + $nilaiBm;
+                    $val = round($nilaiImpor * ($tarifPct / 100), 2);
+                }
+
+                $bayar = 0.00;
+                $fasilitas = 0.00;
+                $lunas = 0.00;
+                if ($fas === '1') {
+                    $bayar = $val;
+                } elseif ($fas === '7') {
+                    $lunas = $val;
+                } else {
+                    $fasilitas = $val;
+                }
+
+                $uStmt = $koneksi->prepare("UPDATE bc_ceisa_barangtarif SET nilai_bayar = ?, nilai_fasilitas = ?, nilai_sudah_dilunasi = ? WHERE nomor_aju = ? AND seri_barang = ? AND kode_pungutan = ?");
+                $uStmt->bind_param('dddsis', $bayar, $fasilitas, $lunas, $escAju, $seri, $row['kode_pungutan']);
+                $uStmt->execute();
+                $uStmt->close();
+                $updatedBarangTarif++;
+            }
+        }
+    }
+
+    // 2. HITUNG BAHAN BAKU TARIF
+    if ($target === 'bahanbaku' || $target === 'all') {
+        $bbRes = $koneksi->query("SELECT seri_barang, seri_bahan_baku, kode_asal_bahan_baku, cif, cif_rupiah, harga_penyerahan, harga_perolehan FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju'");
+        $bbList = [];
+        while ($bb = $bbRes->fetch_assoc()) {
+            $k = intval($bb['seri_barang']) . '|' . intval($bb['seri_bahan_baku']) . '|' . trim($bb['kode_asal_bahan_baku'] ?? '0');
+            $cifRupiah = floatval($bb['cif_rupiah'] ?? 0);
+            if ($cifRupiah <= 0) {
+                $cif = floatval($bb['cif'] ?? 0);
+                if ($cif > 0) $cifRupiah = $cif * $ndpbm;
+                elseif (floatval($bb['harga_perolehan'] ?? 0) > 0) $cifRupiah = floatval($bb['harga_perolehan']);
+                elseif (floatval($bb['harga_penyerahan'] ?? 0) > 0) $cifRupiah = floatval($bb['harga_penyerahan']);
+            }
+            $bbList[$k] = $cifRupiah;
+        }
+
+        $bbtRes = $koneksi->query("SELECT * FROM bc_ceisa_bahanbakutarif WHERE nomor_aju = '$escAju'");
+        $bbtRows = [];
+        while ($r = $bbtRes->fetch_assoc()) {
+            $bbtRows[] = $r;
+        }
+
+        if (!empty($bbtRows)) {
+            foreach ($bbtRows as $row) {
+                $seriB = intval($row['seri_barang']);
+                $seriBb = intval($row['seri_bahan_baku']);
+                $asal = trim($row['kode_asal_bahan_baku'] ?? '0');
+                $k = "$seriB|$seriBb|$asal";
+                $cifRupiah = $bbList[$k] ?? 0;
+
+                $kp = strtoupper(trim($row['kode_pungutan']));
+                $tarifPct = floatval($row['tarif'] ?? 0);
+                $fas = trim($row['kode_fasilitas'] ?? '1');
+
+                $val = 0;
+                if ($kp === 'BM') {
+                    $val = round($cifRupiah * ($tarifPct / 100), 2);
+                } else {
+                    $bmTarifPct = 0;
+                    foreach ($bbtRows as $otherRow) {
+                        if (intval($otherRow['seri_barang']) === $seriB && intval($otherRow['seri_bahan_baku']) === $seriBb && trim($otherRow['kode_asal_bahan_baku'] ?? '0') === $asal && strtoupper(trim($otherRow['kode_pungutan'])) === 'BM') {
+                            $bmTarifPct = floatval($otherRow['tarif'] ?? 0);
+                            break;
+                        }
+                    }
+                    $nilaiBm = round($cifRupiah * ($bmTarifPct / 100), 2);
+                    $nilaiImpor = $cifRupiah + $nilaiBm;
+                    $val = round($nilaiImpor * ($tarifPct / 100), 2);
+                }
+
+                $bayar = 0.00;
+                $fasilitas = 0.00;
+                $lunas = 0.00;
+                if ($fas === '1') {
+                    $bayar = $val;
+                } elseif ($fas === '7') {
+                    $lunas = $val;
+                } else {
+                    $fasilitas = $val;
+                }
+
+                $uStmt = $koneksi->prepare("UPDATE bc_ceisa_bahanbakutarif SET nilai_bayar = ?, nilai_fasilitas = ?, nilai_sudah_dilunasi = ? WHERE nomor_aju = ? AND seri_barang = ? AND seri_bahan_baku = ? AND kode_asal_bahan_baku = ? AND kode_pungutan = ?");
+                $uStmt->bind_param('dddsiiss', $bayar, $fasilitas, $lunas, $escAju, $seriB, $seriBb, $asal, $row['kode_pungutan']);
+                $uStmt->execute();
+                $uStmt->close();
+                $updatedBahanBakuTarif++;
+            }
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'message' => "Kalkulasi tarif berhasil! Diperbarui $updatedBarangTarif baris Barang Tarif & $updatedBahanBakuTarif baris Bahan Baku Tarif.",
+        'updated_barang' => $updatedBarangTarif,
+        'updated_bahanbaku' => $updatedBahanBakuTarif
+    ]);
     exit;
 }
 
@@ -1737,6 +2150,8 @@ if ($action === 'ai_inject') {
         .btn-danger { background: var(--danger); color: #fff; }
         .btn-secondary { background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border); }
         .btn-secondary:hover { background: var(--border); }
+        .btn-warning { background: #d97706; color: #fff; border: 1px solid #b45309; }
+        .btn-warning:hover { background: #b45309; color: #fff; }
         .btn-sm { padding: 0 5px; height: 20px; font-size: 9px; }
 
         /* Filter Toggle Buttons */
@@ -2210,6 +2625,38 @@ if ($action === 'ai_inject') {
             border: 1px solid var(--border);
             vertical-align: middle;
             white-space: nowrap;
+        }
+        table.datagrid tfoot {
+            position: sticky;
+            bottom: 0;
+            z-index: 10;
+            background: var(--bg-input);
+        }
+        table.datagrid tfoot tr.tfoot-row {
+            background: var(--bg-input);
+        }
+        table.datagrid tfoot td {
+            padding: 5px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            border: 1px solid var(--border);
+            white-space: nowrap;
+            background: var(--bg-input);
+            color: var(--text-main);
+            box-shadow: inset 0 2px 0 var(--border), inset 0 -1px 0 var(--border);
+        }
+        table.datagrid tfoot td.td-number {
+            text-align: right !important;
+            font-variant-numeric: tabular-nums;
+            padding-right: 8px !important;
+            color: var(--primary);
+            font-weight: 700;
+        }
+        table.datagrid tfoot td.tfoot-label {
+            text-align: center !important;
+            font-weight: 800 !important;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
         }
         table.datagrid td.td-wrap {
             white-space: normal;
@@ -2689,16 +3136,376 @@ if ($action === 'ai_inject') {
             max-height: 400px;
             overflow-y: auto;
         }
-        .spinner {
-            display: inline-block;
-            width: 12px;
-            height: 12px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 0.8s linear infinite;
+        /* ========================================================
+           GLOBAL MODERN LOADER & PROGRESS ANIMATIONS
+           ======================================================== */
+        /* ========================================================
+           GLOBAL ULTRA-MODERN CYBER LOADER & PIPELINE ANIMATIONS
+           ======================================================== */
+        .app-loader-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 20px 20px 20px;
+            text-align: center;
+            position: relative;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .app-loader-icon-wrap {
+            position: relative;
+            width: 86px;
+            height: 86px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 18px;
+        }
+
+        .app-loader-aura {
+            position: absolute;
+            inset: -12px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(24, 144, 255, 0.22) 0%, rgba(0, 210, 255, 0.08) 50%, transparent 70%);
+            animation: app-aura-pulse 2.2s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        .app-loader-orbit {
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 1.5px dashed rgba(24, 144, 255, 0.35);
+            animation: app-orbit 14s linear infinite;
+        }
+
+        .app-loader-spinner {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 3.5px solid transparent;
+            border-top-color: #1890ff;
+            border-right-color: #00d2ff;
+            animation: app-spin 0.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+            box-sizing: border-box;
+            filter: drop-shadow(0 0 6px rgba(24, 144, 255, 0.4));
+        }
+
+        .app-loader-spinner-inner {
+            position: absolute;
+            inset: 7px;
+            border-radius: 50%;
+            border: 2.5px solid transparent;
+            border-bottom-color: #52c41a;
+            border-left-color: #13c2c2;
+            animation: app-spin-reverse 1.3s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+            box-sizing: border-box;
+        }
+
+        .app-loader-center-disc {
+            position: relative;
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #ffffff, #e6f7ff);
+            box-shadow: 0 4px 14px rgba(24, 144, 255, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2;
+        }
+
+        html[data-theme="dark"] .app-loader-center-disc {
+            background: radial-gradient(circle at 30% 30%, #1f2a37, #111827);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+        }
+
+        .app-loader-center-icon {
+            font-size: 24px;
+            color: #1890ff;
+            animation: app-rocket-float 2s ease-in-out infinite;
+            display: inline-block;
+            filter: drop-shadow(0 2px 8px rgba(24, 144, 255, 0.4));
+        }
+
+        @keyframes app-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes app-spin-reverse {
+            from { transform: rotate(360deg); }
+            to { transform: rotate(0deg); }
+        }
+
+        @keyframes app-orbit {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes app-aura-pulse {
+            0%, 100% { transform: scale(0.95); opacity: 0.6; }
+            50% { transform: scale(1.15); opacity: 1; }
+        }
+
+        @keyframes app-rocket-float {
+            0%, 100% { transform: translateY(0) rotate(-4deg); }
+            50% { transform: translateY(-4px) rotate(4deg); }
+        }
+
+        .app-loader-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-heading, #1f1f1f);
+            margin-bottom: 8px;
+            letter-spacing: -0.3px;
+        }
+
+        .app-loader-desc {
+            font-size: 12px;
+            color: var(--text-muted, #595959);
+            max-width: 480px;
+            line-height: 1.5;
+            margin-bottom: 16px;
+            min-height: 20px;
+            transition: all 0.3s ease;
+        }
+
+        /* Modern Document Meta Card */
+        .app-loader-doc-card {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 14px;
+            background: rgba(24, 144, 255, 0.06);
+            border: 1px solid rgba(24, 144, 255, 0.22);
+            border-radius: 20px;
+            margin-bottom: 16px;
+            font-size: 11.5px;
+        }
+
+        html[data-theme="dark"] .app-loader-doc-card {
+            background: rgba(24, 144, 255, 0.12);
+            border-color: rgba(24, 144, 255, 0.3);
+        }
+
+        .app-loader-doc-card .meta-bc {
+            background: #1890ff;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 10px;
+            padding: 1px 7px;
+            border-radius: 10px;
+            letter-spacing: 0.3px;
+        }
+
+        .app-loader-doc-card .meta-aju {
+            font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+            font-weight: 600;
+            color: var(--text-heading, #1f1f1f);
+            letter-spacing: 0.5px;
+        }
+
+        /* 3-Step Live Pipeline Visualizer */
+        .app-pipeline-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 16px;
+            max-width: 440px;
+            width: 100%;
+        }
+
+        .app-pipeline-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            opacity: 0.45;
+            transition: all 0.4s ease;
+            flex: 1;
+        }
+
+        .app-pipeline-step.active {
+            opacity: 1;
+            transform: scale(1.04);
+        }
+
+        .app-pipeline-step.done {
+            opacity: 0.95;
+        }
+
+        .pipeline-circle {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-card, #ffffff);
+            border: 2px solid #d9d9d9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            color: #8c8c8c;
+            transition: all 0.4s ease;
+        }
+
+        .app-pipeline-step.active .pipeline-circle {
+            border-color: #1890ff;
+            color: #1890ff;
+            box-shadow: 0 0 12px rgba(24, 144, 255, 0.45);
+            background: rgba(24, 144, 255, 0.08);
+            animation: pulse-ring 1.8s infinite;
+        }
+
+        .app-pipeline-step.done .pipeline-circle {
+            border-color: #52c41a;
+            background: #52c41a;
+            color: #ffffff;
+        }
+
+        .pipeline-label {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-muted, #8c8c8c);
+            white-space: nowrap;
+        }
+
+        .app-pipeline-step.active .pipeline-label {
+            color: #1890ff;
+            font-weight: 700;
+        }
+
+        .app-pipeline-step.done .pipeline-label {
+            color: #52c41a;
+        }
+
+        .app-pipeline-line {
+            flex: 1;
+            height: 2.5px;
+            background: rgba(0, 0, 0, 0.08);
+            border-radius: 2px;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 14px;
+        }
+
+        html[data-theme="dark"] .app-pipeline-line {
+            background: rgba(255, 255, 255, 0.12);
+        }
+
+        .app-pipeline-line .line-flow {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #1890ff, #52c41a);
+            transition: width 0.6s ease;
+        }
+
+        .app-pipeline-line.active .line-flow {
+            width: 100%;
+        }
+
+        @keyframes pulse-ring {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(24, 144, 255, 0.5); }
+            50% { box-shadow: 0 0 0 6px rgba(24, 144, 255, 0); }
+        }
+
+        /* Glowing Progress Track */
+        .app-loader-progress-track {
+            width: 100%;
+            max-width: 380px;
+            height: 6px;
+            background: rgba(0, 0, 0, 0.06);
+            border-radius: 999px;
+            overflow: hidden;
+            position: relative;
+            margin-bottom: 14px;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
+        }
+
+        html[data-theme="dark"] .app-loader-progress-track {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .app-loader-progress-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            width: 50%;
+            background: linear-gradient(90deg, #1890ff 0%, #00d2ff 40%, #52c41a 80%, #1890ff 100%);
+            background-size: 200% 100%;
+            border-radius: 999px;
+            animation: app-bar-indeterminate 1.4s ease-in-out infinite;
+            box-shadow: 0 0 10px rgba(0, 210, 255, 0.5);
+        }
+
+        @keyframes app-bar-indeterminate {
+            0% { left: -50%; }
+            50% { left: 40%; }
+            100% { left: 100%; }
+        }
+
+        /* Live Cyber Timer Badge */
+        .app-loader-cyber-timer {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            background: rgba(0, 0, 0, 0.04);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            font-size: 11px;
+            color: var(--text-muted, #8c8c8c);
+        }
+
+        html[data-theme="dark"] .app-loader-cyber-timer {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        .live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #52c41a;
+            box-shadow: 0 0 8px #52c41a;
+            animation: live-blink 1.2s ease-in-out infinite;
+        }
+
+        @keyframes live-blink {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.7); }
+        }
+            color: var(--text-muted, #8c8c8c);
+            background: rgba(0, 0, 0, 0.04);
+            padding: 3px 10px;
+            border-radius: 12px;
+        }
+
+        html[data-theme="dark"] .app-loader-timer {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        /* Universal Spinner */
+        .spinner, .app-spinner-sm {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(24, 144, 255, 0.25);
+            border-radius: 50%;
+            border-top-color: #1890ff;
+            animation: app-spin 0.75s linear infinite;
+            vertical-align: middle;
+            box-sizing: border-box;
+        }
+        .btn-primary .spinner, .btn-success .spinner, .btn-warning .spinner, .btn-danger .spinner {
+            border-color: rgba(255, 255, 255, 0.35);
+            border-top-color: #ffffff;
+        }
     </style>
 </head>
 <?php 
@@ -2742,6 +3549,9 @@ $isEditMode = !empty($selectedAjuParam);
             </button>
             <button type="button" class="btn btn-secondary btn-sm" onclick="openFilterSettingsModal('kolom')" title="Atur Visibilitas Saring Kolom (Global & Per Perusahaan)">
                 ⚙️ Atur Kolom
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openFilterSettingsModal('desimal')" title="Atur Format Desimal / Jumlah Koma Angka (Global & Per Perusahaan)">
+                🔢 Atur Desimal
             </button>
             <!-- Setup AJU Baru & ERP Integration Buttons -->
             <button id="btnToggleEntry" class="btn btn-warning btn-sm <?= $isEditMode ? '' : 'active' ?>" onclick="toggleEntryPanel()" style="<?= $isEditMode ? 'display:none;' : '' ?>">
@@ -2871,7 +3681,7 @@ $isEditMode = !empty($selectedAjuParam);
                         </div>
                         <div style="flex:1.4;">
                             <label style="font-size:9px; color:var(--text-muted); display:block; margin-bottom:2px;">Nilai NDPBM:</label>
-                            <input type="number" step="0.01" id="entryNdpbmVal" value="16250.00" style="width:100%; font-weight:700; color:var(--success);">
+                            <input type="text" inputmode="decimal" id="entryNdpbmVal" value="16,250.00" class="input-number" style="width:100%; font-weight:700; color:var(--success); text-align:right;">
                         </div>
                     </div>
                     <button type="button" class="btn btn-secondary btn-xs" id="btnFetchNdpbm" onclick="fetchLiveNdpbm()" style="margin-top:2px;">
@@ -3047,7 +3857,7 @@ $isEditMode = !empty($selectedAjuParam);
                             </div>
                             <div class="field-group" data-col="ndpbm">
                                 <label>NDPBM (Kurs)</label>
-                                <input type="number" step="0.0001" id="hdr_ndpbm">
+                                <input type="text" inputmode="decimal" id="hdr_ndpbm" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
@@ -3057,37 +3867,37 @@ $isEditMode = !empty($selectedAjuParam);
                             </div>
                             <div class="field-group" data-col="nilai_incoterm">
                                 <label>Nilai Incoterm</label>
-                                <input type="number" step="0.01" id="hdr_nilai_incoterm">
+                                <input type="text" inputmode="decimal" id="hdr_nilai_incoterm" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
                             <div class="field-group" data-col="fob">
                                 <label>Nilai FOB</label>
-                                <input type="number" step="0.01" id="hdr_fob">
+                                <input type="text" inputmode="decimal" id="hdr_fob" class="input-number">
                             </div>
                             <div class="field-group" data-col="cif">
                                 <label>Nilai CIF</label>
-                                <input type="number" step="0.01" id="hdr_cif">
+                                <input type="text" inputmode="decimal" id="hdr_cif" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
                             <div class="field-group" data-col="asuransi">
                                 <label>Nilai Asuransi</label>
-                                <input type="number" step="0.01" id="hdr_asuransi">
+                                <input type="text" inputmode="decimal" id="hdr_asuransi" class="input-number">
                             </div>
                             <div class="field-group" data-col="freight">
                                 <label>Nilai Freight</label>
-                                <input type="number" step="0.01" id="hdr_freight">
+                                <input type="text" inputmode="decimal" id="hdr_freight" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
                             <div class="field-group" data-col="harga_penyerahan">
                                 <label>Harga Penyerahan</label>
-                                <input type="number" step="0.01" id="hdr_harga_penyerahan">
+                                <input type="text" inputmode="decimal" id="hdr_harga_penyerahan" class="input-number">
                             </div>
                             <div class="field-group" data-col="nilai_barang">
                                 <label>Nilai Barang</label>
-                                <input type="number" step="0.01" id="hdr_nilai_barang">
+                                <input type="text" inputmode="decimal" id="hdr_nilai_barang" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
@@ -3097,7 +3907,7 @@ $isEditMode = !empty($selectedAjuParam);
                             </div>
                             <div class="field-group" data-col="dasar_pengenaan_pajak">
                                 <label>Dasar Pengenaan Pajak (DPP)</label>
-                                <input type="number" step="0.01" id="hdr_dasar_pengenaan_pajak">
+                                <input type="text" inputmode="decimal" id="hdr_dasar_pengenaan_pajak" class="input-number">
                             </div>
                         </div>
                     </div>
@@ -3166,15 +3976,15 @@ $isEditMode = !empty($selectedAjuParam);
                         <div class="field-row-3">
                             <div class="field-group" data-col="bruto">
                                 <label>Bruto (kg)</label>
-                                <input type="number" step="0.0001" id="hdr_bruto">
+                                <input type="text" inputmode="decimal" id="hdr_bruto" class="input-number">
                             </div>
                             <div class="field-group" data-col="netto">
                                 <label>Netto (kg)</label>
-                                <input type="number" step="0.0001" id="hdr_netto">
+                                <input type="text" inputmode="decimal" id="hdr_netto" class="input-number">
                             </div>
                             <div class="field-group" data-col="volume">
                                 <label>Volume</label>
-                                <input type="number" step="0.0001" id="hdr_volume">
+                                <input type="text" inputmode="decimal" id="hdr_volume" class="input-number">
                             </div>
                         </div>
                         <div class="field-row">
@@ -3329,6 +4139,11 @@ $isEditMode = !empty($selectedAjuParam);
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr id="tfoot-row-barang" class="tfoot-row">
+                            <!-- Populated dynamically matching thead-row-barang -->
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3404,19 +4219,35 @@ $isEditMode = !empty($selectedAjuParam);
                         <tr>
                             <th style="width:50px;" data-col="seri_barang">Seri Brg</th>
                             <th style="width:50px;" data-col="seri_bahan_baku">Seri BB</th>
-                            <th style="min-width:110px;">Asal BB</th>
-                            <th style="width:100px;">HS Code</th>
-                            <th style="width:110px;">Kode Barang</th>
-                            <th>Uraian Bahan Baku</th>
-                            <th style="width:80px;">Jml Satuan</th>
-                            <th style="width:70px;">Satuan</th>
-                            <th style="width:100px;">Nilai CIF</th>
-                            <th style="width:160px;">No AJU Asal</th>
-                            <th style="width:110px;">No Daftar Asal</th>
+                            <th style="min-width:110px;" data-col="kode_asal_bahan_baku">Asal BB</th>
+                            <th style="width:100px;" data-col="hs">HS Code</th>
+                            <th style="width:110px;" data-col="kode_barang">Kode Barang</th>
+                            <th data-col="uraian">Uraian Bahan Baku</th>
+                            <th style="width:80px;" data-col="jumlah_satuan">Jml Satuan</th>
+                            <th style="width:70px;" data-col="kode_satuan">Satuan</th>
+                            <th style="width:100px;" data-col="cif">Nilai CIF</th>
+                            <th style="width:160px;" data-col="nomor_aju_asal">No AJU Asal</th>
+                            <th style="width:110px;" data-col="nomor_daftar_asal">No Daftar Asal</th>
                             <th style="width:40px; text-align:center;">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="seri_barang" class="tfoot-label">TOTAL</td>
+                            <td data-col="seri_bahan_baku"></td>
+                            <td data-col="kode_asal_bahan_baku"></td>
+                            <td data-col="hs"></td>
+                            <td data-col="kode_barang"></td>
+                            <td data-col="uraian"></td>
+                            <td data-col="jumlah_satuan" class="td-number">0.0000</td>
+                            <td data-col="kode_satuan"></td>
+                            <td data-col="cif" class="td-number">0.00</td>
+                            <td data-col="nomor_aju_asal"></td>
+                            <td data-col="nomor_daftar_asal"></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3426,6 +4257,7 @@ $isEditMode = !empty($selectedAjuParam);
             <div class="grid-toolbar">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif & Pungutan Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangtarif</code>)</span></span>
                 <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungTarif('barang')" title="Hitung nilai bayar/fasilitas tarif barang berdasarkan CIF & persentase Tarif (%)">⚡ Hitung Tarif</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangtarif')">➕ Tambah Tarif</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('barangtarif')">💾 Simpan Barang Tarif</button>
                 </div>
@@ -3435,17 +4267,30 @@ $isEditMode = !empty($selectedAjuParam);
                     <thead>
                         <tr>
                             <th style="width:50px;" data-col="seri_barang">Seri Brg</th>
-                            <th style="min-width:130px;">Jenis Pungutan</th>
-                            <th style="min-width:105px;">Jenis Tarif</th>
-                            <th style="width:90px;">Tarif (%)</th>
-                            <th style="width:110px;">Nilai Bayar</th>
-                            <th style="width:110px;">Nilai Fasilitas</th>
-                            <th style="min-width:110px;">Kd Fasilitas</th>
-                            <th style="width:90px;">Jml Satuan</th>
+                            <th style="min-width:130px;" data-col="kode_pungutan">Jenis Pungutan</th>
+                            <th style="min-width:105px;" data-col="kode_tarif">Jenis Tarif</th>
+                            <th style="width:90px;" data-col="tarif">Tarif (%)</th>
+                            <th style="width:110px;" data-col="nilai_bayar">Nilai Bayar</th>
+                            <th style="width:110px;" data-col="nilai_fasilitas">Nilai Fasilitas</th>
+                            <th style="min-width:110px;" data-col="kode_fasilitas">Kd Fasilitas</th>
+                            <th style="width:90px;" data-col="jumlah_satuan">Jml Satuan</th>
                             <th style="width:40px; text-align:center;">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="seri_barang" class="tfoot-label">TOTAL</td>
+                            <td data-col="kode_pungutan"></td>
+                            <td data-col="kode_tarif"></td>
+                            <td data-col="tarif"></td>
+                            <td data-col="nilai_bayar" class="td-number">0.00</td>
+                            <td data-col="nilai_fasilitas" class="td-number">0.00</td>
+                            <td data-col="kode_fasilitas"></td>
+                            <td data-col="jumlah_satuan" class="td-number">0.0000</td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3455,6 +4300,7 @@ $isEditMode = !empty($selectedAjuParam);
             <div class="grid-toolbar">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Tarif Bahan Baku <span class="tbl-tech-name">(<code>bc_ceisa_bahanbakutarif</code>)</span></span>
                 <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungTarif('bahanbaku')" title="Hitung nilai bayar/fasilitas tarif bahan baku berdasarkan CIF & persentase Tarif (%)">⚡ Hitung Tarif BB</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbakutarif')">➕ Tambah Tarif BB</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('bahanbakutarif')">💾 Simpan Tarif BB</button>
                 </div>
@@ -3465,15 +4311,27 @@ $isEditMode = !empty($selectedAjuParam);
                         <tr>
                             <th style="width:50px;" data-col="seri_barang">Seri Brg</th>
                             <th style="width:50px;" data-col="seri_bahan_baku">Seri BB</th>
-                            <th style="min-width:130px;">Jenis Pungutan</th>
-                            <th style="width:90px;">Tarif (%)</th>
-                            <th style="width:110px;">Nilai Bayar</th>
-                            <th style="width:110px;">Nilai Fasilitas</th>
-                            <th style="min-width:110px;">Kd Fasilitas</th>
+                            <th style="min-width:130px;" data-col="kode_pungutan">Jenis Pungutan</th>
+                            <th style="width:90px;" data-col="tarif">Tarif (%)</th>
+                            <th style="width:110px;" data-col="nilai_bayar">Nilai Bayar</th>
+                            <th style="width:110px;" data-col="nilai_fasilitas">Nilai Fasilitas</th>
+                            <th style="min-width:110px;" data-col="kode_fasilitas">Kd Fasilitas</th>
                             <th style="width:40px; text-align:center;">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="seri_barang" class="tfoot-label">TOTAL</td>
+                            <td data-col="seri_bahan_baku"></td>
+                            <td data-col="kode_pungutan"></td>
+                            <td data-col="tarif"></td>
+                            <td data-col="nilai_bayar" class="td-number">0.00</td>
+                            <td data-col="nilai_fasilitas" class="td-number">0.00</td>
+                            <td data-col="kode_fasilitas"></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3499,6 +4357,15 @@ $isEditMode = !empty($selectedAjuParam);
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="seri" class="tfoot-label">TOTAL</td>
+                            <td data-col="jumlah_kemasan" class="td-number">0.00</td>
+                            <td data-col="kode_kemasan"></td>
+                            <td></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3561,6 +4428,7 @@ $isEditMode = !empty($selectedAjuParam);
             <div class="grid-toolbar">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Pungutan <span class="tbl-tech-name">(<code>bc_ceisa_pungutan</code>)</span></span>
                 <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen (dibulatkan ke ribuan penuh sesuai aturan CEISA 4.0)">⚡ Hitung Pungutan</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('pungutan')">➕ Tambah Pungutan</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('pungutan')">💾 Simpan Pungutan</button>
                 </div>
@@ -3569,14 +4437,23 @@ $isEditMode = !empty($selectedAjuParam);
                 <table class="datagrid" id="table-pungutan">
                     <thead>
                         <tr>
-                            <th style="min-width:130px;">Jenis Pungutan</th>
-                            <th style="min-width:140px;">Kd Fasilitas Tarif</th>
-                            <th>Nilai Pungutan (Rp)</th>
-                            <th style="width:150px;">NPWP Billing</th>
+                            <th style="width:240px; min-width:220px; max-width:300px;" data-col="kode_jenis_pungutan">Jenis Pungutan</th>
+                            <th style="width:280px; min-width:260px; max-width:360px;" data-col="kode_fasilitas_tarif">Kd Fasilitas Tarif</th>
+                            <th style="min-width:140px;" data-col="nilai_pungutan">Nilai Pungutan (Rp)</th>
+                            <th style="width:160px; min-width:160px;" data-col="npwp_billing">NPWP Billing</th>
                             <th style="width:40px; text-align:center;">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="kode_jenis_pungutan" class="tfoot-label">TOTAL</td>
+                            <td data-col="kode_fasilitas_tarif"></td>
+                            <td data-col="nilai_pungutan" class="td-number">0.00</td>
+                            <td data-col="npwp_billing"></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3618,18 +4495,31 @@ $isEditMode = !empty($selectedAjuParam);
                 <table class="datagrid" id="table-jaminan">
                     <thead>
                         <tr>
-                            <th style="min-width:130px;">Jenis Jaminan</th>
-                            <th>Nomor Jaminan</th>
-                            <th style="width:110px;">Tgl Jaminan</th>
-                            <th style="width:120px;">Nilai Jaminan</th>
-                            <th>Penjamin</th>
-                            <th style="width:110px;">Jatuh Tempo</th>
-                            <th style="width:120px;">Nomor BPJ</th>
-                            <th style="width:110px;">Tgl BPJ</th>
+                            <th style="min-width:130px;" data-col="kode_jaminan">Jenis Jaminan</th>
+                            <th data-col="nomor_jaminan">Nomor Jaminan</th>
+                            <th style="width:110px;" data-col="tanggal_jaminan">Tgl Jaminan</th>
+                            <th style="width:120px;" data-col="nilai_jaminan">Nilai Jaminan</th>
+                            <th data-col="penjamin">Penjamin</th>
+                            <th style="width:110px;" data-col="tanggal_jatuh_tempo">Jatuh Tempo</th>
+                            <th style="width:120px;" data-col="nomor_bpj">Nomor BPJ</th>
+                            <th style="width:110px;" data-col="tanggal_bpj">Tgl BPJ</th>
                             <th style="width:40px; text-align:center;">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="kode_jaminan" class="tfoot-label">TOTAL</td>
+                            <td data-col="nomor_jaminan"></td>
+                            <td data-col="tanggal_jaminan"></td>
+                            <td data-col="nilai_jaminan" class="td-number">0.00</td>
+                            <td data-col="penjamin"></td>
+                            <td data-col="tanggal_jatuh_tempo"></td>
+                            <td data-col="nomor_bpj"></td>
+                            <td data-col="tanggal_bpj"></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3670,6 +4560,30 @@ $isEditMode = !empty($selectedAjuParam);
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="jenis_nilai" class="tfoot-label">TOTAL</td>
+                            <td data-col="harga_invoice" class="td-number">0.00</td>
+                            <td data-col="pembayaran_tidak_langsung" class="td-number">0.00</td>
+                            <td data-col="diskon" class="td-number">0.00</td>
+                            <td data-col="komisi_penjualan" class="td-number">0.00</td>
+                            <td data-col="biaya_pengemasan" class="td-number">0.00</td>
+                            <td data-col="biaya_pengepakan" class="td-number">0.00</td>
+                            <td data-col="assist" class="td-number">0.00</td>
+                            <td data-col="royalti" class="td-number">0.00</td>
+                            <td data-col="proceeds" class="td-number">0.00</td>
+                            <td data-col="biaya_transportasi" class="td-number">0.00</td>
+                            <td data-col="biaya_pemuatan" class="td-number">0.00</td>
+                            <td data-col="asuransi" class="td-number">0.00</td>
+                            <td data-col="garansi" class="td-number">0.00</td>
+                            <td data-col="biaya_kepentingan_sendiri" class="td-number">0.00</td>
+                            <td data-col="biaya_pasca_impor" class="td-number">0.00</td>
+                            <td data-col="biaya_pajak_internal" class="td-number">0.00</td>
+                            <td data-col="bunga" class="td-number">0.00</td>
+                            <td data-col="deviden" class="td-number">0.00</td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3768,6 +4682,17 @@ $isEditMode = !empty($selectedAjuParam);
                         </tr>
                     </thead>
                     <tbody></tbody>
+                    <tfoot>
+                        <tr class="tfoot-row">
+                            <td data-col="seri_barang" class="tfoot-label">TOTAL</td>
+                            <td data-col="kode_vd"></td>
+                            <td data-col="nilai_barang" class="td-number">0.00</td>
+                            <td data-col="biaya_tambahan" class="td-number">0.00</td>
+                            <td data-col="biaya_pengurang" class="td-number">0.00</td>
+                            <td data-col="jatuh_tempo"></td>
+                            <td style="text-align:center;"></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
@@ -3933,13 +4858,16 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
             </div>
 
-            <!-- MODAL SUB-TAB BAR (TAB vs KOLOM) -->
+            <!-- MODAL SUB-TAB BAR (TAB vs KOLOM vs DESIMAL) -->
             <div style="display:flex; border-bottom:1px solid var(--border); background:var(--bg-base); padding:0 14px;">
                 <button type="button" id="btnSubTabFilterTab" class="btn btn-tab-sub active" onclick="switchFilterSettingsSubTab('tab')" style="padding:8px 16px; border:none; border-bottom:2px solid var(--primary); background:transparent; font-weight:700; font-size:12px; cursor:pointer; color:var(--primary);">
                     📑 Saring Tab BC
                 </button>
                 <button type="button" id="btnSubTabFilterKolom" class="btn btn-tab-sub" onclick="switchFilterSettingsSubTab('kolom')" style="padding:8px 16px; border:none; border-bottom:2px solid transparent; background:transparent; font-weight:600; font-size:12px; cursor:pointer; color:var(--text-muted);">
                     👁️ Saring Kolom (Header &amp; Barang)
+                </button>
+                <button type="button" id="btnSubTabFilterDesimal" class="btn btn-tab-sub" onclick="switchFilterSettingsSubTab('desimal')" style="padding:8px 16px; border:none; border-bottom:2px solid transparent; background:transparent; font-weight:600; font-size:12px; cursor:pointer; color:var(--text-muted);">
+                    🔢 Format Desimal (Jumlah Koma)
                 </button>
             </div>
 
@@ -3992,6 +4920,169 @@ $isEditMode = !empty($selectedAjuParam);
                         </table>
                     </div>
                 </div>
+
+                <!-- SUB-PANEL 3: FORMAT DESIMAL (JUMLAH KOMA) -->
+                <div id="subPanelFilterDesimal" style="display:none;">
+                    <!-- Penjelasan Rujukan CEISA & Rekomendasi -->
+                    <div style="background:var(--bg-input); border:1px solid var(--border); border-left:4px solid var(--primary); padding:10px 14px; border-radius:4px; margin-bottom:12px; font-size:11px; line-height:1.5;">
+                        <div style="font-weight:700; color:var(--primary); margin-bottom:4px;">💡 Rujukan Standar Format Data OpenAPI CEISA 4.0:</div>
+                        <div style="color:var(--text-main); margin-bottom:4px;">
+                            • <strong>Nilai Uang (CIF, FOB, Harga Penyerahan, Nilai Barang, Tarif):</strong> Format resmi CEISA menggunakan <strong>2 desimal</strong> (contoh: <code>4,208,141.25</code>).<br>
+                            • <strong>Jumlah Kemasan:</strong> Umumnya bilangan bulat / <strong>0 desimal</strong> (contoh: <code>95</code>) atau maksimal 2 desimal.<br>
+                            • <strong>Jumlah Satuan (Qty):</strong> Database menyimpan hingga <code>decimal(18,4)</code> (contoh: <code>7.0000</code>). Untuk satuan fisik/utuh (<code>NIU</code>, <code>PCE</code>, <code>SET</code>, <code>UNIT</code>) dapat diubah menjadi <strong>0 desimal</strong> (<code>7</code>) atau <strong>2 desimal</strong> (<code>7.00</code>) agar rapi dan tidak mengganggu operator.<br>
+                            • <strong>Berat &amp; Ukuran (Netto, Bruto, Volume):</strong> Standar kepabeanan memakai <strong>4 desimal</strong> (contoh: <code>3,841.8340</code>) atau 2 desimal.
+                        </div>
+                        <div style="font-size:10px; color:var(--text-muted);">
+                            * Perubahan format koma di bawah ini berlaku untuk tampilan tabel, form input, dan footer summary. Nilai numerik asli tetap terjaga presisi saat transfer ke server CEISA.
+                        </div>
+                    </div>
+
+                    <!-- Tombol Cepat / Presets (Samakan Semua Kolom) -->
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                        <div style="font-size:11px; font-weight:700; color:var(--text-main);">
+                            ⚡ Tombol Cepat (Samakan Semua / Terapkan Preset):
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(0)" title="Samakan semua kolom angka menjadi bilangan bulat tanpa koma (0 desimal)">⚡ Samakan Semua: 0 Koma</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(2)" title="Samakan semua kolom angka menjadi 2 desimal standar akuntansi">⚡ Samakan Semua: 2 Koma</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(4)" title="Samakan semua kolom angka menjadi 4 desimal teknis bea cukai">⚡ Samakan Semua: 4 Koma</button>
+                            <button type="button" class="btn btn-primary btn-xs" onclick="applyDecimalPreset('optimal')" title="Terapkan rekomendasi optimal: Qty (0), Kemasan (0), Uang (2), Berat (4), Harga (4), Tarif (2)">⭐ Rekomendasi Optimal</button>
+                        </div>
+                    </div>
+
+                    <!-- Grid Konfigurasi Desimal Per Kategori -->
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:10px;">
+                        
+                        <!-- 1. Qty / Jumlah Satuan -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">1. Jumlah Satuan (Qty Barang &amp; Bahan Baku)</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">jumlah_satuan (barang, bahanbaku, tarif)</div>
+                                </div>
+                                <select id="cfgDecQty" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0">0 Desimal (7 - Tanpa Koma)</option>
+                                    <option value="1">1 Desimal (7.0)</option>
+                                    <option value="2">2 Desimal (7.00)</option>
+                                    <option value="3">3 Desimal (7.000)</option>
+                                    <option value="4" selected>4 Desimal (7.0000 - Bawaan)</option>
+                                    <option value="5">5 Desimal</option>
+                                    <option value="6">6 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecQty" style="font-weight:700; font-family:monospace; color:var(--text-main);">7</span>
+                            </div>
+                        </div>
+
+                        <!-- 2. Jumlah Kemasan -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">2. Jumlah Kemasan</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">jumlah_kemasan (barang, kemasan)</div>
+                                </div>
+                                <select id="cfgDecKemasan" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0" selected>0 Desimal (95 - Bulat)</option>
+                                    <option value="1">1 Desimal (95.0)</option>
+                                    <option value="2">2 Desimal (95.00)</option>
+                                    <option value="3">3 Desimal</option>
+                                    <option value="4">4 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecKemasan" style="font-weight:700; font-family:monospace; color:var(--text-main);">95</span>
+                            </div>
+                        </div>
+
+                        <!-- 3. Nilai Uang & Transaksi -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">3. Nilai Uang / Transaksi (CIF, FOB, Pungutan, dll)</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">cif, fob, harga_penyerahan, nilai_barang, pungutan</div>
+                                </div>
+                                <select id="cfgDecUang" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0">0 Desimal (Rp 4,208,141)</option>
+                                    <option value="2" selected>2 Desimal (Rp 4,208,141.25 - Standar)</option>
+                                    <option value="3">3 Desimal</option>
+                                    <option value="4">4 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecUang" style="font-weight:700; font-family:monospace; color:var(--text-main);">4,208,141.25</span>
+                            </div>
+                        </div>
+
+                        <!-- 4. Harga Satuan Barang -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">4. Harga Satuan Barang</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">harga_satuan (barang)</div>
+                                </div>
+                                <select id="cfgDecHargaSatuan" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0">0 Desimal (601,163)</option>
+                                    <option value="2">2 Desimal (601,163.04)</option>
+                                    <option value="4" selected>4 Desimal (601,163.0357 - Presisi)</option>
+                                    <option value="5">5 Desimal</option>
+                                    <option value="6">6 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecHargaSatuan" style="font-weight:700; font-family:monospace; color:var(--text-main);">601,163.0357</span>
+                            </div>
+                        </div>
+
+                        <!-- 5. Berat & Ukuran -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">5. Berat &amp; Ukuran (Netto, Bruto, Volume)</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">netto, bruto, volume (header &amp; barang)</div>
+                                </div>
+                                <select id="cfgDecBerat" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0">0 Desimal (3,842 kg)</option>
+                                    <option value="2">2 Desimal (3,841.83 kg)</option>
+                                    <option value="3">3 Desimal (3,841.834 kg)</option>
+                                    <option value="4" selected>4 Desimal (3,841.8340 kg - Standar BC)</option>
+                                    <option value="5">5 Desimal</option>
+                                    <option value="6">6 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecBerat" style="font-weight:700; font-family:monospace; color:var(--text-main);">3,841.8340</span>
+                            </div>
+                        </div>
+
+                        <!-- 6. Tarif Pajak & Fasilitas -->
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                <div>
+                                    <strong style="font-size:12px; color:var(--text-main);">6. Tarif Pajak / Fasilitas (%)</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">tarif, tarif_ppn_pajak, tarif_ppnbm_pajak</div>
+                                </div>
+                                <select id="cfgDecTarif" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                    <option value="0">0 Desimal (11%)</option>
+                                    <option value="1">1 Desimal (11.0%)</option>
+                                    <option value="2" selected>2 Desimal (11.00% - Standar)</option>
+                                    <option value="3">3 Desimal</option>
+                                    <option value="4">4 Desimal</option>
+                                </select>
+                            </div>
+                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--text-muted);">Preview Tampilan:</span>
+                                <span id="prevDecTarif" style="font-weight:700; font-family:monospace; color:var(--text-main);">11.00</span>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
             </div>
 
             <!-- MODAL FOOTER -->
@@ -4032,14 +5123,14 @@ $isEditMode = !empty($selectedAjuParam);
 
     <!-- RESULT MODAL -->
     <div class="modal-overlay" id="modalResult">
-        <div class="modal" style="max-width:650px;">
+        <div class="modal" style="max-width: 860px; width: 94%;">
             <div class="modal-header">
                 <h3 id="modalResultTitle">Hasil Transfer Gateway CEISA 4.0</h3>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalResult')">✕</button>
+                <button class="btn btn-secondary btn-sm" id="btnModalResultClose" onclick="closeModal('modalResult')">✕</button>
             </div>
             <div class="modal-body" id="modalResultBody"></div>
             <div class="modal-footer">
-                <button class="btn btn-primary" onclick="closeModal('modalResult'); reloadCurrentAju();">OK, Selesai</button>
+                <button class="btn btn-primary" id="btnModalResultOk" onclick="closeModal('modalResult'); reloadCurrentAju();">OK, Selesai</button>
             </div>
         </div>
     </div>
@@ -4720,7 +5811,7 @@ $isEditMode = !empty($selectedAjuParam);
                 const json = await res.json();
                 if (json.status === 'OK') {
                     const input = document.getElementById('entryNdpbmVal');
-                    if (input) input.value = parseFloat(json.ndpbm).toFixed(2);
+                    if (input) input.value = formatCeisaNumber(json.ndpbm, 2);
                     if (badge) badge.innerText = json.source || 'LIVE';
                     showToast(`Kurs ${valuta}: Rp ${parseFloat(json.ndpbm).toLocaleString('id-ID')}`);
                 }
@@ -4734,7 +5825,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function executeCreateNewAju() {
             const kodeBc = document.getElementById('entryDocBc')?.value || '23';
             const valuta = document.getElementById('entryValuta')?.value || 'USD';
-            const ndpbm = parseFloat(document.getElementById('entryNdpbmVal')?.value || 0);
+            const ndpbm = parseInputNumber(document.getElementById('entryNdpbmVal')?.value || 0);
             const tanggal = document.getElementById('entryNdpbmDate')?.value || new Date().toISOString().slice(0, 10);
             const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
 
@@ -4965,7 +6056,20 @@ $isEditMode = !empty($selectedAjuParam);
             const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
 
             const listEl = document.getElementById('erpDocList');
-            if (listEl) listEl.innerHTML = '<div style="padding:20px; text-align:center;"><span class="spinner"></span> Mencari data di ERP...</div>';
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="app-loader-container" style="padding:30px 15px;">
+                        <div class="app-loader-icon-wrap" style="width:44px;height:44px;">
+                            <div class="app-loader-spinner spinner-primary" style="width:44px;height:44px;"></div>
+                            <div class="app-loader-center-icon" style="font-size:18px;">🔌</div>
+                        </div>
+                        <div class="app-loader-title" style="font-size:13px; color:#1890ff;">Mencari Dokumen di Database ERP...</div>
+                        <div class="app-loader-progress-track" style="max-width:200px; margin-top:8px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `;
+            }
 
             try {
                 const url = `editor.php?action=erp_search&cmp_id=${encodeURIComponent(cmpId)}&doc_type=${encodeURIComponent(docType)}&search_q=${encodeURIComponent(q)}&date_from=${encodeURIComponent(dt1)}&date_to=${encodeURIComponent(dt2)}&kode_dokumen=${encodeURIComponent(kodeBc)}`;
@@ -5983,15 +7087,43 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        function parseInputNumber(val) {
+            if (val === null || val === undefined) return NaN;
+            let s = String(val).trim();
+            if (s === '') return NaN;
+            if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
+                s = s.replace(/\./g, '').replace(',', '.');
+            } else if (/^-?\d+,\d+$/.test(s) && !s.includes('.')) {
+                s = s.replace(',', '.');
+            } else {
+                s = s.replace(/,/g, '');
+            }
+            return parseFloat(s);
+        }
+
         function formatCeisaNumber(val, decimals) {
             if (val === null || val === undefined || String(val).trim() === '') return '';
-            const n = parseFloat(val);
+            const n = parseInputNumber(val);
             if (isNaN(n)) return val;
-            if (decimals === 0) return Math.round(n).toString();
-            if (typeof decimals === 'number') {
-                return n.toFixed(decimals);
+            const dec = typeof decimals === 'number' ? decimals : 2;
+            return Number(n).toLocaleString('en-US', {
+                minimumFractionDigits: dec,
+                maximumFractionDigits: dec
+            });
+        }
+
+        function stripNumberCommas(val) {
+            if (val === null || val === undefined) return '';
+            let s = String(val).trim();
+            if (s === '') return '';
+            if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
+                s = s.replace(/\./g, '').replace(',', '.');
+            } else if (/^-?\d+,\d+$/.test(s) && !s.includes('.')) {
+                s = s.replace(',', '.');
+            } else {
+                s = s.replace(/,/g, '');
             }
-            return val;
+            return s;
         }
 
         const headerNumberDecimals = {
@@ -6019,6 +7151,147 @@ $isEditMode = !empty($selectedAjuParam);
             tarif_ppn_pajak: 2,
             tarif_ppnbm_pajak: 2
         };
+
+        let currentDecimalSettings = {
+            qty: 2,
+            kemasan: 0,
+            uang: 2,
+            harga_satuan: 4,
+            berat: 4,
+            tarif: 2
+        };
+
+        function applyDecimalSettingsToConfigs(settings) {
+            if (!settings) return;
+            currentDecimalSettings = Object.assign({}, currentDecimalSettings, settings);
+
+            const decQty = (typeof settings.qty === 'number') ? settings.qty : parseInt(settings.qty || 2, 10);
+            const decKemasan = (typeof settings.kemasan === 'number') ? settings.kemasan : parseInt(settings.kemasan || 0, 10);
+            const decUang = (typeof settings.uang === 'number') ? settings.uang : parseInt(settings.uang || 2, 10);
+            const decHargaSatuan = (typeof settings.harga_satuan === 'number') ? settings.harga_satuan : parseInt(settings.harga_satuan || 4, 10);
+            const decBerat = (typeof settings.berat === 'number') ? settings.berat : parseInt(settings.berat || 4, 10);
+            const decTarif = (typeof settings.tarif === 'number') ? settings.tarif : parseInt(settings.tarif || 2, 10);
+
+            // 1. Update headerNumberDecimals
+            headerNumberDecimals.netto = decBerat;
+            headerNumberDecimals.bruto = decBerat;
+            headerNumberDecimals.volume = decBerat;
+
+            headerNumberDecimals.cif = decUang;
+            headerNumberDecimals.fob = decUang;
+            headerNumberDecimals.asuransi = decUang;
+            headerNumberDecimals.asuransi1 = decUang;
+            headerNumberDecimals.freight = decUang;
+            headerNumberDecimals.nilai_incoterm = decUang;
+            headerNumberDecimals.harga_penyerahan = decUang;
+            headerNumberDecimals.nilai_barang = decUang;
+            headerNumberDecimals.dasar_pengenaan_pajak = decUang;
+            headerNumberDecimals.biaya_tambahan = decUang;
+            headerNumberDecimals.biaya_pengurang = decUang;
+            headerNumberDecimals.vd = decUang;
+            headerNumberDecimals.uang_muka = decUang;
+            headerNumberDecimals.nilai_jasa = decUang;
+            headerNumberDecimals.total_dana_sawit = decUang;
+            headerNumberDecimals.ppn_pajak = decUang;
+            headerNumberDecimals.ppnbm_pajak = decUang;
+
+            headerNumberDecimals.tarif_ppn_pajak = decTarif;
+            headerNumberDecimals.tarif_ppnbm_pajak = decTarif;
+
+            // 2. Update gridConfigs
+            if (gridConfigs.barang) {
+                gridConfigs.barang.forEach(col => {
+                    if (col.key === 'jumlah_satuan') col.decimals = decQty;
+                    else if (col.key === 'jumlah_kemasan') col.decimals = decKemasan;
+                    else if (['netto', 'bruto', 'volume'].includes(col.key)) col.decimals = decBerat;
+                    else if (col.key === 'harga_satuan') col.decimals = decHargaSatuan;
+                    else if (['cif', 'cif_rupiah', 'fob', 'harga_penyerahan', 'nilai_barang'].includes(col.key)) col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.bahanbaku) {
+                gridConfigs.bahanbaku.forEach(col => {
+                    if (col.key === 'jumlah_satuan') col.decimals = decQty;
+                    else if (col.key === 'cif') col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.barangtarif) {
+                gridConfigs.barangtarif.forEach(col => {
+                    if (col.key === 'tarif') col.decimals = decTarif;
+                    else if (['nilai_bayar', 'nilai_fasilitas'].includes(col.key)) col.decimals = decUang;
+                    else if (col.key === 'jumlah_satuan') col.decimals = decQty;
+                });
+            }
+
+            if (gridConfigs.bahanbakutarif) {
+                gridConfigs.bahanbakutarif.forEach(col => {
+                    if (col.key === 'tarif') col.decimals = decTarif;
+                    else if (['nilai_bayar', 'nilai_fasilitas'].includes(col.key)) col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.kemasan) {
+                gridConfigs.kemasan.forEach(col => {
+                    if (col.key === 'jumlah_kemasan') col.decimals = decKemasan;
+                });
+            }
+
+            if (gridConfigs.pungutan) {
+                gridConfigs.pungutan.forEach(col => {
+                    if (col.key === 'nilai_pungutan') col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.jaminan) {
+                gridConfigs.jaminan.forEach(col => {
+                    if (col.key === 'nilai_jaminan') col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.komponenbiaya) {
+                gridConfigs.komponenbiaya.forEach(col => {
+                    if (col.type === 'number') col.decimals = decUang;
+                });
+            }
+
+            if (gridConfigs.barangvd) {
+                gridConfigs.barangvd.forEach(col => {
+                    if (['nilai_barang', 'biaya_tambahan', 'biaya_pengurang'].includes(col.key)) col.decimals = decUang;
+                });
+            }
+        }
+
+        function refreshActiveGridDecimals() {
+            // Re-format header input elements
+            Object.entries(headerNumberDecimals).forEach(([f, dec]) => {
+                const el = document.getElementById('hdr_' + f);
+                if (el && el.value !== '') {
+                    el.value = formatCeisaNumber(el.value, dec);
+                }
+            });
+
+            // Re-format cells and footer summary in all active grid tables
+            Object.keys(gridConfigs).forEach(tableKey => {
+                const table = document.getElementById('table-' + tableKey);
+                if (!table) return;
+
+                const colMap = {};
+                (gridConfigs[tableKey] || []).forEach(c => { colMap[c.key] = c; });
+
+                table.querySelectorAll('tbody tr').forEach(tr => {
+                    tr.querySelectorAll('input[data-col]').forEach(inp => {
+                        const colKey = inp.dataset.col;
+                        const col = colMap[colKey];
+                        if (col && col.type === 'number' && typeof col.decimals === 'number' && inp.value !== '') {
+                            inp.value = formatCeisaNumber(inp.value, col.decimals);
+                        }
+                    });
+                });
+
+                updateTableTotals(tableKey);
+            });
+        }
 
         function autoSizeCellInput(inp, label, isNumber) {
             inp.style.width = '100%';
@@ -6111,8 +7384,10 @@ $isEditMode = !empty($selectedAjuParam);
                 { key: 'jumlah_satuan', type: 'number', label: 'Jml Satuan', decimals: 4 },
                 { key: 'kode_satuan', type: 'text', label: 'Satuan', reff: 'SATUAN BARANG' },
                 { key: 'cif', type: 'number', label: 'Nilai CIF', decimals: 2 },
+                { key: 'kode_dokumen_asal', type: 'select', label: 'Dok Asal', reff: 'DOKUMEN', width: '100px', minWidth: '100px', maxWidth: '100px' },
                 { key: 'nomor_aju_asal', type: 'text', label: 'No AJU Asal' },
-                { key: 'nomor_daftar_asal', type: 'text', label: 'No Daftar Asal' }
+                { key: 'nomor_daftar_asal', type: 'text', label: 'No Daftar Asal' },
+                { key: 'tanggal_daftar_asal', type: 'date', label: 'Tgl Daftar Asal', width: '110px', minWidth: '110px', maxWidth: '110px' }
             ],
             barangtarif: [
                 { key: 'seri_barang', type: 'number', label: 'Seri Brg', decimals: 0, width: '50px', minWidth: '50px', maxWidth: '50px' },
@@ -6155,10 +7430,10 @@ $isEditMode = !empty($selectedAjuParam);
                 { key: 'kode_tipe_kontainer', type: 'select', label: 'Tipe', reff: 'TIPE KONTAINER', width: '120px', minWidth: '120px', maxWidth: '120px' }
             ],
             pungutan: [
-                { key: 'kode_jenis_pungutan', type: 'select', label: 'Jenis Pungutan', reff: 'JENIS PUNGUTAN', width: '130px', minWidth: '130px', maxWidth: '130px' },
-                { key: 'kode_fasilitas_tarif', type: 'select', label: 'Fasilitas Tarif', reff: 'FASILITAS TARIF', width: '130px', minWidth: '130px', maxWidth: '130px' },
-                { key: 'nilai_pungutan', type: 'number', label: 'Nilai Pungutan', decimals: 2 },
-                { key: 'npwp_billing', type: 'text', label: 'NPWP Billing' }
+                { key: 'kode_jenis_pungutan', type: 'select', label: 'Jenis Pungutan', reff: 'JENIS PUNGUTAN', width: '240px', minWidth: '220px', maxWidth: '300px' },
+                { key: 'kode_fasilitas_tarif', type: 'select', label: 'Fasilitas Tarif', reff: 'FASILITAS TARIF', width: '280px', minWidth: '260px', maxWidth: '360px' },
+                { key: 'nilai_pungutan', type: 'number', label: 'Nilai Pungutan', decimals: 2, minWidth: '140px' },
+                { key: 'npwp_billing', type: 'text', label: 'NPWP Billing', minWidth: '160px' }
             ],
             bankdevisa: [
                 { key: 'seri', type: 'number', label: 'Seri', decimals: 0, width: '45px', minWidth: '45px', maxWidth: '45px' },
@@ -6236,14 +7511,25 @@ $isEditMode = !empty($selectedAjuParam);
             Object.entries(headerNumberDecimals).forEach(([f, dec]) => {
                 const el = document.getElementById('hdr_' + f);
                 if (el) {
+                    el.type = 'text';
+                    el.inputMode = 'decimal';
                     el.classList.add('input-number');
+                    el.addEventListener('focus', () => el.select());
                     el.addEventListener('blur', () => {
-                        if (el.value !== '' && !isNaN(el.value)) {
-                            el.value = parseFloat(el.value).toFixed(dec);
+                        if (el.value !== '') {
+                            el.value = formatCeisaNumber(el.value, dec);
                         }
                     });
                 }
             });
+
+            const entryNdpbmEl = document.getElementById('entryNdpbmVal');
+            if (entryNdpbmEl) {
+                entryNdpbmEl.addEventListener('focus', () => entryNdpbmEl.select());
+                entryNdpbmEl.addEventListener('blur', () => {
+                    if (entryNdpbmEl.value !== '') entryNdpbmEl.value = formatCeisaNumber(entryNdpbmEl.value, 2);
+                });
+            }
 
             const params = new URLSearchParams(window.location.search);
             const ajuParam = params.get('nomor_aju');
@@ -6297,7 +7583,19 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         async function reloadCurrentAju() {
-            if (currentAju) await loadAjuData(currentAju);
+            const btnReload = document.querySelector('button[onclick="reloadCurrentAju()"]');
+            if (btnReload) {
+                btnReload.disabled = true;
+                btnReload.innerHTML = '<span class="spinner" style="width:12px;height:12px;display:inline-block;"></span>';
+            }
+            try {
+                if (currentAju) await loadAjuData(currentAju);
+            } finally {
+                if (btnReload) {
+                    btnReload.disabled = false;
+                    btnReload.innerHTML = '🔄';
+                }
+            }
         }
 
         async function loadAjuData(aju) {
@@ -6306,6 +7604,12 @@ $isEditMode = !empty($selectedAjuParam);
             toggleEntryPanel(!isEdit);
             const btnEntry = document.getElementById('btnToggleEntry');
             if (btnEntry) btnEntry.style.display = isEdit ? 'none' : '';
+
+            const postedBadge = document.getElementById('metaPostedBadge');
+            if (postedBadge) {
+                postedBadge.innerHTML = '<span class="spinner" style="width:10px;height:10px;display:inline-block;vertical-align:middle;margin-right:4px;"></span> Memuat Data...';
+            }
+
             try {
                 const cmpUrl = new URLSearchParams(window.location.search).get('cmp_id') || '';
                 const docBcParam = document.getElementById('entryDocBc')?.value || '23';
@@ -6329,9 +7633,13 @@ $isEditMode = !empty($selectedAjuParam);
                     const entryValutaEl = document.getElementById('entryValuta');
                     if (entryValutaEl && currentData.header?.kode_valuta) entryValutaEl.value = currentData.header.kode_valuta;
                     const entryNdpbmEl = document.getElementById('entryNdpbmVal');
-                    if (entryNdpbmEl && currentData.header?.ndpbm) entryNdpbmEl.value = parseFloat(currentData.header.ndpbm).toFixed(2);
+                    if (entryNdpbmEl && currentData.header?.ndpbm) entryNdpbmEl.value = formatCeisaNumber(currentData.header.ndpbm, 2);
                     const entryDateEl = document.getElementById('entryNdpbmDate');
                     if (entryDateEl && currentData.header?.tanggal_pernyataan) entryDateEl.value = currentData.header.tanggal_pernyataan;
+
+                    if (json.decimal_settings) {
+                        applyDecimalSettingsToConfigs(json.decimal_settings);
+                    }
 
                     setupDatalists();
                     populateHeaderSelects();
@@ -6389,7 +7697,8 @@ $isEditMode = !empty($selectedAjuParam);
                     if (metaFilterEl) {
                         const tabLabel = currentTabSource === 'company' ? `Khusus [${currentActiveCmpId}]` : 'Global';
                         const colLabel = currentColSource === 'company' ? `Khusus [${currentActiveCmpId}]` : (currentColSource === 'global' ? 'Global' : 'Bawaan');
-                        metaFilterEl.innerText = `Saring: Tab (${tabLabel}) • Kolom (${colLabel})`;
+                        const decLabel = json.decimal_source === 'company' ? `Khusus [${currentActiveCmpId}]` : (json.decimal_source === 'global' ? 'Global' : 'Bawaan');
+                        metaFilterEl.innerText = `Saring: Tab (${tabLabel}) • Kolom (${colLabel}) • Desimal (${decLabel})`;
                     }
                 } else {
                     showError('Gagal memuat data AJU: ' + (json.message || 'Error'));
@@ -6437,8 +7746,8 @@ $isEditMode = !empty($selectedAjuParam);
                     let v = hdr[f] !== null && hdr[f] !== undefined ? hdr[f] : '';
                     if (f.startsWith('tanggal_') || f.endsWith('_tanggal') || el.classList.contains('hdr-date-input')) {
                         v = formatDateYmd(v);
-                    } else if (headerNumberDecimals[f] !== undefined && v !== '' && !isNaN(v)) {
-                        v = parseFloat(v).toFixed(headerNumberDecimals[f]);
+                    } else if (headerNumberDecimals[f] !== undefined && v !== '') {
+                        v = formatCeisaNumber(v, headerNumberDecimals[f]);
                     }
                     el.value = v;
                     if (el.classList.contains('hdr-date-input')) {
@@ -6512,6 +7821,112 @@ $isEditMode = !empty($selectedAjuParam);
             thAction.style.textAlign = 'center';
             thAction.innerText = 'Hapus';
             theadTr.appendChild(thAction);
+
+            renderBarangTableFooter();
+        }
+
+        function renderBarangTableFooter() {
+            const tfootTr = document.getElementById('tfoot-row-barang');
+            if (!tfootTr) return;
+            tfootTr.innerHTML = '';
+
+            const sumCols = ['jumlah_satuan', 'jumlah_kemasan', 'netto', 'bruto', 'volume', 'cif', 'cif_rupiah', 'fob', 'harga_penyerahan', 'nilai_barang'];
+
+            gridConfigs.barang.forEach(col => {
+                const td = document.createElement('td');
+                td.dataset.col = col.key;
+                if (col.key === 'seri_barang') {
+                    td.style.width = '45px';
+                    td.style.minWidth = '45px';
+                    td.style.maxWidth = '45px';
+                    td.style.textAlign = 'center';
+                    td.classList.add('tfoot-label');
+                    td.innerText = 'TOTAL';
+                } else {
+                    if (col.width) td.style.width = col.width;
+                    if (col.minWidth) td.style.minWidth = col.minWidth;
+                    if (col.maxWidth) td.style.maxWidth = col.maxWidth;
+                    if (sumCols.includes(col.key)) {
+                        td.classList.add('td-number');
+                        const dec = typeof col.decimals === 'number' ? col.decimals : 2;
+                        td.innerText = formatCeisaNumber(0, dec);
+                    } else {
+                        td.innerText = '';
+                    }
+                }
+                const rule = currentVarRules.barang ? currentVarRules.barang[col.key] : null;
+                if (rule && rule.visible === 0) {
+                    td.classList.add('col-hidden');
+                }
+                tfootTr.appendChild(td);
+            });
+
+            // Action delete empty td
+            const tdAction = document.createElement('td');
+            tdAction.style.width = '40px';
+            tdAction.style.minWidth = '40px';
+            tdAction.style.maxWidth = '40px';
+            tdAction.style.textAlign = 'center';
+            tfootTr.appendChild(tdAction);
+        }
+
+        function formatSummaryNumber(num, decimals = 2) {
+            return formatCeisaNumber(num, decimals);
+        }
+
+        function updateTableTotals(tableKey) {
+            const table = document.getElementById('table-' + tableKey);
+            if (!table) return;
+            const tfoot = table.querySelector('tfoot');
+            if (!tfoot) return;
+
+            const footerCells = tfoot.querySelectorAll('td[data-col]');
+            if (footerCells.length === 0) return;
+
+            const colConfigs = gridConfigs[tableKey] || [];
+            const configMap = {};
+            colConfigs.forEach(c => { configMap[c.key] = c; });
+
+            // Ambil semua kolom yang memiliki class td-number di footer
+            const sumCols = [];
+            footerCells.forEach(cell => {
+                if (cell.classList.contains('td-number') && cell.dataset.col) {
+                    sumCols.push(cell.dataset.col);
+                }
+            });
+
+            if (sumCols.length === 0) return;
+
+            // Inisialisasi total akumulasi
+            const sums = {};
+            sumCols.forEach(k => { sums[k] = 0; });
+
+            // Iterasi baris tabel pada tbody
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(tr => {
+                if (tr.style.display === 'none') return;
+                sumCols.forEach(colKey => {
+                    const el = tr.querySelector(`input[data-col="${colKey}"], select[data-col="${colKey}"]`);
+                    if (el) {
+                        const val = parseInputNumber(el.value);
+                        if (!isNaN(val)) {
+                            sums[colKey] += val;
+                        }
+                    }
+                });
+            });
+
+            // Format dan render nilai ke elemen sel tfoot
+            footerCells.forEach(cell => {
+                const colKey = cell.dataset.col;
+                if (colKey && sumCols.includes(colKey)) {
+                    const cConf = configMap[colKey];
+                    const decimals = cConf && typeof cConf.decimals === 'number' ? cConf.decimals : 2;
+                    const total = sums[colKey];
+                    cell.innerText = formatSummaryNumber(total, decimals);
+                    cell.title = `Total: ${formatCeisaNumber(total, decimals)} (${rows.length} baris)`;
+                }
+            });
         }
 
         function populateGrids(tables) {
@@ -6542,6 +7957,9 @@ $isEditMode = !empty($selectedAjuParam);
                     const tr = createGridRow(t, r, idx);
                     tbody.appendChild(tr);
                 });
+
+                // Hitung total footer untuk tabel ini
+                updateTableTotals(t);
             });
 
             // Pastikan seluruh select referensi memiliki lebar pas dan textarea auto-resize
@@ -6722,20 +8140,27 @@ $isEditMode = !empty($selectedAjuParam);
                     const inp = document.createElement('input');
                     const isNum = col.type === 'number';
                     const isSeri = col.key === 'seri' || col.key === 'seri_barang' || col.key === 'seri_bahan_baku' || col.key === 'seri_dokumen' || col.key === 'seri_entitas';
-                    inp.type = isNum ? 'number' : (col.type || 'text');
+                    inp.type = (isNum && !isSeri) ? 'text' : (isNum ? 'number' : (col.type || 'text'));
+                    if (isNum && !isSeri) {
+                        inp.inputMode = 'decimal';
+                    }
                     inp.className = 'cell-input' + (isNum && !isSeri ? ' cell-number' : '');
                     inp.dataset.col = col.key;
                     
                     if (isNum && !isSeri) {
                         td.classList.add('td-number');
-                        inp.step = 'any';
                         inp.value = formatCeisaNumber(rawVal, col.decimals);
 
+                        inp.addEventListener('focus', () => {
+                            inp.select();
+                        });
+
                         inp.addEventListener('blur', () => {
-                            if (inp.value !== '' && !isNaN(inp.value)) {
+                            if (inp.value !== '') {
                                 inp.value = formatCeisaNumber(inp.value, col.decimals);
                             }
                             autoSizeCellInput(inp, col.label, true);
+                            updateTableTotals(tableKey);
                         });
                     } else if (isSeri) {
                         td.classList.add('td-seri');
@@ -6762,10 +8187,10 @@ $isEditMode = !empty($selectedAjuParam);
                     // Terapkan autowidth berdasarkan panjang karakter (max 100)
                     autoSizeCellInput(inp, col.label, isNum && !isSeri);
                     inp.addEventListener('input', () => {
-                        if (isNum && !isSeri && inp.value && inp.value.includes(',')) {
-                            inp.value = inp.value.replace(',', '.');
-                        }
                         autoSizeCellInput(inp, col.label, isNum && !isSeri);
+                        if (isNum && !isSeri) {
+                            updateTableTotals(tableKey);
+                        }
                     });
 
                     // Datalist jika ada referensi untuk kolom barang ini
@@ -6796,7 +8221,10 @@ $isEditMode = !empty($selectedAjuParam);
             btnDel.style.padding = '2px 6px';
             btnDel.innerText = '✕';
             btnDel.title = 'Hapus Baris';
-            btnDel.onclick = function() { tr.remove(); };
+            btnDel.onclick = function() {
+                tr.remove();
+                updateTableTotals(tableKey);
+            };
             tdAction.appendChild(btnDel);
             tr.appendChild(tdAction);
 
@@ -6824,6 +8252,7 @@ $isEditMode = !empty($selectedAjuParam);
             requestAnimationFrame(() => {
                 autoResizeAllTextareas(tr);
             });
+            updateTableTotals(tableKey);
         }
 
         function switchTab(tabName) {
@@ -6934,6 +8363,7 @@ $isEditMode = !empty($selectedAjuParam);
                     el.classList.remove('col-hidden');
                 }
             });
+            updateTableTotals('barang');
         }
 
         function applyTabVisibility(kodeDokumen, tables, customAllowedTabs) {
@@ -7042,7 +8472,9 @@ $isEditMode = !empty($selectedAjuParam);
         ];
 
         function openFilterSettingsModal(initialSubTab) {
-            filterModalActiveSubTab = (initialSubTab === 'kolom') ? 'kolom' : 'tab';
+            if (initialSubTab === 'kolom') filterModalActiveSubTab = 'kolom';
+            else if (initialSubTab === 'desimal') filterModalActiveSubTab = 'desimal';
+            else filterModalActiveSubTab = 'tab';
             switchFilterSettingsSubTab(filterModalActiveSubTab);
 
             // Tentukan default Dokumen BC yang dipilih
@@ -7082,20 +8514,25 @@ $isEditMode = !empty($selectedAjuParam);
         function switchFilterSettingsSubTab(subTab) {
             filterModalActiveSubTab = subTab;
             const isTab = (subTab === 'tab');
+            const isCol = (subTab === 'kolom');
+            const isDec = (subTab === 'desimal');
+
             document.getElementById('subPanelFilterTab').style.display = isTab ? 'block' : 'none';
-            document.getElementById('subPanelFilterKolom').style.display = isTab ? 'none' : 'block';
+            document.getElementById('subPanelFilterKolom').style.display = isCol ? 'block' : 'none';
+            const panelDec = document.getElementById('subPanelFilterDesimal');
+            if (panelDec) panelDec.style.display = isDec ? 'block' : 'none';
 
             const btnTab = document.getElementById('btnSubTabFilterTab');
             const btnCol = document.getElementById('btnSubTabFilterKolom');
-            if (btnTab && btnCol) {
-                btnTab.style.borderBottomColor = isTab ? 'var(--primary)' : 'transparent';
-                btnTab.style.color = isTab ? 'var(--primary)' : 'var(--text-muted)';
-                btnTab.style.fontWeight = isTab ? '700' : '600';
+            const btnDec = document.getElementById('btnSubTabFilterDesimal');
 
-                btnCol.style.borderBottomColor = !isTab ? 'var(--primary)' : 'transparent';
-                btnCol.style.color = !isTab ? 'var(--primary)' : 'var(--text-muted)';
-                btnCol.style.fontWeight = !isTab ? '700' : '600';
-            }
+            [ [btnTab, isTab], [btnCol, isCol], [btnDec, isDec] ].forEach(([btn, active]) => {
+                if (btn) {
+                    btn.style.borderBottomColor = active ? 'var(--primary)' : 'transparent';
+                    btn.style.color = active ? 'var(--primary)' : 'var(--text-muted)';
+                    btn.style.fontWeight = active ? '700' : '600';
+                }
+            });
         }
 
         function onFilterScopeChange() {
@@ -7155,7 +8592,7 @@ $isEditMode = !empty($selectedAjuParam);
                     if (btnReset) btnReset.style.display = 'none';
                 } else {
                     // Scope Perusahaan
-                    const hasCustom = !!(json.tab.has_company_custom || json.kolom.has_company_custom);
+                    const hasCustom = !!(json.tab.has_company_custom || json.kolom.has_company_custom || json.desimal?.has_company_custom);
                     if (hasCustom) {
                         if (badge) {
                             badge.style.background = '#52c41a';
@@ -7179,9 +8616,85 @@ $isEditMode = !empty($selectedAjuParam);
                 // Render KOLOM Datagrid
                 renderFilterColTable(json);
 
+                // Render FORMAT DESIMAL Form
+                renderFilterDecimalsForm(json);
+
             } catch (err) {
                 if (gridTab) gridTab.innerHTML = `<div style="color:var(--danger); padding:10px;">Gagal: ${err.message}</div>`;
                 if (tbodyCol) tbodyCol.innerHTML = `<tr><td colspan="4" style="color:var(--danger); padding:10px;">Gagal: ${err.message}</td></tr>`;
+            }
+        }
+
+        function renderFilterDecimalsForm(data) {
+            if (!data || !data.desimal) return;
+            const cur = data.desimal.current || data.desimal.defaults || {};
+            const setVal = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && val !== undefined && val !== null) {
+                    el.value = String(val);
+                }
+            };
+            setVal('cfgDecQty', cur.qty ?? 2);
+            setVal('cfgDecKemasan', cur.kemasan ?? 0);
+            setVal('cfgDecUang', cur.uang ?? 2);
+            setVal('cfgDecHargaSatuan', cur.harga_satuan ?? 4);
+            setVal('cfgDecBerat', cur.berat ?? 4);
+            setVal('cfgDecTarif', cur.tarif ?? 2);
+            updateDecimalLivePreviews();
+        }
+
+        function updateDecimalLivePreviews() {
+            const getVal = id => parseInt(document.getElementById(id)?.value ?? 2, 10);
+            const formatSample = (num, dec) => Number(num).toLocaleString('en-US', {
+                minimumFractionDigits: dec,
+                maximumFractionDigits: dec
+            });
+
+            const pQty = document.getElementById('prevDecQty');
+            if (pQty) pQty.innerText = formatSample(7, getVal('cfgDecQty'));
+
+            const pKemasan = document.getElementById('prevDecKemasan');
+            if (pKemasan) pKemasan.innerText = formatSample(95, getVal('cfgDecKemasan'));
+
+            const pUang = document.getElementById('prevDecUang');
+            if (pUang) pUang.innerText = formatSample(4208141.25, getVal('cfgDecUang'));
+
+            const pHarga = document.getElementById('prevDecHargaSatuan');
+            if (pHarga) pHarga.innerText = formatSample(601163.0357, getVal('cfgDecHargaSatuan'));
+
+            const pBerat = document.getElementById('prevDecBerat');
+            if (pBerat) pBerat.innerText = formatSample(3841.834, getVal('cfgDecBerat'));
+
+            const pTarif = document.getElementById('prevDecTarif');
+            if (pTarif) pTarif.innerText = formatSample(11, getVal('cfgDecTarif'));
+        }
+
+        function equalizeAllDecimals(decVal) {
+            const v = String(decVal);
+            ['cfgDecQty', 'cfgDecKemasan', 'cfgDecUang', 'cfgDecHargaSatuan', 'cfgDecBerat', 'cfgDecTarif'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.value = v;
+            });
+            updateDecimalLivePreviews();
+            showToast(`Semua kolom format angka telah disamakan menjadi ${decVal} desimal (koma).`);
+        }
+
+        function applyDecimalPreset(presetType) {
+            if (presetType === 'optimal') {
+                const map = {
+                    cfgDecQty: 0,
+                    cfgDecKemasan: 0,
+                    cfgDecUang: 2,
+                    cfgDecHargaSatuan: 4,
+                    cfgDecBerat: 4,
+                    cfgDecTarif: 2
+                };
+                Object.entries(map).forEach(([id, val]) => {
+                    const el = document.getElementById(id);
+                    if (el) el.value = String(val);
+                });
+                updateDecimalLivePreviews();
+                showToast('Rekomendasi optimal CEISA (Qty & Kemasan bulat 0 koma, Uang 2 koma, Berat & Harga 4 koma) telah diterapkan.');
             }
         }
 
@@ -7354,6 +8867,16 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             });
 
+            // Decimals
+            const decimals = {
+                qty: parseInt(document.getElementById('cfgDecQty')?.value ?? 2, 10),
+                kemasan: parseInt(document.getElementById('cfgDecKemasan')?.value ?? 0, 10),
+                uang: parseInt(document.getElementById('cfgDecUang')?.value ?? 2, 10),
+                harga_satuan: parseInt(document.getElementById('cfgDecHargaSatuan')?.value ?? 4, 10),
+                berat: parseInt(document.getElementById('cfgDecBerat')?.value ?? 4, 10),
+                tarif: parseInt(document.getElementById('cfgDecTarif')?.value ?? 2, 10)
+            };
+
             try {
                 if (btn) {
                     btn.disabled = true;
@@ -7367,12 +8890,15 @@ $isEditMode = !empty($selectedAjuParam);
                         cmp_id: cmpId,
                         save_type: 'all',
                         tabs: tabs,
-                        cols: cols
+                        cols: cols,
+                        decimals: decimals
                     })
                 });
                 const json = await res.json();
                 if (json.status === 'OK') {
                     showToast('✓ ' + (json.message || 'Pengaturan berhasil disimpan!'));
+                    applyDecimalSettingsToConfigs(decimals);
+                    refreshActiveGridDecimals();
                     await loadFilterSettingsData();
                     if (currentAju) {
                         await loadAjuData(currentAju);
@@ -7608,10 +9134,23 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         async function saveHeader() {
+            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"]');
+            saveBtns.forEach(b => {
+                b.disabled = true;
+                b._origHtml = b.innerHTML;
+                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
+            });
+
             const data = {};
             headerFields.forEach(f => {
                 const el = document.getElementById('hdr_' + f);
-                if (el) data[f] = el.value !== undefined ? el.value.trim() : '';
+                if (el) {
+                    let v = el.value !== undefined ? el.value.trim() : '';
+                    if (headerNumberDecimals[f] !== undefined && v !== '') {
+                        v = stripNumberCommas(v);
+                    }
+                    data[f] = v;
+                }
             });
 
             const formData = new FormData();
@@ -7631,6 +9170,11 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch (err) {
                 showError('Error: ' + err.message);
+            } finally {
+                saveBtns.forEach(b => {
+                    b.disabled = false;
+                    if (b._origHtml) b.innerHTML = b._origHtml;
+                });
             }
         }
 
@@ -7639,13 +9183,24 @@ $isEditMode = !empty($selectedAjuParam);
             const tbody = document.querySelector(`#table-${tableKey} tbody`);
             if (!tbody) return;
 
+            const saveBtns = document.querySelectorAll(`button[onclick="saveCurrentTab()"], button[onclick="saveTable('${tableKey}')"]`);
+            saveBtns.forEach(b => {
+                b.disabled = true;
+                b._origHtml = b.innerHTML;
+                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
+            });
+
             const trs = tbody.querySelectorAll('tr');
             const rows = [];
             trs.forEach(tr => {
                 const rowObj = {};
                 tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
                     if (el.dataset.col) {
-                        rowObj[el.dataset.col] = el.value !== undefined ? el.value.trim() : '';
+                        let v = el.value !== undefined ? el.value.trim() : '';
+                        if (el.classList.contains('cell-number') || el.type === 'number') {
+                            v = stripNumberCommas(v);
+                        }
+                        rowObj[el.dataset.col] = v;
                     }
                 });
                 rows.push(rowObj);
@@ -7669,6 +9224,139 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch (err) {
                 showError('Error: ' + err.message);
+            } finally {
+                saveBtns.forEach(b => {
+                    b.disabled = false;
+                    if (b._origHtml) b.innerHTML = b._origHtml;
+                });
+            }
+        }
+
+        async function hitungPungutan() {
+            if (!currentAju) {
+                showWarning('Silakan pilih nomor AJU terlebih dahulu!');
+                return;
+            }
+            if (isCurrentDocLocked) {
+                showWarning('Dokumen AJU ini sudah MASUK IT Inventory (terkunci)!');
+                return;
+            }
+
+            const btn = document.querySelector('button[onclick="hitungPungutan()"]');
+            const origHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '⏳ Menghitung...';
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'calc_pungutan');
+                formData.append('nomor_aju', currentAju);
+
+                const res = await fetch('editor.php', { method: 'POST', body: formData });
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    const rows = json.rows || [];
+                    currentData.pungutan = rows;
+
+                    const tbody = document.querySelector('#table-pungutan tbody');
+                    if (tbody) {
+                        tbody.innerHTML = '';
+                        rows.forEach((r, idx) => {
+                            const tr = createGridRow('pungutan', r, idx);
+                            tbody.appendChild(tr);
+                        });
+                        setTimeout(() => {
+                            document.querySelectorAll('#table-pungutan select.cell-select').forEach(autoSizeSelect);
+                        }, 50);
+                    }
+
+                    const countBadge = document.getElementById('count-pungutan');
+                    if (countBadge) countBadge.innerText = rows.length;
+                    updateTableTotals('pungutan');
+
+                    showSuccess(json.message, 'Kalkulasi Pungutan Sukses');
+                } else if (json.status === 'WARNING') {
+                    showWarning(json.message);
+                } else {
+                    showError(json.message || 'Gagal menghitung pungutan.');
+                }
+            } catch (err) {
+                showError('Error saat kalkulasi pungutan: ' + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = origHtml;
+                }
+            }
+        }
+
+        async function hitungTarif(target) {
+            if (!currentAju) {
+                showWarning('Silakan pilih nomor AJU terlebih dahulu!');
+                return;
+            }
+            if (isCurrentDocLocked) {
+                showWarning('Dokumen AJU ini sudah MASUK IT Inventory (terkunci)!');
+                return;
+            }
+
+            const labelTarget = target === 'bahanbaku' ? 'Bahan Baku Tarif' : 'Barang Tarif';
+            const btn = document.querySelector(`button[onclick="hitungTarif('${target}')"]`);
+            const origHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '⏳ Menghitung...';
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'calc_tarif');
+                formData.append('nomor_aju', currentAju);
+                formData.append('target', target);
+
+                const res = await fetch('editor.php', { method: 'POST', body: formData });
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    const reloadTables = target === 'all' ? ['barangtarif', 'bahanbakutarif'] : (target === 'bahanbaku' ? ['bahanbakutarif'] : ['barangtarif']);
+                    const tRes = await fetch(`editor.php?action=load_all&nomor_aju=${encodeURIComponent(currentAju)}`);
+                    const tJson = await tRes.json();
+                    if (tJson.status === 'OK' && tJson.tables) {
+                        reloadTables.forEach(tbl => {
+                            currentData[tbl] = tJson.tables[tbl] || [];
+                            const tbody = document.querySelector(`#table-${tbl} tbody`);
+                            if (tbody) {
+                                tbody.innerHTML = '';
+                                (currentData[tbl]).forEach((r, idx) => {
+                                    const tr = createGridRow(tbl, r, idx);
+                                    tbody.appendChild(tr);
+                                });
+                                setTimeout(() => {
+                                    document.querySelectorAll(`#table-${tbl} select.cell-select`).forEach(autoSizeSelect);
+                                }, 50);
+                            }
+                            const countBadge = document.getElementById('count-' + tbl);
+                            if (countBadge) countBadge.innerText = currentData[tbl].length;
+                            updateTableTotals(tbl);
+                        });
+                    }
+
+                    showSuccess(json.message, 'Kalkulasi Tarif Sukses');
+                } else if (json.status === 'WARNING') {
+                    showWarning(json.message);
+                } else {
+                    showError(json.message || `Gagal menghitung tarif ${labelTarget}.`);
+                }
+            } catch (err) {
+                showError(`Error saat kalkulasi tarif ${labelTarget}: ` + err.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = origHtml;
+                }
             }
         }
 
@@ -7677,6 +9365,13 @@ $isEditMode = !empty($selectedAjuParam);
                 showWarning('Pilih nomor AJU terlebih dahulu!');
                 return;
             }
+            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"]');
+            saveBtns.forEach(b => {
+                b.disabled = true;
+                b._origHtml = b.innerHTML;
+                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
+            });
+
             const kbFields = [
                 'nama_pic', 'alamat_pic', 'telp_pic', 'lokasi_siap_periksa',
                 'waktu_siap_periksa', 'kode_cara_stuffing', 'jumlah_kontainer20',
@@ -7707,6 +9402,11 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch (err) {
                 showError('Koneksi gagal: ' + err.message);
+            } finally {
+                saveBtns.forEach(b => {
+                    b.disabled = false;
+                    if (b._origHtml) b.innerHTML = b._origHtml;
+                });
             }
         }
 
@@ -7715,20 +9415,37 @@ $isEditMode = !empty($selectedAjuParam);
                 showWarning('Silakan buat dokumen baru atau pilih nomor AJU terlebih dahulu untuk melihat preview JSON.', 'Form Kosong');
                 return;
             }
-            document.getElementById('previewContent').innerText = 'Menyusun JSON segar dari database...';
+            const previewMeta = document.getElementById('previewMeta');
+            const previewContent = document.getElementById('previewContent');
+            if (previewMeta) previewMeta.innerText = 'Menyusun JSON segar dari database...';
+            if (previewContent) {
+                previewContent.innerHTML = `
+                    <div class="app-loader-container" style="padding:40px 20px; background:transparent;">
+                        <div class="app-loader-icon-wrap" style="width:48px;height:48px;">
+                            <div class="app-loader-spinner spinner-primary" style="width:48px;height:48px;"></div>
+                            <div class="app-loader-center-icon" style="font-size:20px;">👁️</div>
+                        </div>
+                        <div class="app-loader-title" style="font-size:13px; color:#1890ff;">Menyusun Data JSON CEISA 4.0</div>
+                        <div class="app-loader-desc" style="font-size:11px; max-width:320px;">Mengekstrak dan memformat seluruh tabel dokumen AJU dari database...</div>
+                        <div class="app-loader-progress-track" style="max-width:240px; margin-top:10px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `;
+            }
             document.getElementById('modalPreview').style.display = 'flex';
 
             try {
                 const res = await fetch(`transfer.php?action=preview_json&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    document.getElementById('previewMeta').innerText = `Ukuran: ${json.bytes.toLocaleString()} bytes | Dokumen: BC ${json.kode_dokumen}`;
-                    document.getElementById('previewContent').innerText = JSON.stringify(json.data, null, 2);
+                    if (previewMeta) previewMeta.innerText = `Ukuran: ${json.bytes.toLocaleString()} bytes | Dokumen: BC ${json.kode_dokumen}`;
+                    if (previewContent) previewContent.innerText = JSON.stringify(json.data, null, 2);
                 } else {
-                    document.getElementById('previewContent').innerText = `ERROR: ${json.message}`;
+                    if (previewContent) previewContent.innerText = `ERROR: ${json.message}`;
                 }
             } catch (err) {
-                document.getElementById('previewContent').innerText = `ERROR: ${err.message}`;
+                if (previewContent) previewContent.innerText = `ERROR: ${err.message}`;
             }
         }
 
@@ -7739,6 +9456,303 @@ $isEditMode = !empty($selectedAjuParam);
                 const url = currentAju ? `/transfer.php?nomor_aju=${encodeURIComponent(currentAju)}` : '/transfer.php';
                 window.location.href = url;
             }
+        }
+
+        // -------------------------------------------------------------
+        // RENDER CEISA GATEWAY RESPONSE (USER FRIENDLY & ERROR TABLE)
+        // -------------------------------------------------------------
+        function renderCeisaGatewayResponse(data, nomorAju, activeBc) {
+            let payload = data;
+            if (data && typeof data === 'object' && data.response !== undefined && data.response !== null) {
+                payload = data.response;
+            }
+
+            // Status check
+            let isSuccess = false;
+            let statusBadgeText = 'UNKNOWN';
+
+            // Check if inner payload has status
+            const innerStatus = (payload && typeof payload === 'object' && payload.status) ? String(payload.status).toLowerCase().trim() : '';
+            const outerStatus = (data && typeof data === 'object' && data.status) ? String(data.status).toLowerCase().trim() : '';
+
+            if (innerStatus === 'ok' || innerStatus === 'success' || innerStatus === 'saved' || innerStatus === 'receive') {
+                isSuccess = true;
+                statusBadgeText = (payload.status || 'BERHASIL').toUpperCase();
+            } else if (innerStatus === 'failed' || innerStatus === 'reject' || innerStatus === 'error' || outerStatus === 'error') {
+                isSuccess = false;
+                statusBadgeText = (payload?.status || data?.status || 'GAGAL / REJECT').toUpperCase();
+            } else if (outerStatus === 'ok' && !innerStatus) {
+                const msgStr = JSON.stringify(payload || '');
+                if (msgStr.includes('invalid') || msgStr.includes('error') || msgStr.includes('failed') || msgStr.includes('is required')) {
+                    isSuccess = false;
+                    statusBadgeText = 'DITOLAK';
+                } else {
+                    isSuccess = true;
+                    statusBadgeText = 'BERHASIL';
+                }
+            } else if (outerStatus === 'raw') {
+                isSuccess = false;
+                statusBadgeText = 'RESPON MENTAH';
+            }
+
+            // Extract message(s)
+            let rawMessages = [];
+            if (payload && payload.message) {
+                if (Array.isArray(payload.message)) {
+                    rawMessages = payload.message;
+                } else {
+                    rawMessages = [String(payload.message)];
+                }
+            } else if (data && data.message) {
+                if (Array.isArray(data.message)) {
+                    rawMessages = data.message;
+                } else {
+                    rawMessages = [String(data.message)];
+                }
+            } else if (data && data.raw_response) {
+                rawMessages = [String(data.raw_response)];
+            }
+
+            if (rawMessages.length === 0) {
+                rawMessages = [isSuccess ? 'Dokumen berhasil diterima oleh CEISA 4.0' : 'Tidak ada rincian pesan dari server.'];
+            }
+
+            // Dictionary for CEISA fields -> Indonesian
+            const fieldDict = {
+                'tanggalDaftarDokAsal': 'Tanggal Daftar Dok Asal',
+                'nomorDaftarDokAsal': 'Nomor Daftar Dok Asal',
+                'kodeDokumenAsal': 'Kode Dokumen Asal',
+                'nomorAjuDokAsal': 'Nomor AJU Dok Asal',
+                'seriBahanBaku': 'Seri Bahan Baku',
+                'seriBarang': 'Seri Barang',
+                'seri': 'Nomor Seri',
+                'kodeBarang': 'Kode Barang',
+                'uraianBarang': 'Uraian Barang',
+                'uraian': 'Uraian Barang',
+                'posTarif': 'HS Code / Pos Tarif',
+                'kodeSatuanBarang': 'Kode Satuan Barang',
+                'kodeSatuan': 'Kode Satuan',
+                'jumlahSatuan': 'Jumlah Satuan',
+                'hargaPenyerahan': 'Harga Penyerahan',
+                'hargaCif': 'Nilai CIF',
+                'cif': 'Nilai CIF',
+                'fob': 'Nilai FOB',
+                'asuransi': 'Nilai Asuransi',
+                'freight': 'Nilai Freight',
+                'nilaiBarang': 'Nilai Barang',
+                'nomorDokumen': 'Nomor Dokumen',
+                'tanggalDokumen': 'Tanggal Dokumen',
+                'kodeDokumen': 'Jenis / Kode Dokumen',
+                'kodeEntitas': 'Kode Peran Entitas',
+                'nomorIdentitas': 'Nomor NPWP / NIK Entitas',
+                'namaEntitas': 'Nama Perusahaan / Entitas',
+                'alamatEntitas': 'Alamat Entitas',
+                'kodeKantor': 'Kantor Bea Cukai',
+                'kodeKantorBongkar': 'Kantor Bongkar',
+                'kodeKantorTujuan': 'Kantor Tujuan',
+                'kodeValuta': 'Valuta / Mata Uang',
+                'ndpbm': 'Kurs NDPBM',
+                'bruto': 'Berat Kotor (Bruto)',
+                'netto': 'Berat Bersih (Netto)',
+                'volume': 'Volume',
+                'kodeNegara': 'Negara',
+                'kodeCaraAngkut': 'Cara Pengangkutan',
+                'namaPengangkut': 'Nama Sarana Pengangkut',
+                'nomorPengangkut': 'Nomor Pengangkut (Voyage/Flight)'
+            };
+
+            function humanizeField(f) {
+                if (!f) return '-';
+                if (fieldDict[f]) return fieldDict[f];
+                return f.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
+            }
+
+            function humanizePath(pathStr) {
+                if (!pathStr || pathStr === '$') return 'Dokumen Utama (Header)';
+                let clean = pathStr.replace(/^\$\.?/, '');
+                let parts = clean.split('.');
+                let labels = [];
+                for (let p of parts) {
+                    let m = p.match(/^([a-zA-Z0-9_]+)(?:\[(\d+)\])?$/);
+                    if (m) {
+                        let name = m[1];
+                        let idx = m[2] !== undefined ? (parseInt(m[2]) + 1) : null;
+                        let lbl = name;
+                        if (name === 'barang') lbl = 'Barang #' + idx;
+                        else if (name === 'bahanBaku') lbl = 'Bahan Baku #' + idx;
+                        else if (name === 'dokumen') lbl = 'Dokumen #' + idx;
+                        else if (name === 'entitas') lbl = 'Entitas #' + idx;
+                        else if (name === 'kemasan') lbl = 'Kemasan #' + idx;
+                        else if (name === 'kontainer') lbl = 'Kontainer #' + idx;
+                        else if (name === 'pengangkut') lbl = 'Pengangkut #' + idx;
+                        else if (name === 'header') lbl = 'Header';
+                        else lbl = humanizeField(name) + (idx ? ' #' + idx : '');
+                        labels.push(lbl);
+                    } else {
+                        labels.push(p);
+                    }
+                }
+                return labels.join(' <span style="color:#bfbfbf;">➔</span> ');
+            }
+
+            function parseMessage(raw) {
+                let text = String(raw).trim();
+                let m = text.match(/^\$?\.?([a-zA-Z0-9_\[\].]+?)(?:\.([a-zA-Z0-9_]+))?:\s*(.*)$/);
+                if (m) {
+                    let path = m[1];
+                    let field = m[2] || '';
+                    let detail = m[3] || '';
+                    if (!field && !path.endsWith(']')) {
+                        let parts = path.split('.');
+                        field = parts.pop();
+                        path = parts.join('.');
+                    }
+                    return {
+                        location: humanizePath(path),
+                        fieldRaw: field,
+                        fieldName: humanizeField(field),
+                        detail: detail
+                    };
+                }
+                return {
+                    location: 'Gateway CEISA',
+                    fieldRaw: '',
+                    fieldName: '-',
+                    detail: text
+                };
+            }
+
+            function analyzeSolution(issue) {
+                let d = issue.detail.toLowerCase();
+                let f = (issue.fieldRaw || '').toLowerCase();
+
+                if (d.includes('invalid date')) {
+                    let dateMatch = issue.detail.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+                    if (dateMatch && parseInt(dateMatch[2]) > 12) {
+                        return `<span style="color:#cf1322; font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> Format Tanggal Terbalik:</span> Posisi Bulan & Hari tertukar (<code>${dateMatch[0]}</code>). Seharusnya <code>${dateMatch[1]}-${dateMatch[3].padStart(2,'0')}-${dateMatch[2].padStart(2,'0')}</code>. Tanggal di database telah dinormalisasi secara otomatis.`;
+                    }
+                    return '<span style="color:#cf1322; font-weight:600;">Format Tanggal Salah:</span> Gunakan format standar <code>YYYY-MM-DD</code> (contoh: <code>2026-08-31</code>).';
+                }
+                if (d.includes('is missing but it is required') || d.includes('is required')) {
+                    return `Kolom <strong>${issue.fieldName}</strong> wajib diisi dan tidak boleh dikosongkan.`;
+                }
+                if (d.includes('kodedokumen tidak dikenali') && (activeBc === '613' || activeBc === '611' || activeBc === '612')) {
+                    return `<strong>Khusus Dokumen PPKEK (${activeBc}):</strong> CEISA OpenAPI hanya menerima BC standar. Gunakan menu <strong>Posting INSW</strong> untuk dokumen ini.`;
+                }
+                if (d.includes('unauthorized') || d.includes('token expired') || d.includes('invalid token')) {
+                    return 'Token sesi Bea Cukai telah kedaluwarsa. Sistem perlu melakukan refresh token login CEISA.';
+                }
+                if (d.includes('enum') || d.includes('is not one of')) {
+                    return `Nilai pada kolom <strong>${issue.fieldName}</strong> tidak sesuai dengan tabel referensi resmi Bea Cukai.`;
+                }
+                return 'Periksa kembali data pada tab terkait di Editor AJU.';
+            }
+
+            // Build HTML
+            let html = '';
+
+            if (isSuccess) {
+                html += `
+                    <div style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:8px; padding:16px 18px; margin-bottom:14px; display:flex; align-items:flex-start; gap:12px;">
+                        <div style="font-size:26px; line-height:1; color:#52c41a;">&#9989;</div>
+                        <div style="flex:1;">
+                            <div style="font-size:14px; font-weight:700; color:#276722; margin-bottom:4px;">Berhasil Terkirim ke Portal CEISA 4.0!</div>
+                            <div style="font-size:11.5px; color:#595959; margin-bottom:6px;">
+                                <strong>Nomor AJU:</strong> <code style="color:#096dd9; font-size:12px;">${escapeHtml(nomorAju || '-')}</code>
+                                &nbsp;&nbsp;|&nbsp;&nbsp; <strong>Status:</strong> <span style="background:#52c41a; color:#fff; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600;">${statusBadgeText}</span>
+                            </div>
+                            <div style="font-size:11.5px; color:#389e0d; background:#fff; border:1px solid #d9f7be; border-radius:4px; padding:8px 10px;">
+                                ${escapeHtml(rawMessages.join(' | '))}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div style="background:#fff2f0; border:1px solid #ffccc7; border-radius:8px; padding:16px 18px; margin-bottom:14px; display:flex; align-items:flex-start; gap:12px;">
+                        <div style="font-size:26px; line-height:1; color:#ff4d4f;">&#10060;</div>
+                        <div style="flex:1;">
+                            <div style="font-size:14px; font-weight:700; color:#cf1322; margin-bottom:4px;">Validasi Ditolak oleh Gateway CEISA 4.0</div>
+                            <div style="font-size:11.5px; color:#595959; margin-bottom:6px;">
+                                <strong>Nomor AJU:</strong> <code style="color:#d4380d; font-size:12px;">${escapeHtml(nomorAju || '-')}</code>
+                                &nbsp;&nbsp;|&nbsp;&nbsp; <strong>Respon Gateway:</strong> <span style="background:#ff4d4f; color:#fff; padding:1px 6px; border-radius:4px; font-size:10px; font-weight:600;">${statusBadgeText}</span>
+                            </div>
+                            <div style="font-size:11px; color:#8c8c8c;">
+                                Ditemukan <strong style="color:#cf1322;">${rawMessages.length} kendala validasi data</strong> yang belum memenuhi aturan skema Bea Cukai.
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                // Render error table
+                html += `
+                    <div style="border:1px solid #f0f0f0; border-radius:6px; overflow:hidden; margin-bottom:12px; box-shadow:0 1px 2px rgba(0,0,0,0.03);">
+                        <div style="background:#fafafa; padding:8px 12px; border-bottom:1px solid #e8e8e8; font-weight:700; font-size:11.5px; color:#262626; display:flex; align-items:center; justify-content:space-between;">
+                            <span><i class="fa-solid fa-list-check" style="color:#1890ff; margin-right:5px;"></i> Rincian Kesalahan Validasi (${rawMessages.length} Item)</span>
+                            <span style="font-size:10.5px; color:#8c8c8c; font-weight:normal;">Periksa dan perbaiki kolom di bawah ini</span>
+                        </div>
+                        <div style="max-height:260px; overflow-y:auto;">
+                            <table style="width:100%; border-collapse:collapse; font-size:11px; text-align:left;">
+                                <thead>
+                                    <tr style="background:#f5f5f5; color:#595959; border-bottom:1px solid #e8e8e8;">
+                                        <th style="padding:6px 8px; width:30px; text-align:center;">#</th>
+                                        <th style="padding:6px 8px; width:160px;">Lokasi Data</th>
+                                        <th style="padding:6px 8px; width:140px;">Kolom / Field</th>
+                                        <th style="padding:6px 8px;">Pesan Validasi</th>
+                                        <th style="padding:6px 8px; width:240px;">Saran Solusi & Penjelasan</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                `;
+
+                rawMessages.forEach((msg, idx) => {
+                    const parsed = parseMessage(msg);
+                    const solution = analyzeSolution(parsed);
+                    const rowBg = idx % 2 === 0 ? '#ffffff' : '#fafafa';
+                    html += `
+                        <tr style="background:${rowBg}; border-bottom:1px solid #f0f0f0; vertical-align:top;">
+                            <td style="padding:7px 8px; text-align:center; color:#8c8c8c; font-weight:600;">${idx + 1}</td>
+                            <td style="padding:7px 8px; font-weight:600; color:#1890ff;">${parsed.location}</td>
+                            <td style="padding:7px 8px;">
+                                <div style="font-weight:600; color:#262626;">${escapeHtml(parsed.fieldName)}</div>
+                                ${parsed.fieldRaw ? `<code style="font-size:9.5px; color:#8c8c8c;">${escapeHtml(parsed.fieldRaw)}</code>` : ''}
+                            </td>
+                            <td style="padding:7px 8px; color:#cf1322; word-break:break-word;">
+                                ${escapeHtml(parsed.detail)}
+                            </td>
+                            <td style="padding:7px 8px; color:#595959; line-height:1.4;">
+                                ${solution}
+                            </td>
+                        </tr>
+                    `;
+                });
+
+                html += `
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+
+                html += `
+                    <div style="font-size:11px; color:#595959; margin-bottom:10px;">
+                        💡 <em>Tip: Klik tab yang sesuai pada grid editor di atas untuk memeriksa dan memperbaiki data, lalu tekan tombol <strong>💾 Simpan Tab</strong>.</em>
+                    </div>
+                `;
+            }
+
+            // Collapsible raw JSON
+            const rawDisplay = typeof payload === 'object' ? JSON.stringify(payload, null, 2) : String(payload);
+            html += `
+                <details style="background:#f9f9f9; border:1px solid #e8e8e8; border-radius:6px; padding:6px 10px; margin-top:8px;">
+                    <summary style="cursor:pointer; font-size:11px; font-weight:600; color:#595959; outline:none;">
+                        <i class="fa-solid fa-code" style="color:#8c8c8c; margin-right:4px;"></i> Lihat Respon Teknis Asli (JSON Gateway)
+                    </summary>
+                    <pre class="code-view" style="margin-top:6px; max-height:200px; font-size:10.5px; background:#1e1e1e; color:#d4d4d4; padding:8px; border-radius:4px; overflow-x:auto;">${escapeHtml(rawDisplay)}</pre>
+                </details>
+            `;
+
+            return html;
         }
 
         async function transferCeisa() {
@@ -7762,26 +9776,131 @@ $isEditMode = !empty($selectedAjuParam);
             );
             if (!ok) return;
 
-            document.getElementById('modalResultTitle').innerText = 'Mentransfer ke CEISA 4.0...';
-            document.getElementById('modalResultBody').innerHTML = `<div style="text-align:center; padding:30px;"><span class="spinner" style="width:28px;height:28px;"></span><p style="margin-top:10px; color:var(--text-muted);">Menghubungi OpenAPI Bea Cukai...</p></div>`;
+            const modalTitle = document.getElementById('modalResultTitle');
+            const modalBody = document.getElementById('modalResultBody');
+            const btnClose = document.getElementById('btnModalResultClose');
+            const btnOk = document.getElementById('btnModalResultOk');
+
+            if (modalTitle) modalTitle.innerText = '🚀 Pengiriman ke Portal CEISA 4.0';
+            if (btnClose) btnClose.disabled = true;
+            if (btnOk) {
+                btnOk.disabled = true;
+                btnOk.innerHTML = '<span class="spinner"></span> Mengirim ke CEISA...';
+            }
+
+            let secondsElapsed = 0;
+            const updateTimer = () => {
+                secondsElapsed++;
+                const mins = String(Math.floor(secondsElapsed / 60)).padStart(2, '0');
+                const secs = String(secondsElapsed % 60).padStart(2, '0');
+                const timerEl = document.getElementById('editorTransferTimerCounter');
+                if (timerEl) timerEl.innerText = `${mins}:${secs}`;
+
+                // Live dynamic pipeline stages
+                const statusMsg = document.getElementById('editorTransferStatusMessage');
+                const step1 = document.getElementById('editorPipeStep1');
+                const line1 = document.getElementById('editorPipeLine1');
+                const step2 = document.getElementById('editorPipeStep2');
+                const line2 = document.getElementById('editorPipeLine2');
+                const step3 = document.getElementById('editorPipeStep3');
+
+                if (secondsElapsed >= 1 && step2 && !step2.classList.contains('active')) {
+                    if (step1) { step1.classList.remove('active'); step1.classList.add('done'); }
+                    if (line1) line1.classList.add('active');
+                    step2.classList.add('active');
+                    if (statusMsg) statusMsg.innerHTML = 'Melakukan otentikasi Bearer Token & enkripsi sesi Bea Cukai...';
+                }
+                if (secondsElapsed >= 2 && step3 && !step3.classList.contains('active')) {
+                    if (step2) { step2.classList.remove('active'); step2.classList.add('done'); }
+                    if (line2) line2.classList.add('active');
+                    step3.classList.add('active');
+                    if (statusMsg) statusMsg.innerHTML = 'Mengirim transmisi ke API Gateway Bea Cukai & memverifikasi respon...';
+                }
+            };
+
+            const docTypeForBadge = document.getElementById('hdr_kode_dokumen')?.value || '25';
+            modalBody.innerHTML = `
+                <div class="app-loader-container">
+                    <div class="app-loader-icon-wrap">
+                        <div class="app-loader-aura"></div>
+                        <div class="app-loader-orbit"></div>
+                        <div class="app-loader-spinner"></div>
+                        <div class="app-loader-spinner-inner"></div>
+                        <div class="app-loader-center-disc">
+                            <i class="fa-solid fa-rocket app-loader-center-icon"></i>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-title">Transmisi Dokumen ke Portal CEISA 4.0</div>
+
+                    <div class="app-loader-doc-card">
+                        <span class="meta-bc">BC ${escapeHtml(docTypeForBadge)}</span>
+                        <span class="meta-aju">${escapeHtml(currentAju)}</span>
+                    </div>
+
+                    <div class="app-pipeline-container">
+                        <div class="app-pipeline-step active" id="editorPipeStep1">
+                            <div class="pipeline-circle"><i class="fa-solid fa-file-shield"></i></div>
+                            <span class="pipeline-label">1. Validasi Data</span>
+                        </div>
+                        <div class="app-pipeline-line" id="editorPipeLine1">
+                            <div class="line-flow"></div>
+                        </div>
+                        <div class="app-pipeline-step" id="editorPipeStep2">
+                            <div class="pipeline-circle"><i class="fa-solid fa-key"></i></div>
+                            <span class="pipeline-label">2. Otentikasi Sesi</span>
+                        </div>
+                        <div class="app-pipeline-line" id="editorPipeLine2">
+                            <div class="line-flow"></div>
+                        </div>
+                        <div class="app-pipeline-step" id="editorPipeStep3">
+                            <div class="pipeline-circle"><i class="fa-solid fa-satellite-dish"></i></div>
+                            <span class="pipeline-label">3. Transmisi Gateway</span>
+                        </div>
+                    </div>
+
+                    <div class="app-loader-desc" id="editorTransferStatusMessage">
+                        Mempersiapkan struktur data dokumen, verifikasi entitas & tarif pabean...
+                    </div>
+
+                    <div class="app-loader-progress-track">
+                        <div class="app-loader-progress-bar"></div>
+                    </div>
+
+                    <div class="app-loader-cyber-timer">
+                        <span class="live-dot"></span>
+                        <span style="font-size:10px; font-weight:700; letter-spacing:0.5px;">LIVE TRANSMISSION</span>
+                        <span style="opacity:0.4;">|</span>
+                        <i class="fa-regular fa-clock" style="font-size:11px;"></i>
+                        <span id="editorTransferTimerCounter" style="font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-weight:700;">00:00</span>
+                    </div>
+                </div>
+            `;
             document.getElementById('modalResult').style.display = 'flex';
+            const timerInterval = setInterval(updateTimer, 1000);
 
             try {
+                const docType = document.getElementById('hdr_kode_dokumen')?.value || '';
                 const res = await fetch(`transfer.php?action=transfer&nomor_aju=${encodeURIComponent(currentAju)}`, { method: 'POST' });
-                const json = await res.json();
-                const resp = json.response || json;
-                const isOk = resp && (resp.status === 'OK' || resp.status === 'ok');
-
-                document.getElementById('modalResultTitle').innerText = isOk ? '✓ Berhasil Terkirim ke CEISA' : 'Respon Gateway CEISA 4.0';
-                document.getElementById('modalResultBody').innerHTML = `
-                    <div style="margin-bottom:12px; font-size:13px;">
-                        <strong>Pesan Server:</strong> ${resp.message || json.raw_response || '-'}
-                    </div>
-                    <pre class="code-view">${escapeHtml(JSON.stringify(resp, null, 2))}</pre>
-                `;
+                const text = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    json = { status: 'ERROR', message: text || 'Respon server tidak valid' };
+                }
+                if (modalTitle) modalTitle.innerText = 'Hasil Transfer Gateway CEISA 4.0';
+                modalBody.innerHTML = renderCeisaGatewayResponse(json, currentAju, docType);
             } catch (err) {
-                document.getElementById('modalResultTitle').innerText = 'Gagal Koneksi';
-                document.getElementById('modalResultBody').innerHTML = `<div style="color:var(--danger);">${err.message}</div>`;
+                if (modalTitle) modalTitle.innerText = 'Gagal Koneksi';
+                modalBody.innerHTML = renderCeisaGatewayResponse({ status: 'ERROR', message: err.message }, currentAju, '');
+            } finally {
+                clearInterval(timerInterval);
+                if (btnClose) btnClose.disabled = false;
+                if (btnOk) {
+                    btnOk.disabled = false;
+                    btnOk.innerHTML = 'OK, Selesai';
+                }
             }
         }
 

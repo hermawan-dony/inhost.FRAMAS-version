@@ -40,11 +40,13 @@ if (file_exists($localPdfFile) && filesize($localPdfFile) > 1000) {
 // 2. Jika path pdf kosong di request, coba cari dari tabel bc_ceisa_sppb atau bc_ceisa_data
 if (empty($pdf) && isset($koneksi) && $koneksi) {
     $stmtFindPdf = $koneksi->prepare("
-        SELECT COALESCE(NULLIF(s.pdf, ''), NULLIF(d.pdf, '')) AS pdf_path,
-               COALESCE(NULLIF(s.cmp_id, ''), NULLIF(d.cmp_id, '')) AS found_cmp
+        SELECT COALESCE(NULLIF(s.pdf, ''), NULLIF(d.pdf, ''), NULLIF(r.pdf, '')) AS pdf_path,
+               COALESCE(NULLIF(s.cmp_id, ''), NULLIF(d.cmp_id, ''), NULLIF(r.cmp_id, '')) AS found_cmp
         FROM (SELECT ? AS aju) x
         LEFT JOIN bc_ceisa_sppb s ON s.nomorAju = x.aju
         LEFT JOIN bc_ceisa_data d ON d.nomorAju = x.aju
+        LEFT JOIN bc_ceisa_respons r ON r.nomor_aju = x.aju AND r.pdf IS NOT NULL AND r.pdf != ''
+        ORDER BY r.id DESC
         LIMIT 1
     ");
     if ($stmtFindPdf) {

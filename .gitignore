@@ -1,5 +1,7 @@
 # Database dumps
 *.sql
+!sql_templates/*.sql
+!www/sql_templates/*.sql
 database/*.sql
 !database/ceisa0400db.sql.zip
 

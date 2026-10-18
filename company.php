@@ -17,6 +17,16 @@ require_once __DIR__ . '/koneksi.php';
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_REQUEST['is_admin']) && (string)$_REQUEST['is_admin'] === '1');
 
 if (!$isAdmin) {
+    if (!empty($_REQUEST['action'])) {
+        header('Content-Type: application/json; charset=utf-8');
+        http_response_code(401);
+        echo json_encode([
+            'status' => 'AUTH_EXPIRED',
+            'message' => 'Sesi login Anda telah berakhir. Silakan login kembali untuk melanjutkan.'
+        ]);
+        exit;
+    }
+
     http_response_code(403);
     echo '<!DOCTYPE html>
     <html lang="id">
@@ -489,11 +499,12 @@ if ($action === 'set_active') {
 }
 
 // -------------------------------------------------------------
-// 7. AJAX API: DELETE PERUSAHAAN
+// 7. AJAX API: DELETE PERUSAHAAN (DENGAN KONFIRMASI NPWP)
 // -------------------------------------------------------------
 if ($action === 'delete') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmp_id = trim($_POST['cmp_id'] ?? '');
+    $cmp_id       = trim($_POST['cmp_id'] ?? '');
+    $confirm_npwp = trim($_POST['confirm_npwp'] ?? '');
     
     if (empty($cmp_id)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'ID Perusahaan tidak boleh kosong.']);
@@ -502,9 +513,42 @@ if ($action === 'delete') {
     
     // Cek jumlah total perusahaan
     $cntRes = $koneksi->query("SELECT COUNT(*) as total FROM bc_ceisa_company");
-    $cnt = $cntRes ? $cntRes->fetch_assoc()['total'] : 0;
+    $cnt = $cntRes ? (int)$cntRes->fetch_assoc()['total'] : 0;
     if ($cnt <= 1) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Tidak dapat menghapus satu-satunya perusahaan yang terdaftar dalam sistem.']);
+        exit;
+    }
+    
+    // Ambil data perusahaan untuk validasi NPWP
+    $stmtCmp = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
+    if (!$stmtCmp) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Database error: ' . $koneksi->error]);
+        exit;
+    }
+    $stmtCmp->bind_param("s", $cmp_id);
+    $stmtCmp->execute();
+    $resCmp = $stmtCmp->get_result();
+    $comp = $resCmp ? $resCmp->fetch_assoc() : null;
+    $stmtCmp->close();
+
+    if (!$comp) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Perusahaan dengan ID '$cmp_id' tidak ditemukan."]);
+        exit;
+    }
+
+    $targetNpwp   = trim((string)($comp['npwp'] ?? ''));
+    $cleanConfirm = preg_replace('/[^0-9A-Za-z]/', '', $confirm_npwp);
+    $cleanTarget  = preg_replace('/[^0-9A-Za-z]/', '', $targetNpwp);
+    $cleanCmpId   = preg_replace('/[^0-9A-Za-z]/', '', $cmp_id);
+
+    // Gunakan NPWP terdaftar, atau fallback ke cmp_id jika field npwp kosong
+    $expected = !empty($cleanTarget) ? $cleanTarget : $cleanCmpId;
+
+    if (empty($cleanConfirm) || $cleanConfirm !== $expected) {
+        echo json_encode([
+            'status' => 'ERROR',
+            'message' => 'Konfirmasi gagal: NPWP yang dimasukkan (' . $confirm_npwp . ') tidak sesuai dengan NPWP perusahaan (' . ($targetNpwp ?: $cmp_id) . ').'
+        ]);
         exit;
     }
     
@@ -523,7 +567,7 @@ if ($action === 'delete') {
                     $_SESSION['is_inv']         = (int)$or['IS_INV'];
                 }
             }
-            echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_id' berhasil dihapus dari database."]);
+            echo json_encode(['status' => 'OK', 'message' => "Perusahaan '{$comp['cmp_name']}' [{$cmp_id}] berhasil dihapus dari database."]);
         } else {
             echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menghapus perusahaan: ' . $stmt->error]);
         }
@@ -2864,7 +2908,7 @@ $theme = $_GET['theme'] ?? 'light';
                             <button type="button" class="ant-btn ant-btn-warning ant-btn-sm" onclick="clearCompanyData('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" title="Hapus Semua Data Transaksi Perusahaan Ini">
                                 🧹 Clear Data
                             </button>
-                            <button type="button" class="ant-btn ant-btn-danger ant-btn-sm" onclick="deleteCompany('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" title="Hapus Perusahaan">
+                            <button type="button" class="ant-btn ant-btn-danger ant-btn-sm" onclick="deleteCompany('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}', '${escapeJs(row.npwp || '')}')" title="Hapus Perusahaan">
                                 🗑️
                             </button>
                         </div>
@@ -3711,44 +3755,82 @@ $theme = $_GET['theme'] ?? 'light';
             });
         }
 
-        // 9. DELETE COMPANY
-        function deleteCompany(cmpId, cmpName) {
+        // 9. DELETE COMPANY (DENGAN KONFIRMASI NPWP)
+        function deleteCompany(cmpId, cmpName, npwp) {
+            const targetNpwp = (npwp && String(npwp).trim()) ? String(npwp).trim() : String(cmpId).trim();
+
             Swal.fire({
                 title: 'Hapus Perusahaan?',
-                html: `Apakah Anda yakin ingin menghapus data perusahaan <strong>[${escapeHtml(cmpId)}] ${escapeHtml(cmpName)}</strong>?<br><br><span style="color:#ff4d4f; font-size:11px;">⚠️ Tindakan ini permanen dan tidak dapat dibatalkan.</span>`,
+                html: `
+                    <div style="text-align:left; font-size:12px; line-height:1.6;">
+                        <p style="margin:0 0 10px 0;">Apakah Anda yakin ingin menghapus data perusahaan:</p>
+                        <div style="background:rgba(0,0,0,0.04); border:1px solid var(--border-card, #d9d9d9); border-radius:6px; padding:10px 12px; margin-bottom:12px;">
+                            <div style="font-size:13.5px; font-weight:700; color:#cf1322;">[${escapeHtml(cmpId)}] ${escapeHtml(cmpName)}</div>
+                            <div style="font-size:11px; color:var(--text-muted, #8c8c8c); margin-top:3px;">NPWP Terdaftar: <strong style="font-family:monospace; color:#1890ff; font-size:12px;">${escapeHtml(targetNpwp)}</strong></div>
+                        </div>
+                        <div style="background:#fff1f0; border-left:3px solid #ff4d4f; border-radius:4px; padding:8px 10px; margin-bottom:12px; font-size:11.5px; color:#cf1322;">
+                            ⚠️ <strong>Tindakan Permanen:</strong> Tindakan ini permanen dan tidak dapat dibatalkan. Seluruh profil dan konfigurasi perusahaan akan dihapus dari sistem.
+                        </div>
+                        <p style="margin:0 0 6px 0; font-weight:600;">Untuk konfirmasi, silakan ketik nomor <strong>NPWP</strong> perusahaan di bawah ini:</p>
+                        <div style="background:rgba(24,144,255,0.06); border:1px dashed #91d5ff; border-radius:4px; padding:6px 10px; text-align:center; font-family:monospace; font-size:13px; font-weight:700; color:#096dd9; user-select:all; margin-bottom:6px;" title="Klik untuk menyalin">
+                            ${escapeHtml(targetNpwp)}
+                        </div>
+                    </div>
+                `,
+                input: 'text',
+                inputPlaceholder: `Ketik NPWP "${targetNpwp}" untuk konfirmasi...`,
+                inputAttributes: {
+                    autocapitalize: 'off',
+                    autocomplete: 'off',
+                    spellcheck: 'false'
+                },
                 icon: 'warning',
                 showCancelButton: true,
                 confirmButtonColor: '#ff4d4f',
                 cancelButtonColor: '#8c8c8c',
-                confirmButtonText: 'Ya, Hapus Permanen',
-                cancelButtonText: 'Batal'
-            }).then((result) => {
-                if (result.isConfirmed) {
+                confirmButtonText: '🗑️ Ya, Hapus Permanen',
+                cancelButtonText: 'Batal',
+                showLoaderOnConfirm: true,
+                inputValidator: (value) => {
+                    const cleanVal = (value || '').replace(/[^0-9A-Za-z]/g, '');
+                    const cleanTarget = targetNpwp.replace(/[^0-9A-Za-z]/g, '');
+                    if (!value || !value.trim()) {
+                        return 'Nomor NPWP wajib dimasukkan untuk konfirmasi!';
+                    }
+                    if (cleanVal !== cleanTarget) {
+                        return `Nomor NPWP tidak sesuai! Silakan ketik "${targetNpwp}".`;
+                    }
+                },
+                preConfirm: (value) => {
                     const fd = new FormData();
                     fd.append('cmp_id', cmpId);
+                    fd.append('confirm_npwp', value.trim());
 
-                    fetch(getCompanyApiUrl('delete'), {
+                    return fetch(getCompanyApiUrl('delete'), {
                         method: 'POST',
                         body: fd
                     })
                     .then(r => r.json())
                     .then(res => {
-                        if (res.status === 'OK') {
-                            Swal.fire({
-                                icon: 'success',
-                                title: 'Perusahaan Dihapus',
-                                text: res.message,
-                                timer: 1800,
-                                showConfirmButton: false
-                            });
-                            loadCompanyList();
-                        } else {
-                            Swal.fire({ icon: 'error', title: 'Gagal', text: res.message });
+                        if (res.status !== 'OK') {
+                            throw new Error(res.message || 'Gagal menghapus perusahaan.');
                         }
+                        return res;
                     })
                     .catch(err => {
-                        Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
+                        Swal.showValidationMessage(`${err.message}`);
                     });
+                }
+            }).then((result) => {
+                if (result.isConfirmed && result.value) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Perusahaan Berhasil Dihapus',
+                        text: result.value.message,
+                        timer: 2000,
+                        showConfirmButton: false
+                    });
+                    loadCompanyList();
                 }
             });
         }
