@@ -55,9 +55,33 @@ if (!function_exists('ceisa_get_company')) {
                 }
                 $stmt->close();
             }
+
+            // 2b. Jika identifier adalah nomor_aju manifes, cari dari bc_ceisa_manifes_header
+            $stmtM = $koneksi->prepare("SELECT cmp_id FROM bc_ceisa_manifes_header WHERE nomor_aju = ? LIMIT 1");
+            if ($stmtM) {
+                $stmtM->bind_param("s", $clean_id);
+                $stmtM->execute();
+                $resM = $stmtM->get_result();
+                if ($rowM = $resM->fetch_assoc()) {
+                    $stmtM->close();
+                    if (!empty($rowM['cmp_id'])) {
+                        return ceisa_get_company($rowM['cmp_id']);
+                    }
+                }
+                $stmtM->close();
+            }
         }
         
-        // 3. Fallback: Ambil perusahaan aktif pertama dari database
+        // 3. Fallback: Deteksi konteks modul Manifes NVOCC (Prioritaskan TVL)
+        $scriptName = strtolower(basename($_SERVER['SCRIPT_NAME'] ?? ''));
+        if (strpos($scriptName, 'manifest') !== false) {
+            $resM = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE (cmp_id = 'TVL' OR company_roles LIKE '%nvocc%') AND is_active = 1 LIMIT 1");
+            if ($resM && $rowM = $resM->fetch_assoc()) {
+                return $rowM;
+            }
+        }
+
+        // Ambil perusahaan aktif pertama dari database
         $res = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE is_active = 1 ORDER BY cmp_id ASC LIMIT 1");
         if ($res && $row = $res->fetch_assoc()) {
             return $row;
@@ -67,25 +91,25 @@ if (!function_exists('ceisa_get_company')) {
     }
 }
 
-// Deteksi Company Identifier dari berbagai kemungkinan parameter input
+// Deteksi Company Identifier dari berbagai kemungkinan parameter input (Prioritaskan Request dan Sesi Pengguna)
 $target_cmp = null;
 
-if (!empty($cmp_id)) {
-    $target_cmp = $cmp_id;
-} elseif (!empty($_REQUEST['cmp_id'])) {
-    $target_cmp = $_REQUEST['cmp_id'];
-} elseif (!empty($_REQUEST['npwp'])) {
-    $target_cmp = $_REQUEST['npwp'];
-} elseif (!empty($_REQUEST['nomor_aju'])) {
-    $target_cmp = $_REQUEST['nomor_aju'];
-} elseif (!empty($_REQUEST['aju'])) {
-    $target_cmp = $_REQUEST['aju'];
+if (!empty($_REQUEST['cmp_id'])) {
+    $target_cmp = trim($_REQUEST['cmp_id']);
 } elseif (!empty($_SESSION['company_cmp_id'])) {
-    $target_cmp = $_SESSION['company_cmp_id'];
+    $target_cmp = trim($_SESSION['company_cmp_id']);
 } elseif (!empty($_SESSION['cmp_id'])) {
-    $target_cmp = $_SESSION['cmp_id'];
+    $target_cmp = trim($_SESSION['cmp_id']);
 } elseif (!empty($_SERVER['HTTP_X_COMPANY_ID'])) {
-    $target_cmp = $_SERVER['HTTP_X_COMPANY_ID'];
+    $target_cmp = trim($_SERVER['HTTP_X_COMPANY_ID']);
+} elseif (!empty($cmp_id) && $cmp_id !== 'default') {
+    $target_cmp = trim($cmp_id);
+} elseif (!empty($_REQUEST['npwp'])) {
+    $target_cmp = trim($_REQUEST['npwp']);
+} elseif (!empty($_REQUEST['nomor_aju'])) {
+    $target_cmp = trim($_REQUEST['nomor_aju']);
+} elseif (!empty($_REQUEST['aju'])) {
+    $target_cmp = trim($_REQUEST['aju']);
 }
 
 // Ambil data konfigurasi perusahaan yang aktif

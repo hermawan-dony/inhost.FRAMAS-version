@@ -185,6 +185,7 @@ if ($action === 'switch_company') {
         $stmt->execute();
         $res = $stmt->get_result();
         if ($res && $comp = $res->fetch_assoc()) {
+            $_SESSION['cmp_id']             = $comp['cmp_id'];
             $_SESSION['company_cmp_id']     = $comp['cmp_id'];
             $_SESSION['company_name']       = $comp['cmp_name'];
             $_SESSION['company_npwp']       = $comp['npwp'];
@@ -481,6 +482,63 @@ if (!empty($detectedSubdomain) && isset($koneksi) && $koneksi) {
     }
 }
 
+// Deteksi URL Query Parameter Khusus Perusahaan (misal: ?cmp=RMB atau ?cmp=TVL atau ?company=rmb)
+// Otomatis membuka portal langsung khusus untuk user perusahaan bersangkutan (user RMB saja, is_admin = false)
+$urlCmpParam = trim($_GET['cmp'] ?? $_GET['company'] ?? '');
+if (!empty($urlCmpParam) && isset($koneksi) && $koneksi) {
+    $cmpLookup = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE (cmp_id = ? OR LOWER(cmp_id) = LOWER(?) OR LOWER(subdomain) = LOWER(?) OR npwp = ?) AND is_active = 1 LIMIT 1");
+    if ($cmpLookup) {
+        $cmpLookup->bind_param("ssss", $urlCmpParam, $urlCmpParam, $urlCmpParam, $urlCmpParam);
+        $cmpLookup->execute();
+        $resComp = $cmpLookup->get_result();
+        if ($resComp && $cRow = $resComp->fetch_assoc()) {
+            $_SESSION['is_admin']          = false; // Non-admin: akun khusus per user perusahaan
+            $_SESSION['user_id']           = $cRow['subdomain'] ?: $cRow['cmp_id'];
+            $_SESSION['user_name']         = $cRow['cmp_name'];
+            $_SESSION['user_role']         = 'User ' . $cRow['cmp_name'];
+            $_SESSION['company_cmp_id']    = $cRow['cmp_id'];
+            $_SESSION['company_name']      = $cRow['cmp_name'];
+            $_SESSION['company_npwp']      = $cRow['npwp'];
+            $_SESSION['is_inv']            = (int)$cRow['IS_INV'];
+            $_SESSION['company_roles']     = $cRow['company_roles'] ?: 'tpb';
+            $_SESSION['company_erp_name']  = $cRow['ERP_Name'] ?: '-';
+            $_SESSION['company_logo']      = $cRow['logo'] ?? '';
+            $_SESSION['company_subdomain'] = $cRow['subdomain'] ?? '';
+            $_SESSION['company_card_color']= $cRow['card_color'] ?? '';
+            $_SESSION['allowed_menus']     = ['*'];
+            $_SESSION['allowed_docs']      = ['*'];
+
+            // Jika ada parameter &user=... khusus, periksa hak akses profil pengguna spesifik
+            if (!empty($_GET['user'])) {
+                $specificUser = trim($_GET['user']);
+                $uStmt = $koneksi->prepare("SELECT user_id, nama_lengkap, role, allowed_menus, allowed_docs FROM bc_ceisa_login WHERE (user_id = ? OR username = ?) AND cmp_id = ? AND is_active = 1 LIMIT 1");
+                if ($uStmt) {
+                    $uStmt->bind_param("sss", $specificUser, $specificUser, $cRow['cmp_id']);
+                    $uStmt->execute();
+                    $uRes = $uStmt->get_result();
+                    if ($uRes && $uData = $uRes->fetch_assoc()) {
+                        $_SESSION['user_id']   = $uData['user_id'];
+                        $_SESSION['user_name'] = !empty($uData['nama_lengkap']) ? $uData['nama_lengkap'] : $uData['user_id'];
+                        $userRole              = $uData['role'] ?: 'operator';
+                        $_SESSION['user_role'] = $userRole;
+                        $_SESSION['is_admin']  = ($userRole === 'admin');
+                        if ($userRole === 'bc') {
+                            $_SESSION['allowed_menus'] = ['it_inventory'];
+                        } else {
+                            $m = $uData['allowed_menus'];
+                            $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
+                        }
+                        $d = $uData['allowed_docs'];
+                        $_SESSION['allowed_docs']  = ($d === '*' || empty($d)) ? ['*'] : (json_decode($d, true) ?: [$d]);
+                    }
+                    $uStmt->close();
+                }
+            }
+        }
+        $cmpLookup->close();
+    }
+}
+
 $isLoggedIn       = !empty($_SESSION['company_cmp_id']);
 $isAdmin          = !empty($_SESSION['is_admin']);
 $sessionCmpId     = $_SESSION['company_cmp_id'] ?? '';
@@ -603,7 +661,7 @@ if (!function_exists('isMenuAllowed')) {
 }
 
 // Inisialisasi Tab Awal & Parameter AJU (Mendukung deep linking & Form Editor)
-$initialTab = $_GET['tab'] ?? '';
+$initialTab = $_GET['tab'] ?? $_GET['menu'] ?? '';
 if (empty($initialTab)) {
     if ($userRole === 'bc') {
         $initialTab = 'it_inventory_home';
@@ -652,6 +710,7 @@ $breadcrumbTitlesPhp = [
     'import'          => 'Import Excel Dokumen',
     'manifest_ceisa'  => 'Manifest Ceisa 4.0',
     'manifest'        => 'Manifest Host to Host',
+    'bc11_monitoring' => 'BC 1.1 Monitoring',
     'dokap'           => 'Upload Dokumen Pelengkap',
     'load_erp_odoo'   => 'Load ERP Data - Odoo to CEISA 4.0',
     'tracking'        => 'Tracking Respon Pabean',
@@ -705,7 +764,10 @@ if ($initialTab === 'editor') {
 } elseif ($initialTab === 'manifest_ceisa') {
     $initSrc = "/manifest_ceisa.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'manifest') {
-    $initSrc = "/manifest.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
+    $initSrc = "/manifest.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'bc11_monitoring') {
+    $ajuParam = !empty($initialAju) ? '&nomor_aju=' . urlencode($initialAju) : '';
+    $initSrc = "/bc11_monitoring.php?cmp_id=" . urlencode($sessionCmpId) . "{$ajuParam}&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'dokap') {
     $initSrc = "/upload_dokap.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'tracking') {
@@ -2669,6 +2731,17 @@ if ($initialTab === 'editor') {
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
+                    <div class="kt-menu__item <?= ($initialTab === 'bc11_monitoring') ? 'active' : '' ?>" id="nav-item-bc11_monitoring" onclick="switchMainTab('bc11_monitoring')">
+                        <a class="kt-menu__link">
+                            <span class="kt-menu__link-icon">
+                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
+                                    <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.6-9.4-22.7zM790.2 320H608V137.8L790.2 320zm-598.2 64h416v64H192v-64zm0 160h416v64H192v-64zm528 288H192v-64h528v64z"></path>
+                                </svg>
+                            </span>
+                            <span class="kt-menu__link-text">BC 1.1 Monitoring</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
                     <?php endif; ?>
                 </div>
 
@@ -3389,6 +3462,7 @@ if ($initialTab === 'editor') {
             'import': 'Import Excel Dokumen',
             'manifest_ceisa': 'Manifest Ceisa 4.0',
             'manifest': 'Manifest Host to Host',
+            'bc11_monitoring': 'BC 1.1 Monitoring',
             'dokap': 'Upload Dokumen Pelengkap',
             'load_erp_odoo': 'Load ERP Data - Odoo to CEISA 4.0',
             'tracking': 'Tracking Respon Pabean',
@@ -3445,7 +3519,14 @@ if ($initialTab === 'editor') {
                 const ajuParam = (effectiveAju && String(effectiveAju).trim() !== '') 
                     ? `&nomor_aju=${encodeURIComponent(String(effectiveAju).trim())}` 
                     : '';
-                return `/manifest.php?cmp_id=${encodeURIComponent(cmpId)}${ajuParam}&embedded=1${adminParam}${themeParam}`;
+                return `/manifest.php?cmp_id=${encodeURIComponent(cmpId)}${ajuParam}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            }
+            if (tabId === 'bc11_monitoring') {
+                const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;
+                const ajuParam = (effectiveAju && String(effectiveAju).trim() !== '') 
+                    ? `&nomor_aju=${encodeURIComponent(String(effectiveAju).trim())}` 
+                    : '';
+                return `/bc11_monitoring.php?cmp_id=${encodeURIComponent(cmpId)}${ajuParam}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             }
             if (tabId === 'dokap') return `/upload_dokap.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'tracking') return `/statusaju.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
@@ -3671,6 +3752,20 @@ if ($initialTab === 'editor') {
                     wrapper.appendChild(ifrm);
                     window.tabIframes[tabId] = ifrm;
                 }
+            }
+
+            // Sinkronkan URL browser agar mencerminkan tab aktif & mempertahankan parameter cmp
+            if (window.history && window.history.replaceState) {
+                try {
+                    const u = new URL(window.location.href);
+                    u.searchParams.set('tab', tabId);
+                    if (currentAjuParam) {
+                        u.searchParams.set('nomor_aju', currentAjuParam);
+                    } else {
+                        u.searchParams.delete('nomor_aju');
+                    }
+                    window.history.replaceState({}, '', u.toString());
+                } catch(e) {}
             }
         }
 

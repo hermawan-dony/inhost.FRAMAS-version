@@ -8,11 +8,17 @@ session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+
 $isAdmin = !empty($_SESSION['is_admin']) || (!empty($_GET['is_admin']) && $_GET['is_admin'] == '1');
-$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : ($cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
-$sessionCmpName = $namaperusahaan ?: ($_SESSION['company_name'] ?? 'Perusahaan');
-$sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
-$sessionKodeKantor = $kode_kantor ?: ($_SESSION['company_kode_kantor'] ?? '070100');
+$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : 'TVL')));
+if (empty($sessionCmpId) || $sessionCmpId === 'default' || ($sessionCmpId === '080167772504400' && empty($_REQUEST['cmp_id']) && (empty($_SESSION['company_cmp_id']) || $_SESSION['company_cmp_id'] !== '080167772504400'))) {
+    $sessionCmpId = 'TVL';
+}
+$sessionCmpName = !empty($_SESSION['company_name']) ? $_SESSION['company_name'] : ($namaperusahaan ?: 'Perusahaan');
+$sessionNpwp = !empty($_SESSION['company_npwp']) ? $_SESSION['company_npwp'] : ($npwp ?: '');
+$sessionKodeKantor = !empty($_SESSION['company_kode_kantor']) ? $_SESSION['company_kode_kantor'] : ($kode_kantor ?: '070100');
 
 // Ambil Referensi Jenis Kemasan dari bc_ceisa_reff
 $reffKemasan = [];
@@ -552,6 +558,8 @@ if (empty($reffNegara)) {
                         <button type="button" class="btn btn-warning btn-sm" onclick="promptRenameAju(currentNomorAju)" title="Ubah Nomor AJU dokumen ini beserta seluruh House B/L">✏️ Rename AJU</button>
                         <button type="button" class="btn btn-accent btn-sm" onclick="promptCopyAju(currentNomorAju)" title="Duplikasi seluruh dokumen ini menjadi AJU baru">📋 Copy AJU</button>
                         <button type="button" class="btn btn-secondary btn-sm" onclick="confirmGenerateNewAju()" title="Generate Nomor AJU baru">🎲 Generate No Aju</button>
+                        <button type="button" class="btn btn-success btn-sm" onclick="exportExcelAju(currentNomorAju)" title="Download file Excel Format Baru resmi CEISA 4.0">📥 Export Excel CEISA</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="actionUploadPortalRestore(currentNomorAju)" title="Kirim langsung ke Portal CEISA 4.0 via Microservice Restore Excel (Format Baru)">🚀 Kirim ke Portal CEISA</button>
                         <button type="submit" class="btn btn-primary btn-sm">💾 Simpan Header</button>
                     </div>
                 </div>
@@ -678,10 +686,23 @@ if (empty($reffNegara)) {
     <!-- ========================================================================= -->
     <!-- TAB 3: PENCARIAN POS BC 1.1 (INWARD / OUTWARD)                             -->
     <!-- ========================================================================= -->
+    <!-- ========================================================================= -->
+    <!-- TAB 3: PENCARIAN POS BC 1.1 (INWARD / OUTWARD)                             -->
+    <!-- ========================================================================= -->
     <div id="tab-inquiry" style="display:none;">
-        <div class="card">
+        <div style="display:flex; gap:8px; margin-bottom:8px;">
+            <button type="button" id="btnSubTabInqBl" class="btn btn-primary btn-sm" onclick="switchInqMode('bl')">
+                <i class="fa-solid fa-barcode"></i> Pencarian No B/L (Bill of Lading)
+            </button>
+            <button type="button" id="btnSubTabInqVessel" class="btn btn-secondary btn-sm" onclick="switchInqMode('vessel')">
+                <i class="fa-solid fa-ship"></i> Pencarian Sarana Pengangkut (Nama Kapal / Data Umum)
+            </button>
+        </div>
+
+        <!-- Form 1: No BL -->
+        <div class="card" id="cardInqBl">
             <div class="card-header">
-                <span class="card-title">🔎 Pencarian Pos Manifes BC 1.1 Live (Inward / Outward)</span>
+                <span class="card-title">🔎 Pencarian Pos Manifes BC 1.1 Live Berdasarkan Bill of Lading</span>
             </div>
             <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
                 <div class="form-group">
@@ -703,6 +724,33 @@ if (empty($reffNegara)) {
             </div>
         </div>
 
+        <!-- Form 2: Sarana Pengangkut / Kapal (MapController) -->
+        <div class="card" id="cardInqVessel" style="display:none;">
+            <div class="card-header">
+                <span class="card-title">🚢 Pencarian Jadwal & Manifes Kedatangan Sarana Pengangkut (MapController)</span>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <span style="font-size:9px; color:var(--text-muted);">Quick Search:</span>
+                    <button type="button" class="btn btn-secondary btn-sm" style="height:18px; font-size:9px; padding:0 5px;" onclick="setInqVesselQuick('SINAR SUNDA')">SINAR SUNDA</button>
+                    <button type="button" class="btn btn-secondary btn-sm" style="height:18px; font-size:9px; padding:0 5px;" onclick="setInqVesselQuick('MTT SANDAKAN')">MTT SANDAKAN</button>
+                    <button type="button" class="btn btn-secondary btn-sm" style="height:18px; font-size:9px; padding:0 5px;" onclick="setInqVesselQuick('KOTA MANIS')">KOTA MANIS</button>
+                </div>
+            </div>
+            <div class="form-grid" style="grid-template-columns: 2fr 1fr auto; align-items:flex-end;">
+                <div class="form-group">
+                    <label>Nama Sarana Pengangkut (Nama Kapal)</label>
+                    <input type="text" id="inq_vessel_name" class="form-control" style="font-weight:700; text-transform:uppercase;" placeholder="Contoh: SINAR SUNDA / MTT SANDAKAN / KOTA MANIS..." value="SINAR SUNDA" onkeyup="if(event.key==='Enter') cariVesselMap()">
+                </div>
+                <div class="form-group">
+                    <label>Filter Kantor (Opsional)</label>
+                    <input type="text" id="inq_vessel_kantor" class="form-control" placeholder="Semua Kantor atau e.g. 070100">
+                </div>
+                <div class="form-group">
+                    <button type="button" class="btn btn-primary" id="btnCariVessel" onclick="cariVesselMap()">🚀 Cari Manifes Kapal</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hasil Pencarian No BL -->
         <div class="card" id="cardInquiryResult" style="display:none;">
             <div class="card-header">
                 <span class="card-title">📋 Hasil Data Pos BC 1.1</span>
@@ -710,6 +758,40 @@ if (empty($reffNegara)) {
             </div>
             <div id="inquiryParsedResult" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:12px; margin-bottom:16px;"></div>
             <pre class="code-view" id="inquiryRawResult"></pre>
+        </div>
+
+        <!-- Hasil Pencarian Sarana Pengangkut / Kapal -->
+        <div class="card" id="cardVesselResult" style="display:none;">
+            <div class="card-header">
+                <span class="card-title" id="titleVesselResult">🚢 Daftar Manifes Kedatangan Kapal (CEISA 4.0 MapController)</span>
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <span id="badgeVesselCount" style="background:var(--primary); color:#fff; font-size:10px; padding:2px 8px; border-radius:10px; font-weight:700;">0 Data</span>
+                    <button class="btn btn-secondary btn-sm" onclick="salinVesselJson()">📋 Salin JSON</button>
+                </div>
+            </div>
+            <div class="table-responsive" style="max-height:450px; overflow-y:auto;">
+                <table class="custom-table" style="font-size:11px;">
+                    <thead>
+                        <tr>
+                            <th style="width:30px;">No</th>
+                            <th>Nama Sarana Pengangkut & IMO</th>
+                            <th>Tanggal Tiba / Berangkat</th>
+                            <th>Kode Kantor</th>
+                            <th>Nomor Voyage</th>
+                            <th>Nomor Daftar (BC 1.1)</th>
+                            <th>Jenis Manifes</th>
+                            <th>Tanggal Daftar</th>
+                            <th>Pel. Asal & Bongkar</th>
+                            <th>Kade / TPS</th>
+                            <th>Pos / Cont</th>
+                            <th style="text-align:right;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tableBodyVessel">
+                        <tr><td colspan="12" style="text-align:center; padding:15px; color:var(--text-muted);">Ketik nama kapal lalu klik Cari.</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -1115,8 +1197,10 @@ if (empty($reffNegara)) {
                             <button class="btn btn-secondary btn-sm" onclick="editManifest('${r.nomor_aju}')" title="Edit Manifes">✏️</button>
                             <button class="btn btn-secondary btn-sm" onclick="promptCopyAju('${r.nomor_aju}')" title="Copy / Duplikat AJU">📋</button>
                             <button class="btn btn-secondary btn-sm" onclick="viewJsonAju('${r.nomor_aju}')" title="Lihat JSON Payload">📄</button>
-                            <button class="btn btn-secondary btn-sm" onclick="window.open('pdf_manifest.php?nomor_aju=' + encodeURIComponent('${r.nomor_aju}') + '&cmp_id=' + encodeURIComponent(activeCmpId), '_blank')" title="Cetak (*.pdf)">🖨️</button>
-                            ${stt === 'Draft' ? `<button class="btn btn-warning btn-sm" onclick="actionCekLengkap('${r.nomor_aju}')" title="Cek Kelengkapan">🔍</button>` : ''}
+                            ${(stt !== 'Draft' && r.id_nvocc_header) ? `<button class="btn btn-secondary btn-sm" onclick="window.open('pdf_manifest.php?nomor_aju=' + encodeURIComponent('${r.nomor_aju}') + '&cmp_id=' + encodeURIComponent(activeCmpId), '_blank')" title="Cetak (*.pdf)">🖨️</button>` : ''}
+                            <button class="btn btn-secondary btn-sm" onclick="exportExcelAju('${r.nomor_aju}')" title="Export Excel Format Baru CEISA 4.0"><span style="color:#52c41a; font-weight:bold;">📊 XLSX</span></button>
+                            <button class="btn btn-primary btn-sm" onclick="actionUploadPortalRestore('${r.nomor_aju}')" title="Kirim langsung ke Portal CEISA 4.0 via Microservice Restore Excel"><span style="font-weight:bold;">🚀 Portal</span></button>
+                            ${(stt === 'Draft' || stt === 'Ready') ? `<button class="btn btn-warning btn-sm" onclick="actionCekLengkap('${r.nomor_aju}')" title="Periksa Kelengkapan (CEISA 4.0 Validation)">🔍 Periksa</button>` : ''}
                             ${stt === 'Ready' ? `<button class="btn btn-primary btn-sm" onclick="actionKirim('${r.nomor_aju}')" title="Kirim ke Bea Cukai">🚀 Kirim</button>` : ''}
                             ${stt === 'Terkirim' ? `<button class="btn btn-accent btn-sm" onclick="actionRekon('${r.nomor_aju}')" title="Rekonsiliasi (Pecah Pos)">🔄 Rekon</button>` : ''}
                             <button class="btn btn-secondary btn-sm" onclick="actionStatus('${r.nomor_aju}')" title="Cek Status Respon">⏱️</button>
@@ -2038,28 +2122,226 @@ if (empty($reffNegara)) {
             } catch (err) { showError('Error: ' + err.message); }
         }
 
-        async function actionStatus(nomorAju) {
+        function exportExcelAju(nomorAju) {
+            nomorAju = nomorAju || currentNomorAju;
+            if (!nomorAju) {
+                showWarning('Nomor Aju tidak valid atau belum disimpan.');
+                return;
+            }
+            window.open(`manifest_api.php?action=export_excel&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmpId)}`, '_blank');
+        }
+
+        async function actionUploadPortalRestore(nomorAju) {
+            nomorAju = nomorAju || currentNomorAju;
+            if (!nomorAju) {
+                showWarning('Nomor Aju tidak valid atau belum disimpan.');
+                return;
+            }
+
+            // Langsung tampilkan progress Swal tanpa prompt token atau konfirmasi bertumpuk
+            Swal.fire({
+                ...getSwalThemeOptions(),
+                title: 'Mengirim ke Portal CEISA 4.0...',
+                html: `<div style="text-align:center; padding:10px 0;"><div class="spinner-border text-primary" role="status" style="width:2.2rem; height:2.2rem; margin-bottom:12px;"></div><div style="font-size:12px; font-weight:600; color:var(--text-heading); margin-bottom:4px;">Memproses AJU: ${escapeHtml(nomorAju)}</div><div style="font-size:10.5px; color:var(--text-muted);">Menghasilkan Excel 7 Sheet & mengunggah ke Gateway Bea Cukai (MFA Token otomatis)...</div></div>`,
+                allowOutsideClick: false,
+                showConfirmButton: false,
+                didOpen: () => Swal.showLoading()
+            });
+
             try {
-                const res = await fetch(`manifest_api.php?action=api_status&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const fd = new FormData();
+                fd.append('nomor_aju', nomorAju);
+                fd.append('cmp_id', activeCmpId);
+
+                const res = await fetch('manifest_api.php?action=upload_portal_restore', {
+                    method: 'POST',
+                    body: fd
+                });
                 const json = await res.json();
+
                 if (json.status === 'OK') {
+                    loadManifestList();
+                    if (currentNomorAju === nomorAju) {
+                        openManifestDetail(nomorAju);
+                    }
+                    if (json.is_ready) {
+                        Swal.fire({
+                            ...getSwalThemeOptions(),
+                            title: 'Berhasil & Siap Kirim!',
+                            html: `
+                                <div style="text-align:left; font-size:12px; line-height:1.6; color:var(--text-heading);">
+                                    <div style="background:rgba(16,185,129,0.1); border-left:3px solid #10b981; padding:10px 12px; border-radius:4px; margin-bottom:12px; font-size:11.5px;">
+                                        <strong>✅ Otomatis Masuk & Tervalidasi CEISA 4.0:</strong><br>
+                                        Dokumen <strong>${escapeHtml(nomorAju)}</strong> telah berhasil diunggah ke Portal Bea Cukai dan terverifikasi <strong>DATA LENGKAP (READY)</strong>!
+                                    </div>
+                                    Kirimkan dokumen ini secara resmi ke Bea Cukai sekarang?
+                                </div>
+                            `,
+                            icon: 'success',
+                            showCancelButton: true,
+                            confirmButtonText: '🚀 Ya, Langsung Kirim Manifes!',
+                            confirmButtonColor: '#2563eb',
+                            cancelButtonText: 'Nanti Saja',
+                            cancelButtonColor: '#6b7280'
+                        }).then((resKirim) => {
+                            if (resKirim.isConfirmed) {
+                                actionKirim(nomorAju);
+                            }
+                        });
+                    } else {
+                        Swal.fire({
+                            ...getSwalThemeOptions(),
+                            title: 'Berhasil Terunggah!',
+                            text: json.message || 'Dokumen berhasil di-restore ke Portal CEISA 4.0.',
+                            icon: 'success',
+                            confirmButtonColor: '#10b981'
+                        });
+                    }
+                } else {
+                    const isBadRequest = (json.message === 'Bad Request' || json.http_code === 400 || (json.message && json.message.indexOf('400') !== -1));
+                    if (isBadRequest) {
+                        Swal.fire({
+                            ...getSwalThemeOptions(),
+                            title: 'Unggah ke Portal CEISA 4.0',
+                            html: `
+                                <div style="text-align:left; font-size:12px; line-height:1.6; color:var(--text-heading);">
+                                    <div style="background:rgba(59,130,246,0.1); border-left:3px solid #3b82f6; padding:10px 12px; border-radius:4px; margin-bottom:12px; font-size:11.5px;">
+                                        <strong>ℹ️ Mekanisme Resmi Portal CEISA 4.0:</strong><br>
+                                        Endpoint <code>UploadRestoreExcel</code> Bea Cukai memerlukan otorisasi sesi browser langsung dari pengguna.
+                                    </div>
+                                    <b>Alur Pengiriman ke Portal CEISA:</b>
+                                    <ol style="margin:6px 0 12px 18px; padding:0;">
+                                        <li>Klik tombol <b>Unduh File (.xlsx)</b> di bawah untuk mendapatkan file Excel Format Baru (7 Sheet) resmi.</li>
+                                        <li>Buka Portal CEISA 4.0 lalu klik menu <b>📥 Restore Data</b> dan unggah file tersebut.</li>
+                                        <li>Setelah terunggah ke portal, klik <b>🌐 Tarik Data</b> dan <b>🚀 Kirim</b> di sini untuk memproses pengiriman resmi ke Bea Cukai!</li>
+                                    </ol>
+                                </div>
+                            `,
+                            icon: 'info',
+                            showCancelButton: true,
+                            confirmButtonText: '📥 Unduh File Excel (.xlsx)',
+                            confirmButtonColor: '#10b981',
+                            cancelButtonText: 'Tutup',
+                            cancelButtonColor: '#6b7280',
+                            width: 520
+                        }).then((result) => {
+                            if (result.isConfirmed) {
+                                exportExcelAju(nomorAju);
+                            }
+                        });
+                    } else {
+                        Swal.fire({
+                            ...getSwalThemeOptions(),
+                            title: 'Gagal Mengirim',
+                            html: `<div style="text-align:left; font-size:11px; color:#f87171;"><b>Pesan Bea Cukai:</b><br>${escapeHtml(json.message || 'Terjadi kesalahan.')}</div>`,
+                            icon: 'error',
+                            confirmButtonColor: '#ef4444'
+                        });
+                    }
+                }
+            } catch (err) {
+                Swal.fire({
+                    ...getSwalThemeOptions(),
+                    title: 'Error Jaringan',
+                    text: err.message,
+                    icon: 'error'
+                });
+            }
+        }
+
+        function backupPortalExcel(nomorAju) {
+            nomorAju = nomorAju || currentNomorAju;
+            if (!nomorAju) {
+                showWarning('Nomor Aju tidak valid.');
+                return;
+            }
+            window.open(`manifest_api.php?action=backup_portal_excel&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmpId)}`, '_blank');
+        }
+
+        async function actionStatus(nomorAju) {
+            nomorAju = nomorAju || currentNomorAju;
+            if (!nomorAju) {
+                showWarning('Nomor Aju tidak valid.');
+                return;
+            }
+
+            Swal.fire({
+                ...getSwalThemeOptions(),
+                title: 'Riwayat Dokumen',
+                html: '<div style="padding:15px 0; text-align:center;"><div class="spinner-border text-primary" role="status"></div><div style="font-size:11px; margin-top:8px; color:#94a3b8;">Mengambil riwayat resmi dari Portal CEISA 4.0...</div></div>',
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                width: 560
+            });
+
+            try {
+                const res = await fetch(`manifest_api.php?action=get_portal_history&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const json = await res.json();
+
+                if (json.status === 'OK' && json.timeline && json.timeline.length > 0) {
+                    let tlHtml = `
+                        <div style="text-align:left; max-height:420px; overflow-y:auto; padding:10px 10px 5px; font-family:'Segoe UI',sans-serif;">
+                            <div style="font-size:10px; color:#94a3b8; margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid #334155;">
+                                NOMOR AJU: <strong style="color:#f8fafc;">${escapeHtml(nomorAju)}</strong>
+                            </div>
+                            <div style="position:relative; padding-left:26px; border-left:2px solid #334155; margin-left:14px;">
+                    `;
+
+                    json.timeline.forEach((item) => {
+                        const color = item.color || '#38bdf8';
+                        const icon = item.icon || 'fa-check-circle';
+                        tlHtml += `
+                            <div style="position:relative; margin-bottom:18px;">
+                                <div style="position:absolute; left:-34px; top:0; width:18px; height:18px; border-radius:50%; background:#0f172a; border:2px solid ${color}; display:flex; align-items:center; justify-content:center; font-size:9px; color:${color};">
+                                    <i class="fas ${icon}"></i>
+                                </div>
+                                <div style="font-size:10px; color:#94a3b8; margin-bottom:2px;">
+                                    ${escapeHtml(item.time)}
+                                </div>
+                                <div style="font-size:11.5px; font-weight:600; color:#f8fafc;">
+                                    ${escapeHtml(item.title)}
+                                </div>
+                            </div>
+                        `;
+                    });
+
+                    tlHtml += `
+                            </div>
+                        </div>
+                    `;
+
+                    Swal.fire({
+                        ...getSwalThemeOptions(),
+                        title: 'Riwayat Dokumen',
+                        html: tlHtml,
+                        width: 560,
+                        showCancelButton: true,
+                        cancelButtonText: 'Cancel',
+                        confirmButtonText: 'OK',
+                        confirmButtonColor: '#2563eb'
+                    });
+                    loadManifestList();
+                    return;
+                }
+
+                // Fallback jika belum ada history portal, coba get status biasa
+                const fallbackRes = await fetch(`manifest_api.php?action=api_status&nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const fbJson = await fallbackRes.json();
+                if (fbJson.status === 'OK') {
                     Swal.fire({
                         ...getSwalThemeOptions(),
                         title: 'Status Respon CEISA',
-                        html: `<pre style="text-align:left; max-height:300px; overflow:auto; font-size:10px; background:#0b1120; color:#38bdf8; padding:10px; border-radius:4px;">${escapeHtml(JSON.stringify(json.data, null, 2))}</pre>`,
+                        html: `<pre style="text-align:left; max-height:300px; overflow:auto; font-size:10px; background:#0b1120; color:#38bdf8; padding:10px; border-radius:4px;">${escapeHtml(JSON.stringify(fbJson.data, null, 2))}</pre>`,
                         confirmButtonText: 'Tutup'
                     });
                     loadManifestList();
-                } else if (json.status === 'WARNING') {
+                } else {
                     Swal.fire({
                         ...getSwalThemeOptions(),
-                        icon: 'info',
-                        title: 'Status Manifes',
-                        html: json.message,
-                        confirmButtonText: 'Mengerti'
+                        title: 'Riwayat Dokumen',
+                        html: `<div style="text-align:left; font-size:11px; padding:10px 0;"><strong>Nomor AJU:</strong> ${escapeHtml(nomorAju)}<br><div style="margin-top:12px; color:#94a3b8; text-align:center;">Belum ada riwayat tercatat di CEISA 4.0 untuk dokumen ini.</div></div>`,
+                        confirmButtonText: 'Tutup'
                     });
-                } else {
-                    showError(json.message);
                 }
             } catch (err) { showError('Error: ' + err.message); }
         }
@@ -2162,6 +2444,187 @@ if (empty($reffNegara)) {
         function salinDataKeClipboard() {
             if (!lastInquiryData) return;
             navigator.clipboard.writeText(JSON.stringify(lastInquiryData, null, 2)).then(() => showSuccess('Hasil pencarian disalin ke clipboard!'));
+        }
+
+        let lastVesselData = null;
+
+        function switchInqMode(mode) {
+            const btnBl = document.getElementById('btnSubTabInqBl');
+            const btnVes = document.getElementById('btnSubTabInqVessel');
+            const cardBl = document.getElementById('cardInqBl');
+            const cardVes = document.getElementById('cardInqVessel');
+            const resBl = document.getElementById('cardInquiryResult');
+            const resVes = document.getElementById('cardVesselResult');
+
+            if (mode === 'vessel') {
+                btnBl.className = 'btn btn-secondary btn-sm';
+                btnVes.className = 'btn btn-primary btn-sm';
+                cardBl.style.display = 'none';
+                cardVes.style.display = 'block';
+                resBl.style.display = 'none';
+                if (lastVesselData) resVes.style.display = 'block';
+            } else {
+                btnBl.className = 'btn btn-primary btn-sm';
+                btnVes.className = 'btn btn-secondary btn-sm';
+                cardBl.style.display = 'block';
+                cardVes.style.display = 'none';
+                resVes.style.display = 'none';
+                if (lastInquiryData) resBl.style.display = 'block';
+            }
+        }
+
+        function setInqVesselQuick(name) {
+            document.getElementById('inq_vessel_name').value = name;
+            cariVesselMap();
+        }
+
+        async function cariVesselMap() {
+            const vessel = document.getElementById('inq_vessel_name').value.trim();
+            const kantor = document.getElementById('inq_vessel_kantor').value.trim();
+            if (!vessel) {
+                showWarning('Nama Sarana Pengangkut / Kapal wajib diisi!');
+                return;
+            }
+
+            const card = document.getElementById('cardVesselResult');
+            const tbody = document.getElementById('tableBodyVessel');
+            const badge = document.getElementById('badgeVesselCount');
+            const title = document.getElementById('titleVesselResult');
+            const btn = document.getElementById('btnCariVessel');
+
+            card.style.display = 'block';
+            tbody.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:20px;">Menghubungi API Gateway CEISA 4.0 MapController...</td></tr>';
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Mencari...';
+
+            try {
+                const res = await fetch(`manifest_api.php?action=api_vessel_map&vessel_name=${encodeURIComponent(vessel)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const json = await res.json();
+                lastVesselData = json;
+
+                if (json.status === 'OK' && Array.isArray(json.data) && json.data.length > 0) {
+                    let list = json.data;
+                    if (kantor) {
+                        list = list.filter(item => String(item.kodeKantor || '').includes(kantor));
+                    }
+                    badge.innerText = `${list.length} Data`;
+                    title.innerText = `🚢 Manifes Kedatangan: ${vessel.toUpperCase()} (${list.length} Jadwal)`;
+
+                    let rows = '';
+                    list.forEach((r, idx) => {
+                        const asal = r.namaPelabuhanAsal || r.kodePelabuhanAsal || '-';
+                        const bongkar = r.namaPelabuhanBongkar || r.kodePelabuhanBongkar || '-';
+                        const kade = r.kade || '-';
+                        const tglDoc = r.tanggalTiba || r.tanggalBerangkat || '-';
+                        const isOutward = String(r.jenisManifes || '').toLowerCase().includes('outward') || (!r.tanggalTiba && r.tanggalBerangkat);
+                        const jenisBadge = isOutward 
+                            ? '<span style="background:rgba(245,158,11,0.15); color:#b45309; font-weight:700; padding:2px 6px; border-radius:4px; font-size:10px;">Outward (BC 1.1)</span>'
+                            : '<span style="background:rgba(59,130,246,0.15); color:#1d4ed8; font-weight:700; padding:2px 6px; border-radius:4px; font-size:10px;">Inward (BC 1.1)</span>';
+
+                        rows += `
+                            <tr>
+                                <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
+                                <td>
+                                    <strong>${r.namaSaranaPengangkut || '-'}</strong>
+                                    <div style="font-size:10px; color:var(--text-muted);">IMO: ${r.imoNumber || '-'} | CS: ${r.callSign || '-'} (${r.kodeNegara || '-'})</div>
+                                </td>
+                                <td>
+                                    <strong style="color:#059669; font-size:11px;">${tglDoc}</strong>
+                                </td>
+                                <td>
+                                    <span style="font-weight:700;">${r.kodeKantor || '-'}</span>
+                                </td>
+                                <td>
+                                    <strong style="color:var(--accent); font-size:12px;">${r.nomorVoyage || '-'}</strong>
+                                </td>
+                                <td>
+                                    <strong style="color:var(--primary); font-size:13px;">${r.nomorDaftar || '-'}</strong>
+                                </td>
+                                <td>
+                                    ${jenisBadge}
+                                </td>
+                                <td>
+                                    <span style="font-size:11px;">${r.tanggalDaftar || '-'}</span>
+                                </td>
+                                <td>
+                                    <div><i class="fa-solid fa-arrow-right-from-bracket" style="font-size:9px; color:var(--text-muted);"></i> ${asal}</div>
+                                    <div><i class="fa-solid fa-arrow-right-to-bracket" style="font-size:9px; color:var(--primary);"></i> ${bongkar}</div>
+                                </td>
+                                <td><span style="background:rgba(245,158,11,0.15); color:#b45309; padding:2px 6px; border-radius:4px; font-weight:700;">${kade}</span></td>
+                                <td>
+                                    <div><strong>${r.jumlahPos || 0}</strong> Pos</div>
+                                    <div style="font-size:10px; color:var(--text-muted);">${r.jumlahContainer || 0} Cont</div>
+                                </td>
+                                <td style="text-align:right; white-space:nowrap;">
+                                    <button type="button" class="btn btn-success btn-sm" onclick="applyVesselToEditor(${idx})" title="Terapkan data kapal dan nomor BC 1.1 ini ke Form Editor AJU">
+                                        ⚡ Terapkan ke AJU
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    });
+                    tbody.innerHTML = rows;
+                } else {
+                    badge.innerText = '0 Data';
+                    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--danger);">${json.message || 'Tidak ada data kedatangan kapal untuk ' + vessel}</td></tr>`;
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:20px; color:var(--danger);">Error: ${err.message}</td></tr>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🚀 Cari Manifes Kapal';
+            }
+        }
+
+        function applyVesselToEditor(idx) {
+            if (!lastVesselData || !lastVesselData.data || !lastVesselData.data[idx]) return;
+            const r = lastVesselData.data[idx];
+
+            // Pindah ke tab editor jika belum terbuka
+            showTab('editor');
+
+            // Set Form Header Fields
+            if (document.getElementById('m_sarana_pengangkut')) document.getElementById('m_sarana_pengangkut').value = r.namaSaranaPengangkut || '';
+            if (document.getElementById('m_nomor_voyage')) document.getElementById('m_nomor_voyage').value = r.nomorVoyage || '';
+            if (document.getElementById('m_imo_number')) document.getElementById('m_imo_number').value = r.imoNumber || '';
+            if (document.getElementById('m_call_sign')) document.getElementById('m_call_sign').value = r.callSign || '';
+            if (document.getElementById('m_kode_negara')) {
+                const opt = Array.from(document.getElementById('m_kode_negara').options).find(o => o.value === r.kodeNegara);
+                if (opt) document.getElementById('m_kode_negara').value = r.kodeNegara;
+            }
+            if (document.getElementById('m_kode_kantor') && r.kodeKantor) document.getElementById('m_kode_kantor').value = r.kodeKantor;
+
+            // Format tanggal tiba / berangkat (YYYY-MM-DDTHH:mm)
+            const tglVal = r.tanggalTiba || r.tanggalBerangkat;
+            if (tglVal && document.getElementById('m_tgl_tiba')) {
+                const parts = tglVal.split(' ');
+                if (parts[0]) {
+                    const dp = parts[0].split('-');
+                    if (dp.length === 3) {
+                        const ymd = `${dp[2]}-${dp[1]}-${dp[0]}`;
+                        const time = parts[1] ? parts[1].substring(0, 5) : '00:00';
+                        document.getElementById('m_tgl_tiba').value = `${ymd}T${time}`;
+                    }
+                }
+            }
+
+            // Simpan info BC 1.1 jika ada dokumen yang aktif
+            if (currentNomorAju) {
+                const fd = new FormData();
+                fd.append('action', 'sync_to_manifest');
+                fd.append('nomor_aju', currentNomorAju);
+                fd.append('nomor_bc11', r.nomorDaftar || '');
+                fd.append('tanggal_bc11', r.tanggalDaftar || '');
+                fd.append('nomor_pos', '');
+                fetch('getbl.php', { method: 'POST', body: fd }).catch(() => {});
+            }
+
+            showSuccess(`Data Kapal "${r.namaSaranaPengangkut}" Voyage ${r.nomorVoyage} (BC 1.1: ${r.nomorDaftar || '-'}) berhasil diterapkan ke Form Editor!`);
+        }
+
+        function salinVesselJson() {
+            if (!lastVesselData) return;
+            navigator.clipboard.writeText(JSON.stringify(lastVesselData, null, 2)).then(() => showSuccess('Data JSON sarana pengangkut disalin ke clipboard!'));
         }
 
         // =========================================================================

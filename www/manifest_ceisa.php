@@ -8,8 +8,14 @@ session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 
+header("Cache-Control: no-store, no-cache, must-revalidate, max-age=0");
+header("Pragma: no-cache");
+
 $isAdmin = !empty($_SESSION['is_admin']) || (!empty($_GET['is_admin']) && $_GET['is_admin'] == '1');
-$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : ($cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
+$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : 'TVL')));
+if (empty($sessionCmpId) || $sessionCmpId === 'default' || ($sessionCmpId === '080167772504400' && empty($_REQUEST['cmp_id']) && (empty($_SESSION['company_cmp_id']) || $_SESSION['company_cmp_id'] !== '080167772504400'))) {
+    $sessionCmpId = 'TVL';
+}
 $rawNpwp = preg_replace('/\D/', '', $npwp ?: ($_SESSION['company_npwp'] ?? ''));
 $sessionNpwp = $rawNpwp;
 if (strlen($sessionNpwp) === 16 && substr($sessionNpwp, 0, 1) === '0') {
@@ -19,21 +25,73 @@ if (strlen($sessionNpwp) === 16 && substr($sessionNpwp, 0, 1) === '0') {
 }
 $sessionKodeKantor = $kode_kantor ?: ($_SESSION['company_kode_kantor'] ?? '070100');
 
-// Ambil token MFA (sama persis seperti Dashboard Ceisa 4.0)
-$cachedToken = $_SESSION["mfatoken_" . $sessionCmpId] ?? ($_SESSION["mfatoken"] ?? ($_SESSION["portal_token_" . $sessionCmpId] ?? ''));
+if (!function_exists('isJwtExpired')) {
+    function isJwtExpired($jwt) {
+        if (empty($jwt) || !is_string($jwt)) return true;
+        $parts = explode('.', $jwt);
+        if (count($parts) < 2) return false;
+        $payload = json_decode(base64_decode(str_pad(strtr($parts[1], '-_', '+/'), strlen($parts[1]) % 4, '=', STR_PAD_RIGHT)), true);
+        if (!empty($payload['exp']) && is_numeric($payload['exp'])) {
+            return (time() >= ($payload['exp'] - 30));
+        }
+        return false;
+    }
+}
+
+if (!function_exists('isTokenValidForCompany')) {
+    function isTokenValidForCompany($jwt, $targetCmpRow) {
+        if (empty($jwt) || !is_string($jwt) || empty($targetCmpRow)) return false;
+        if (isJwtExpired($jwt)) return false;
+
+        $parts = explode('.', $jwt);
+        if (count($parts) < 2) return false;
+        $payload = json_decode(base64_decode(str_pad(strtr($parts[1], '-_', '+/'), strlen($parts[1]) % 4, '=', STR_PAD_RIGHT)), true);
+        if (!is_array($payload)) return false;
+
+        // 1. Cek preferred_username
+        $expectedUser = strtolower(trim($targetCmpRow['username_ceisa'] ?? ''));
+        $tokenUser = strtolower(trim($payload['preferred_username'] ?? ''));
+        if (!empty($expectedUser) && !empty($tokenUser) && $expectedUser !== $tokenUser) {
+            return false;
+        }
+
+        // 2. Cek identitas (NPWP 15)
+        $rawCmpNpwp = preg_replace('/\D/', '', $targetCmpRow['npwp'] ?? '');
+        $tokenIdentitas = preg_replace('/\D/', '', $payload['identitas'] ?? '');
+        if (!empty($rawCmpNpwp) && !empty($tokenIdentitas)) {
+            $cmpNpwp15 = (strlen($rawCmpNpwp) === 16 && substr($rawCmpNpwp, 0, 1) === '0') ? substr($rawCmpNpwp, 1) : substr($rawCmpNpwp, 0, 15);
+            if ($tokenIdentitas !== $cmpNpwp15 && $tokenIdentitas !== $rawCmpNpwp) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+
+// Ambil profil resmi perusahaan untuk validasi kepemilikan token
+$currentCmpRow = null;
+$qCmp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, username_ceisa, token_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
+if ($qCmp && $rCmp = $qCmp->fetch_assoc()) {
+    $currentCmpRow = $rCmp;
+}
+
+// Ambil token MFA aktif TERISOLASI (hanya yang sah milik perusahaan $sessionCmpId)
+$cachedToken = $_SESSION["mfatoken_" . $sessionCmpId] ?? ($_SESSION["portal_token_" . $sessionCmpId] ?? '');
+if (!empty($cachedToken) && !isTokenValidForCompany($cachedToken, $currentCmpRow)) {
+    $cachedToken = '';
+}
 if (empty($cachedToken)) {
     $mfaCacheFile = sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $sessionCmpId) . '.json';
     if (file_exists($mfaCacheFile)) {
         $cTok = @json_decode(@file_get_contents($mfaCacheFile), true);
-        if (!empty($cTok['token'])) {
+        if (!empty($cTok['token']) && isTokenValidForCompany($cTok['token'], $currentCmpRow)) {
             $cachedToken = $cTok['token'];
         }
     }
 }
-if (empty($cachedToken)) {
-    $qC = $koneksi->query("SELECT token_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
-    if ($qC && $rC = $qC->fetch_assoc()) {
-        $cachedToken = $rC['token_ceisa'] ?? '';
+if (empty($cachedToken) && !empty($currentCmpRow['token_ceisa'])) {
+    if (isTokenValidForCompany($currentCmpRow['token_ceisa'], $currentCmpRow)) {
+        $cachedToken = $currentCmpRow['token_ceisa'];
     }
 }
 ?>
@@ -173,6 +231,104 @@ if (empty($cachedToken)) {
         .ant-btn-ceisa-primary:hover {
             background: #40a9ff;
             border-color: #40a9ff;
+        }
+
+        /* Mini Dashboard Rekap Status (Area Kotak Merah Pengguna) */
+        .mini-status-dashboard {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: var(--bg-base);
+            padding: 3px 6px;
+            border-radius: 5px;
+            border: 1px solid var(--border);
+            flex-wrap: wrap;
+        }
+        .mini-card {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 3px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            min-width: 52px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            user-select: none;
+        }
+        .mini-card:hover {
+            transform: translateY(-1px);
+            border-color: #1890ff;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.06);
+        }
+        .mini-card.active {
+            border-color: #1890ff;
+            background: rgba(24, 144, 255, 0.08);
+            box-shadow: 0 0 0 1px #1890ff;
+        }
+        .mini-card-label {
+            font-size: 8px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            line-height: 1;
+            margin-bottom: 2px;
+        }
+        .mini-card-val {
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1;
+        }
+        .mini-card-total .mini-card-label { color: #1890ff; }
+        .mini-card-total .mini-card-val { color: #1890ff; }
+        .mini-card-draft .mini-card-label { color: #8c8c8c; }
+        .mini-card-draft .mini-card-val { color: #595959; }
+        .mini-card-ready .mini-card-label { color: #52c41a; }
+        .mini-card-ready .mini-card-val { color: #389e0d; }
+        .mini-card-terkirim .mini-card-label { color: #1890ff; }
+        .mini-card-terkirim .mini-card-val { color: #096dd9; }
+        .mini-card-rekon .mini-card-label { color: #fa8c16; }
+        .mini-card-rekon .mini-card-val { color: #d46b08; }
+        .mini-card-selesai .mini-card-label { color: #237804; }
+        .mini-card-selesai .mini-card-val { color: #135200; }
+        .mini-card-reject .mini-card-label { color: #cf1322; }
+        .mini-card-reject .mini-card-val { color: #a8071a; }
+
+        /* Clickable Vessel Link */
+        .vessel-link {
+            color: #1890ff;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 1px 5px;
+            border-radius: 3px;
+            transition: all 0.15s;
+        }
+        .vessel-link:hover {
+            color: #40a9ff;
+            background: rgba(24, 144, 255, 0.08);
+            text-decoration: underline;
+        }
+        .badge-kantor {
+            background: rgba(0,0,0,0.04);
+            color: var(--text-muted);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
+        }
+        .badge-kade {
+            background: #fffbe6;
+            color: #d46b08;
+            border: 1px solid #ffe58f;
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 9px;
+            font-weight: 600;
         }
 
         /* Actions Toolbar Under Title */
@@ -636,36 +792,70 @@ if (empty($cachedToken)) {
     <div class="ceisa-container">
         <!-- Section 1: Browse Data NVOCC -->
         <div id="viewBrowseSection">
-            <!-- Header Row: Title & Button -->
-            <div class="portal-header-row">
-                <div class="portal-title-block">
-                    <span class="portal-folder-icon">📁</span>
-                    <span class="portal-title-text">Browse Data NVOCC</span>
-                </div>
-                <button type="button" class="ant-btn-ceisa-primary" onclick="openHostToHostEditor()">
-                    <span>➕</span>
-                    <span>Pembuatan Dokumen Baru</span>
-                </button>
-            </div>
+            <!-- Header Row: Title, Actions & Mini Dashboard Rekap Status -->
+            <div class="portal-header-row" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+                <div>
+                    <div class="portal-title-block" style="display:flex; align-items:center; gap:8px;">
+                        <span class="portal-folder-icon">📁</span>
+                        <span class="portal-title-text">Browse Data NVOCC</span>
+                        <button type="button" class="ant-btn-ceisa-primary" style="margin-left:8px;" onclick="openHostToHostEditor()">
+                            <span>➕</span>
+                            <span>Pembuatan Dokumen Baru</span>
+                        </button>
+                    </div>
 
-            <!-- Actions Toolbar -->
-            <div class="portal-toolbar">
-                <button type="button" class="portal-tool-btn" onclick="openRestoreDataModal()">
-                    <span>📥</span>
-                    <span>Restore Data</span>
-                </button>
-                <button type="button" class="portal-tool-btn" onclick="toggleFilterDrawer()">
-                    <span>⚡</span>
-                    <span>Filter Data</span>
-                </button>
-                <button type="button" class="portal-tool-btn" onclick="loadPortalData(true)">
-                    <span>🔄</span>
-                    <span>Perbaharui Data</span>
-                </button>
-                <button type="button" class="portal-tool-btn live-sync" onclick="openSyncPortalModal()" title="Tarik langsung seluruh dokumen Manifes NVOCC dari Gateway Portal CEISA 4.0">
-                    <span>🌐</span>
-                    <span>Tarik dari CEISA 4.0 (Live API)</span>
-                </button>
+                    <!-- Actions Toolbar -->
+                    <div class="portal-toolbar" style="margin-bottom:0; padding-bottom:0; border-bottom:none; margin-top:8px;">
+                        <button type="button" class="portal-tool-btn" onclick="openRestoreDataModal()">
+                            <span>📥</span>
+                            <span>Restore Data</span>
+                        </button>
+                        <button type="button" class="portal-tool-btn" onclick="toggleFilterDrawer()">
+                            <span>⚡</span>
+                            <span>Filter Data</span>
+                        </button>
+                        <button type="button" class="portal-tool-btn" onclick="loadPortalData(true)">
+                            <span>🔄</span>
+                            <span>Perbaharui Data</span>
+                        </button>
+                        <button type="button" class="portal-tool-btn live-sync" onclick="openSyncPortalModal()" title="Tarik langsung seluruh dokumen Manifes NVOCC dari Gateway Portal CEISA 4.0">
+                            <span>🌐</span>
+                            <span>Tarik dari CEISA 4.0 (Live API)</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- MINI DASHBOARD STATUS REKAP (Di Area Kotak Merah Pengguna) -->
+                <div class="mini-status-dashboard" id="miniStatusDashboard" title="Klik salah satu kartu untuk mem-filter dokumen berdasarkan status">
+                    <div class="mini-card mini-card-total active" onclick="filterByStatus('')" title="Semua Dokumen">
+                        <span class="mini-card-label">TOTAL</span>
+                        <span class="mini-card-val" id="miniStatTotal">0</span>
+                    </div>
+                    <div class="mini-card mini-card-draft" onclick="filterByStatus('Draft')" title="Filter Status DRAFT">
+                        <span class="mini-card-label">DRAFT</span>
+                        <span class="mini-card-val" id="miniStatDraft">0</span>
+                    </div>
+                    <div class="mini-card mini-card-ready" onclick="filterByStatus('Ready')" title="Filter Status READY">
+                        <span class="mini-card-label">READY</span>
+                        <span class="mini-card-val" id="miniStatReady">0</span>
+                    </div>
+                    <div class="mini-card mini-card-terkirim" onclick="filterByStatus('Terkirim')" title="Filter Status TERKIRIM">
+                        <span class="mini-card-label">TERKIRIM</span>
+                        <span class="mini-card-val" id="miniStatTerkirim">0</span>
+                    </div>
+                    <div class="mini-card mini-card-rekon" onclick="filterByStatus('Rekon')" title="Filter Status REKON">
+                        <span class="mini-card-label">REKON</span>
+                        <span class="mini-card-val" id="miniStatRekon">0</span>
+                    </div>
+                    <div class="mini-card mini-card-selesai" onclick="filterByStatus('Selesai')" title="Filter Status SELESAI / PENERIMAAN">
+                        <span class="mini-card-label">SELESAI</span>
+                        <span class="mini-card-val" id="miniStatSelesai">0</span>
+                    </div>
+                    <div class="mini-card mini-card-reject" onclick="filterByStatus('Reject')" title="Filter Status REJECT / DITOLAK">
+                        <span class="mini-card-label">DITOLAK</span>
+                        <span class="mini-card-val" id="miniStatReject">0</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Filter Drawer Panel -->
@@ -943,6 +1133,16 @@ if (empty($cachedToken)) {
     <div id="rowDropdownMenu" class="dropdown-menu"></div>
 
     <script>
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
         const activeCmpId = <?= json_encode($sessionCmpId) ?>;
         const activeCmpNpwp = <?= json_encode($sessionNpwp) ?>;
         let cachedPortalToken = <?= json_encode($cachedToken) ?>;
@@ -987,11 +1187,13 @@ if (empty($cachedToken)) {
             const jenis = document.getElementById('filterJenis').value;
             const status = document.getElementById('filterStatus').value;
 
-            // Jika force live sync atau token tersimpan & load pertama kali tanpa filter
+            // Jika force live sync atau load pertama kali tanpa filter
             if ((forceLiveSync || (!hasAutoSynced && cachedPortalToken)) && !search && !jenis && !status) {
                 hasAutoSynced = true;
                 const fd = new FormData();
-                fd.append('portal_token', cachedPortalToken);
+                if (cachedPortalToken) {
+                    fd.append('portal_token', cachedPortalToken);
+                }
                 fetch(`manifest_api.php?action=sync_ceisa_portal&cmp_id=${encodeURIComponent(activeCmpId)}`, { method: 'POST', body: fd })
                     .then(r => r.json())
                     .then(res => {
@@ -1018,6 +1220,9 @@ if (empty($cachedToken)) {
                         totalRecords = (res.pagination && res.pagination.total) ? res.pagination.total : tableData.length;
                         renderTable();
                         renderPagination();
+                        if (res.stats) {
+                            renderMiniDashboard(res.stats);
+                        }
                     } else {
                         tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:20px; color:#cf1322;">⚠️ ${res.message || 'Gagal memuat data.'}</td></tr>`;
                     }
@@ -1086,7 +1291,12 @@ if (empty($cachedToken)) {
                     <td>${noDaftar}</td>
                     <td>${tglDaftar}</td>
                     <td><span class="status-badge ${badgeClass}">${status}</span></td>
-                    <td>${sarana}</td>
+                    <td>
+                        <a href="javascript:void(0)" class="vessel-link" onclick="openVesselManifestModal('${escapeHtml(sarana)}', '${escapeHtml(voy)}', '${escapeHtml(noDaftar)}', '${escapeHtml(tglDaftar)}', '${escapeHtml(aju)}', '${escapeHtml(ktr)}', '${escapeHtml(status)}')" title="Klik untuk menampilkan Jadwal Kedatangan & Informasi Manifes BC 1.1">
+                            <span>🚢</span>
+                            <span>${sarana}</span>
+                        </a>
+                    </td>
                     <td>${tglDoc}</td>
                     <td style="text-align:center;">
                         <button type="button" class="action-menu-trigger" onclick="openRowMenu(event, ${idx})">
@@ -1111,6 +1321,249 @@ if (empty($cachedToken)) {
             return 'status-draft';
         }
 
+        // 3.1 Mini Status Dashboard Handlers
+        function renderMiniDashboard(stats) {
+            if (!stats) return;
+            const elTotal = document.getElementById('miniStatTotal');
+            const elDraft = document.getElementById('miniStatDraft');
+            const elReady = document.getElementById('miniStatReady');
+            const elKirim = document.getElementById('miniStatTerkirim');
+            const elRekon = document.getElementById('miniStatRekon');
+            const elSelesai = document.getElementById('miniStatSelesai');
+            const elReject = document.getElementById('miniStatReject');
+
+            if (elTotal) elTotal.innerText = stats.total || 0;
+            if (elDraft) elDraft.innerText = stats.draft || 0;
+            if (elReady) elReady.innerText = stats.ready || 0;
+            if (elKirim) elKirim.innerText = stats.terkirim || 0;
+            if (elRekon) elRekon.innerText = stats.rekon || 0;
+            if (elSelesai) elSelesai.innerText = stats.selesai || 0;
+            if (elReject) elReject.innerText = stats.reject || 0;
+        }
+
+        let activeFilterStatus = '';
+        function filterByStatus(st) {
+            activeFilterStatus = st;
+            const sel = document.getElementById('filterStatus');
+            if (sel) sel.value = st;
+            currentPage = 1;
+            updateMiniCardsActive(st);
+            fetchLocalList(document.getElementById('filterSearch').value.trim(), document.getElementById('filterJenis').value, st);
+        }
+
+        function updateMiniCardsActive(st) {
+            const cards = document.querySelectorAll('.mini-card');
+            cards.forEach(c => c.classList.remove('active'));
+            if (!st) {
+                document.querySelector('.mini-card-total')?.classList.add('active');
+            } else {
+                const sLow = st.toLowerCase();
+                if (sLow.includes('draft')) document.querySelector('.mini-card-draft')?.classList.add('active');
+                else if (sLow.includes('ready')) document.querySelector('.mini-card-ready')?.classList.add('active');
+                else if (sLow.includes('terkirim') || sLow.includes('kirim')) document.querySelector('.mini-card-terkirim')?.classList.add('active');
+                else if (sLow.includes('rekon')) document.querySelector('.mini-card-rekon')?.classList.add('active');
+                else if (sLow.includes('selesai') || sLow.includes('penerimaan')) document.querySelector('.mini-card-selesai')?.classList.add('active');
+                else if (sLow.includes('reject') || sLow.includes('tolak')) document.querySelector('.mini-card-reject')?.classList.add('active');
+            }
+        }
+
+        // 3.2 Modal Sarana Angkut & Informasi Manifes BC 1.1 Handlers
+        let activeVesselModalData = {
+            sarana: '',
+            voy: '',
+            noDaftar: '',
+            tglDaftar: '',
+            aju: '',
+            ktr: '',
+            status: '',
+            schedules: []
+        };
+
+        async function openVesselManifestModal(sarana, voy, noDaftar, tglDaftar, aju, ktr, status) {
+            activeVesselModalData = { sarana, voy, noDaftar, tglDaftar, aju, ktr, status, schedules: [] };
+            const modal = document.getElementById('modalVesselScheduleManifest');
+            if (!modal) return;
+            modal.style.display = 'flex';
+
+            // 1. Tampilkan Informasi Dokumen Terpilih
+            document.getElementById('lblModalVesselTitle').innerText = `Daftar Jadwal & Manifes: ${sarana}`;
+            document.getElementById('lblModalAju').innerText = aju || '-';
+            document.getElementById('lblModalSarana').innerText = sarana || '-';
+            document.getElementById('lblModalVoyage').innerText = voy || '-';
+            document.getElementById('lblModalKantor').innerText = ktr ? (ktr + ' - TMP TANJUNG PERAK') : '-';
+            
+            const badgeBc11 = document.getElementById('lblModalBc11No');
+            const badgeTgl  = document.getElementById('lblModalBc11Tgl');
+            const badgeSt   = document.getElementById('lblModalDocStatus');
+
+            if (noDaftar && noDaftar !== '-' && noDaftar !== '') {
+                badgeBc11.innerHTML = `<span style="background:#ecfdf5; color:#047857; padding:2px 8px; border-radius:4px; border:1px solid #a7f3d0; font-size:13px; font-weight:800;">${noDaftar}</span>`;
+                badgeTgl.innerText = tglDaftar || '-';
+            } else {
+                badgeBc11.innerHTML = `<span style="color:#d97706; font-size:11px; font-weight:600;">⚠️ Belum Tercatat di Database</span>`;
+                badgeTgl.innerText = '—';
+            }
+
+            badgeSt.className = 'status-badge ' + getStatusBadgeClass(status);
+            badgeSt.innerText = status || 'DRAFT';
+
+            // 2. Fetch Seluruh Jadwal Kedatangan Kapal via MapController
+            const tbody = document.getElementById('tbodyModalVesselVoyages');
+            const lblFound = document.getElementById('lblModalVesselFound');
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:25px; color:var(--text-muted);"><span class="spinner"></span> Menghubungi Gateway CEISA 4.0 MapController...</td></tr>`;
+            lblFound.innerText = 'Mencari...';
+
+            try {
+                const res = await fetch(`getbl.php?action=search_vessel&vessel=${encodeURIComponent(sarana)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const json = await res.json();
+
+                if (json.status === 'OK' && Array.isArray(json.data) && json.data.length > 0) {
+                    activeVesselModalData.schedules = json.data;
+                    lblFound.innerText = `${json.data.length} Jadwal Ditemukan`;
+                    renderModalVesselTable(json.data, voy, aju);
+                } else {
+                    activeVesselModalData.schedules = [];
+                    lblFound.innerText = '0 Jadwal';
+                    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:var(--text-muted); padding:25px;">${json.message || 'Tidak ada data jadwal kedatangan kapal dari Bea Cukai.'}</td></tr>`;
+                }
+            } catch (err) {
+                lblFound.innerText = 'Error';
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; color:#cf1322; padding:25px;">Gagal memuat jadwal kapal: ${err.message}</td></tr>`;
+            }
+        }
+
+        function renderModalVesselTable(list, targetVoyage, targetAju) {
+            const tbody = document.getElementById('tbodyModalVesselVoyages');
+            tbody.innerHTML = '';
+
+            list.forEach((r, idx) => {
+                const tr = document.createElement('tr');
+                const voyMatch = targetVoyage && r.nomorVoyage && (r.nomorVoyage.trim().toUpperCase() === targetVoyage.trim().toUpperCase());
+                
+                if (voyMatch) {
+                    tr.style.background = 'rgba(16, 185, 129, 0.12)';
+                    tr.style.fontWeight = '600';
+                }
+
+                const asal = r.namaPelabuhanAsal || r.kodePelabuhanAsal || '-';
+                const bongkar = r.namaPelabuhanBongkar || r.kodePelabuhanBongkar || '-';
+                const kade = r.kade || '-';
+                const tglDoc = r.tanggalTiba || r.tanggalBerangkat || '-';
+                const isOutward = String(r.jenisManifes || '').toLowerCase().includes('outward') || (!r.tanggalTiba && r.tanggalBerangkat);
+                const jBadge = isOutward ? '<span class="status-badge status-rekon" style="font-size:8px;">Outward</span>' : '<span class="status-badge status-terkirim" style="font-size:8px;">Inward</span>';
+
+                const matchTag = voyMatch ? `<div style="font-size:8.5px; color:#059669; font-weight:700; margin-top:2px;">★ COCOK DENGAN AJU INI</div>` : '';
+
+                tr.innerHTML = `
+                    <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
+                    <td>
+                        <strong style="color:var(--text-heading); font-size:10px;">${escapeHtml(r.nomorVoyage || '-')}</strong>
+                        ${matchTag}
+                    </td>
+                    <td>
+                        <strong style="color:#1890ff; font-size:11px;">${escapeHtml(r.nomorDaftar || '-')}</strong>
+                    </td>
+                    <td><span style="color:#059669; font-weight:600;">${escapeHtml(tglDoc)}</span></td>
+                    <td><span class="badge-kantor">${escapeHtml(r.kodeKantor || '-')}</span></td>
+                    <td>${jBadge}</td>
+                    <td>${escapeHtml(r.tanggalDaftar || '-')}</td>
+                    <td>
+                        <div style="font-size:9.5px;">🚢 ${escapeHtml(asal)}</div>
+                        <div style="font-size:9.5px; color:#1890ff;">⚓ ${escapeHtml(bongkar)}</div>
+                    </td>
+                    <td><span class="badge-kade">${escapeHtml(kade)}</span></td>
+                    <td>
+                        <div><strong>${r.jumlahPos || 0}</strong> Pos</div>
+                        <div style="font-size:9px; color:var(--text-muted);">${r.jumlahContainer || 0} Cont</div>
+                    </td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <button type="button" class="ant-btn-ceisa-primary" style="height:22px; font-size:9px; padding:0 8px; ${voyMatch ? 'background:#059669; border-color:#047857;' : ''}" onclick="applyBc11FromSchedule('${escapeHtml(targetAju)}', '${escapeHtml(r.nomorDaftar || '')}', '${escapeHtml(r.tanggalDaftar || '')}', '${escapeHtml(r.nomorVoyage || '')}')" title="Terapkan nomor BC 1.1 dan tanggal ini ke AJU ${targetAju}">
+                            <span>⚡ Terapkan</span>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        async function applyBc11FromSchedule(nomorAju, noBc11, tglBc11, voyage) {
+            if (!noBc11) {
+                Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Nomor Daftar BC 1.1 belum tersedia pada jadwal ini.' });
+                return;
+            }
+
+            const confirm = await Swal.fire({
+                title: 'Terapkan Nomor BC 1.1?',
+                html: `Apakah Anda yakin ingin menerapkan <strong>Nomor BC 1.1: ${noBc11}</strong> (Tanggal: ${tglBc11}) ke Dokumen AJU <code>${nomorAju}</code>?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#1890ff',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: 'Ya, Terapkan Sekarang',
+                cancelButtonText: 'Batal'
+            });
+
+            if (!confirm.isConfirmed) return;
+
+            const fd = new FormData();
+            fd.append('action', 'sync_to_manifest');
+            fd.append('nomor_aju', nomorAju);
+            fd.append('nomor_bc11', noBc11);
+            fd.append('tanggal_bc11', tglBc11);
+
+            try {
+                const res = await fetch('getbl.php', { method: 'POST', body: fd });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Berhasil Diterapkan!',
+                        text: `Nomor BC 1.1 ${noBc11} berhasil disimpan ke dokumen AJU ${nomorAju}.`,
+                        timer: 1800,
+                        showConfirmButton: false
+                    });
+                    // Update tampilan modal
+                    document.getElementById('lblModalBc11No').innerHTML = `<span style="background:#ecfdf5; color:#047857; padding:2px 8px; border-radius:4px; border:1px solid #a7f3d0; font-size:13px; font-weight:800;">${noBc11}</span>`;
+                    document.getElementById('lblModalBc11Tgl').innerText = tglBc11;
+                    // Reload table di background
+                    fetchLocalList(document.getElementById('filterSearch').value.trim(), document.getElementById('filterJenis').value, document.getElementById('filterStatus').value);
+                } else {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: json.message || 'Terjadi kesalahan saat menyimpan.' });
+                }
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: 'Error', text: err.message });
+            }
+        }
+
+        function closeVesselScheduleModal() {
+            const modal = document.getElementById('modalVesselScheduleManifest');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function openFullMonitoringForActiveVessel() {
+            const sarana = activeVesselModalData.sarana || '';
+            const voy = activeVesselModalData.voy || '';
+            const url = `bc11_monitoring.php?tab=vessel&vessel=${encodeURIComponent(sarana)}&cmp_id=${encodeURIComponent(activeCmpId)}`;
+            window.open(url, '_blank');
+        }
+
+        function copyModalVesselTable() {
+            const list = activeVesselModalData.schedules || [];
+            if (list.length === 0) {
+                Swal.fire({ icon: 'info', title: 'Info', text: 'Tidak ada data jadwal kapal untuk disalin.' });
+                return;
+            }
+            let tsv = "No\tNomor Voyage\tNomor Daftar (BC 1.1)\tTanggal Tiba Berangkat\tKode Kantor\tJenis Manifes\tTanggal Daftar\tPel Asal\tPel Bongkar\tKade\tJumlah Pos\tJumlah Container\tBerat Bruto\n";
+            list.forEach((r, idx) => {
+                const isOutward = String(r.jenisManifes || '').toLowerCase().includes('outward') || (!r.tanggalTiba && r.tanggalBerangkat);
+                const jMan = isOutward ? 'Outward (BC 1.1)' : 'Inward (BC 1.1)';
+                tsv += `${idx+1}\t${r.nomorVoyage||''}\t${r.nomorDaftar||''}\t${r.tanggalTiba||r.tanggalBerangkat||''}\t${r.kodeKantor||''}\t${jMan}\t${r.tanggalDaftar||''}\t${r.namaPelabuhanAsal||r.kodePelabuhanAsal||''}\t${r.namaPelabuhanBongkar||r.kodePelabuhanBongkar||''}\t${r.kade||''}\t${r.jumlahPos||0}\t${r.jumlahContainer||0}\t${r.berat||0}\n`;
+            });
+            navigator.clipboard.writeText(tsv).then(() => {
+                Swal.fire({ icon: 'success', title: 'Disalin!', text: `${list.length} baris jadwal kapal disalin dalam format TSV (Siap di Excel).`, timer: 1500, showConfirmButton: false });
+            });
+        }
+
         // 4. Open Action Dropdown Menu (Dinamis 100% Mengikuti Portal Resmi CEISA 4.0)
         function openRowMenu(e, idx) {
             e.stopPropagation();
@@ -1125,17 +1578,23 @@ if (empty($cachedToken)) {
 
             let itemsHtml = '';
 
-            // 1. Opsi Standar CEISA 4.0: Riwayat & Cetak (*.pdf)
+            // 1. Opsi Standar CEISA 4.0: Riwayat
             itemsHtml += `
                 <div class="dropdown-item" onclick="handleMenuAction('riwayat')">
                     <span style="font-size:11px;">🔄</span>
                     <span>Riwayat</span>
                 </div>
-                <div class="dropdown-item" onclick="handleMenuAction('cetak')">
-                    <span style="font-size:11px;">🖨️</span>
-                    <span>Cetak (*.pdf)</span>
-                </div>
             `;
+
+            // Hanya tampilkan Cetak (*.pdf) jika BUKAN status Draft dan sudah memiliki ID NVOCC resmi
+            if (!status.toUpperCase().includes('DRAFT') && activeTargetRow && activeTargetRow.id_nvocc_header) {
+                itemsHtml += `
+                    <div class="dropdown-item" onclick="handleMenuAction('cetak')">
+                        <span style="font-size:11px;">🖨️</span>
+                        <span>Cetak (*.pdf)</span>
+                    </div>
+                `;
+            }
 
             // 2. Jika status DRAFT / READY: muncul Periksa Kelengkapan
             if (status.includes('DRAFT') || status.includes('READY')) {
@@ -1143,6 +1602,16 @@ if (empty($cachedToken)) {
                     <div class="dropdown-item" onclick="handleMenuAction('cek_lengkap')">
                         <span style="font-size:11px;">📋</span>
                         <span>Periksa Kelengkapan</span>
+                    </div>
+                `;
+            }
+
+            // 2b. Jika status READY: muncul Kirim Data
+            if (status.includes('READY')) {
+                itemsHtml += `
+                    <div class="dropdown-item" onclick="handleMenuAction('kirim_data')" style="color:#52c41a; font-weight:600;">
+                        <span style="font-size:11px;">🚀</span>
+                        <span>Kirim Data</span>
                     </div>
                 `;
             }
@@ -1218,11 +1687,64 @@ if (empty($cachedToken)) {
             } else if (action === 'backup') {
                 backupJson(aju);
             } else if (action === 'cek_lengkap') {
-                checkKelengkapan(aju);
+                const idNvocc = activeTargetRow ? (activeTargetRow.id_nvocc_header || '') : '';
+                checkKelengkapan(aju, idNvocc);
+            } else if (action === 'kirim_data') {
+                kirimDataPortal(activeTargetRow);
             } else if (action === 'redress') {
                 ajukanRedress(activeTargetRow);
             } else if (action === 'edit') {
                 openHostToHostEditor(aju);
+            }
+        }
+
+        async function kirimDataPortal(row) {
+            const aju = row ? row.nomor_aju : activeTargetAju;
+            const resConfirm = await Swal.fire({
+                title: 'Kirim Manifes ke Bea Cukai',
+                html: `Kirim dokumen manifes <strong>${aju}</strong> ke sistem CEISA 4.0 Bea Cukai?<br><br><span style="color:var(--text-muted); font-size:11px;">Pastikan data telah diverifikasi lengkap (READY) sebelum dikirim.</span>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#52c41a',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: '🚀 Ya, Kirim Sekarang',
+                cancelButtonText: 'Batal'
+            });
+            if (!resConfirm.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Mengirim Manifes ke Bea Cukai...',
+                html: `Sedang memproses pengiriman AJU: <strong>${aju}</strong>`,
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const fData = new FormData();
+                fData.append('action', 'api_kirim');
+                fData.append('nomor_aju', aju);
+                fData.append('cmp_id', activeCmpId);
+
+                const res = await fetch('manifest_api.php', { method: 'POST', body: fData });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    Swal.fire({
+                        title: 'Berhasil Dikirim!',
+                        html: json.message || 'Manifes berhasil dikirim ke Bea Cukai.',
+                        icon: 'success',
+                        confirmButtonColor: '#52c41a'
+                    });
+                    loadPortalData();
+                } else {
+                    Swal.fire({
+                        title: 'Gagal Kirim Manifes',
+                        html: json.message || 'Terjadi kesalahan saat mengirim dokumen.',
+                        icon: 'error',
+                        confirmButtonColor: '#ff4d4f'
+                    });
+                }
+            } catch (err) {
+                Swal.fire('Error', err.message, 'error');
             }
         }
 
@@ -1437,22 +1959,91 @@ if (empty($cachedToken)) {
             });
         }
 
-        function showRiwayatStatus(row) {
+        async function showRiwayatStatus(row) {
             const aju = row ? row.nomor_aju : activeTargetAju;
+            if (!aju) return;
+
             Swal.fire({
-                title: '📜 Riwayat Respon CEISA 4.0',
-                html: `
-                    <div style="text-align:left; font-size:10.5px; line-height:1.7;">
-                        <strong>Nomor AJU:</strong> ${aju}<br>
-                        <strong>Status Saat Ini:</strong> <span class="status-badge status-ready">${row ? (row.status || 'Draft') : 'Draft'}</span><br>
-                        <strong>Nomor Daftar (BC 1.1):</strong> ${row ? (row.nomor_bc11 || '-') : '-'}<br>
-                        <strong>Tanggal Daftar:</strong> ${row ? (row.tanggal_bc11 || '-') : '-'}<br>
-                        <strong>Respon Terakhir:</strong> ${row ? (row.respon_terakhir || 'Sinkronisasi Berhasil') : '-'}<br>
-                    </div>
-                `,
-                confirmButtonColor: '#1890ff',
-                confirmButtonText: 'Tutup'
+                title: 'Riwayat Dokumen',
+                html: '<div style="padding:20px 0; text-align:center;"><div class="spinner-border text-primary" role="status"></div><div style="font-size:11px; margin-top:8px; color:var(--text-muted);">Memuat riwayat dari CEISA 4.0...</div></div>',
+                showConfirmButton: false,
+                allowOutsideClick: false,
+                width: 580
             });
+
+            try {
+                const res = await fetch(`manifest_api.php?action=get_portal_history&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const json = await res.json();
+
+                if (json.status !== 'OK' || !json.timeline || json.timeline.length === 0) {
+                    Swal.fire({
+                        title: 'Riwayat Dokumen',
+                        html: `
+                            <div style="text-align:left; font-size:11px; padding:10px 0;">
+                                <strong>Nomor AJU:</strong> ${escapeHtml(aju)}<br>
+                                <div style="margin-top:12px; color:var(--text-muted); text-align:center;">
+                                    Belum ada catatan riwayat respon untuk dokumen ini di server CEISA 4.0.
+                                </div>
+                            </div>
+                        `,
+                        confirmButtonText: 'Tutup',
+                        confirmButtonColor: '#1890ff',
+                        width: 500
+                    });
+                    return;
+                }
+
+                // Render Timeline Visual persis seperti Portal CEISA 4.0
+                let tlHtml = `
+                    <div style="text-align:left; max-height:420px; overflow-y:auto; padding:10px 15px 5px; font-family:'Segoe UI',sans-serif;">
+                        <div style="font-size:10px; color:#8c8c8c; margin-bottom:14px; padding-bottom:6px; border-bottom:1px solid #f0f0f0;">
+                            NOMOR AJU: <strong style="color:#262626;">${escapeHtml(aju)}</strong>
+                        </div>
+                        <div style="position:relative; padding-left:26px; border-left:2px solid #e8e8e8; margin-left:14px;">
+                `;
+
+                json.timeline.forEach((item, idx) => {
+                    const isLast = (idx === json.timeline.length - 1);
+                    const color = item.color || '#1890ff';
+                    const icon = item.icon || 'fa-check-circle';
+
+                    tlHtml += `
+                        <div style="position:relative; margin-bottom:20px;">
+                            <div style="position:absolute; left:-34px; top:0; width:18px; height:18px; border-radius:50%; background:#fff; border:2px solid ${color}; display:flex; align-items:center; justify-content:center; font-size:9px; color:${color};">
+                                <i class="fas ${icon}"></i>
+                            </div>
+                            <div style="font-size:10px; color:#8c8c8c; margin-bottom:2px;">
+                                ${escapeHtml(item.time)}
+                            </div>
+                            <div style="font-size:11.5px; font-weight:600; color:#262626;">
+                                ${escapeHtml(item.title)}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                tlHtml += `
+                        </div>
+                    </div>
+                `;
+
+                Swal.fire({
+                    title: 'Riwayat Dokumen',
+                    html: tlHtml,
+                    width: 580,
+                    showCancelButton: true,
+                    cancelButtonText: 'Cancel',
+                    confirmButtonText: 'OK',
+                    confirmButtonColor: '#1890ff',
+                    cancelButtonColor: '#d9d9d9'
+                });
+            } catch (err) {
+                Swal.fire({
+                    title: 'Error',
+                    text: 'Gagal memuat riwayat: ' + err.message,
+                    icon: 'error'
+                });
+            }
         }
 
         function cetakPdf(aju, idNvocc = '') {
@@ -1534,15 +2125,29 @@ if (empty($cachedToken)) {
         }
 
         // 8. Cek Kelengkapan
-        function checkKelengkapan(nomorAju) {
+        function checkKelengkapan(nomorAju, idNvocc = '') {
+            if (!idNvocc && activeTargetRow && activeTargetRow.id_nvocc_header) {
+                idNvocc = activeTargetRow.id_nvocc_header;
+            }
             Swal.fire({
                 title: 'Memvalidasi Kelengkapan Dokumen...',
-                html: `Memeriksa header, kelompok pos, House B/L, dan kontainer untuk AJU:<br><strong>${nomorAju}</strong>`,
+                html: `Memeriksa status kelengkapan manifes di Gateway CEISA 4.0:<br><strong>${escapeHtml(nomorAju)}</strong>`,
                 allowOutsideClick: false,
                 didOpen: () => Swal.showLoading()
             });
 
-            fetch(`manifest_api.php?action=api_cek_lengkap&cmp_id=${encodeURIComponent(activeCmpId)}&nomor_aju=${encodeURIComponent(nomorAju)}`)
+            const fd = new FormData();
+            fd.append('action', 'api_cek_lengkap');
+            fd.append('cmp_id', activeCmpId);
+            fd.append('nomor_aju', nomorAju);
+            if (idNvocc) {
+                fd.append('id_nvocc_header', idNvocc);
+            }
+
+            fetch(`manifest_api.php`, {
+                method: 'POST',
+                body: fd
+            })
                 .then(r => r.json())
                 .then(res => {
                     if (res.status === 'OK') {
@@ -1732,80 +2337,51 @@ if (empty($cachedToken)) {
         }
 
         // 14. Live Tarik Data dari Portal CEISA 4.0
-        function openSyncPortalModal() {
+        function openSyncPortalModal(manualToken = null) {
             Swal.fire({
-                title: '🌐 Tarik Data dari Portal CEISA 4.0',
-                html: `
-                    <div style="text-align:left; font-size:10.5px; line-height:1.5; margin-bottom:12px;">
-                        Fitur ini menarik langsung daftar dokumen Manifes NVOCC yang aktif dari server API Portal CEISA 4.0 (<code>/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/${activeCmpNpwp || ''}</code>).
-                    </div>
-                    <div style="text-align:left; margin-bottom:6px;">
-                        <label style="font-weight:600; font-size:9.5px; color:var(--text-muted); text-transform:uppercase;">Portal Bearer JWT Token (MFA Token)</label>
-                        <textarea id="swalPortalToken" placeholder="Tempel token Bearer dari portal.beacukai.go.id (jika sudah ada tersimpan akan otomatis digunakan)..." style="width:100%; height:75px; font-family:monospace; font-size:9px; background:var(--bg-input); color:var(--text-main); border:1px solid var(--border); border-radius:3px; padding:6px; outline:none; resize:vertical;">${cachedPortalToken || ''}</textarea>
-                    </div>
-                    <div style="text-align:left;">
-                        <label style="font-weight:600; font-size:9.5px; color:var(--text-muted); text-transform:uppercase;">Portal API Key</label>
-                        <input type="text" id="swalApiKey" value="6222a75e-1dbb-493e-9461-27f721097e9c" class="filter-input" style="width:100%; height:24px;">
-                    </div>
-                `,
-                width: 540,
-                showCancelButton: true,
-                confirmButtonColor: '#52c41a',
-                cancelButtonColor: '#8c8c8c',
-                confirmButtonText: '🔄 Mulai Sinkronisasi',
-                cancelButtonText: 'Batal',
-                preConfirm: () => {
-                    const token = document.getElementById('swalPortalToken').value.trim();
-                    const apiKey = document.getElementById('swalApiKey').value.trim();
-                    if (!token) {
-                        Swal.showValidationMessage('Portal Bearer Token wajib diisi.');
-                        return false;
-                    }
-                    return { token, apiKey };
-                }
-            }).then(r => {
-                if (r.isConfirmed) {
-                    const { token, apiKey } = r.value;
-                    cachedPortalToken = token;
+                title: 'Menyinkronkan dengan CEISA 4.0...',
+                html: '<div style="font-size:11px; margin-top:8px; color:var(--text-muted);">Menghubungi endpoint Gateway Bea Cukai...</div>',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
 
+            const fd = new FormData();
+            if (manualToken) {
+                fd.append('portal_token', manualToken);
+            }
+
+            fetch(`manifest_api.php?action=sync_ceisa_portal&cmp_id=${encodeURIComponent(activeCmpId)}`, {
+                method: 'POST',
+                body: fd
+            })
+            .then(res => res.json())
+            .then(res => {
+                if (res.status === 'OK') {
                     Swal.fire({
-                        title: 'Menyinkronkan dengan CEISA 4.0...',
-                        html: 'Menghubungi endpoint Gateway Bea Cukai...',
-                        allowOutsideClick: false,
-                        didOpen: () => Swal.showLoading()
+                        title: 'Sinkronisasi Selesai!',
+                        html: res.message,
+                        icon: 'success',
+                        confirmButtonColor: '#52c41a'
                     });
-
-                    const fd = new FormData();
-                    fd.append('portal_token', token);
-                    fd.append('api_key', apiKey);
-
-                    fetch(`manifest_api.php?action=sync_ceisa_portal&cmp_id=${encodeURIComponent(activeCmpId)}`, {
-                        method: 'POST',
-                        body: fd
-                    })
-                    .then(res => res.json())
-                    .then(res => {
-                        if (res.status === 'OK') {
-                            Swal.fire({
-                                title: 'Sinkronisasi Selesai!',
-                                html: res.message,
-                                icon: 'success',
-                                confirmButtonColor: '#52c41a'
-                            });
-                            loadPortalData();
-                        } else {
-                            Swal.fire({
-                                title: 'Gagal Sinkronisasi',
-                                html: res.message || 'Terjadi kesalahan saat menghubungi API Bea Cukai.',
-                                icon: 'error',
-                                confirmButtonColor: '#ff4d4f'
-                            });
-                        }
-                    })
-                    .catch(err => {
-                        Swal.fire({ title: 'Error', text: err.message, icon: 'error' });
+                    loadPortalData();
+                } else if (res.status === 'NEED_TOKEN') {
+                    Swal.fire({
+                        title: 'Token MFA Belum Siap',
+                        html: `<div style="font-size:11px; text-align:left; color:#f87171;">${res.message || 'Gagal menghasilkan token MFA otomatis.'}</div><div style="font-size:10px; margin-top:8px; color:var(--text-muted);">Pastikan data login CEISA & Secret MFA tersimpan pada profil perusahaan aktif.</div>`,
+                        icon: 'warning',
+                        confirmButtonColor: '#faad14'
+                    });
+                } else {
+                    Swal.fire({
+                        title: 'Gagal Sinkronisasi',
+                        html: res.message || 'Terjadi kesalahan saat menghubungi API Bea Cukai.',
+                        icon: 'error',
+                        confirmButtonColor: '#ff4d4f'
                     });
                 }
+            })
+            .catch(err => {
+                Swal.fire({ title: 'Error', text: err.message, icon: 'error' });
             });
         }
 
@@ -1907,5 +2483,104 @@ if (empty($cachedToken)) {
             renderTable();
         }
     </script>
+
+    <!-- Modal: Jadwal & Manifes Kedatangan Sarana Pengangkut (MapController) -->
+    <div id="modalVesselScheduleManifest" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.65); backdrop-filter:blur(3px); z-index:10000; align-items:center; justify-content:center; padding:16px;" onclick="if(event.target===this) closeVesselScheduleModal()">
+        <div class="modal-box" style="background:var(--bg-card); border-radius:10px; max-width:880px; width:100%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 10px 25px rgba(0,0,0,0.25); border:1px solid var(--border); overflow:hidden;">
+            <div class="modal-header" style="padding:12px 18px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; background:var(--table-head-bg);">
+                <div>
+                    <div style="font-size:13.5px; font-weight:700; color:var(--text-heading); display:flex; align-items:center; gap:8px;">
+                        <span style="font-size:16px;">🚢</span>
+                        <span id="lblModalVesselTitle">Daftar Jadwal & Manifes: -</span>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                        Integrasi Layanan OpenAPI CEISA 4.0 MapController & Informasi Manifes BC 1.1 Bea Cukai
+                    </div>
+                </div>
+                <button type="button" class="btn-card-add" style="padding:3px 8px; font-size:13px; font-weight:700;" onclick="closeVesselScheduleModal()">✕</button>
+            </div>
+            
+            <div class="modal-body" style="padding:14px 18px; overflow-y:auto; flex:1;">
+                <!-- 1. Informasi Manifes BC 1.1 Dokumen Terpilih Ini -->
+                <div style="background:rgba(24,144,255,0.04); border:1px solid rgba(24,144,255,0.25); border-radius:6px; padding:12px 16px; margin-bottom:14px;">
+                    <div style="font-size:11px; font-weight:700; color:#1890ff; display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                        <span><span style="font-size:12px;">📋</span> INFORMASI MANIFES BC 1.1 DOKUMEN INI (BEA CUKAI)</span>
+                        <span id="lblModalDocStatus" class="status-badge status-ready">-</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px; font-size:10.5px;">
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Nomor Pengajuan (AJU):</span><br>
+                            <strong id="lblModalAju" style="color:var(--text-heading); font-family:Consolas, monospace;">-</strong>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Nomor Daftar (BC 1.1):</span><br>
+                            <span id="lblModalBc11No"><strong style="color:#059669; font-size:13px;">-</strong></span>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Tanggal Daftar (BC 1.1):</span><br>
+                            <strong id="lblModalBc11Tgl" style="color:var(--text-heading);">-</strong>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Nomor Voyage / Flight:</span><br>
+                            <strong id="lblModalVoyage" style="color:var(--text-heading);">-</strong>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Kantor Pelayanan:</span><br>
+                            <span id="lblModalKantor" class="badge-kantor">-</span>
+                        </div>
+                        <div>
+                            <span style="color:var(--text-muted); font-size:9.5px; text-transform:uppercase;">Sarana Pengangkut:</span><br>
+                            <strong id="lblModalSarana" style="color:#0284c7; font-size:11.5px;">-</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. Daftar Jadwal & Manifes Kedatangan Kapal (MapController) -->
+                <div>
+                    <div style="font-size:11px; font-weight:700; color:var(--text-heading); display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                        <span><span style="font-size:12px;">🚢</span> DAFTAR JADWAL & MANIFES KEDATANGAN KAPAL INI (CEISA 4.0 MAPCONTROLLER)</span>
+                        <span id="lblModalVesselFound" style="font-size:10px; color:var(--text-muted);">0 Jadwal</span>
+                    </div>
+                    
+                    <div class="table-responsive" style="max-height:280px; overflow-y:auto;">
+                        <table class="ceisa-table" id="tableModalVesselVoyages">
+                            <thead>
+                                <tr>
+                                    <th style="width:25px; text-align:center;">No</th>
+                                    <th>Nomor Voyage</th>
+                                    <th>Nomor Daftar (BC 1.1)</th>
+                                    <th>Tanggal Tiba / Berangkat</th>
+                                    <th>Kantor</th>
+                                    <th>Jenis Manifes</th>
+                                    <th>Tanggal Daftar</th>
+                                    <th>Pel. Asal & Bongkar</th>
+                                    <th>Kade / TPS</th>
+                                    <th>Pos / Cont</th>
+                                    <th style="text-align:right; width:100px;">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbodyModalVesselVoyages">
+                                <tr><td colspan="11" style="text-align:center; padding:25px; color:var(--text-muted);"><span class="spinner"></span> Menghubungi Gateway CEISA 4.0 MapController...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="padding:10px 18px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--table-head-bg);">
+                <button type="button" class="portal-tool-btn" onclick="openFullMonitoringForActiveVessel()" style="color:#1890ff; font-weight:600;">
+                    <span>🌐 Buka di Full Monitoring BC 1.1</span>
+                </button>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="portal-tool-btn" onclick="copyModalVesselTable()" style="color:var(--text-main);">
+                        <span>📋 Salin Jadwal (TSV)</span>
+                    </button>
+                    <button type="button" class="ant-btn-ceisa-primary" style="height:26px; padding:0 14px;" onclick="closeVesselScheduleModal()">
+                        <span>Tutup</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

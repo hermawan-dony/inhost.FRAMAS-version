@@ -34,7 +34,6 @@ if (!function_exists('get_cached_mfatoken')) {
                 if ((time() - (int)$cache['created_at']) < $expiry_time) {
                     $_SESSION["mfatoken_" . $cmp_key] = $cache['token'];
                     $_SESSION["mfatoken_created_at_" . $cmp_key] = (int)$cache['created_at'];
-                    $_SESSION["mfatoken"] = $cache['token'];
                     return $cache['token'];
                 }
             }
@@ -107,7 +106,6 @@ if (empty($activeToken)) {
         $now = time();
         $_SESSION["mfatoken_" . $cmp_key] = $newToken;
         $_SESSION["mfatoken_created_at_" . $cmp_key] = $now;  
-        $_SESSION["mfatoken"] = $newToken; // backward compatibility
 
         // Simpan ke shared cache file agar tidak request login ulang
         @file_put_contents($tokenCacheFile, json_encode([
@@ -121,7 +119,5 @@ if (empty($activeToken)) {
         // Log minimal tanpa menghentikan sistem
         error_log("CEISA MFA cURL Error: " . $err);
     }
-} else {
-    $_SESSION["mfatoken"] = $activeToken;
 }
 ?>

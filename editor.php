@@ -4200,7 +4200,12 @@ $isEditMode = !empty($selectedAjuParam);
                         </div>
                         <div class="field-row">
                             <div class="field-group" data-col="nomor_bc11">
-                                <label>Nomor BC 1.1</label>
+                                <label style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>Nomor BC 1.1</span>
+                                    <button type="button" class="btn-hdr-ue-bc11" onclick="triggerUeBc11()" style="height: 18px; padding: 0 7px; font-size: 10px; font-weight: 700; line-height: 1; border-radius: 3px; background: #2563eb; color: #fff; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Ambil data Manifest BC 1.1 otomatis dari Host BL (PowerBuilder ue_bc11)">
+                                        🔍 Get BC 1.1
+                                    </button>
+                                </label>
                                 <input type="text" id="hdr_nomor_bc11">
                             </div>
                             <div class="field-group" data-col="tanggal_bc11">
@@ -6391,6 +6396,107 @@ $isEditMode = !empty($selectedAjuParam);
                 <button type="button" class="btn btn-secondary" onclick="closeModal('modalIncomingPicker')">Batal</button>
                 <button type="button" class="btn btn-primary" id="btnInsertIncoming" onclick="insertSelectedIncoming()" style="font-weight:700; background:#0891b2; border-color:#0e7490;">
                     ➕ Masukkan ke Dokumen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GET MANIFEST BC 1.1 MODAL (PowerBuilder ue_bc11 & w_bc_ceisa_getbc11) -->
+    <div class="modal-overlay" id="modalUeBc11">
+        <div class="modal" style="max-width: 950px; width: 95vw; max-height: 90vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.1), transparent);">
+                <div>
+                    <h3 style="color: #2563eb; display: flex; align-items: center; gap: 8px; margin: 0;">
+                        <span>🔍 Get Manifest BC 1.1 (ue_bc11)</span>
+                    </h3>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                        Mengambil data pos/subpos manifes kedatangan sarana pengangkut (BC 1.1) dari API Gateway Bea Cukai.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalUeBc11')">✕</button>
+            </div>
+
+            <div class="modal-body" style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto; flex: 1; padding: 16px;">
+                <!-- SEARCH / INQUIRY BAR -->
+                <div style="display: flex; gap: 10px; align-items: flex-end; background: rgba(0,0,0,0.02); padding: 12px; border-radius: 6px; border: 1px solid var(--border); flex-wrap: wrap;">
+                    <div style="flex: 2; min-width: 200px;">
+                        <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">HOST AWB / HOST BL (740/705):</label>
+                        <input type="text" id="ueBc11HostBl" class="form-control" style="font-weight: 700; text-transform: uppercase;" placeholder="Nomor Host BL...">
+                    </div>
+                    <div style="width: 140px;">
+                        <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TGL HOST BL:</label>
+                        <input type="date" id="ueBc11Tgl" class="form-control" value="<?= date('Y-m-d') ?>">
+                    </div>
+                    <div style="width: 120px;">
+                        <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">KANTOR BONGKAR:</label>
+                        <input type="text" id="ueBc11Kantor" class="form-control" placeholder="040300" maxlength="6">
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        <button type="button" class="btn btn-primary" id="btnUeBc11Fetch" onclick="fetchUeBc11Data()">
+                            <i class="fa-solid fa-magnifying-glass"></i> Cari BC 1.1
+                        </button>
+                        <button type="button" class="btn btn-info" id="btnUeBc11Tps" onclick="fetchUeBc11Tps()">
+                            <i class="fa-solid fa-warehouse"></i> Get TPS
+                        </button>
+                    </div>
+                </div>
+
+                <!-- DUA PANEL: KIRI DATA BC 1.1, KANAN DAFTAR TPS -->
+                <div style="display: grid; grid-template-columns: 1fr 340px; gap: 14px; min-height: 320px;">
+                    <!-- LEFT: BC 1.1 PREVIEW -->
+                    <div style="border: 1px solid var(--border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column;">
+                        <div style="font-size: 12px; font-weight: 700; color: var(--primary); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
+                            <span>Hasil Pencarian Manifest BC 1.1</span>
+                            <span id="ueBc11StatusBadge" style="font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(0,0,0,0.05); color: var(--text-muted);">Menunggu input</span>
+                        </div>
+                        <div id="ueBc11PreviewContainer" style="flex: 1; overflow-y: auto;">
+                            <table class="datagrid" style="width: 100%; font-size: 11px;">
+                                <tbody>
+                                    <tr><td style="width: 160px; font-weight: 600;">Nomor BC 1.1</td><td id="prevUeNomorDaftar" style="font-weight: 700; color: #2563eb;">-</td></tr>
+                                    <tr><td style="font-weight: 600;">Tanggal BC 1.1</td><td id="prevUeTanggalDaftar">-</td></tr>
+                                    <tr><td style="font-weight: 600;">Nomor Pos / Sub Pos</td><td><strong id="prevUePos">-</strong> / <span id="prevUeSubPos">-</span></td></tr>
+                                    <tr><td style="font-weight: 600;">Kantor Bongkar</td><td id="prevUeKantor">-</td></tr>
+                                    <tr><td style="font-weight: 600;">Mother Vessel (Pengangkut)</td><td id="prevUeVessel" style="font-weight: 600;">-</td></tr>
+                                    <tr><td style="font-weight: 600;">Voyage / Tanggal Tiba</td><td><span id="prevUeVoyage">-</span> / <span id="prevUeTglTiba">-</span></td></tr>
+                                    <tr><td style="font-weight: 600;">Pelabuhan Bongkar / Muat</td><td><span id="prevUePelBongkar">-</span> / <span id="prevUePelMuat">-</span></td></tr>
+                                    <tr><td style="font-weight: 600;">Pelabuhan Transit / Akhir</td><td><span id="prevUePelTransit">-</span> / <span id="prevUePelAkhir">-</span></td></tr>
+                                    <tr><td style="font-weight: 600;">Master BL (741)</td><td><span id="prevUeNoBl" style="font-weight: 600;">-</span> (<span id="prevUeTglBl">-</span>)</td></tr>
+                                    <tr><td style="font-weight: 600;">Berat Bruto</td><td id="prevUeBruto">-</td></tr>
+                                    <tr><td style="font-weight: 600;">Kemasan</td><td><span id="prevUeJmlKemas">-</span> <span id="prevUeKdKemas">-</span></td></tr>
+                                    <tr><td style="font-weight: 600;">Pengirim</td><td id="prevUePengirim">-</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT: TPS LIST & SELECTION -->
+                    <div style="border: 1px solid var(--border); border-radius: 6px; padding: 12px; display: flex; flex-direction: column;">
+                        <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <span>Pilih Gudang TPS</span>
+                            <span id="ueSelectedTpsBadge" style="background: #fef08a; color: #854d0e; font-weight: 800; padding: 2px 8px; border-radius: 4px; font-size: 11px;">-</span>
+                        </div>
+                        <input type="text" id="ueSearchTps" class="form-control" placeholder="Cari TPS..." onkeyup="filterUeTpsList()" style="margin-bottom: 8px; font-size: 11px;">
+                        <div style="flex: 1; max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px;">
+                            <table class="datagrid" style="width: 100%; font-size: 11px;">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 65px;">Kode</th>
+                                        <th>Nama TPS</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="tbodyUeTps">
+                                    <tr><td colspan="2" style="text-align: center; color: var(--text-muted); padding: 14px;">Belum memuat TPS</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalUeBc11')">Batal</button>
+                <button type="button" class="btn btn-primary" id="btnTransferUeBc11" onclick="applyUeBc11ToDocument()" style="font-size: 13px; font-weight: 700; padding: 6px 20px; background: #059669; border-color: #047857;" disabled>
+                    ⚡ Transfer ke Dokumen &gt;
                 </button>
             </div>
         </div>
@@ -11647,6 +11753,392 @@ $isEditMode = !empty($selectedAjuParam);
                     showToast('Baris dihapus. Klik Simpan untuk memperbarui database.');
                 }
             }
+        }
+
+        // =============================================================
+        // EVENT ue_bc11() & w_bc_ceisa_getbc11 MODAL INTEGRATION
+        // Persis PowerBuilder w_bc_ceisa40_interface2.srw
+        // =============================================================
+        let ueBc11CurrentResult = null;
+        let ueBc11TpsList = [];
+        let ueBc11SelectedTps = '';
+
+        function triggerUeBc11() {
+            if (!currentAju || !currentData.header) {
+                alert('Silakan pilih atau buat dokumen AJU terlebih dahulu!');
+                return;
+            }
+
+            // 1. Ambil kode kantor bongkar dari header
+            const hdrKantor = document.getElementById('hdr_kode_kantor_bongkar')?.value || (currentData.header.kode_kantor_bongkar || '');
+            document.getElementById('ueBc11Kantor').value = hdrKantor;
+
+            // 2. Cari Host BL (kode 740 atau 705) dari Dokumen Lampiran (persis PowerBuilder)
+            let hostBl = '';
+            let tglHostBl = '';
+            if (Array.isArray(currentData.dokumen)) {
+                const found740 = currentData.dokumen.find(d => String(d.kode_dokumen).trim() === '740' || String(d.kode_dokumen).trim() === '705');
+                if (found740) {
+                    hostBl = found740.nomor_dokumen || '';
+                    tglHostBl = found740.tanggal_dokumen || '';
+                }
+            }
+
+            if (hostBl) document.getElementById('ueBc11HostBl').value = hostBl;
+            if (tglHostBl) document.getElementById('ueBc11Tgl').value = formatDateYmd(tglHostBl);
+
+            // 3. Pre-select TPS jika sudah ada di header
+            const curTps = document.getElementById('hdr_kode_tps')?.value || (currentData.header.kode_tps || '');
+            ueBc11SelectedTps = curTps;
+            document.getElementById('ueSelectedTpsBadge').innerText = curTps || '-';
+
+            // Buka Modal
+            openModal('modalUeBc11');
+
+            // 4. Jika Host BL ada, langsung jalankan fetch otomatis (persis PB: if isdate(ls_tgl) then cb_1.triggerevent(clicked!))
+            if (hostBl) {
+                fetchUeBc11Data();
+            }
+        }
+
+        async function fetchUeBc11Data() {
+            const hostBl = document.getElementById('ueBc11HostBl').value.trim();
+            const kantor = document.getElementById('ueBc11Kantor').value.trim();
+            const cmpId  = currentData.header?.cmp_id || (new URLSearchParams(window.location.search).get('cmp_id') || '');
+
+            if (!hostBl) {
+                alert('Nomor Host AWB / Host BL wajib diisi!');
+                document.getElementById('ueBc11HostBl').focus();
+                return;
+            }
+
+            const btn = document.getElementById('btnUeBc11Fetch');
+            const badge = document.getElementById('ueBc11StatusBadge');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Mencari...';
+            badge.innerText = 'Mengambil data dari Bea Cukai...';
+            badge.style.background = '#dbeafe';
+            badge.style.color = '#1e40af';
+
+            try {
+                const res = await fetch(`getbl.php?a=${encodeURIComponent(hostBl)}&format=json&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+
+                if (json.status === 'OK' && json.data) {
+                    ueBc11CurrentResult = json.data;
+                    renderUeBc11Preview(json.data);
+
+                    badge.innerText = 'Data ditemukan';
+                    badge.style.background = '#dcfce7';
+                    badge.style.color = '#166534';
+                    document.getElementById('btnTransferUeBc11').disabled = false;
+
+                    // Update Kantor jika kosong
+                    if (!kantor && json.data.kodeKantor) {
+                        document.getElementById('ueBc11Kantor').value = json.data.kodeKantor;
+                    }
+
+                    // Otomatis tarik TPS
+                    fetchUeBc11Tps();
+                } else {
+                    badge.innerText = 'Tidak ditemukan';
+                    badge.style.background = '#fee2e2';
+                    badge.style.color = '#991b1b';
+                    document.getElementById('btnTransferUeBc11').disabled = true;
+                    alert(json.message || 'Data Manifest BC 1.1 tidak ditemukan untuk Host BL ini.');
+                }
+            } catch(e) {
+                badge.innerText = 'Error';
+                badge.style.background = '#fee2e2';
+                badge.style.color = '#991b1b';
+                alert('Koneksi gagal: ' + e.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Cari BC 1.1';
+            }
+        }
+
+        function renderUeBc11Preview(d) {
+            document.getElementById('prevUeNomorDaftar').innerText = d.nomorDaftar || '-';
+            document.getElementById('prevUeTanggalDaftar').innerText = d.tanggalDaftar || '-';
+            document.getElementById('prevUePos').innerText = d.nomorPosHeader || (d.nomorPos ? d.nomorPos.substring(0, 4) : '-');
+            document.getElementById('prevUeSubPos').innerText = d.nomorSubPos || (d.nomorPos ? d.nomorPos.substring(4) : '-');
+            document.getElementById('prevUeKantor').innerText = d.kodeKantor || '-';
+            document.getElementById('prevUeVessel').innerText = d.motherVessel || '-';
+            document.getElementById('prevUeVoyage').innerText = d.nomorVoyage_detail || d.nomorVoyage || '-';
+            document.getElementById('prevUeTglTiba').innerText = d.tanggalTiba || '-';
+            document.getElementById('prevUePelBongkar').innerText = d.kodePelabuhanBongkar || '-';
+            document.getElementById('prevUePelMuat').innerText = d.kodePelabuhanAsal || '-';
+            document.getElementById('prevUePelTransit').innerText = d.kodePelabuhanTransit || '-';
+            document.getElementById('prevUePelAkhir').innerText = d.kodePelabuhanAkhir || '-';
+            document.getElementById('prevUeNoBl').innerText = d.nomorBl || '-';
+            document.getElementById('prevUeTglBl').innerText = d.tanggalBl || '-';
+            document.getElementById('prevUeBruto').innerText = Number(d.berat || 0).toLocaleString('id-ID', { minimumFractionDigits: 2 }) + ' kg';
+            document.getElementById('prevUeJmlKemas').innerText = Number(d.jumlahKemasan || 0).toLocaleString('id-ID');
+            document.getElementById('prevUeKdKemas').innerText = d.jenisKemasan || '-';
+            document.getElementById('prevUePengirim').innerText = d.namaPengirim || '-';
+        }
+
+        async function fetchUeBc11Tps() {
+            const kantor = document.getElementById('ueBc11Kantor').value.trim();
+            const cmpId  = currentData.header?.cmp_id || (new URLSearchParams(window.location.search).get('cmp_id') || '');
+            const btn = document.getElementById('btnUeBc11Tps');
+
+            if (!kantor) {
+                alert('Kode Kantor Bongkar harus diisi!');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Ambil TPS...';
+
+            try {
+                const res = await fetch(`gettps.php?a=${encodeURIComponent(kantor)}&format=json&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && Array.isArray(json.data)) {
+                    ueBc11TpsList = json.data;
+                    renderUeTpsTable(ueBc11TpsList);
+                } else {
+                    document.getElementById('tbodyUeTps').innerHTML = `<tr><td colspan="2" style="text-align: center; color: var(--text-muted); padding: 14px;">Tidak ada TPS untuk kantor ${kantor}</td></tr>`;
+                }
+            } catch(e) {
+                console.warn('Gagal ambil TPS:', e);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-warehouse"></i> Get TPS';
+            }
+        }
+
+        function renderUeTpsTable(list) {
+            const tbody = document.getElementById('tbodyUeTps');
+            tbody.innerHTML = '';
+
+            if (list.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="2" style="text-align: center; color: var(--text-muted); padding: 14px;">Tidak ada TPS yang cocok</td></tr>`;
+                return;
+            }
+
+            list.forEach(item => {
+                const tr = document.createElement('tr');
+                if (item.kodeGudang === ueBc11SelectedTps) {
+                    tr.style.background = 'rgba(59, 130, 246, 0.2)';
+                    tr.style.fontWeight = '700';
+                }
+                tr.style.cursor = 'pointer';
+                tr.onclick = () => selectUeTps(item.kodeGudang, tr);
+                tr.innerHTML = `
+                    <td style="font-weight: 700; color: var(--primary);">${escapeHtml(item.kodeGudang)}</td>
+                    <td>${escapeHtml(item.namaGudang)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function selectUeTps(kode, trElement) {
+            ueBc11SelectedTps = kode;
+            document.querySelectorAll('#tbodyUeTps tr').forEach(r => {
+                r.style.background = '';
+                r.style.fontWeight = 'normal';
+            });
+            if (trElement) {
+                trElement.style.background = 'rgba(59, 130, 246, 0.2)';
+                trElement.style.fontWeight = '700';
+            }
+            document.getElementById('ueSelectedTpsBadge').innerText = kode;
+        }
+
+        function filterUeTpsList() {
+            const q = document.getElementById('ueSearchTps').value.trim().toUpperCase();
+            if (!q) {
+                renderUeTpsTable(ueBc11TpsList);
+                return;
+            }
+            const filtered = ueBc11TpsList.filter(item => {
+                const text = `${item.kodeGudang} ${item.namaGudang}`.toUpperCase();
+                return text.includes(q);
+            });
+            renderUeTpsTable(filtered);
+        }
+
+        // -------------------------------------------------------------
+        // TRANSFER KE DOKUMEN (Persis w_bc_ceisa_getbc11 cb_2 clicked!)
+        // -------------------------------------------------------------
+        function applyUeBc11ToDocument() {
+            if (!ueBc11CurrentResult) {
+                alert('Belum ada data BC 1.1 yang dapat ditransfer!');
+                return;
+            }
+
+            const d = ueBc11CurrentResult;
+            const fullPos = d.nomorPos || '';
+            const pos4 = (fullPos.length >= 4) ? fullPos.substring(0, 4) : fullPos;
+            const subPos8 = (fullPos.length > 4) ? fullPos.substring(4) : '';
+
+            // 1. TRANSFER KE HEADER INPUTS
+            const setField = (id, val) => {
+                const el = document.getElementById(id);
+                if (el && val !== undefined && val !== null) {
+                    el.value = val;
+                    if (el.classList.contains('hdr-date-input')) {
+                        const grp = el.closest('.input-date-group');
+                        if (grp) {
+                            const nat = grp.querySelector('.hdr-date-native');
+                            if (nat) nat.value = val;
+                        }
+                    }
+                }
+            };
+
+            setField('hdr_nomor_bc11', d.nomorDaftar || '');
+            setField('hdr_tanggal_bc11', formatDateYmd(d.tanggalDaftar || ''));
+            setField('hdr_nomor_pos', pos4);
+            setField('hdr_nomor_sub_pos', subPos8);
+            setField('hdr_kode_pelabuhan_bongkar', d.kodePelabuhanBongkar || '');
+            setField('hdr_kode_pelabuhan_muat', d.kodePelabuhanAsal || '');
+            setField('hdr_kode_pelabuhan_transit', d.kodePelabuhanTransit || '');
+            setField('hdr_kode_pelabuhan_muat_akhir', d.kodePelabuhanAkhir || '');
+            setField('hdr_kode_kantor_bongkar', d.kodeKantor || '');
+            setField('hdr_kode_tutup_pu', '11');
+            setField('hdr_kode_tujuan_tpb', '1');
+            setField('hdr_kode_asuransi', 'LN');
+            setField('hdr_kode_jasa_kena_pajak', '1');
+
+            if (ueBc11SelectedTps) {
+                setField('hdr_kode_tps', ueBc11SelectedTps);
+            }
+
+            // Tanggal Tiba format YYYY-MM-DD
+            if (d.tanggalTiba) {
+                let tglTibaFormatted = formatDateYmd(d.tanggalTiba);
+                setField('hdr_tanggal_tiba', tglTibaFormatted);
+            }
+
+            // Bruto jika saat ini 0
+            const curBruto = parseInputNumber(document.getElementById('hdr_bruto')?.value || 0);
+            if (curBruto === 0 && d.berat) {
+                const decBerat = headerNumberDecimals.bruto || 4;
+                setField('hdr_bruto', formatCeisaNumber(d.berat, decBerat));
+            }
+
+            // Sync ke currentData.header
+            if (currentData.header) {
+                currentData.header.nomor_bc11 = d.nomorDaftar || '';
+                currentData.header.tanggal_bc11 = formatDateYmd(d.tanggalDaftar || '');
+                currentData.header.nomor_pos = pos4;
+                currentData.header.nomor_sub_pos = subPos8;
+                currentData.header.kode_pelabuhan_bongkar = d.kodePelabuhanBongkar || '';
+                currentData.header.kode_pelabuhan_muat = d.kodePelabuhanAsal || '';
+                currentData.header.kode_pelabuhan_transit = d.kodePelabuhanTransit || '';
+                currentData.header.kode_pelabuhan_muat_akhir = d.kodePelabuhanAkhir || '';
+                currentData.header.kode_kantor_bongkar = d.kodeKantor || '';
+                currentData.header.kode_tutup_pu = '11';
+                currentData.header.kode_tujuan_tpb = '1';
+                currentData.header.kode_asuransi = 'LN';
+                currentData.header.kode_jasa_kena_pajak = '1';
+                if (ueBc11SelectedTps) currentData.header.kode_tps = ueBc11SelectedTps;
+                if (d.tanggalTiba) currentData.header.tanggal_tiba = formatDateYmd(d.tanggalTiba);
+            }
+
+            // 2. TRANSFER KE KEMASAN
+            const kodeKemasan = d.jenisKemasan || '';
+            const jmlKemasan = parseFloat(d.jumlahKemasan) || 0;
+            if (kodeKemasan) {
+                if (!Array.isArray(currentData.kemasan)) currentData.kemasan = [];
+                if (currentData.kemasan.length === 0) {
+                    currentData.kemasan.push({ seri: 1, kode_kemasan: kodeKemasan, jumlah_kemasan: jmlKemasan, merek: '' });
+                } else if (currentData.kemasan.length === 1) {
+                    currentData.kemasan[0].kode_kemasan = kodeKemasan;
+                    currentData.kemasan[0].jumlah_kemasan = jmlKemasan;
+                }
+                populateTable('kemasan', currentData.kemasan);
+
+                // Update kemasan barang jika ada
+                if (Array.isArray(currentData.barang)) {
+                    currentData.barang.forEach(b => {
+                        b.kode_kemasan = kodeKemasan;
+                        if (currentData.barang.length === 1) b.jumlah_kemasan = jmlKemasan;
+                    });
+                    populateTable('barang', currentData.barang);
+                }
+
+                // Update kontainer jika 1 baris
+                if (Array.isArray(currentData.kontainer) && currentData.kontainer.length === 1) {
+                    currentData.kontainer[0].kode_kemasan = kodeKemasan;
+                    currentData.kontainer[0].jumlah_kemasan = jmlKemasan;
+                    populateTable('kontainer', currentData.kontainer);
+                }
+            }
+
+            // 3. TRANSFER KE DOKUMEN LAMPIRAN (Seri 1: 380, Seri 2: 740/705, Seri 3: 741)
+            const kodeKantor = d.kodeKantor || document.getElementById('hdr_kode_kantor_bongkar')?.value || '';
+            const kodeDokHost = (kodeKantor === '040300') ? '705' : '740';
+
+            if (!Array.isArray(currentData.dokumen)) currentData.dokumen = [];
+
+            // Seri 1: Invoice (380)
+            let dok1 = currentData.dokumen.find(doc => parseInt(doc.seri, 10) === 1);
+            if (!dok1) {
+                dok1 = { seri: 1, kode_dokumen: '380', nomor_dokumen: '', tanggal_dokumen: '' };
+                currentData.dokumen.push(dok1);
+            } else if (!dok1.kode_dokumen) {
+                dok1.kode_dokumen = '380';
+            }
+
+            // Seri 2: Host BL (740 / 705)
+            let dok2 = currentData.dokumen.find(doc => parseInt(doc.seri, 10) === 2);
+            if (!dok2) {
+                dok2 = { seri: 2, kode_dokumen: kodeDokHost, nomor_dokumen: d.nomorHostBl || '', tanggal_dokumen: formatDateYmd(d.tanggalHostBl || '') };
+                currentData.dokumen.push(dok2);
+            } else {
+                dok2.kode_dokumen = kodeDokHost;
+                if (d.nomorHostBl) dok2.nomor_dokumen = d.nomorHostBl;
+                if (d.tanggalHostBl) dok2.tanggal_dokumen = formatDateYmd(d.tanggalHostBl);
+            }
+
+            // Seri 3: Master BL (741)
+            if (d.nomorBl) {
+                let dok3 = currentData.dokumen.find(doc => parseInt(doc.seri, 10) === 3);
+                if (!dok3) {
+                    dok3 = { seri: 3, kode_dokumen: '741', nomor_dokumen: d.nomorBl, tanggal_dokumen: formatDateYmd(d.tanggalBl || '') };
+                    currentData.dokumen.push(dok3);
+                } else {
+                    dok3.kode_dokumen = '741';
+                    dok3.nomor_dokumen = d.nomorBl;
+                    if (d.tanggalBl) dok3.tanggal_dokumen = formatDateYmd(d.tanggalBl);
+                }
+            }
+
+            // Urutkan dokumen berdasarkan nomor seri
+            currentData.dokumen.sort((a, b) => (parseInt(a.seri, 10) || 0) - (parseInt(b.seri, 10) || 0));
+            populateTable('dokumen', currentData.dokumen);
+
+            // 4. TRANSFER KE PENGANGKUT
+            if (!Array.isArray(currentData.pengangkut)) currentData.pengangkut = [];
+            const caraAngkut = (d.kodePelabuhanBongkar === 'IDCGK') ? '4' : '1';
+            const vesselName = d.motherVessel || '';
+            const voyNo = d.nomorVoyage_detail || d.nomorVoyage || '';
+            const bendera = (d.namaPelabuhanAsal && d.namaPelabuhanAsal.length >= 2) ? d.namaPelabuhanAsal.substring(0, 2).toUpperCase() : '';
+
+            if (currentData.pengangkut.length === 0) {
+                currentData.pengangkut.push({
+                    seri: 1,
+                    kode_cara_angkut: caraAngkut,
+                    nama_pengangkut: vesselName,
+                    nomor_pengangkut: voyNo,
+                    kode_bendera: bendera,
+                    call_sign: ''
+                });
+            } else {
+                currentData.pengangkut[0].kode_cara_angkut = caraAngkut;
+                if (vesselName) currentData.pengangkut[0].nama_pengangkut = vesselName;
+                if (voyNo) currentData.pengangkut[0].nomor_pengangkut = voyNo;
+                if (bendera) currentData.pengangkut[0].kode_bendera = bendera;
+            }
+            populateTable('pengangkut', currentData.pengangkut);
+
+            // Tutup Modal & Notifikasi Sukses
+            closeModal('modalUeBc11');
+            showToast('✅ Data BC 1.1 berhasil ditransfer ke Header, Kemasan, Dokumen & Pengangkut!');
         }
 
         window.addEventListener('DOMContentLoaded', init);

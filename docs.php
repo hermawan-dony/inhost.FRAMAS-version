@@ -456,6 +456,7 @@ if (!$isAdmin) {
         <a href="#ep-nib" class="menu-item"><span class="method-badge badge-get">GET</span> nib.php</a>
         <a href="#ep-skep" class="menu-item"><span class="method-badge badge-get">GET</span> skep.php</a>
         <a href="#ep-getbc11" class="menu-item"><span class="method-badge badge-get">GET</span> getbc11.php</a>
+        <a href="#ep-getbl" class="menu-item"><span class="method-badge badge-get" style="background:#7c3aed; color:#fff;">PB</span> getbl.php (Inkuiri BC 1.1)</a>
         <a href="#ep-gettps" class="menu-item"><span class="method-badge badge-get">GET</span> gettps.php</a>
         <a href="#ep-cekaju" class="menu-item"><span class="method-badge badge-get">GET</span> cekaju.php</a>
     </div>
@@ -1063,6 +1064,10 @@ MessageBox("Daftar AJU", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</p
                     <tr><td><code>api_rekon</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/rekon</code></td><td>Melakukan rekonsiliasi / pecah pos antara manifes operator kapal dan NVOCC. Status berubah menjadi <strong>Rekon</strong>.</td></tr>
                     <tr><td><code>api_status</code></td><td><code>GET</code></td><td><code>/manifes/nvocc/status/{nomorAju}</code></td><td>Menarik riwayat dan status respon terakhir dari Bea Cukai.</td></tr>
                     <tr><td><code>api_bc11</code></td><td><code>GET</code></td><td><code>/manifes/nvocc/bc11?nomorAju={nomorAju}</code></td><td>Mendapatkan Nomor BC 1.1, Tanggal BC 1.1, dan Pos Manifes setelah proses rekon berhasil.</td></tr>
+                    <tr><td><code>export_excel</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=export_excel&amp;nomor_aju={nomorAju}</code></td><td>Mengekspor dokumen Manifes H2H menjadi file Excel Format Baru (.xlsx 7 Sheet) resmi CEISA 4.0 (NVOCC, MASTER, BL HS, BL, BL DOKUMEN, BL PETIKEMAS TERANGKUT, BL PETIKEMAS TERTINGGAL).</td></tr>
+                    <tr><td><code>upload_portal_restore</code></td><td><code>POST</code></td><td><code>/manifest_api.php?action=upload_portal_restore</code></td><td>Mengirim &amp; me-restore dokumen langsung ke Portal CEISA 4.0 via microservice <code>/manifes-restore-dokumen/v1/tempNVOCC/UploadRestoreExcel</code>.</td></tr>
+                    <tr><td><code>backup_portal_excel</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=backup_portal_excel&amp;nomor_aju={nomorAju}</code></td><td>Mengunduh file backup Excel resmi langsung dari server CEISA 4.0 via endpoint <code>/v3/ManifesSchema/v1/tempNVOCC/ExcelNvocc</code>.</td></tr>
+                    <tr><td><code>get_portal_history</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=get_portal_history&amp;nomor_aju={nomorAju}</code></td><td>Menarik rekam jejak riwayat resmi dokumen (Penerimaan, Perbaikan, Rekon, Respon Outward/Inward) dari <code>HistoryManifes</code> dan <code>DataManifesResponse</code>.</td></tr>
                     <tr><td><code>delete_manifes</code></td><td><code>DELETE</code></td><td><code>/manifes/nvocc/draft/{nomorAju}</code></td><td>Menghapus draft manifes dari gateway Bea Cukai dan database lokal.</td></tr>
                     <tr><td><code>api_inward</code></td><td><code>GET</code></td><td><code>/manifes/inward</code></td><td>Pencarian pos manifes kedatangan sarana pengangkut berdasarkan No BL, Tgl BL, dan Kode Kantor.</td></tr>
                     <tr><td><code>api_outward</code></td><td><code>GET</code></td><td><code>/manifes/outward</code></td><td>Pencarian pos manifes keberangkatan ekspor berdasarkan No BL, Tgl BL, dan Kode Kantor.</td></tr>
@@ -2398,6 +2403,88 @@ lole_http.DisconnectObject()
 DESTROY lole_http
 
 MessageBox("BC 1.1", ls_response)</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GETBL.PHP (INKUIRI BC 1.1, JADWAL KAPAL & KONTAINER - POWERBUILDER & REST SERVICE) -->
+    <div class="doc-section" id="ep-getbl">
+        <div class="api-card">
+            <div class="api-header">
+                <span class="method-badge badge-get" style="background:#7c3aed; color:#fff;">PB / REST</span>
+                <span class="endpoint-url">/getbl.php</span>
+            </div>
+            <p style="font-size:13px; color: var(--text-muted); margin-bottom:14px;">
+                Layanan inkuiri terpadu Manifes BC 1.1, Jadwal Kedatangan Sarana Pengangkut (MapController), Peti Kemas (Container), dan Bill of Lading.<br>
+                Mendukung output format <strong>TSV (Tab-Separated Values)</strong> yang siap diimpor langsung ke DataWindow PowerBuilder via <code>dw.ImportString(ls_response, 2, 999999, 1, 0, 0)</code>, maupun format <strong>JSON</strong> untuk REST Client.
+            </p>
+            <table class="param-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Tipe</th><th>Wajib?</th><th>Keterangan</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>a</code></td><td>string</td><td>Kondisional</td><td>Nomor Host B/L atau Master B/L (contoh: <code>SUB600398100</code>). Digunakan untuk inkuiri B/L &amp; Pos BC 1.1.</td></tr>
+                    <tr><td><code>action</code></td><td>string</td><td>Kondisional</td><td>Pilihan aksi: <code>search_vessel</code> (Jadwal kapal), <code>search_container</code> (Peti kemas), <code>manifest_detail</code> (Rincian header), atau <code>sync_to_manifest</code>.</td></tr>
+                    <tr><td><code>vessel</code></td><td>string</td><td>Kondisional</td><td>Nama Kapal / Sarana Pengangkut (contoh: <code>SINAR SUNDA</code>, <code>MTT SANDAKAN</code>). Wajib jika <code>action=search_vessel</code>.</td></tr>
+                    <tr><td><code>nomor_container</code></td><td>string</td><td>Kondisional</td><td>Nomor Peti Kemas (contoh: <code>NYKU3933307</code>). Wajib jika <code>action=search_container</code>.</td></tr>
+                    <tr><td><code>id_header</code></td><td>string</td><td>Kondisional</td><td>UUID ID Header Manifes dari Bea Cukai. Wajib jika <code>action=manifest_detail</code>.</td></tr>
+                    <tr><td><code>format</code></td><td>string</td><td>Opsional</td><td><code>tsv</code> untuk Tab-Delimited DataWindow ready, atau <code>json</code> (default).</td></tr>
+                    <tr><td><code>cmp_id</code></td><td>string</td><td>Opsional</td><td>ID Perusahaan konteks multi-tenant (contoh: <code>TVL</code>).</td></tr>
+                </tbody>
+            </table>
+
+            <h4 style="font-size:13px; margin: 16px 0 6px; color:var(--text-main);">Contoh Pemanggilan API:</h4>
+            <div class="snippet-wrapper">
+                <div class="snippet-tabs">
+                    <button class="snippet-tab-btn active" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
+                    <button class="snippet-tab-btn pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                </div>
+                <div class="snippet-pane pane-curl active">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre># 1. Inkuiri Jadwal Kapal (Format TSV untuk DataWindow)
+curl -X GET "http://[server-ip]/getbl.php?action=search_vessel&amp;vessel=SINAR+SUNDA&amp;format=tsv&amp;cmp_id=TVL"
+
+# 2. Inkuiri Bill of Lading &amp; Pos BC 1.1 (Format JSON)
+curl -X GET "http://[server-ip]/getbl.php?a=SUB600398100&amp;format=json&amp;cmp_id=TVL"
+
+# 3. Inkuiri Peti Kemas (Format TSV)
+curl -X GET "http://[server-ip]/getbl.php?action=search_container&amp;nomor_container=NYKU3933307&amp;format=tsv&amp;cmp_id=TVL"</pre>
+                    </div>
+                </div>
+                <div class="snippet-pane pane-pb" style="display:none;">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// PowerBuilder (PowerScript) - Tarik Jadwal Kapal Langsung ke DataWindow
+OLEObject lole_http
+String ls_url, ls_response
+Long ll_status, ll_rows
+
+ls_url = "http://ceisaapi01.123456.id/getbl.php?action=search_vessel&vessel=SINAR+SUNDA&format=tsv&cmp_id=" + gs_cmp_id
+
+lole_http = CREATE OLEObject
+IF lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0") &lt;&gt; 0 THEN
+    lole_http.ConnectToNewObject("MSXML2.XMLHTTP")
+END IF
+
+lole_http.Open("GET", ls_url, False)
+lole_http.Send()
+
+ll_status = Long(lole_http.Status)
+IF ll_status = 200 THEN
+    ls_response = String(lole_http.ResponseText)
+    // Import langsung string TSV ke DataWindow (parameter 2 = mulai baris ke-2 / skip header)
+    dw_vessel.Reset()
+    ll_rows = dw_vessel.ImportString(ls_response, 2, 999999, 1, 0, 0)
+    MessageBox("Sukses", "Berhasil menarik " + String(ll_rows) + " baris jadwal kapal.")
+ELSE
+    MessageBox("Error", "Gagal memanggil API: HTTP " + String(ll_status))
+END IF
+
+lole_http.DisconnectObject()
+DESTROY lole_http</pre>
                     </div>
                 </div>
             </div>

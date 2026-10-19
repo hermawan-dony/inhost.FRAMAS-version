@@ -13,7 +13,7 @@ require_once __DIR__ . '/datalogin.php';
 
 $nomorAju   = trim($_GET['nomor_aju'] ?? ($_GET['aju'] ?? ''));
 $idNvocc    = trim($_GET['id_nvocc_header'] ?? ($_GET['id_nvocc'] ?? ''));
-$targetCmp  = trim($_GET['cmp_id'] ?? ($cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''))));
+$targetCmp  = !empty($_GET['cmp_id']) ? trim($_GET['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : '')));
 $forceFresh = !empty($_GET['refresh']) || !empty($_GET['force']);
 $isDownload = !empty($_GET['download']) && $_GET['download'] == '1';
 
@@ -88,14 +88,14 @@ if (!$forceFresh && file_exists($cachedPdfFile) && filesize($cachedPdfFile) > 10
     }
 }
 
-// 3. Jika belum memiliki ID NVOCC dari CEISA
-if (empty($idNvocc)) {
-    $stt = $headerData['status'] ?? 'Draft';
+// 3. Jika dokumen masih Draft atau belum memiliki ID NVOCC dari CEISA
+$stt = trim($headerData['status'] ?? 'Draft');
+if (strtolower($stt) === 'draft' || empty($idNvocc)) {
     echo '<!DOCTYPE html>
     <html lang="id">
     <head>
         <meta charset="UTF-8">
-        <title>Dokumen Belum Tersedia - CEISA 4.0</title>
+        <title>Dokumen Masih Draft - CEISA 4.0</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
             .card { background: #fff; border-radius: 6px; padding: 28px 36px; max-width: 520px; box-shadow: 0 4px 14px rgba(0,0,0,0.08); text-align: center; }
@@ -109,10 +109,10 @@ if (empty($idNvocc)) {
     </head>
     <body>
         <div class="card">
-            <div class="icon">📄</div>
-            <h2>Dokumen PDF Resmi Belum Tersedia</h2>
-            <p>Nomor AJU: <code>' . htmlspecialchars($nomorAju) . '</code><br>Status Saat Ini: <strong>' . htmlspecialchars($stt) . '</strong><br><br>
-            Dokumen ini belum memiliki <strong>ID NVOCC</strong> resmi dari sistem Bea Cukai CEISA 4.0. Cetak dokumen PDF Jasper resmi Bea Cukai tersedia setelah dokumen dikirimkan atau ditarik dari Portal CEISA 4.0.</p>
+            <div class="icon">📝</div>
+            <h2>Dokumen Masih Berstatus Draft</h2>
+            <p>Nomor AJU: <code>' . htmlspecialchars($nomorAju) . '</code><br>Status Saat Ini: <strong style="color:#d48806;">' . htmlspecialchars($stt) . '</strong><br><br>
+            Dokumen manifes masih berstatus <strong>Draft</strong> sehingga cetak PDF Jasper resmi Bea Cukai belum tersedia. Silakan kirim data ke Portal CEISA 4.0 terlebih dahulu.</p>
             <button class="btn" onclick="window.close()">Tutup Jendela</button>
         </div>
     </body>

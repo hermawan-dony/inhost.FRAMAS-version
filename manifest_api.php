@@ -3,7 +3,9 @@
  * CEISA 4.0 - Manifest (NVOCC) API Handler
  * Melayani seluruh transaksi Manifes BC 1.1 Host-to-Host OpenAPI Bea Cukai
  */
-header('Content-Type: application/json; charset=utf-8');
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    header('Content-Type: application/json; charset=utf-8');
+}
 
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
@@ -11,7 +13,24 @@ require_once __DIR__ . '/init.php';
 require_once __DIR__ . '/CeisaManifestBuilder.php';
 
 $action = $_REQUEST['action'] ?? '';
-$activeCmp = (!empty($_REQUEST['cmp_id'])) ? trim($_REQUEST['cmp_id']) : ($cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
+$nomorAjuReq = trim($_REQUEST['nomor_aju'] ?? $_POST['nomor_aju'] ?? '');
+
+$activeCmp = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : ''));
+
+// Jika nomor_aju ada dan cmp_id belum jelas, prioritaskan pemilik nomor_aju di database
+if (!empty($nomorAjuReq)) {
+    $qOwner = $koneksi->query("SELECT cmp_id FROM bc_ceisa_manifes_header WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAjuReq) . "' LIMIT 1");
+    if ($qOwner && $rOwner = $qOwner->fetch_assoc()) {
+        if (!empty($rOwner['cmp_id'])) {
+            $activeCmp = $rOwner['cmp_id'];
+        }
+    }
+}
+
+// Default aman untuk modul manifes NVOCC adalah TVL (jangan sampai fallback ke RMB)
+if (empty($activeCmp) || $activeCmp === 'default' || ($activeCmp === '080167772504400' && empty($_REQUEST['cmp_id']) && (empty($_SESSION['company_cmp_id']) || $_SESSION['company_cmp_id'] !== '080167772504400'))) {
+    $activeCmp = 'TVL';
+}
 
 if (empty($activeCmp)) {
     echo json_encode(['status' => 'ERROR', 'message' => 'Sesi perusahaan tidak valid. Silakan pilih perusahaan aktif terlebih dahulu.']);
@@ -80,9 +99,13 @@ function callCeisaGateway($method, $endpoint, $payload = null, $queryParams = []
             }
         }
     }
-    // Terakhir jika masih kosong, fallback session token non-MFA
+    // Jangan izinkan fallback ke session token non-spesifik jika milik perusahaan lain
+    if (!empty($bearer) && !empty($rComp) && function_exists('isTokenValidForCompany') && !isTokenValidForCompany($bearer, $rComp)) {
+        $bearer = '';
+    }
     if (empty($bearer)) {
-        $bearer = $_SESSION["token"] ?? '';
+        // Ambil token MFA resmi aktif untuk perusahaan ini
+        $bearer = getActivePortalMfaToken($activeCmp);
     }
 
     // Ambil API Key resmi jika tersedia untuk perusahaan ini
@@ -257,18 +280,23 @@ if ($action === 'get_list') {
         'draft'    => 0,
         'ready'    => 0,
         'terkirim' => 0,
-        'rekon'    => 0
+        'rekon'    => 0,
+        'selesai'  => 0,
+        'reject'   => 0
     ];
     $qStats = $koneksi->query("SELECT status, COUNT(*) as cnt FROM bc_ceisa_manifes_header WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' {$sourceCond} GROUP BY status");
     if ($qStats) {
         while ($stRow = $qStats->fetch_assoc()) {
-            $sName = strtolower(trim($stRow['status']));
+            $rawStatus = trim($stRow['status']);
+            $sName = strtolower($rawStatus);
             $cnt = (int)$stRow['cnt'];
             $stats['total'] += $cnt;
             if ($sName === 'draft') $stats['draft'] += $cnt;
             elseif ($sName === 'ready') $stats['ready'] += $cnt;
             elseif ($sName === 'terkirim') $stats['terkirim'] += $cnt;
-            elseif (strpos($sName, 'rekon') !== false || strpos($sName, 'selesai') !== false || strpos($sName, 'penerimaan') !== false) $stats['rekon'] += $cnt;
+            elseif (strpos($sName, 'selesai') !== false || strpos($sName, 'penerimaan') !== false) $stats['selesai'] += $cnt;
+            elseif (strpos($sName, 'rekon') !== false || strpos($sName, 'rikon') !== false) $stats['rekon'] += $cnt;
+            elseif (strpos($sName, 'reject') !== false || strpos($sName, 'tolak') !== false) $stats['reject'] += $cnt;
         }
     }
 
@@ -688,7 +716,7 @@ if ($action === 'api_draft') {
 }
 
 // =========================================================================
-// 7. CEK KELENGKAPAN NVOCC (POST /manifes/nvocc/cek-lengkap)
+// 7. CEK KELENGKAPAN NVOCC (POST /manifes-validasi-service/v1/cekLengkap/nvocc)
 // =========================================================================
 if ($action === 'api_cek_lengkap') {
     $nomorAju = trim($_REQUEST['nomor_aju'] ?? $_POST['nomor_aju'] ?? '');
@@ -700,8 +728,118 @@ if ($action === 'api_cek_lengkap') {
     $escAju = $koneksi->real_escape_string($nomorAju);
     $escCmp = $koneksi->real_escape_string($activeCmp);
 
-    // 1. Validasi lokal: Cek keberadaan House B/L (HBL)
-    $chkHbl = $koneksi->query("SELECT COUNT(*) AS total_hbl FROM bc_ceisa_manifes_bl WHERE nomor_aju = '{$escAju}' AND (cmp_id = '{$escCmp}' OR cmp_id = '' OR cmp_id IS NULL)");
+    // 1. Cari id_nvocc_header dari request atau database bc_ceisa_manifes_header
+    $idNvocc = trim($_REQUEST['id_nvocc_header'] ?? $_POST['id_nvocc_header'] ?? '');
+    $qH = $koneksi->query("SELECT id_nvocc_header, status, cmp_id FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+    if ($qH && $rH = $qH->fetch_assoc()) {
+        if (empty($idNvocc)) {
+            $idNvocc = trim($rH['id_nvocc_header'] ?? '');
+        }
+        if (!empty($rH['cmp_id'])) {
+            $activeCmp = $rH['cmp_id'];
+        }
+    }
+
+    // Ambil portal MFA token terisolasi untuk perusahaan aktif (otomatis refresh jika perlu)
+    $portalToken = getActivePortalMfaToken($activeCmp);
+
+    // 2. Jika id_nvocc_header tersedia, langsung panggil endpoint validasi resmi CEISA 4.0
+    if (!empty($idNvocc)) {
+        if (empty($portalToken)) {
+            echo json_encode(['status' => 'ERROR', 'message' => "Gagal mendapatkan MFA token resmi CEISA 4.0 untuk perusahaan {$activeCmp}."]);
+            exit;
+        }
+
+        $url = "https://apis-gw.beacukai.go.id/manifes-validasi-service/v1/cekLengkap/nvocc?idNvoccHeader=" . urlencode($idNvocc);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => '',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER     => [
+                "Authorization: Bearer {$portalToken}",
+                "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                "Accept: application/json, text/plain, */*",
+                "Origin: https://portal.beacukai.go.id",
+                "Referer: https://portal.beacukai.go.id/",
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            ]
+        ]);
+        $resp = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
+        curl_close($ch);
+
+        if (!$curlErr && $httpCode === 200) {
+            $resData = json_decode($resp, true);
+            $infoArr = $resData['info'] ?? [];
+            $isLengkap = is_array($infoArr) && in_array('DATA LENGKAP', $infoArr);
+            if ($isLengkap || (isset($resData['status']) && ($resData['status'] === true || $resData['status'] === 'true'))) {
+                $infoStr = is_array($infoArr) ? implode(', ', $infoArr) : 'DATA LENGKAP';
+                $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Ready', respon_terakhir = 'Cek Lengkap: {$infoStr}', updated_at = NOW() WHERE nomor_aju = '{$escAju}'");
+                echo json_encode([
+                    'status'   => 'OK',
+                    'message'  => 'Manifes telah diverifikasi oleh CEISA 4.0 dan DATA LENGKAP (Status: READY)!',
+                    'response' => $resData
+                ]);
+                exit;
+            } else {
+                $msg = is_array($infoArr) ? implode('<br>• ', $infoArr) : ($resData['message'] ?? $resp);
+                echo json_encode([
+                    'status'   => 'ERROR',
+                    'message'  => 'Validasi Kelengkapan (CEISA 4.0):<br>• ' . $msg,
+                    'raw'      => $resData ?: $resp
+                ]);
+                exit;
+            }
+        } elseif ($httpCode === 401) {
+            // Token expired di server, regenerate dan coba lagi sekali
+            $portalToken = getActivePortalMfaToken($activeCmp);
+            if (!empty($portalToken)) {
+                $chR = curl_init($url);
+                curl_setopt_array($chR, [
+                    CURLOPT_POST           => true,
+                    CURLOPT_POSTFIELDS     => '',
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT        => 30,
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_SSL_VERIFYHOST => false,
+                    CURLOPT_HTTPHEADER     => [
+                        "Authorization: Bearer {$portalToken}",
+                        "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                        "Accept: application/json, text/plain, */*",
+                        "Origin: https://portal.beacukai.go.id",
+                        "Referer: https://portal.beacukai.go.id/",
+                        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+                    ]
+                ]);
+                $respR = curl_exec($chR);
+                $codeR = curl_getinfo($chR, CURLINFO_HTTP_CODE);
+                curl_close($chR);
+                if ($codeR === 200) {
+                    $resData = json_decode($respR, true);
+                    $infoArr = $resData['info'] ?? [];
+                    $isLengkap = is_array($infoArr) && in_array('DATA LENGKAP', $infoArr);
+                    if ($isLengkap || (isset($resData['status']) && ($resData['status'] === true || $resData['status'] === 'true'))) {
+                        $infoStr = is_array($infoArr) ? implode(', ', $infoArr) : 'DATA LENGKAP';
+                        $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Ready', respon_terakhir = 'Cek Lengkap: {$infoStr}', updated_at = NOW() WHERE nomor_aju = '{$escAju}'");
+                        echo json_encode([
+                            'status'   => 'OK',
+                            'message'  => 'Manifes telah diverifikasi oleh CEISA 4.0 dan DATA LENGKAP (Status: READY)!',
+                            'response' => $resData
+                        ]);
+                        exit;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fallback: Dokumen lokal (belum ada di portal)
+    $chkHbl = $koneksi->query("SELECT COUNT(*) AS total_hbl FROM bc_ceisa_manifes_bl WHERE nomor_aju = '{$escAju}'");
     $cntHbl = ($chkHbl && $rHbl = $chkHbl->fetch_assoc()) ? (int)$rHbl['total_hbl'] : 0;
     if ($cntHbl === 0) {
         echo json_encode([
@@ -711,7 +849,7 @@ if ($action === 'api_cek_lengkap') {
         exit;
     }
 
-    // 2. Validasi kelengkapan data via Builder
+    // 3. Fallback: Validasi kelengkapan data via Builder
     $builder = new CeisaManifestBuilder($koneksi, $activeCmp);
     $valErrors = $builder->validate($nomorAju);
     if (!empty($valErrors)) {
@@ -722,31 +860,14 @@ if ($action === 'api_cek_lengkap') {
         exit;
     }
 
-    // 3. Panggil API CEISA Cek Kelengkapan
+    // Fallback: Panggil Gateway API
     $call = callCeisaGateway('POST', '/manifes/nvocc/cek-lengkap', null, ['nomorAju' => $nomorAju]);
     $resData = json_decode($call['response'], true);
-
-    // 4. Jika CEISA merespon "Data Tidak ditemukan", coba unggah draft ke Bea Cukai
-    if ($call['http_code'] !== 200 && (!empty($resData['message']) && stripos($resData['message'], 'Tidak ditemukan') !== false)) {
-        $payload = $builder->buildPayload($nomorAju);
-        $callDraft = callCeisaGateway('POST', '/manifes/nvocc/draft', $payload);
-        $resDraft = json_decode($callDraft['response'], true);
-        if ($callDraft['http_code'] === 200 || $callDraft['http_code'] === 201) {
-            $idNvocc = $resDraft['data']['idNvoccHeader'] ?? ($resDraft['idNvoccHeader'] ?? null);
-            if ($idNvocc) {
-                $koneksi->query("UPDATE bc_ceisa_manifes_header SET id_nvocc_header = '{$idNvocc}' WHERE nomor_aju = '{$escAju}' AND (cmp_id = '{$escCmp}' OR cmp_id = '' OR cmp_id IS NULL)");
-            }
-            // Ulangi panggil cek-lengkap
-            $call = callCeisaGateway('POST', '/manifes/nvocc/cek-lengkap', null, ['nomorAju' => $nomorAju]);
-            $resData = json_decode($call['response'], true);
-        }
-    }
 
     $isSuccess = ($call['http_code'] === 200 || $call['http_code'] === 201)
         && (empty($resData['status']) || !in_array(strtolower((string)$resData['status']), ['failed', 'gagal', 'false']));
 
     if ($isSuccess) {
-        // Status berubah menjadi Ready jika lengkap
         $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Ready', respon_terakhir = 'Cek Lengkap: Ready' WHERE nomor_aju = '{$escAju}' AND (cmp_id = '{$escCmp}' OR cmp_id = '' OR cmp_id IS NULL)");
         echo json_encode([
             'status'   => 'OK',
@@ -777,17 +898,22 @@ if ($action === 'api_kirim') {
     $isSuccess = ($call['http_code'] === 200 || $call['http_code'] === 201)
         && (empty($resData['status']) || !in_array(strtolower((string)$resData['status']), ['failed', 'gagal', 'false']));
 
-    if ($isSuccess) {
+    $msg = $resData['message'] ?? ($resData['error'] ?? ('HTTP Error ' . $call['http_code']));
+    if (is_array($msg)) $msg = implode(', ', $msg);
+    $isAlreadySubmitted = (stripos((string)$msg, 'Data Sudah Ada') !== false || stripos((string)$msg, 'Sudah Terdaftar') !== false);
+
+    if ($isSuccess || $isAlreadySubmitted) {
         $now = date('Y-m-d H:i:s');
-        $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Terkirim', waktu_kirim = '{$now}', respon_terakhir = 'Terkirim ke Bea Cukai' WHERE nomor_aju = '{$nomorAju}' AND cmp_id = '{$activeCmp}'");
+        $note = $isAlreadySubmitted ? 'Terkirim: Data Sudah Ada di Bea Cukai' : 'Terkirim ke Bea Cukai';
+        $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Terkirim', waktu_kirim = IFNULL(waktu_kirim, '{$now}'), respon_terakhir = '{$note}', updated_at = NOW() WHERE nomor_aju = '{$nomorAju}' AND (cmp_id = '{$activeCmp}' OR cmp_id = '' OR cmp_id IS NULL)");
         echo json_encode([
             'status'   => 'OK',
-            'message'  => 'Data Manifes NVOCC berhasil dikirim ke Bea Cukai!',
+            'message'  => $isAlreadySubmitted
+                ? 'Dokumen Manifes NVOCC [' . $nomorAju . '] telah diverifikasi dan tercatat di sistem Bea Cukai (Status: TERKIRIM)!'
+                : 'Data Manifes NVOCC [' . $nomorAju . '] berhasil dikirim ke Bea Cukai (Status: TERKIRIM)!',
             'response' => $resData ?: $call['response']
         ]);
     } else {
-        $msg = $resData['message'] ?? ($resData['error'] ?? ('HTTP Error ' . $call['http_code']));
-        if (is_array($msg)) $msg = implode(', ', $msg);
         echo json_encode(['status' => 'ERROR', 'message' => 'Gagal Kirim: ' . $msg, 'raw' => $call]);
     }
     exit;
@@ -870,6 +996,92 @@ if ($action === 'api_status') {
             exit;
         }
 
+        // Fallback cerdas: Cek ke layanan Portal HistoryManifes & DataManifesResponse resmi
+        $portalToken = getActivePortalMfaToken($activeCmp);
+        if (!empty($portalToken)) {
+            $mfaHeaders = [
+                "Authorization: Bearer {$portalToken}",
+                "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                "Accept: application/json, text/plain, */*",
+                "Origin: https://portal.beacukai.go.id",
+                "Referer: https://portal.beacukai.go.id/manifest/nvocc"
+            ];
+            
+            // Cek DataManifesResponse
+            $chR = curl_init("https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifesResponse/manifesNomorAju/" . urlencode($nomorAju));
+            curl_setopt_array($chR, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER     => $mfaHeaders
+            ]);
+            $respR = curl_exec($chR);
+            $codeR = curl_getinfo($chR, CURLINFO_HTTP_CODE);
+            curl_close($chR);
+            $jsonR = ($codeR === 200) ? json_decode($respR, true) : null;
+
+            // Cek HistoryManifes
+            $chH = curl_init("https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/HistoryManifes?noAju=" . urlencode($nomorAju));
+            curl_setopt_array($chH, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER     => $mfaHeaders
+            ]);
+            $respH = curl_exec($chH);
+            $codeH = curl_getinfo($chH, CURLINFO_HTTP_CODE);
+            curl_close($chH);
+            $jsonH = ($codeH === 200) ? json_decode($respH, true) : null;
+
+            if (!empty($jsonR['data']) || !empty($jsonH['data'])) {
+                $respList = $jsonR['data'] ?? [];
+                $histList = $jsonH['data'] ?? [];
+                
+                $noBc11 = '';
+                $tglBc11 = null;
+                $newStatus = $currStatus;
+                $respNote = '';
+
+                foreach ($respList as $rp) {
+                    if (!empty($rp['nomorBc11'])) $noBc11 = $rp['nomorBc11'];
+                    if (!empty($rp['tanggalBc11'])) $tglBc11 = date('Y-m-d', strtotime($rp['tanggalBc11']));
+                    if (!empty($rp['idJenisRespon'])) {
+                        $jr = (string)$rp['idJenisRespon'];
+                        if ($jr === '50') { $newStatus = 'Terkirim'; $respNote = 'Penerimaan Data NVOCC (' . ($rp['nomorRespon'] ?? '') . ')'; }
+                        elseif ($jr === '51') { $newStatus = 'Rekon'; $respNote = 'Rekon NVOCC (' . ($rp['nomorRespon'] ?? '') . ')'; }
+                        elseif ($jr === '52') { $newStatus = 'Reject'; $respNote = 'Penolakan NVOCC: ' . ($rp['keterangan'] ?? ''); }
+                    }
+                }
+
+                if (!empty($noBc11) && $newStatus !== 'Rekon' && $newStatus !== 'Selesai') {
+                    $newStatus = 'Rekon';
+                }
+
+                $stmtUp = $koneksi->prepare("UPDATE bc_ceisa_manifes_header SET status = ?, nomor_bc11 = IFNULL(NULLIF(?, ''), nomor_bc11), tanggal_bc11 = IFNULL(?, tanggal_bc11), respon_terakhir = IFNULL(NULLIF(?, ''), respon_terakhir), updated_at = NOW() WHERE nomor_aju = ? AND (cmp_id = ? OR cmp_id = '' OR cmp_id IS NULL)");
+                if ($stmtUp) {
+                    $stmtUp->bind_param("ssssss", $newStatus, $noBc11, $tglBc11, $respNote, $escAju, $escCmp);
+                    $stmtUp->execute();
+                    $stmtUp->close();
+                }
+
+                echo json_encode([
+                    'status'    => 'OK',
+                    'message'   => 'Data status resmi berhasil disinkronisasi dari Portal CEISA 4.0!',
+                    'data'      => [
+                        'status'           => $newStatus,
+                        'nomor_bc11'       => $noBc11,
+                        'tanggal_bc11'     => $tglBc11,
+                        'respon_terakhir'  => $respNote,
+                        'portal_responses' => $respList,
+                        'portal_history'   => $histList
+                    ]
+                ]);
+                exit;
+            }
+        }
+
         // Jika dokumen masih Draft atau Ready (belum dikirim ke Bea Cukai)
         if (in_array(strtolower($currStatus), ['draft', 'ready'])) {
             echo json_encode([
@@ -927,51 +1139,641 @@ if ($action === 'api_bc11') {
 }
 
 // =========================================================================
-// 12. PENCARIAN POS INWARD (GET /manifes/inward)
+// 12. PENCARIAN POS INWARD / OUTWARD (v3 DataManifestHeader CEISA 4.0)
+// Endpoint: https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/getByNoHostBlTanggalAndKodeKantor
 // =========================================================================
 if ($action === 'api_inward') {
-    $nomorBl   = trim($_GET['nomor_bl'] ?? '');
-    $tanggalBl = trim($_GET['tanggal_bl'] ?? date('Y-m-d'));
-    $kantor    = trim($_GET['kode_kantor'] ?? '050100');
+    $nomorBl   = trim($_GET['nomor_bl'] ?? ($_GET['no_bl'] ?? ($_GET['nomor_host_bl'] ?? '')));
+    $tanggalBl = trim($_GET['tanggal_bl'] ?? '');
+    $kantor    = trim($_GET['kode_kantor'] ?? '');
 
     if (empty($nomorBl)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor B/L tidak boleh kosong.']);
         exit;
     }
 
-    $call = callCeisaGateway('GET', '/manifes/inward', null, [
-        'nomorBl'    => $nomorBl,
-        'tanggalBl'  => $tanggalBl,
-        'kodeKantor' => $kantor
+    $portalToken = getActivePortalMfaToken($activeCmp);
+    if (empty($portalToken)) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Token MFA CEISA 4.0 untuk perusahaan {$activeCmp} tidak tersedia."]);
+        exit;
+    }
+
+    $urlV3 = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/getByNoHostBlTanggalAndKodeKantor?noHostBl=" . urlencode($nomorBl);
+    if (!empty($kantor)) {
+        $urlV3 .= "&kodeKantor=" . urlencode($kantor);
+    }
+    if (!empty($tanggalBl)) {
+        $urlV3 .= "&tanggalBl=" . urlencode($tanggalBl);
+    }
+
+    $ch = curl_init($urlV3);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 25,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Authorization: Bearer {$portalToken}",
+            "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+            "Accept: application/json, text/plain, */*",
+            "Origin: https://portal.beacukai.go.id",
+            "Referer: https://portal.beacukai.go.id/"
+        ]
     ]);
+    $respV3 = curl_exec($ch);
+    $codeV3 = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $errV3  = curl_error($ch);
+    curl_close($ch);
 
-    $resData = json_decode($call['response'], true);
-    if ($call['http_code'] === 200) {
-        echo json_encode(['status' => 'OK', 'data' => $resData ?: $call['response']]);
-    } else {
-        // Fallback coba endpoint v3 DataManifestHeader jika openapi belum return
-        $bearer = $_SESSION["token"] ?? '';
-        $urlV3 = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/getByNoHostBlTanggalAndKodeKantor?noHostBl=" . urlencode($nomorBl);
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL            => $urlV3,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_HTTPHEADER     => ["Authorization: Bearer {$bearer}"],
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false
-        ]);
-        $respV3 = curl_exec($ch);
-        $codeV3 = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
+    $jsonV3 = json_decode($respV3, true);
+    if ($codeV3 === 200 && !empty($jsonV3['data'])) {
+        $items = is_array($jsonV3['data']) ? $jsonV3['data'] : [];
+        $firstItem = $items[0] ?? null;
+        $idHeader = $firstItem['idHeader'] ?? '';
+        $headerDetail = null;
 
-        if ($codeV3 === 200) {
-            echo json_encode(['status' => 'OK', 'data' => json_decode($respV3, true)]);
-        } else {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Data pos inward tidak ditemukan.', 'raw' => $call]);
+        if (!empty($idHeader)) {
+            $chD = curl_init("https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/DatamanifesHeader/" . urlencode($idHeader));
+            curl_setopt_array($chD, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER     => [
+                    "Authorization: Bearer {$portalToken}",
+                    "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                    "Accept: application/json, text/plain, */*",
+                    "Origin: https://portal.beacukai.go.id",
+                    "Referer: https://portal.beacukai.go.id/"
+                ]
+            ]);
+            $respD = curl_exec($chD);
+            curl_close($chD);
+            $jsonD = json_decode($respD, true);
+            if (!empty($jsonD['data'])) {
+                $headerDetail = $jsonD['data'];
+                if (!empty($firstItem) && is_array($firstItem)) {
+                    $firstItem['nomorVoyage_detail'] = $headerDetail['nomorVoyage'] ?? ($firstItem['nomorVoyage'] ?? '');
+                    $firstItem['tanggalTiba'] = $headerDetail['tanggalTiba'] ?? ($firstItem['tanggalTiba'] ?? '');
+                    $firstItem['tanggalBerangkat'] = $headerDetail['tanggalBerangkat'] ?? ($firstItem['tanggalBerangkat'] ?? '');
+                    $firstItem['modePengangkut'] = $headerDetail['modePengangkut'] ?? ($firstItem['modePengangkut'] ?? '');
+                    $items[0] = $firstItem;
+                }
+            }
         }
+
+        echo json_encode([
+            'status'        => 'OK',
+            'data'          => $items,
+            'header_detail' => $headerDetail,
+            'count'         => count($items)
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'status'  => 'ERROR',
+        'message' => 'Data Pos Manifes BC 1.1 tidak ditemukan untuk nomor BL tersebut.',
+        'raw'     => $jsonV3 ?: $respV3,
+        'code'    => $codeV3
+    ]);
+    exit;
+}
+
+// =========================================================================
+// 12A. PENCARIAN SARANA PENGANGKUT / KAPAL (v3 MapController CEISA 4.0)
+// Endpoint: https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/MapController/{vesselName}
+// =========================================================================
+if ($action === 'api_vessel_map') {
+    $vesselName = trim($_GET['vessel_name'] ?? ($_GET['nama_kapal'] ?? ($_GET['q'] ?? '')));
+    if (empty($vesselName)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nama Sarana Pengangkut / Kapal tidak boleh kosong.']);
+        exit;
+    }
+
+    $portalToken = getActivePortalMfaToken($activeCmp);
+    if (empty($portalToken)) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Token MFA CEISA 4.0 untuk perusahaan {$activeCmp} tidak tersedia."]);
+        exit;
+    }
+
+    $urlVessel = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/MapController/" . rawurlencode($vesselName);
+
+    $ch = curl_init($urlVessel);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Authorization: Bearer {$portalToken}",
+            "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+            "Accept: application/json, text/plain, */*",
+            "Origin: https://portal.beacukai.go.id",
+            "Referer: https://portal.beacukai.go.id/"
+        ]
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
+    curl_close($ch);
+
+    $json = json_decode($resp, true);
+    if ($code === 200 && !empty($json['data'])) {
+        echo json_encode([
+            'status'  => 'OK',
+            'vessel'  => $vesselName,
+            'count'   => count($json['data']),
+            'data'    => $json['data']
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'status'  => 'ERROR',
+        'message' => 'Data Manifes Kedatangan tidak ditemukan untuk Sarana Pengangkut "' . $vesselName . '".',
+        'raw'     => $json ?: $resp,
+        'code'    => $code
+    ]);
+    exit;
+}
+
+// =========================================================================
+// 12A-2. DETAIL MANIFES HEADER BY ID HEADER (DatamanifesHeader)
+// Endpoint: https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/DatamanifesHeader/{idHeader}
+// =========================================================================
+if ($action === 'get_manifest_detail') {
+    $idHeader = trim($_GET['id_header'] ?? ($_POST['id_header'] ?? ''));
+    if (empty($idHeader)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID Header Manifes tidak boleh kosong.']);
+        exit;
+    }
+
+    $portalToken = getActivePortalMfaToken($activeCmp);
+    if (empty($portalToken)) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Token MFA CEISA 4.0 untuk perusahaan {$activeCmp} tidak tersedia."]);
+        exit;
+    }
+
+    $urlDetail = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifestHeader/DatamanifesHeader/" . urlencode($idHeader);
+
+    $ch = curl_init($urlDetail);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 25,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Authorization: Bearer {$portalToken}",
+            "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+            "Accept: application/json, text/plain, */*",
+            "Origin: https://portal.beacukai.go.id",
+            "Referer: https://portal.beacukai.go.id/"
+        ]
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $json = json_decode($resp, true);
+    if ($code === 200 && !empty($json['data'])) {
+        echo json_encode([
+            'status' => 'OK',
+            'data'   => $json['data']
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'status'  => 'ERROR',
+        'message' => 'Detail Header Manifes tidak ditemukan.',
+        'raw'     => $json ?: $resp,
+        'code'    => $code
+    ]);
+    exit;
+}
+
+// =========================================================================
+// 12B. EXPORT EXCEL CEISA 4.0 FORMAT BARU (.XLSX)
+// =========================================================================
+if ($action === 'export_excel') {
+    require_once __DIR__ . '/CeisaManifestXlsxExporter.php';
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? $_GET['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        header('Content-Type: text/plain; charset=utf-8');
+        die("Error: Nomor Aju tidak boleh kosong.");
+    }
+
+    try {
+        $exporter = new CeisaManifestXlsxExporter($koneksi, $activeCmp);
+        $exporter->download($nomorAju);
+    } catch (Exception $e) {
+        header('Content-Type: text/plain; charset=utf-8');
+        die("Gagal Export Excel CEISA 4.0: " . $e->getMessage());
     }
     exit;
 }
+
+// =========================================================================
+// 12C. UPLOAD RESTORE EXCEL KE PORTAL CEISA 4.0
+// Endpoint: https://apis-gw.beacukai.go.id/manifes-restore-dokumen/v1/tempNVOCC/UploadRestoreExcel
+// =========================================================================
+if ($action === 'upload_portal_restore') {
+    require_once __DIR__ . '/CeisaManifestXlsxExporter.php';
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? $_POST['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor Aju tidak boleh kosong.']);
+        exit;
+    }
+
+    $escAju = $koneksi->real_escape_string($nomorAju);
+    $existingIdNvocc = '';
+    $qDocCmp = $koneksi->query("SELECT cmp_id, id_nvocc_header FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+    if ($qDocCmp && $rDocCmp = $qDocCmp->fetch_assoc()) {
+        if (!empty($rDocCmp['cmp_id'])) {
+            $activeCmp = $rDocCmp['cmp_id'];
+        }
+        $existingIdNvocc = trim($rDocCmp['id_nvocc_header'] ?? '');
+    }
+
+    // Ambil portal MFA token terisolasi untuk perusahaan aktif (otomatis generate/refresh jika perlu)
+    $portalToken = getActivePortalMfaToken($activeCmp);
+    if (empty($portalToken)) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Gagal menghasilkan token Portal MFA CEISA 4.0 untuk perusahaan {$activeCmp}. Pastikan kredensial login CEISA & Secret MFA tersimpan pada profil perusahaan."]);
+        exit;
+    }
+
+    // 1. Generate Excel Format Baru sementara di temp directory
+    $tmpDir = sys_get_temp_dir();
+    $tmpFile = rtrim($tmpDir, '/\\') . DIRECTORY_SEPARATOR . "Manifest_CEISA4_NVOCC_{$nomorAju}_" . uniqid() . ".xlsx";
+    try {
+        $exporter = new CeisaManifestXlsxExporter($koneksi, $activeCmp);
+        $exporter->export($nomorAju, $tmpFile);
+    } catch (Exception $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal generate Excel CEISA: ' . $e->getMessage()]);
+        exit;
+    }
+
+    // 2. Ambil data profil perusahaan aktif untuk multipart form-data
+    $qCompInfo = $koneksi->query("SELECT cmp_name, alamat, npwp FROM bc_ceisa_company WHERE cmp_id = '{$activeCmp}' LIMIT 1");
+    $rCompInfo = $qCompInfo ? $qCompInfo->fetch_assoc() : [];
+    $rawNpwp = preg_replace('/[^0-9]/', '', $rCompInfo['npwp'] ?? '0033093287048000');
+    $npwpShipper = !empty($rawNpwp) ? $rawNpwp : '0033093287048000';
+    $namaShipper = trim($rCompInfo['cmp_name'] ?? 'PT TVL GLOBAL LOGISTIK');
+    $alamatShipper = trim($rCompInfo['alamat'] ?? 'WISMA MITRA SUNTER LT 1, NO. 104 JL. YOS SUDARSO');
+
+    // 3. Upload multipart ke endpoint resmi Portal CEISA 4.0
+    $url = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/tempNVOCC/UploadRestoreExcel";
+    $cfile = new CURLFile($tmpFile, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', "Manifest_NVOCC_{$nomorAju}.xlsx");
+    $postData = [
+        'file'          => $cfile,
+        'npwpShipper'   => $npwpShipper,
+        'namaShipper'   => $namaShipper,
+        'alamatShipper' => $alamatShipper
+    ];
+
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $url,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $postData,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 60,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Authorization: Bearer {$portalToken}",
+            "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+            "Accept: application/json, text/plain, */*",
+            "Origin: https://portal.beacukai.go.id",
+            "Referer: https://portal.beacukai.go.id/",
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+        ]
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    @unlink($tmpFile);
+
+    if ($curlErr) {
+        echo json_encode(['status' => 'ERROR', 'message' => "CURL Error: $curlErr"]);
+        exit;
+    }
+
+    $resJson = json_decode($resp, true);
+
+    // Periksa status respons dari Bea Cukai (200, 201 Created, atau pesan sukses/duplikat)
+    $respMsg = $resJson['message'] ?? '';
+    $isSuccess = ($httpCode === 200 || $httpCode === 201) && (
+        (isset($resJson['status']) && ($resJson['status'] === true || $resJson['status'] === 'true' || strtolower((string)$resJson['status']) === 'success' || strtolower((string)$resJson['status']) === 'ok'))
+        || isset($resJson['idNvoccHeader'])
+        || stripos($respMsg, 'berhasil') !== false
+        || stripos($respMsg, 'sukses') !== false
+    );
+    $isDuplicate = (stripos($respMsg, 'sudah terdaftar') !== false || stripos($respMsg, 'duplikat') !== false);
+
+    if ($isSuccess || $isDuplicate) {
+        // Otomatis sinkronkan id_nvocc_header terbaru dari Portal CEISA 4.0
+        $npwp15 = substr(str_pad(ltrim($npwpShipper, '0'), 15, '0', STR_PAD_LEFT), 0, 15);
+        $syncUrl = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{$npwp15}";
+        $chSync = curl_init($syncUrl);
+        curl_setopt_array($chSync, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER     => [
+                "Authorization: Bearer {$portalToken}",
+                "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                "Accept: */*",
+                "Origin: https://portal.beacukai.go.id",
+                "Referer: https://portal.beacukai.go.id/",
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            ]
+        ]);
+        $respSync = curl_exec($chSync);
+        curl_close($chSync);
+
+        $targetIdNvocc = $existingIdNvocc;
+        if (!empty($respSync)) {
+            $syncData = json_decode($respSync, true);
+            $items = $syncData['data'] ?? ($syncData['item'] ?? ($syncData['dataProses'] ?? (is_array($syncData) ? $syncData : [])));
+            if (is_array($items)) {
+                foreach ($items as $it) {
+                    $itAju = trim($it['nomorAju'] ?? ($it['nomor_aju'] ?? ''));
+                    if ($itAju === $nomorAju && !empty($it['idNvoccHeader'])) {
+                        $targetIdNvocc = trim($it['idNvoccHeader']);
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Simpan id_nvocc_header yang didapat
+        if (!empty($targetIdNvocc)) {
+            $koneksi->query("UPDATE bc_ceisa_manifes_header SET id_nvocc_header = '{$targetIdNvocc}' WHERE nomor_aju = '{$escAju}'");
+        }
+
+        // Lakukan Cek Lengkap (Validasi) secara otomatis
+        $isLengkap = false;
+        $cekData = null;
+        if (!empty($targetIdNvocc)) {
+            $chCek = curl_init("https://apis-gw.beacukai.go.id/manifes-validasi-service/v1/cekLengkap/nvocc?idNvoccHeader=" . urlencode($targetIdNvocc));
+            curl_setopt_array($chCek, [
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => '',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 30,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER     => [
+                    "Authorization: Bearer {$portalToken}",
+                    "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+                    "Accept: application/json, text/plain, */*",
+                    "Origin: https://portal.beacukai.go.id",
+                    "Referer: https://portal.beacukai.go.id/",
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+                ]
+            ]);
+            $respCek = curl_exec($chCek);
+            $httpCek = curl_getinfo($chCek, CURLINFO_HTTP_CODE);
+            curl_close($chCek);
+
+            if ($httpCek === 200) {
+                $cekData = json_decode($respCek, true);
+                $infoArr = $cekData['info'] ?? [];
+                $isLengkap = is_array($infoArr) && in_array('DATA LENGKAP', $infoArr);
+            }
+        }
+
+        if ($isLengkap) {
+            $koneksi->query("UPDATE bc_ceisa_manifes_header SET status = 'Ready', respon_terakhir = 'Cek Lengkap: DATA LENGKAP', updated_at = NOW() WHERE nomor_aju = '{$escAju}'");
+            echo json_encode([
+                'status'          => 'OK',
+                'is_ready'        => true,
+                'id_nvocc_header' => $targetIdNvocc,
+                'message'         => "Dokumen '{$nomorAju}' berhasil dikirim otomatis ke Portal CEISA 4.0 dan terverifikasi DATA LENGKAP (Status: READY)! Silakan klik '🚀 Kirim' untuk submit resmi ke Bea Cukai.",
+                'data'            => $resJson,
+                'validation'      => $cekData
+            ]);
+            exit;
+        } else {
+            $koneksi->query("UPDATE bc_ceisa_manifes_header SET respon_terakhir = 'Restored di Portal CEISA', updated_at = NOW() WHERE nomor_aju = '{$escAju}'");
+            echo json_encode([
+                'status'          => 'OK',
+                'is_ready'        => false,
+                'id_nvocc_header' => $targetIdNvocc,
+                'message'         => "Dokumen '{$nomorAju}' berhasil di-restore ke Portal CEISA 4.0! Silakan klik '🔍 Periksa' untuk memvalidasi kelengkapan dokumen.",
+                'data'            => $resJson,
+                'validation'      => $cekData
+            ]);
+            exit;
+        }
+    }
+
+
+    $errMsg = trim($resJson['message'] ?? '');
+    if (empty($errMsg)) {
+        $errMsg = trim($resJson['error'] ?? '');
+    }
+    if (empty($errMsg) && !empty($resJson['Exception'])) {
+        $errMsg = trim($resJson['Exception']);
+    }
+    if (empty($errMsg) && $httpCode !== 200) {
+        $errMsg = "Gateway Bea Cukai mengembalikan HTTP {$httpCode} (" . ($curlErr ?: 'Bad Request / Respon Gateway Kosong') . ")";
+    }
+    if (empty($errMsg)) {
+        $errMsg = "Terjadi kendala respon dari Gateway Bea Cukai: " . substr(strip_tags((string)$resp), 0, 250);
+    }
+
+    echo json_encode([
+        'status'    => 'ERROR',
+        'http_code' => $httpCode,
+        'message'   => $errMsg,
+        'raw'       => $resJson ?: $resp
+    ]);
+    exit;
+}
+
+// =========================================================================
+// 12D. BACKUP EXCEL LANGSUNG DARI PORTAL CEISA 4.0
+// Endpoint: https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/tempNVOCC/ExcelNvocc?nomorAju={nomorAju}
+// =========================================================================
+if ($action === 'backup_portal_excel') {
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? $_GET['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        header('Content-Type: text/plain; charset=utf-8');
+        die("Error: Nomor Aju tidak boleh kosong.");
+    }
+
+    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, username_ceisa, token_ceisa, api_key_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
+    $rComp = ($qComp && $qComp->num_rows > 0) ? $qComp->fetch_assoc() : null;
+
+    $portalToken = trim($_POST['portal_token'] ?? $_GET['portal_token'] ?? '');
+    if (empty($portalToken) || ($rComp && !isTokenValidForCompany($portalToken, $rComp))) {
+        $portalToken = getActivePortalMfaToken($activeCmp);
+    }
+
+    $url = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/tempNVOCC/ExcelNvocc?nomorAju=" . urlencode($nomorAju);
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 45,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER     => [
+            "Authorization: Bearer {$portalToken}",
+            "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+            "Accept: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/json, */*",
+            "Origin: https://portal.beacukai.go.id",
+            "Referer: https://portal.beacukai.go.id/manifest/nvocc",
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+        ]
+    ]);
+    $res = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($httpCode === 200 && strlen($res) > 500) {
+        header('Content-Description: File Transfer');
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="Backup_CEISA4_NVOCC_' . $nomorAju . '.xlsx"');
+        header('Expires: 0');
+        header('Cache-Control: must-revalidate');
+        header('Pragma: public');
+        header('Content-Length: ' . strlen($res));
+        echo $res;
+    } else {
+        header('Content-Type: text/plain; charset=utf-8');
+        die("Gagal unduh Backup Excel CEISA 4.0: " . $res);
+    }
+    exit;
+}
+
+// =========================================================================
+// 12E. RIWAYAT DOKUMEN PORTAL CEISA 4.0 (HistoryManifes & DataManifesResponse)
+// =========================================================================
+if ($action === 'get_portal_history') {
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? $_GET['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor Aju tidak boleh kosong.']);
+        exit;
+    }
+
+    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, username_ceisa, token_ceisa, api_key_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
+    $rComp = ($qComp && $qComp->num_rows > 0) ? $qComp->fetch_assoc() : null;
+
+    $portalToken = trim($_POST['portal_token'] ?? $_GET['portal_token'] ?? '');
+    if (empty($portalToken) || ($rComp && !isTokenValidForCompany($portalToken, $rComp))) {
+        $portalToken = getActivePortalMfaToken($activeCmp);
+    }
+
+    $headers = [
+        "Authorization: Bearer {$portalToken}",
+        "Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c",
+        "Accept: application/json, text/plain, */*",
+        "Origin: https://portal.beacukai.go.id",
+        "Referer: https://portal.beacukai.go.id/manifest/nvocc",
+        "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+    ];
+
+    // 1. Fetch HistoryManifes
+    $urlHist = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/HistoryManifes?noAju=" . urlencode($nomorAju);
+    $ch1 = curl_init($urlHist);
+    curl_setopt_array($ch1, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 25,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER => $headers
+    ]);
+    $respHist = curl_exec($ch1);
+    $codeHist = curl_getinfo($ch1, CURLINFO_HTTP_CODE);
+    curl_close($ch1);
+
+    // 2. Fetch DataManifesResponse
+    $urlResp = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataManifesResponse/manifesNomorAju/" . urlencode($nomorAju);
+    $ch2 = curl_init($urlResp);
+    curl_setopt_array($ch2, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 25,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false,
+        CURLOPT_HTTPHEADER => $headers
+    ]);
+    $respResp = curl_exec($ch2);
+    $codeResp = curl_getinfo($ch2, CURLINFO_HTTP_CODE);
+    curl_close($ch2);
+
+    $jsonHist = json_decode($respHist, true);
+    $jsonResp = json_decode($respResp, true);
+
+    $statusMap = [
+        '50' => ['label' => 'Penerimaan Data NVOCC', 'icon' => 'fa-check-circle', 'color' => '#1890ff'],
+        '51' => ['label' => 'Rekon Data NVOCC', 'icon' => 'fa-thumbs-up', 'color' => '#52c41a'],
+        '52' => ['label' => 'Penolakan / Reject Data NVOCC', 'icon' => 'fa-times-circle', 'color' => '#ff4d4f'],
+        '53' => ['label' => 'Perbaikan Data NVOCC', 'icon' => 'fa-edit', 'color' => '#faad14'],
+        '54' => ['label' => 'Persetujuan Perbaikan Data NVOCC', 'icon' => 'fa-wrench', 'color' => '#1890ff'],
+        '30' => ['label' => 'Respon Pemberian Nomor & Tgl. Inward Manifes', 'icon' => 'fa-check-circle', 'color' => '#52c41a'],
+        '31' => ['label' => 'Respon Pemberian Nomor & Tgl. Outward Manifes', 'icon' => 'fa-check-circle', 'color' => '#52c41a']
+    ];
+
+    $timeline = [];
+    if (!empty($jsonHist['data']) && is_array($jsonHist['data'])) {
+        foreach ($jsonHist['data'] as $item) {
+            $st = (string)($item['status'] ?? '');
+            $info = $statusMap[$st] ?? ['label' => 'Status ' . $st, 'icon' => 'fa-circle', 'color' => '#1890ff'];
+            $timeline[] = [
+                'type' => 'status',
+                'status_code' => $st,
+                'title' => $info['label'],
+                'icon' => $info['icon'],
+                'color' => $info['color'],
+                'time' => $item['waktuRekam'] ?? '-',
+                'id_status' => $item['idStatus'] ?? '',
+                'id_respon' => $item['idRespon'] ?? '',
+                'raw' => $item
+            ];
+        }
+    }
+
+    $responses = [];
+    if (!empty($jsonResp['data']) && is_array($jsonResp['data'])) {
+        foreach ($jsonResp['data'] as $rItem) {
+            $rSt = (string)($rItem['idJenisRespon'] ?? '');
+            $info = $statusMap[$rSt] ?? ['label' => 'Respon ' . $rSt, 'icon' => 'fa-file-alt', 'color' => '#1890ff'];
+            $responses[] = [
+                'id_respon' => $rItem['idRespon'] ?? '',
+                'jenis_respon' => $rSt,
+                'title' => $info['label'],
+                'nomor_respon' => $rItem['nomorRespon'] ?? '-',
+                'tanggal_respon' => $rItem['tanggalRespon'] ?? ($rItem['wkRekam'] ?? '-'),
+                'time' => $rItem['wkRekam'] ?? '',
+                'sarana_pengangkut' => $rItem['namaSaranaPengangkut'] ?? '',
+                'voyage' => $rItem['nomorVoyage'] ?? '',
+                'raw' => $rItem
+            ];
+        }
+    }
+
+    // Sort timeline by time ASC
+    usort($timeline, function($a, $b) {
+        return strtotime($a['time']) - strtotime($b['time']);
+    });
+
+    echo json_encode([
+        'status' => 'OK',
+        'nomor_aju' => $nomorAju,
+        'timeline' => $timeline,
+        'responses' => $responses,
+        'raw_history' => $jsonHist,
+        'raw_response' => $jsonResp
+    ]);
+    exit;
+}
+
 
 // =========================================================================
 // 13. HAPUS DRAFT MANIFES (DELETE /manifes/nvocc/draft/{nomorAju})
@@ -1256,7 +2058,57 @@ if ($action === 'copy_aju') {
 }
 
 /**
+ * Memeriksa apakah token JWT sudah kedaluwarsa berdasarkan klaim 'exp'
+ */
+function isJwtExpired($jwt) {
+    if (empty($jwt) || !is_string($jwt)) return true;
+    $parts = explode('.', $jwt);
+    if (count($parts) < 2) return false;
+    $payload = json_decode(base64_decode(str_pad(strtr($parts[1], '-_', '+/'), strlen($parts[1]) % 4, '=', STR_PAD_RIGHT)), true);
+    if (!empty($payload['exp']) && is_numeric($payload['exp'])) {
+        return (time() >= ($payload['exp'] - 30));
+    }
+    return false;
+}
+
+/**
+ * Validasi ketat kepemilikan token CEISA 4.0 (Anti-bocor antar-perusahaan)
+ * Menolak token jika identitas (NPWP) atau preferred_username milik perusahaan lain!
+ */
+function isTokenValidForCompany($jwt, $targetCmpRow) {
+    if (empty($jwt) || !is_string($jwt) || empty($targetCmpRow)) return false;
+    if (isJwtExpired($jwt)) return false;
+
+    $parts = explode('.', $jwt);
+    if (count($parts) < 2) return false;
+    $payload = json_decode(base64_decode(str_pad(strtr($parts[1], '-_', '+/'), strlen($parts[1]) % 4, '=', STR_PAD_RIGHT)), true);
+    if (!is_array($payload)) return false;
+
+    // 1. Cek preferred_username (harus persis sama dengan username_ceisa perusahaan)
+    $expectedUser = strtolower(trim($targetCmpRow['username_ceisa'] ?? ''));
+    $tokenUser = strtolower(trim($payload['preferred_username'] ?? ''));
+    if (!empty($expectedUser) && !empty($tokenUser) && $expectedUser !== $tokenUser) {
+        // TOKEN MILIK PERUSAHAAN LAIN! TOLAK SEGERA!
+        return false;
+    }
+
+    // 2. Cek identitas (NPWP)
+    $rawCmpNpwp = preg_replace('/\D/', '', $targetCmpRow['npwp'] ?? '');
+    $tokenIdentitas = preg_replace('/\D/', '', $payload['identitas'] ?? '');
+    if (!empty($rawCmpNpwp) && !empty($tokenIdentitas)) {
+        $cmpNpwp15 = (strlen($rawCmpNpwp) === 16 && substr($rawCmpNpwp, 0, 1) === '0') ? substr($rawCmpNpwp, 1) : substr($rawCmpNpwp, 0, 15);
+        if ($tokenIdentitas !== $cmpNpwp15 && $tokenIdentitas !== $rawCmpNpwp) {
+            // NPWP TIDAK COCOK DENGAN TOKEN!
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Helper untuk mengambil MFA Bearer Token Portal CEISA 4.0 aktif
+ * TERISOLASI 100% PER PERUSAHAAN (DILARANG MENGGUNAKAN TOKEN PERUSAHAAN LAIN)
  */
 function getActivePortalMfaToken($activeCmp) {
     global $koneksi;
@@ -1266,7 +2118,8 @@ function getActivePortalMfaToken($activeCmp) {
     $username = '';
     $password = '';
     $secretmfa = '';
-    $qComp = $koneksi->query("SELECT cmp_id, username_ceisa, password_ceisa, secret_mfa, token_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' OR username_ceisa = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
+    $rComp = null;
+    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, username_ceisa, password_ceisa, secret_mfa, token_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' OR username_ceisa = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
     if ($qComp && $rComp = $qComp->fetch_assoc()) {
         $officialCmpId = $rComp['cmp_id'];
         $username = $rComp['username_ceisa'] ?? '';
@@ -1274,45 +2127,97 @@ function getActivePortalMfaToken($activeCmp) {
         $secretmfa = $rComp['secret_mfa'] ?? '';
     }
 
-    $portalToken = $_SESSION["mfatoken_" . $officialCmpId] ?? ($_SESSION["mfatoken_" . $activeCmp] ?? ($_SESSION["mfatoken"] ?? ($_SESSION["portal_token_" . $officialCmpId] ?? '')));
+    if (!$rComp) {
+        return '';
+    }
+
+    // 1. Prioritaskan session spesifik perusahaan jika valid dan milik perusahaan ini
+    $candidateSession = $_SESSION["mfatoken_" . $officialCmpId] ?? ($_SESSION["portal_token_" . $officialCmpId] ?? ($_SESSION["mfatoken_" . $activeCmp] ?? ($_SESSION["portal_token_" . $activeCmp] ?? '')));
+    if (!empty($candidateSession) && isTokenValidForCompany($candidateSession, $rComp)) {
+        return $candidateSession;
+    }
     
-    if (empty($portalToken)) {
-        // Cek file cache MFA token (ceisa_token_{cmp}.json dari initmfa.php) dengan masa aktif 8 menit
-        $possibleFiles = [
-            sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $officialCmpId) . '.json',
-            sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $activeCmp) . '.json',
-            sys_get_temp_dir() . '/ceisa_token_' . strtoupper(preg_replace('/[^a-zA-Z0-9_-]/', '_', $activeCmp)) . '.json'
-        ];
-        foreach ($possibleFiles as $mfaCacheFile) {
-            if (file_exists($mfaCacheFile)) {
-                $cTok = @json_decode(@file_get_contents($mfaCacheFile), true);
-                if (!empty($cTok['token']) && !empty($cTok['created_at']) && (time() - (int)$cTok['created_at']) < 480) {
-                    $portalToken = $cTok['token'];
-                    break;
-                }
+    // 2. Cek file cache MFA token spesifik perusahaan (/tmp/ceisa_token_{cmp}.json)
+    $possibleFiles = [
+        sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $officialCmpId) . '.json',
+        sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $activeCmp) . '.json'
+    ];
+    foreach ($possibleFiles as $mfaCacheFile) {
+        if (file_exists($mfaCacheFile)) {
+            $cTok = @json_decode(@file_get_contents($mfaCacheFile), true);
+            if (!empty($cTok['token']) && isTokenValidForCompany($cTok['token'], $rComp)) {
+                $_SESSION["mfatoken_" . $officialCmpId] = $cTok['token'];
+                $_SESSION["portal_token_" . $officialCmpId] = $cTok['token'];
+                return $cTok['token'];
             }
         }
     }
 
-    // Jika masih kosong / expired, jalankan initmfa.php secara otomatis menggunakan kredensial perusahaan aktif
-    if (empty($portalToken) && !empty($username) && !empty($password) && !empty($secretmfa)) {
-        $GLOBALS['cmp_id'] = $officialCmpId;
-        $_REQUEST['cmp_id'] = $officialCmpId;
-        $GLOBALS['username'] = $username;
-        $GLOBALS['password'] = $password;
-        $GLOBALS['secretmfa'] = $secretmfa;
-        $cmp_id = $officialCmpId;
-        if (file_exists(__DIR__ . '/initmfa.php')) {
-            require __DIR__ . '/initmfa.php';
-            $portalToken = $_SESSION["mfatoken_" . $officialCmpId] ?? ($_SESSION["mfatoken"] ?? '');
+    // 3. Cek token yang tersimpan di database perusahaan jika terbukti sah milik perusahaan ini
+    if (!empty($rComp['token_ceisa']) && isTokenValidForCompany($rComp['token_ceisa'], $rComp)) {
+        $_SESSION["mfatoken_" . $officialCmpId] = trim($rComp['token_ceisa']);
+        $_SESSION["portal_token_" . $officialCmpId] = trim($rComp['token_ceisa']);
+        return trim($rComp['token_ceisa']);
+    }
+
+    // 4. Jika token belum ada atau expired/milik perusahaan lain, generate langsung token baru via OTP login
+    if (!empty($username) && !empty($password) && !empty($secretmfa)) {
+        unset($_SESSION["mfatoken_" . $officialCmpId]);
+        unset($_SESSION["mfatoken_created_at_" . $officialCmpId]);
+        unset($_SESSION["portal_token_" . $officialCmpId]);
+
+        $otp = '';
+        if (file_exists(__DIR__ . '/GoogleAuthenticator.php')) {
+            require_once __DIR__ . '/GoogleAuthenticator.php';
+            $ga = new PHPGangsta_GoogleAuthenticator();
+            $otp = $ga->getCode($secretmfa);
+        }
+
+        $chLogin = curl_init("https://apis-gw.beacukai.go.id/v2/authws/mfa/otp-login");
+        curl_setopt_array($chLogin, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => json_encode([
+                "username" => $username,
+                "password" => $password,
+                "otp"      => (string)$otp
+            ]),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 20,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER     => [
+                "Content-Type: application/json",
+                "Accept: application/json, text/plain, */*",
+                "Origin: https://portal.beacukai.go.id",
+                "Referer: https://portal.beacukai.go.id/",
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+            ]
+        ]);
+        $loginResp = curl_exec($chLogin);
+        curl_close($chLogin);
+
+        $loginArr = json_decode($loginResp, true);
+        $freshToken = $loginArr['item']['access_token'] ?? '';
+        if (!empty($freshToken) && isTokenValidForCompany($freshToken, $rComp)) {
+            $now = time();
+            $_SESSION["mfatoken_" . $officialCmpId] = $freshToken;
+            $_SESSION["portal_token_" . $officialCmpId] = $freshToken;
+            $_SESSION["mfatoken_created_at_" . $officialCmpId] = $now;
+
+            $cachePath = sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $officialCmpId) . '.json';
+            @file_put_contents($cachePath, json_encode([
+                'token'      => $freshToken,
+                'created_at' => $now,
+                'cmp_key'    => $officialCmpId
+            ]));
+            @chmod($cachePath, 0666);
+
+            $koneksi->query("UPDATE bc_ceisa_company SET token_ceisa = '" . $koneksi->real_escape_string($freshToken) . "' WHERE cmp_id = '" . $koneksi->real_escape_string($officialCmpId) . "'");
+            return $freshToken;
         }
     }
 
-    if (empty($portalToken) && !empty($rComp['token_ceisa'])) {
-        $portalToken = trim($rComp['token_ceisa']);
-    }
-
-    return $portalToken;
+    return '';
 }
 
 // =========================================================================
@@ -1320,7 +2225,7 @@ function getActivePortalMfaToken($activeCmp) {
 // =========================================================================
 if ($action === 'sync_ceisa_portal') {
     // 1. Ambil NPWP perusahaan aktif
-    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, token_ceisa, api_key_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
+    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, username_ceisa, token_ceisa, api_key_ceisa FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "' LIMIT 1");
     if (!$qComp || $qComp->num_rows === 0) {
         echo json_encode(['status' => 'ERROR', 'message' => "Data profil perusahaan '$activeCmp' tidak ditemukan."]);
         exit;
@@ -1341,9 +2246,9 @@ if ($action === 'sync_ceisa_portal') {
         exit;
     }
 
-    // 2. Token portal MFA (Sama persis dengan Dashboard Ceisa 4.0)
+    // 2. Token portal MFA (Pastikan 100% sah milik perusahaan ini)
     $portalToken = trim($_POST['portal_token'] ?? ($_GET['portal_token'] ?? ''));
-    if (empty($portalToken)) {
+    if (empty($portalToken) || !isTokenValidForCompany($portalToken, $rComp)) {
         $portalToken = getActivePortalMfaToken($activeCmp);
     }
 
@@ -1352,17 +2257,18 @@ if ($action === 'sync_ceisa_portal') {
         $apiKey = '6222a75e-1dbb-493e-9461-27f721097e9c'; // Official CEISA 4.0 Portal API Key
     }
 
-    if (empty($portalToken)) {
+    if (empty($portalToken) || !isTokenValidForCompany($portalToken, $rComp)) {
         echo json_encode([
             'status' => 'NEED_TOKEN',
-            'message' => 'Portal Token (Bearer JWT dari Portal CEISA 4.0) belum diisi.',
+            'message' => "Portal Token untuk perusahaan {$rComp['cmp_name']} belum tersedia atau tidak sesuai identitas perusahaan.",
             'npwp' => $npwp15
         ]);
         exit;
     }
 
-    // Simpan ke sesi jika berhasil diberikan
+    // Simpan ke sesi jika berhasil didapatkan dan terbukti sah
     $_SESSION["portal_token_" . $activeCmp] = $portalToken;
+    $_SESSION["mfatoken_" . $activeCmp] = $portalToken;
 
     $url = "https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{$npwp15}";
 
@@ -1503,10 +2409,12 @@ if ($action === 'sync_ceisa_portal') {
         $escCmpName = $koneksi->real_escape_string($rComp['cmp_name']);
 
         // Cek apakah data sudah ada
-        $chk = $koneksi->query("SELECT nomor_aju, asal_data FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' AND cmp_id = '{$escCmp}' LIMIT 1");
+        $chk = $koneksi->query("SELECT nomor_aju, asal_data, status FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' AND cmp_id = '{$escCmp}' LIMIT 1");
         if ($chk && $chk->num_rows > 0) {
             $existing = $chk->fetch_assoc();
             $targetAsal = ($existing['asal_data'] === 'H2H') ? 'H2H' : 'PORTAL';
+            $finalStt = (strtolower($existing['status'] ?? '') === 'terkirim' && in_array(strtolower($escStt), ['draft', 'ready'])) ? 'Terkirim' : $escStt;
+            $finalResp = ($finalStt === 'Terkirim' && strtolower($existing['status'] ?? '') === 'terkirim') ? "IFNULL(respon_terakhir, 'Sync Portal: {$escStt}')" : "'Sync Portal: {$escStt}'";
             $sqlUp = "UPDATE bc_ceisa_manifes_header SET
                         kode_kantor = '{$escKtr}',
                         jenis_manifes = '{$jenisManifes}',
@@ -1514,12 +2422,12 @@ if ($action === 'sync_ceisa_portal') {
                         nama_sarana_pengangkut = '{$escSar}',
                         imo_number = '{$escImo}',
                         id_nvocc_header = '{$escNvo}',
-                        status = '{$escStt}',
+                        status = '{$finalStt}',
                         nomor_bc11 = '{$escDft}',
                         tanggal_bc11 = {$escTglDft},
                         tanggal_berangkat = {$escTglDoc},
                         asal_data = '{$targetAsal}',
-                        respon_terakhir = 'Sync Portal: {$escStt}'
+                        respon_terakhir = {$finalResp}
                       WHERE nomor_aju = '{$escAju}' AND cmp_id = '{$escCmp}'";
             $koneksi->query($sqlUp);
             $updated++;
@@ -1803,6 +2711,29 @@ if ($action === 'get_reff') {
     }
     echo json_encode(['status' => 'OK', 'reff' => $reff, 'data' => $items]);
     exit;
+}
+// =========================================================================
+// 21. AMBIL LOG RESPON GATEWAY (bc_ceisa_manifes_respon_logs)
+// =========================================================================
+if ($action === 'get_logs') {
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? '');
+    $where = "";
+    if (!empty($nomorAju)) {
+        $where = "WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAju) . "'";
+    }
+    $res = $koneksi->query("SELECT * FROM bc_ceisa_manifes_respon_logs {$where} ORDER BY id DESC LIMIT 20");
+    $logs = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $logs[] = $r;
+        }
+    }
+    echo json_encode(['status' => 'OK', 'count' => count($logs), 'data' => $logs]);
+    exit;
+}
+
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') !== basename(__FILE__)) {
+    return;
 }
 
 echo json_encode(['status' => 'ERROR', 'message' => "Action '$action' tidak dikenali."]);

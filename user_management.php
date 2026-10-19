@@ -15,7 +15,7 @@ if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'bc') {
         <p>Akun dengan peran <b>Pejabat Bea Cukai (BC)</b> hanya berwenang mengakses modul <b>Laporan IT Inventory</b>.</p>
     </div>');
 }
-$activeCmp = $cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''));
+$activeCmp = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : '')));
 $activeCmpName = $namaperusahaan ?: ($_SESSION['company_name'] ?? $activeCmp);
 $activeNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
 $themeParam = $_GET['theme'] ?? 'light';

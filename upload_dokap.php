@@ -14,7 +14,7 @@ require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 require_once __DIR__ . '/init.php';
 
-$activeCmp = $cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''));
+$activeCmp = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : '')));
 $apiKey    = $active_company['api_key_ceisa'] ?? 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83';
 $bearer    = $_SESSION["token"] ?? ($_SESSION["token_" . $activeCmp] ?? '');
 $sessionCmpName = $active_company['cmp_name'] ?? ($_SESSION['company_cmp_name'] ?? $activeCmp);

@@ -86,7 +86,7 @@ $bearer = $_SESSION["token_" . $targetCmp] ?? ($_SESSION["token"] ?? '');
 if (empty($bearer)) {
     // Coba fallback ke MFA token jika ada
     require_once __DIR__ . '/initmfa.php';
-    $bearer = $_SESSION["mfatoken_" . $targetCmp] ?? ($_SESSION["mfatoken"] ?? '');
+    $bearer = $_SESSION["mfatoken_" . $targetCmp] ?? '';
 }
 
 $hostprd = "https://apis-gw.beacukai.go.id/openapi/download-respon?path=" . urlencode($pdf);

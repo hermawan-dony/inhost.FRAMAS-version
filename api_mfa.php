@@ -16,11 +16,13 @@ require_once __DIR__ . '/GoogleAuthenticator.php';
 
 $action = $_REQUEST['action'] ?? 'get_otp';
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_REQUEST['is_admin']) && $_REQUEST['is_admin'] === '1');
-$cmp_id = trim($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+$cmp_id = trim($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
 
 // Keamanan: Jika bukan admin dan ada session company, paksa cmp_id ke session perusahaan
 if (!$isAdmin && !empty($_SESSION['company_cmp_id'])) {
     $cmp_id = $_SESSION['company_cmp_id'];
+} elseif (!$isAdmin && !empty($_SESSION['cmp_id'])) {
+    $cmp_id = $_SESSION['cmp_id'];
 }
 
 // Fallback jika belum ada cmp_id di session

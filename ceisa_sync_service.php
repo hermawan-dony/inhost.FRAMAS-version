@@ -123,7 +123,7 @@ $secretmfa = $secretMfa;
 
 require __DIR__ . '/initmfa.php';
 
-$bearer = $_SESSION["mfatoken_" . $cmpId] ?? ($_SESSION["mfatoken"] ?? '');
+$bearer = $_SESSION["mfatoken_" . $cmpId] ?? '';
 
 if (empty($bearer)) {
     echo json_encode([
