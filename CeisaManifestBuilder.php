@@ -67,6 +67,18 @@ class CeisaManifestBuilder {
         if (empty($h['nomor_voyage'])) $errors[] = "Nomor Voyage / Penerbangan tidak boleh kosong.";
         if (empty($h['nama_sarana_pengangkut'])) $errors[] = "Nama Sarana Pengangkut tidak boleh kosong.";
 
+        // Validasi kesesuaian awalan nomor AJU dengan kode kantor
+        if (!empty($h['kode_kantor']) && strlen($nomorAju) >= 6 && substr($nomorAju, 0, 6) !== $h['kode_kantor']) {
+            $errors[] = "Awalan 6 digit Nomor AJU (" . substr($nomorAju, 0, 6) . ") tidak sesuai dengan Kode Kantor (" . $h['kode_kantor'] . "). Silakan gunakan tombol ✏️ Rename AJU.";
+        }
+
+        // Validasi urutan tanggal
+        if (!empty($h['tanggal_berangkat']) && !empty($h['tanggal_tiba'])) {
+            if (strtotime($h['tanggal_tiba']) < strtotime($h['tanggal_berangkat'])) {
+                $errors[] = "Tanggal Tiba (" . $h['tanggal_tiba'] . ") tidak boleh lebih awal dari Tanggal Berangkat (" . $h['tanggal_berangkat'] . ").";
+            }
+        }
+
         // Cek data House BL
         $stmtBL = $this->db->prepare("SELECT COUNT(*) as cnt FROM bc_ceisa_manifes_bl WHERE nomor_aju = ? AND cmp_id = ?");
         $stmtBL->bind_param("ss", $nomorAju, $this->cmp_id);
@@ -300,7 +312,7 @@ class CeisaManifestBuilder {
             "namaSaranaPengangkut" => $this->cleanString($header['nama_sarana_pengangkut']),
             "imoNumber"            => (string)($header['imo_number'] ?: ''),
             "kodeNegara"           => (string)($header['kode_negara'] ?: 'PA'),
-            "asalData"             => (string)($header['asal_data'] ?: 'S'),
+            "asalData"             => "S",
             "flwaktuTempuh"        => (string)($header['flwaktu_tempuh'] ?: '24'),
             "dataKelompokPos"      => $kelompokPosArr,
             "lampirans"            => $lampiransArr,

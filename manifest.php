@@ -9,9 +9,75 @@ require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 
 $isAdmin = !empty($_SESSION['is_admin']) || (!empty($_GET['is_admin']) && $_GET['is_admin'] == '1');
-$sessionCmpId = $cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''));
+$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : ($cmp_id ?: ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
 $sessionCmpName = $namaperusahaan ?: ($_SESSION['company_name'] ?? 'Perusahaan');
 $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
+$sessionKodeKantor = $kode_kantor ?: ($_SESSION['company_kode_kantor'] ?? '070100');
+
+// Ambil Referensi Jenis Kemasan dari bc_ceisa_reff
+$reffKemasan = [];
+$qKemas = $koneksi->query("SELECT kode, teks FROM bc_ceisa_reff WHERE reff = 'JENIS KEMASAN' AND (status IS NULL OR status <> 'N') ORDER BY (kode = 'CT') DESC, (kode = 'BX') DESC, (kode = 'PK') DESC, (kode = 'BG') DESC, kode ASC");
+if ($qKemas) {
+    while ($rk = $qKemas->fetch_assoc()) {
+        $reffKemasan[] = $rk;
+    }
+}
+if (empty($reffKemasan)) {
+    $reffKemasan = [
+        ['kode' => 'CT', 'teks' => 'Carton / Kotak Karton'],
+        ['kode' => 'BX', 'teks' => 'Box / Peti'],
+        ['kode' => 'PK', 'teks' => 'Package / Paket'],
+        ['kode' => 'BG', 'teks' => 'Bag / Kantong'],
+        ['kode' => 'DR', 'teks' => 'Drum / Tong'],
+        ['kode' => 'PL', 'teks' => 'Pallet'],
+        ['kode' => 'CS', 'teks' => 'Case'],
+        ['kode' => 'CR', 'teks' => 'Crate']
+    ];
+}
+
+// Ambil Pelabuhan Populer / Internasional & Pelabuhan Indonesia dari bc_ceisa_reff
+$reffPelabuhan = [
+    'populer' => [],
+    'utama_id' => [],
+    'lainnya_id' => []
+];
+$sqlPort = "SELECT kode, teks,
+            CASE 
+                WHEN kode IN ('CNSHZ','CNSHA','CNNGB','CNQIN','CNXMN','CNTNJ','SGSIN','MYPKG','MYTPP','HKHKG','TWKHH','JPTYO','JPYOK','KRPUS','THLCH','VNHCM','INKAT','INNSA','USLAX','NLRTM','DEHAM') THEN 1
+                WHEN kode IN ('IDTPP','IDTPS','IDSRG','IDBLW','IDMAK','IDBTH','IDPNK','IDBDJ','IDBPN','IDPLM','IDPAN','IDBIT','IDDPS') THEN 2
+                ELSE 3
+            END as grp_order
+            FROM bc_ceisa_reff 
+            WHERE reff = 'PELABUHAN' 
+              AND (kode LIKE 'ID%' OR kode IN ('CNSHZ','CNSHA','CNNGB','CNQIN','CNXMN','CNTNJ','CNGZU','CNDLC','SGSIN','MYPKG','MYTPP','MYPEN','MYPGU','HKHKG','TWKHH','TWKEL','TWTPE','JPTYO','JPYOK','JPOSA','JPKOB','JPNGO','KRPUS','KRINC','KRPTK','THBKK','THLCH','VNHCM','VNHPH','INMAA','INNSA','INKAT','INBOM','AEJEA','AEDXB','USLAX','USLGB','USNYC','USSAV','NLRTM','DEHAM','BEANR','GBFXT','AUMEL','AUSYD'))
+              AND (status IS NULL OR status <> 'N')
+            ORDER BY grp_order ASC, kode ASC";
+$qPort = $koneksi->query($sqlPort);
+if ($qPort) {
+    while ($rp = $qPort->fetch_assoc()) {
+        if ($rp['grp_order'] == 1) {
+            $reffPelabuhan['populer'][] = $rp;
+        } elseif ($rp['grp_order'] == 2) {
+            $reffPelabuhan['utama_id'][] = $rp;
+        } else {
+            $reffPelabuhan['lainnya_id'][] = $rp;
+        }
+    }
+}
+if (empty($reffPelabuhan['populer']) && empty($reffPelabuhan['utama_id'])) {
+    $reffPelabuhan['populer'] = [
+        ['kode' => 'CNSHZ', 'teks' => 'Shenzhen, China'],
+        ['kode' => 'CNSHA', 'teks' => 'Shanghai, China'],
+        ['kode' => 'SGSIN', 'teks' => 'Singapore'],
+        ['kode' => 'MYPKG', 'teks' => 'Port Klang, Malaysia']
+    ];
+    $reffPelabuhan['utama_id'] = [
+        ['kode' => 'IDTPP', 'teks' => 'Tanjung Priok, Jakarta'],
+        ['kode' => 'IDTPS', 'teks' => 'Tanjung Perak, Surabaya'],
+        ['kode' => 'IDSRG', 'teks' => 'Tanjung Emas, Semarang'],
+        ['kode' => 'IDBLW', 'teks' => 'Belawan, Medan']
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -355,27 +421,18 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
 </head>
 <body data-theme="light">
 
-    <!-- PAGE HEADER -->
-    <div class="page-header">
-        <div class="page-title">
-            <span style="font-size: 24px;">🚢</span>
-            <div>
-                <h1>Manifes BC 1.1 / NVOCC (Host-to-Host OpenAPI)</h1>
-                <p>Pengelolaan dan Rekonsiliasi Manifes Kedatangan Sarana Pengangkut CEISA 4.0 &middot; Perusahaan: <strong><?= htmlspecialchars($sessionCmpName) ?></strong> (<?= htmlspecialchars($sessionCmpId) ?>)</p>
-            </div>
+    <!-- SUB TABS NAVIGATION & TOOLBAR -->
+    <div class="subtabs" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; border-bottom:1px solid var(--border); padding-bottom:4px;">
+        <div style="display:flex; gap:4px; overflow-x:auto;">
+            <button class="subtab-btn active" id="tabbtn-list" onclick="showTab('list')">📋 Daftar Inputan Host to Host</button>
+            <button class="subtab-btn" id="tabbtn-editor" onclick="showTab('editor')">✏️ Form Editor Manifes</button>
+            <button class="subtab-btn" id="tabbtn-inquiry" onclick="showTab('inquiry')">🔍 Pencarian Pos BC 1.1 (Inward/Outward)</button>
+            <button class="subtab-btn" id="tabbtn-json" onclick="showTab('json')">📄 JSON Payload Viewer</button>
         </div>
-        <div style="display:flex; gap:8px;">
-            <button class="btn btn-secondary btn-sm" onclick="toggleTheme()">🌓 Ganti Tema</button>
-            <button class="btn btn-primary" onclick="showTab('editor'); resetForm();">➕ Buat Manifes Baru</button>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+            <button class="btn btn-success btn-sm" onclick="openImportManifestModal()" style="background:#10b981; border-color:#059669; color:#fff;">📥 Import Excel Backup</button>
+            <button class="btn btn-primary btn-sm" onclick="showTab('editor'); resetForm();">➕ Buat Manifes Baru</button>
         </div>
-    </div>
-
-    <!-- SUB TABS NAVIGATION -->
-    <div class="subtabs">
-        <button class="subtab-btn active" id="tabbtn-list" onclick="showTab('list')">📋 Daftar Manifes</button>
-        <button class="subtab-btn" id="tabbtn-editor" onclick="showTab('editor')">✏️ Form Editor Manifes</button>
-        <button class="subtab-btn" id="tabbtn-inquiry" onclick="showTab('inquiry')">🔍 Pencarian Pos BC 1.1 (Inward/Outward)</button>
-        <button class="subtab-btn" id="tabbtn-json" onclick="showTab('json')">📄 JSON Payload Viewer</button>
     </div>
 
     <!-- ========================================================================= -->
@@ -461,19 +518,31 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                 <div class="card-header">
                     <span class="card-title">📦 Data Header Manifes NVOCC</span>
                     <div style="display:flex; gap:8px;">
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="generateAutoAju()">🎲 Generate No Aju</button>
+                        <button type="button" class="btn btn-warning btn-sm" onclick="promptRenameAju(currentNomorAju)" title="Ubah Nomor AJU dokumen ini beserta seluruh House B/L">✏️ Rename AJU</button>
+                        <button type="button" class="btn btn-accent btn-sm" onclick="promptCopyAju(currentNomorAju)" title="Duplikasi seluruh dokumen ini menjadi AJU baru">📋 Copy AJU</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="confirmGenerateNewAju()" title="Generate Nomor AJU baru">🎲 Generate No Aju</button>
                         <button type="submit" class="btn btn-primary btn-sm">💾 Simpan Header</button>
                     </div>
                 </div>
 
                 <div class="form-grid">
                     <div class="form-group">
-                        <label>Nomor Aju (26 Digit)</label>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <label style="margin:0;">Nomor Aju (26 Digit)</label>
+                            <a href="javascript:void(0)" onclick="promptRenameAju(currentNomorAju)" style="font-size:8.5px; font-weight:700; color:var(--warning); text-decoration:none;" title="Ganti Nomor AJU dokumen ini">✏️ Rename</a>
+                        </div>
                         <input type="text" id="m_nomor_aju" class="form-control" required placeholder="00900009192025012345678901">
                     </div>
                     <div class="form-group">
                         <label>Kode Kantor Pabean</label>
-                        <input type="text" id="m_kode_kantor" class="form-control" value="009000" required>
+                        <input type="text" id="m_kode_kantor" class="form-control" value="<?= htmlspecialchars($sessionKodeKantor) ?>" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Jenis Manifes</label>
+                        <select id="m_jenis_manifes" class="form-control">
+                            <option value="11">11 - Manifes Kedatangan (Inward / Impor)</option>
+                            <option value="12">12 - Manifes Keberangkatan (Outward / Ekspor)</option>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label>ID Perusahaan (NPWP 16)</label>
@@ -485,7 +554,7 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                     </div>
                     <div class="form-group" style="grid-column: span 2;">
                         <label>Alamat Perusahaan</label>
-                        <input type="text" id="m_alamat_perusahaan" class="form-control" value="<?= htmlspecialchars($alamat) ?>" required>
+                        <input type="text" id="m_alamat_perusahaan" class="form-control" value="<?= htmlspecialchars($alamat ?: '-') ?>" placeholder="Alamat Perusahaan NVOCC">
                     </div>
                     <div class="form-group">
                         <label>Nomor Voyage / Penerbangan</label>
@@ -521,7 +590,7 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                     </div>
                     <div class="form-group">
                         <label>Tanggal Tiba (Estimasi / Aktual)</label>
-                        <input type="datetime-local" id="m_tgl_tiba" class="form-control" required>
+                        <input type="datetime-local" id="m_tgl_tiba" class="form-control">
                     </div>
                     <div class="form-group">
                         <label>Waktu Tempuh (Jam)</label>
@@ -563,8 +632,8 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         <!-- Action Floating / Bottom Bar -->
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:12px;">
             <button type="button" class="btn btn-secondary" onclick="previewCurrentJson()">📄 Preview JSON CEISA</button>
-            <button type="button" class="btn btn-warning" onclick="executeCekLengkap()">🔍 Cek Kelengkapan</button>
-            <button type="button" class="btn btn-primary" onclick="submitDraftToCeisa()">🚀 Kirim Draft ke CEISA 4.0</button>
+            <button type="button" class="btn btn-warning" onclick="executeCekLengkap()">🔍 Cek Kelengkapan (CEISA)</button>
+            <button type="button" class="btn btn-primary" onclick="executeKirimManifes()">🚀 Kirim ke Bea Cukai (CEISA)</button>
         </div>
     </div>
 
@@ -628,11 +697,12 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
     <div class="modal" id="modalHouseBl">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 style="font-size:14px; font-weight:700;">Tambah / Edit House B/L (HBL)</h3>
+                <h3 id="modalBlTitle" style="font-size:14px; font-weight:700;">Tambah / Edit House B/L (HBL)</h3>
                 <button type="button" onclick="closeModalBL()" style="background:transparent; border:none; color:var(--text-muted); font-size:16px; cursor:pointer;">✕</button>
             </div>
             <div class="modal-body">
                 <form id="formHouseBl" onsubmit="saveHouseBl(event)">
+                    <input type="hidden" id="bl_orig_nomor_host_bl" value="">
                     <div class="form-grid">
                         <div class="form-group">
                             <label>No Master B/L (MBL)</label>
@@ -680,7 +750,13 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                         </div>
                         <div class="form-group">
                             <label>Jenis Kemasan</label>
-                            <input type="text" id="bl_jenis_kemasan" class="form-control" value="CT" required>
+                            <select id="bl_jenis_kemasan" class="form-control" required>
+                                <?php foreach ($reffKemasan as $rk): ?>
+                                    <option value="<?= htmlspecialchars($rk['kode']) ?>" <?= ($rk['kode'] === 'CT') ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($rk['kode']) ?> - <?= htmlspecialchars($rk['teks']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label>Jumlah Kemasan</label>
@@ -691,16 +767,94 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                             <input type="text" id="bl_mother_vessel" class="form-control" required placeholder="MV KAPAL PENGANGKUT">
                         </div>
                         <div class="form-group">
-                            <label>Pelabuhan Asal</label>
-                            <input type="text" id="bl_pelabuhan_asal" class="form-control" required placeholder="CNSHZ">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label>Pelabuhan Asal</label>
+                                <a href="javascript:void(0)" onclick="searchGlobalPort('bl_pelabuhan_asal')" style="font-size:8.5px; color:var(--primary); text-decoration:none;" title="Cari di 91.000+ Pelabuhan Dunia">🔍 Cari Lainnya</a>
+                            </div>
+                            <select id="bl_pelabuhan_asal" class="form-control" required onchange="handlePortSelectChange(this)">
+                                <optgroup label="⭐ Pelabuhan Populer & Internasional">
+                                    <?php foreach ($reffPelabuhan['populer'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>" <?= ($rp['kode'] === 'CNSHZ') ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="🇮🇩 Pelabuhan Utama Indonesia">
+                                    <?php foreach ($reffPelabuhan['utama_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="Pelabuhan Indonesia Lainnya">
+                                    <?php foreach ($reffPelabuhan['lainnya_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <option value="__SEARCH__">🔍 Cari Pelabuhan Lainnya di Dunia...</option>
+                            </select>
                         </div>
                         <div class="form-group">
-                            <label>Pelabuhan Bongkar</label>
-                            <input type="text" id="bl_pelabuhan_bongkar" class="form-control" required placeholder="IDTPP">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label>Pelabuhan Bongkar</label>
+                                <a href="javascript:void(0)" onclick="searchGlobalPort('bl_pelabuhan_bongkar')" style="font-size:8.5px; color:var(--primary); text-decoration:none;" title="Cari di 91.000+ Pelabuhan Dunia">🔍 Cari Lainnya</a>
+                            </div>
+                            <select id="bl_pelabuhan_bongkar" class="form-control" required onchange="handlePortSelectChange(this)">
+                                <optgroup label="🇮🇩 Pelabuhan Utama Indonesia">
+                                    <?php foreach ($reffPelabuhan['utama_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>" <?= ($rp['kode'] === 'IDTPP') ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="⭐ Pelabuhan Populer & Internasional">
+                                    <?php foreach ($reffPelabuhan['populer'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="Pelabuhan Indonesia Lainnya">
+                                    <?php foreach ($reffPelabuhan['lainnya_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <option value="__SEARCH__">🔍 Cari Pelabuhan Lainnya di Dunia...</option>
+                            </select>
                         </div>
                         <div class="form-group">
-                            <label>Pelabuhan Akhir</label>
-                            <input type="text" id="bl_pelabuhan_akhir" class="form-control" required placeholder="IDTPP">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <label>Pelabuhan Akhir</label>
+                                <a href="javascript:void(0)" onclick="searchGlobalPort('bl_pelabuhan_akhir')" style="font-size:8.5px; color:var(--primary); text-decoration:none;" title="Cari di 91.000+ Pelabuhan Dunia">🔍 Cari Lainnya</a>
+                            </div>
+                            <select id="bl_pelabuhan_akhir" class="form-control" required onchange="handlePortSelectChange(this)">
+                                <optgroup label="🇮🇩 Pelabuhan Utama Indonesia">
+                                    <?php foreach ($reffPelabuhan['utama_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>" <?= ($rp['kode'] === 'IDTPP') ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="⭐ Pelabuhan Populer & Internasional">
+                                    <?php foreach ($reffPelabuhan['populer'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <optgroup label="Pelabuhan Indonesia Lainnya">
+                                    <?php foreach ($reffPelabuhan['lainnya_id'] as $rp): ?>
+                                        <option value="<?= htmlspecialchars($rp['kode']) ?>">
+                                            <?= htmlspecialchars($rp['kode']) ?> - <?= htmlspecialchars($rp['teks']) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <option value="__SEARCH__">🔍 Cari Pelabuhan Lainnya di Dunia...</option>
+                            </select>
                         </div>
                     </div>
 
@@ -759,11 +913,89 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         </div>
     </div>
 
+    <!-- MODAL IMPORT EXCEL BACKUP CEISA 4.0 -->
+    <div id="modalImportManifest" class="modal" style="display:none; z-index:9999;" onclick="if(event.target === this) closeImportManifestModal();">
+        <div class="modal-content" style="max-width:550px;">
+            <div class="modal-header" style="padding:14px 18px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; background:var(--bg-input);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:20px;">📥</span>
+                    <h3 style="margin:0; font-size:14px; font-weight:700; color:var(--text);">Import File Excel Backup CEISA 4.0</h3>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeImportManifestModal()" style="border:none; background:transparent; font-size:18px; cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:18px;">
+                <p style="font-size:12px; color:var(--text-muted); line-height:1.5; margin-bottom:14px;">
+                    Unggah file <strong>.xlsx</strong> hasil klik menu <em>"Back-Up"</em> pada Portal CEISA 4.0 (Manifest Online / NVOCC). Sistem akan otomatis membaca seluruh sheet (<em>NVOCC, MASTER, BL, BL HS, BL PETIKEMAS TERANGKUT, BL DOKUMEN</em>) dan menyimpannya sebagai <strong>Draft Manifes</strong> di sistem lokal.
+                </p>
+
+                <div id="dropZoneManifest" style="border:2px dashed var(--border); border-radius:6px; padding:25px; text-align:center; background:var(--bg-input); cursor:pointer; transition:all 0.2s;" onclick="document.getElementById('fileExcelManifest').click()">
+                    <div style="font-size:36px; margin-bottom:8px;">📊</div>
+                    <div style="font-weight:600; font-size:13px; color:var(--primary); margin-bottom:4px;">Klik untuk memilih file Excel (.xlsx)</div>
+                    <div style="font-size:11px; color:var(--text-muted);">atau seret & lepas file ke kotak ini</div>
+                    <div id="selectedManifestFileName" style="margin-top:10px; font-weight:700; color:var(--text); font-size:12px; display:none;"></div>
+                </div>
+                <input type="file" id="fileExcelManifest" accept=".xlsx, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="display:none;" onchange="handleManifestFileSelected(this)">
+
+                <div id="importProgressManifest" style="display:none; margin-top:16px;">
+                    <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px; color:var(--text-muted);">
+                        <span>Memproses impor Excel...</span>
+                        <span id="importProgressPercent">⏳</span>
+                    </div>
+                    <div style="height:6px; background:var(--border); border-radius:3px; overflow:hidden;">
+                        <div id="importProgressBar" style="width:100%; height:100%; background:var(--primary);"></div>
+                    </div>
+                </div>
+
+                <div id="importResultManifest" style="display:none; margin-top:14px; padding:12px; border-radius:6px; font-size:12px;"></div>
+            </div>
+            <div class="modal-footer" style="padding:12px 18px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:8px; background:var(--bg-input);">
+                <button type="button" class="btn btn-secondary" onclick="closeImportManifestModal()">Tutup</button>
+                <button type="button" id="btnSubmitImportManifest" class="btn btn-success" onclick="submitImportManifest()" disabled style="background:#10b981; border-color:#059669; color:#fff;">🚀 Mulai Impor Data</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CARI PELABUHAN GLOBAL (91.000+ Port Ref) -->
+    <div id="modalSearchPort" class="modal" style="display:none; z-index:10000;" onclick="if(event.target === this) closeSearchPortModal();">
+        <div class="modal-content" style="max-width:560px;">
+            <div class="modal-header" style="padding:12px 16px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">⚓</span>
+                    <h3 style="margin:0; font-size:13px; font-weight:700; color:var(--text-main);" id="searchPortModalTitle">Cari Referensi Pelabuhan (UN/LOCODE)</h3>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeSearchPortModal()" style="border:none; background:transparent; font-size:16px; cursor:pointer;">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:14px 16px;">
+                <div style="margin-bottom:10px;">
+                    <input type="text" id="portSearchQuery" class="form-control" placeholder="Ketik kode (misal CNSHA, SGSIN, IDTPP) atau nama kota / pelabuhan..." autocomplete="off" oninput="debouncePortSearch(this.value)" style="font-size:12px; padding:8px 12px; width:100%;">
+                </div>
+                <div style="max-height:300px; overflow-y:auto; border:1px solid var(--border); border-radius:4px;" id="portSearchResultList">
+                    <div style="padding:16px; text-align:center; color:var(--text-muted); font-size:11px;">
+                        Ketik minimal 2 karakter untuk mencari di seluruh referensi 91.000+ pelabuhan dunia.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:10px 16px; border-top:1px solid var(--border); display:flex; justify-content:flex-end;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeSearchPortModal()">Tutup</button>
+            </div>
+        </div>
+    </div>
+
     <!-- JAVASCRIPT APPLICATION LOGIC -->
     <script>
         const activeCmpId = '<?= htmlspecialchars($sessionCmpId) ?>';
         let currentNomorAju = '';
         let lastInquiryData = null;
+
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
 
         // Auto Sync Theme from Parent
         function applyCurrentTheme(th) {
@@ -800,25 +1032,25 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         }
 
         // =========================================================================
-        // 1. LOAD MANIFEST LIST
+        // 1. LOAD MANIFEST LIST (KHUSUS DOKUMEN INPUTAN HOST TO HOST)
         // =========================================================================
         async function loadManifestList() {
             const kw = document.getElementById('searchKeyword').value;
             const st = document.getElementById('filterStatus').value;
             const tbody = document.getElementById('tableBodyManifest');
-            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-muted);">Memuat data...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-muted);">Memuat data dokumen Host to Host...</td></tr>';
 
             try {
-                const res = await fetch(`manifest_api.php?action=get_list&search=${encodeURIComponent(kw)}&status=${encodeURIComponent(st)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
+                const res = await fetch(`manifest_api.php?action=get_list&source=h2h&search=${encodeURIComponent(kw)}&status=${encodeURIComponent(st)}&cmp_id=${encodeURIComponent(activeCmpId)}`);
                 const json = await res.json();
 
                 if (json.status !== 'OK' || !json.data || json.data.length === 0) {
-                    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-muted);">Belum ada data manifes. Klik "Buat Manifes Baru" untuk memulai.</td></tr>';
-                    updateStats([]);
+                    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:20px; color:var(--text-muted);">Belum ada data manifes Host to Host. Klik "Buat Manifes Baru" untuk memulai.</td></tr>';
+                    updateStats([], json.stats);
                     return;
                 }
 
-                updateStats(json.data);
+                updateStats(json.data, json.stats);
 
                 let html = '';
                 json.data.forEach((r, idx) => {
@@ -843,7 +1075,9 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                         <td>${r.nomor_bc11 ? `<strong>${r.nomor_bc11}</strong> (${r.tanggal_bc11 || ''})` : '<span style="color:var(--text-muted);">-</span>'}</td>
                         <td style="text-align:right; white-space:nowrap;">
                             <button class="btn btn-secondary btn-sm" onclick="editManifest('${r.nomor_aju}')" title="Edit Manifes">✏️</button>
+                            <button class="btn btn-secondary btn-sm" onclick="promptCopyAju('${r.nomor_aju}')" title="Copy / Duplikat AJU">📋</button>
                             <button class="btn btn-secondary btn-sm" onclick="viewJsonAju('${r.nomor_aju}')" title="Lihat JSON Payload">📄</button>
+                            <button class="btn btn-secondary btn-sm" onclick="window.open('pdf_manifest.php?nomor_aju=' + encodeURIComponent('${r.nomor_aju}') + '&cmp_id=' + encodeURIComponent(activeCmpId), '_blank')" title="Cetak (*.pdf)">🖨️</button>
                             ${stt === 'Draft' ? `<button class="btn btn-warning btn-sm" onclick="actionCekLengkap('${r.nomor_aju}')" title="Cek Kelengkapan">🔍</button>` : ''}
                             ${stt === 'Ready' ? `<button class="btn btn-primary btn-sm" onclick="actionKirim('${r.nomor_aju}')" title="Kirim ke Bea Cukai">🚀 Kirim</button>` : ''}
                             ${stt === 'Terkirim' ? `<button class="btn btn-accent btn-sm" onclick="actionRekon('${r.nomor_aju}')" title="Rekonsiliasi (Pecah Pos)">🔄 Rekon</button>` : ''}
@@ -858,7 +1092,15 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             }
         }
 
-        function updateStats(rows) {
+        function updateStats(rows, statsObj) {
+            if (statsObj) {
+                document.getElementById('stat-total').innerText = statsObj.total || 0;
+                document.getElementById('stat-draft').innerText = statsObj.draft || 0;
+                document.getElementById('stat-ready').innerText = statsObj.ready || 0;
+                document.getElementById('stat-terkirim').innerText = statsObj.terkirim || 0;
+                document.getElementById('stat-rekon').innerText = statsObj.rekon || 0;
+                return;
+            }
             document.getElementById('stat-total').innerText = rows.length;
             let d = 0, rd = 0, tk = 0, rk = 0;
             rows.forEach(r => {
@@ -866,7 +1108,7 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                 if (s === 'draft') d++;
                 else if (s === 'ready') rd++;
                 else if (s === 'terkirim') tk++;
-                else if (s === 'rekon') rk++;
+                else if (s === 'rekon' || s.includes('rekon')) rk++;
             });
             document.getElementById('stat-draft').innerText = d;
             document.getElementById('stat-ready').innerText = rd;
@@ -875,16 +1117,201 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         }
 
         // =========================================================================
-        // 2. AUTO GENERATE NOMOR AJU
+        // 2. AUTO GENERATE NOMOR AJU & RENAME / COPY FITUR
         // =========================================================================
+        function extractNpwp6ForAju(npwpRaw) {
+            let clean = (npwpRaw || '').replace(/\D/g, '');
+            // Jika 16 digit dan diawali '0', ambil 15 digit aslinya agar 6 digit pertama tidak diawali '00'
+            if (clean.length === 16 && clean.startsWith('0')) {
+                clean = clean.substring(1);
+            }
+            return clean.substring(0, 6) || '012345';
+        }
+
         function generateAutoAju() {
-            const ktr = document.getElementById('m_kode_kantor').value || '009000';
-            const npwpClean = (document.getElementById('m_id_perusahaan').value || '0123456789012345').replace(/\D/g, '').substring(0, 10);
+            const ktr = document.getElementById('m_kode_kantor').value || '<?= htmlspecialchars($sessionKodeKantor) ?>';
+            const npwpClean = extractNpwp6ForAju(document.getElementById('m_id_perusahaan')?.value || '<?= htmlspecialchars($sessionNpwp) ?>');
             const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             const rnd = Math.floor(100000 + Math.random() * 900000);
             const autoAju = `${ktr}${npwpClean}${dateStr}${rnd}`;
             document.getElementById('m_nomor_aju').value = autoAju;
             currentNomorAju = autoAju;
+        }
+
+        function confirmGenerateNewAju() {
+            if (currentNomorAju) {
+                Swal.fire({
+                    ...getSwalThemeOptions(),
+                    icon: 'question',
+                    title: 'Generate No AJU',
+                    html: `Dokumen <strong>${escapeHtml(currentNomorAju)}</strong> sedang aktif dibuka.<br><br>Apakah Anda bermaksud <b>ME-RENAME</b> nomor AJU dokumen ini, atau membuat <b>DRAFT BARU KOSONG</b>?`,
+                    showDenyButton: true,
+                    showCancelButton: true,
+                    confirmButtonText: '✏️ Rename AJU Ini',
+                    denyButtonText: '🆕 Buat Draft Baru Kosong',
+                    cancelButtonText: 'Batal',
+                    confirmButtonColor: '#faad14',
+                    denyButtonColor: '#1890ff'
+                }).then((res) => {
+                    if (res.isConfirmed) {
+                        promptRenameAju(currentNomorAju);
+                    } else if (res.isDenied) {
+                        resetForm();
+                    }
+                });
+            } else {
+                generateAutoAju();
+            }
+        }
+
+        async function promptRenameAju(nomorAju) {
+            const aju = nomorAju || currentNomorAju || document.getElementById('m_nomor_aju')?.value;
+            if (!aju) {
+                showWarning('Silakan buka atau pilih dokumen manifes yang ingin di-rename terlebih dahulu.');
+                return;
+            }
+
+            const ktr = document.getElementById('m_kode_kantor')?.value || '070100';
+            const npwpClean = extractNpwp6ForAju(document.getElementById('m_id_perusahaan')?.value || '<?= htmlspecialchars($sessionNpwp) ?>');
+            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            const rnd = Math.floor(100000 + Math.random() * 900000);
+            const candidateAju = `${ktr}${npwpClean}${dateStr}${rnd}`;
+
+            const { value: formValues } = await Swal.fire({
+                ...getSwalThemeOptions(),
+                title: '✏️ Rename Nomor AJU',
+                html: `
+                    <div style="text-align:left; font-size:11px; margin-bottom:12px;">
+                        <div style="color:var(--text-muted); margin-bottom:2px;">NOMOR AJU LAMA:</div>
+                        <div style="font-weight:700; color:var(--primary); font-family:monospace; font-size:12px; margin-bottom:10px;">${escapeHtml(aju)}</div>
+                        <div style="color:var(--text-muted); margin-bottom:4px;">NOMOR AJU BARU (26 DIGIT):</div>
+                        <input id="swal_new_aju" class="swal2-input" value="${candidateAju}" maxlength="26" style="font-family:monospace; font-size:12px; margin:0 0 6px 0; width:100%;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:10px; color:var(--text-muted);">Format: 26 digit standar CEISA</span>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('swal_new_aju').value='${ktr}${npwpClean}${dateStr}'+Math.floor(100000+Math.random()*900000)" style="font-size:9px;">🎲 Acak Nomor</button>
+                        </div>
+                    </div>
+                `,
+                focusConfirm: false,
+                showCancelButton: true,
+                confirmButtonText: '💾 Simpan Perubahan AJU',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#faad14',
+                preConfirm: () => {
+                    const val = document.getElementById('swal_new_aju').value.trim();
+                    if (!val) {
+                        Swal.showValidationMessage('Nomor AJU baru tidak boleh kosong!');
+                        return false;
+                    }
+                    if (val.length !== 26 || !/^\d+$/.test(val)) {
+                        Swal.showValidationMessage('Nomor AJU harus terdiri dari tepat 26 digit angka!');
+                        return false;
+                    }
+                    if (val === aju) {
+                        Swal.showValidationMessage('Nomor AJU baru tidak boleh sama dengan nomor AJU lama!');
+                        return false;
+                    }
+                    return val;
+                }
+            });
+
+            if (!formValues) return;
+
+            const fData = new FormData();
+            fData.append('action', 'rename_aju');
+            fData.append('cmp_id', activeCmpId);
+            fData.append('old_nomor_aju', aju);
+            fData.append('new_nomor_aju', formValues);
+
+            try {
+                const res = await fetch('manifest_api.php', { method: 'POST', body: fData });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    currentNomorAju = json.new_nomor_aju;
+                    document.getElementById('m_nomor_aju').value = json.new_nomor_aju;
+                    showSuccess(json.message);
+                    editManifest(json.new_nomor_aju);
+                    loadManifestList();
+                } else {
+                    showError(json.message);
+                }
+            } catch (err) {
+                showError('Error: ' + err.message);
+            }
+        }
+
+        async function promptCopyAju(sourceAju) {
+            const aju = sourceAju || currentNomorAju || document.getElementById('m_nomor_aju')?.value;
+            if (!aju) {
+                showWarning('Silakan buka atau pilih dokumen manifes yang ingin diduplikasi.');
+                return;
+            }
+
+            const ktr = document.getElementById('m_kode_kantor')?.value || '<?= htmlspecialchars($sessionKodeKantor) ?>';
+            const npwpClean = extractNpwp6ForAju(document.getElementById('m_id_perusahaan')?.value || '<?= htmlspecialchars($sessionNpwp) ?>');
+            const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            const rnd = Math.floor(100000 + Math.random() * 900000);
+            const candidateAju = `${ktr}${npwpClean}${dateStr}${rnd}`;
+
+            const { value: formValues } = await Swal.fire({
+                ...getSwalThemeOptions(),
+                title: '📋 Copy / Duplikat AJU Manifes',
+                html: `
+                    <div style="text-align:left; font-size:11px; margin-bottom:12px;">
+                        <div style="color:var(--text-muted); margin-bottom:2px;">DOKUMEN ASAL:</div>
+                        <div style="font-weight:700; color:var(--primary); font-family:monospace; font-size:12px; margin-bottom:10px;">${escapeHtml(aju)}</div>
+                        <div style="color:var(--text-muted); margin-bottom:4px;">NOMOR AJU BARU (HASIL DUPLIKASI):</div>
+                        <input id="swal_copy_aju" class="swal2-input" value="${candidateAju}" maxlength="26" style="font-family:monospace; font-size:12px; margin:0 0 6px 0; width:100%;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:10px; color:var(--text-muted);">Seluruh Header, House BL, Kontainer & Dokumen akan diduplikasi</span>
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('swal_copy_aju').value='${ktr}${npwpClean}${dateStr}'+Math.floor(100000+Math.random()*900000)" style="font-size:9px;">🎲 Acak Nomor</button>
+                        </div>
+                    </div>
+                `,
+                focusConfirm: false,
+                showCancelButton: true,
+                confirmButtonText: '🚀 Duplikasi Sekarang',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#10b981',
+                preConfirm: () => {
+                    const val = document.getElementById('swal_copy_aju').value.trim();
+                    if (!val) {
+                        Swal.showValidationMessage('Nomor AJU baru tidak boleh kosong!');
+                        return false;
+                    }
+                    if (val.length !== 26 || !/^\d+$/.test(val)) {
+                        Swal.showValidationMessage('Nomor AJU harus terdiri dari tepat 26 digit angka!');
+                        return false;
+                    }
+                    if (val === aju) {
+                        Swal.showValidationMessage('Nomor AJU baru tidak boleh sama dengan dokumen asal!');
+                        return false;
+                    }
+                    return val;
+                }
+            });
+
+            if (!formValues) return;
+
+            const fData = new FormData();
+            fData.append('action', 'copy_aju');
+            fData.append('cmp_id', activeCmpId);
+            fData.append('source_nomor_aju', aju);
+            fData.append('target_nomor_aju', formValues);
+
+            try {
+                const res = await fetch('manifest_api.php', { method: 'POST', body: fData });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    showSuccess(json.message);
+                    editManifest(json.new_nomor_aju);
+                    loadManifestList();
+                } else {
+                    showError(json.message);
+                }
+            } catch (err) {
+                showError('Error: ' + err.message);
+            }
         }
 
         function resetForm() {
@@ -896,6 +1323,7 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             const tglTiba = now.toISOString().slice(0, 16);
             document.getElementById('m_tgl_berangkat').value = tglBerangkat;
             document.getElementById('m_tgl_tiba').value = tglTiba;
+            document.getElementById('m_alamat_perusahaan').value = '<?= htmlspecialchars($alamat ?: "-") ?>';
         }
 
         // =========================================================================
@@ -915,10 +1343,13 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
 
                 const h = json.header;
                 document.getElementById('m_nomor_aju').value = h.nomor_aju || '';
-                document.getElementById('m_kode_kantor').value = h.kode_kantor || '009000';
+                document.getElementById('m_kode_kantor').value = h.kode_kantor || '070100';
+                if (document.getElementById('m_jenis_manifes')) {
+                    document.getElementById('m_jenis_manifes').value = h.jenis_manifes || '11';
+                }
                 document.getElementById('m_id_perusahaan').value = h.id_perusahaan || '';
                 document.getElementById('m_nama_perusahaan').value = h.nama_perusahaan || '';
-                document.getElementById('m_alamat_perusahaan').value = h.alamat_perusahaan || '';
+                document.getElementById('m_alamat_perusahaan').value = h.alamat_perusahaan || '<?= htmlspecialchars($alamat ?: "-") ?>' || '-';
                 document.getElementById('m_nomor_voyage').value = h.nomor_voyage || '';
                 document.getElementById('m_mode_pengangkut').value = h.mode_pengangkut || 'Laut';
                 document.getElementById('m_sarana_pengangkut').value = h.nama_sarana_pengangkut || '';
@@ -927,8 +1358,23 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                 document.getElementById('m_kode_negara').value = h.kode_negara || 'PA';
                 document.getElementById('m_flwaktu_tempuh').value = h.flwaktu_tempuh || '24';
 
-                if (h.tanggal_berangkat) document.getElementById('m_tgl_berangkat').value = h.tanggal_berangkat.replace(' ', 'T').substring(0, 16);
-                if (h.tanggal_tiba) document.getElementById('m_tgl_tiba').value = h.tanggal_tiba.replace(' ', 'T').substring(0, 16);
+                if (h.tanggal_berangkat) {
+                    document.getElementById('m_tgl_berangkat').value = h.tanggal_berangkat.replace(' ', 'T').substring(0, 16);
+                } else {
+                    document.getElementById('m_tgl_berangkat').value = new Date().toISOString().slice(0, 16);
+                }
+
+                if (h.tanggal_tiba) {
+                    document.getElementById('m_tgl_tiba').value = h.tanggal_tiba.replace(' ', 'T').substring(0, 16);
+                } else if (h.tanggal_berangkat) {
+                    const dt = new Date(h.tanggal_berangkat.replace(' ', 'T'));
+                    dt.setHours(dt.getHours() + 24);
+                    document.getElementById('m_tgl_tiba').value = dt.toISOString().slice(0, 16);
+                } else {
+                    const dt = new Date();
+                    dt.setHours(dt.getHours() + 24);
+                    document.getElementById('m_tgl_tiba').value = dt.toISOString().slice(0, 16);
+                }
 
                 // Render House BLs
                 renderHouseBlTable(json.house_bls || []);
@@ -937,7 +1383,10 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             }
         }
 
+        let currentLoadedBls = [];
+
         function renderHouseBlTable(bls) {
+            currentLoadedBls = bls || [];
             const tbody = document.getElementById('tableBodyHouseBl');
             if (!bls || bls.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:15px; color:var(--text-muted);">Belum ada data House BL. Klik tombol "Tambah House B/L" di atas.</td></tr>';
@@ -946,18 +1395,24 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
 
             let html = '';
             bls.forEach((b, idx) => {
+                const kms = escapeHtml(b.jenisKemasan || b.kode_kemasan || 'CT');
+                const jml = b.jumlahKemasan || b.jumlah_kemasan || 1;
+                const asal = escapeHtml(b.kode_pelabuhan_asal || '-');
+                const bkr = escapeHtml(b.kode_pelabuhan_bongkar || '-');
+                const safeHbl = escapeHtml(b.nomor_host_bl || '');
                 html += `<tr>
                     <td>${idx + 1}</td>
-                    <td><strong>${b.nomor_host_bl}</strong></td>
-                    <td>${b.tanggal_host_bl || '-'}</td>
-                    <td>${b.nomor_bl || '-'}</td>
-                    <td>${b.nama_pengirim || '-'}</td>
-                    <td>${b.nama_penerima || '-'}</td>
+                    <td><strong>${safeHbl}</strong></td>
+                    <td>${escapeHtml(b.tanggal_host_bl || '-')}</td>
+                    <td>${escapeHtml(b.nomor_bl || '-')}</td>
+                    <td>${escapeHtml(b.nama_pengirim || '-')}</td>
+                    <td>${escapeHtml(b.nama_penerima || '-')}</td>
                     <td>${parseFloat(b.berat || 0).toLocaleString('id-ID')}</td>
-                    <td>${b.jumlah_kemasan || 1} ${b.jenisKemasan || 'CT'}</td>
-                    <td>${b.kode_pelabuhan_asal || ''} → ${b.kode_pelabuhan_bongkar || ''}</td>
-                    <td style="text-align:right;">
-                        <button class="btn btn-secondary btn-sm" onclick="editHouseBlModal('${b.nomor_host_bl}')">✏️ Edit</button>
+                    <td>${jml} ${kms}</td>
+                    <td>${asal} → ${bkr}</td>
+                    <td style="text-align:right; white-space:nowrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="editHouseBlModal('${safeHbl}')" title="Edit House B/L">✏️ Edit</button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="deleteHouseBl('${safeHbl}')" style="color:var(--danger); margin-left:4px;" title="Hapus House B/L">🗑️</button>
                     </td>
                 </tr>`;
             });
@@ -969,23 +1424,72 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         // =========================================================================
         async function saveHeader(e) {
             e.preventDefault();
+            const ajuInput = document.getElementById('m_nomor_aju');
+            const ktrInput = document.getElementById('m_kode_kantor');
+            let ajuVal = (ajuInput.value || '').trim();
+            const ktrVal = (ktrInput.value || '').trim();
+
+            // Validasi kesesuaian kode kantor dengan awalan nomor AJU
+            if (ajuVal.length >= 6 && ktrVal && ajuVal.substring(0, 6) !== ktrVal) {
+                const ok = await showConfirm(
+                    `Awalan 6 digit Nomor AJU (<strong>${escapeHtml(ajuVal.substring(0, 6))}</strong>) berbeda dengan Kode Kantor (<strong>${escapeHtml(ktrVal)}</strong>).<br><br>Apakah Anda ingin otomatis menyesuaikan 6 digit pertama Nomor AJU menjadi <strong>${escapeHtml(ktrVal)}</strong>?`,
+                    'Ketidaksesuaian Kode Kantor',
+                    'Ya, Sesuaikan AJU',
+                    'Tetap Simpan',
+                    'warning'
+                );
+                if (ok) {
+                    ajuVal = ktrVal + ajuVal.substring(6);
+                    ajuInput.value = ajuVal;
+                }
+            }
+
             const fData = new FormData();
             fData.append('action', 'save_header');
             fData.append('cmp_id', activeCmpId);
-            fData.append('nomor_aju', document.getElementById('m_nomor_aju').value);
-            fData.append('kode_kantor', document.getElementById('m_kode_kantor').value);
+            fData.append('nomor_aju', ajuVal);
+            fData.append('kode_kantor', ktrVal);
+            fData.append('jenis_manifes', document.getElementById('m_jenis_manifes') ? document.getElementById('m_jenis_manifes').value : '11');
             fData.append('id_perusahaan', document.getElementById('m_id_perusahaan').value);
             fData.append('nama_perusahaan', document.getElementById('m_nama_perusahaan').value);
-            fData.append('alamat_perusahaan', document.getElementById('m_alamat_perusahaan').value);
+
+            let alamatVal = (document.getElementById('m_alamat_perusahaan').value || '').trim();
+            if (!alamatVal) {
+                alamatVal = '-';
+                document.getElementById('m_alamat_perusahaan').value = '-';
+            }
+            fData.append('alamat_perusahaan', alamatVal);
+
             fData.append('nomor_voyage', document.getElementById('m_nomor_voyage').value);
             fData.append('mode_pengangkut', document.getElementById('m_mode_pengangkut').value);
             fData.append('nama_sarana_pengangkut', document.getElementById('m_sarana_pengangkut').value);
             fData.append('imo_number', document.getElementById('m_imo_number').value);
             fData.append('call_sign', document.getElementById('m_call_sign').value);
             fData.append('kode_negara', document.getElementById('m_kode_negara').value);
-            fData.append('tanggal_berangkat', document.getElementById('m_tgl_berangkat').value);
-            fData.append('tanggal_tiba', document.getElementById('m_tgl_tiba').value);
-            fData.append('flwaktu_tempuh', document.getElementById('m_flwaktu_tempuh').value);
+
+            let tglBerangkatVal = document.getElementById('m_tgl_berangkat').value;
+            if (!tglBerangkatVal) {
+                tglBerangkatVal = new Date().toISOString().slice(0, 16);
+                document.getElementById('m_tgl_berangkat').value = tglBerangkatVal;
+            }
+            fData.append('tanggal_berangkat', tglBerangkatVal);
+
+            let tglTibaVal = document.getElementById('m_tgl_tiba').value;
+            if (!tglTibaVal) {
+                const dt = new Date(tglBerangkatVal);
+                dt.setHours(dt.getHours() + 24);
+                tglTibaVal = dt.toISOString().slice(0, 16);
+                document.getElementById('m_tgl_tiba').value = tglTibaVal;
+            }
+
+            // Validasi tanggal tiba tidak boleh lebih awal dari tanggal berangkat
+            if (tglBerangkatVal && tglTibaVal && new Date(tglTibaVal) < new Date(tglBerangkatVal)) {
+                showWarning('Tanggal Tiba tidak boleh lebih awal dari Tanggal Berangkat!');
+                return;
+            }
+            fData.append('tanggal_tiba', tglTibaVal);
+
+            fData.append('flwaktu_tempuh', document.getElementById('m_flwaktu_tempuh').value || '24');
 
             try {
                 const res = await fetch('manifest_api.php', { method: 'POST', body: fData });
@@ -1002,18 +1506,271 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
         }
 
         // =========================================================================
-        // 5. MODAL HOUSE BL
+        // 5. REFERENSI SELECT & MODAL HOUSE BL
         // =========================================================================
+        function setSelectOrAddOption(selectId, val, label) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return;
+            val = (val || '').trim();
+            if (!val) {
+                sel.selectedIndex = 0;
+                return;
+            }
+
+            let found = false;
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value.toUpperCase() === val.toUpperCase()) {
+                    sel.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                const opt = document.createElement('option');
+                opt.value = val;
+                opt.textContent = `${val} - ${label || val}`;
+                sel.insertBefore(opt, sel.firstChild);
+                sel.selectedIndex = 0;
+            }
+        }
+
+        let activePortTargetSelectId = null;
+        let portSearchTimer = null;
+
+        function handlePortSelectChange(selectEl) {
+            if (selectEl.value === '__SEARCH__') {
+                searchGlobalPort(selectEl.id);
+            }
+        }
+
+        function searchGlobalPort(selectId) {
+            activePortTargetSelectId = selectId;
+            const modal = document.getElementById('modalSearchPort');
+            const input = document.getElementById('portSearchQuery');
+            const list = document.getElementById('portSearchResultList');
+            
+            let fieldLabel = 'Pelabuhan';
+            if (selectId === 'bl_pelabuhan_asal') fieldLabel = 'Pelabuhan Asal';
+            else if (selectId === 'bl_pelabuhan_bongkar') fieldLabel = 'Pelabuhan Bongkar';
+            else if (selectId === 'bl_pelabuhan_akhir') fieldLabel = 'Pelabuhan Akhir';
+
+            document.getElementById('searchPortModalTitle').innerHTML = `⚓ Cari Referensi ${fieldLabel} (UN/LOCODE)`;
+            input.value = '';
+            list.innerHTML = `
+                <div style="padding:16px; text-align:center; color:var(--text-muted); font-size:11px;">
+                    Ketik minimal 2 karakter untuk mencari di seluruh 91.000+ data referensi pelabuhan Bea Cukai.
+                </div>
+            `;
+            modal.style.display = 'flex';
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeSearchPortModal() {
+            const modal = document.getElementById('modalSearchPort');
+            if (modal) modal.style.display = 'none';
+            if (activePortTargetSelectId) {
+                const sel = document.getElementById(activePortTargetSelectId);
+                if (sel && sel.value === '__SEARCH__') {
+                    sel.selectedIndex = 0;
+                }
+            }
+        }
+
+        function debouncePortSearch(q) {
+            clearTimeout(portSearchTimer);
+            portSearchTimer = setTimeout(() => {
+                doSearchPort(q);
+            }, 250);
+        }
+
+        async function doSearchPort(q) {
+            const list = document.getElementById('portSearchResultList');
+            q = (q || '').trim();
+            if (q.length < 2) {
+                list.innerHTML = `
+                    <div style="padding:16px; text-align:center; color:var(--text-muted); font-size:11px;">
+                        Ketik minimal 2 karakter untuk mencari di seluruh 91.000+ data referensi pelabuhan Bea Cukai.
+                    </div>
+                `;
+                return;
+            }
+
+            list.innerHTML = `<div style="padding:16px; text-align:center; color:var(--primary); font-size:11px;">⏳ Mencari referensi pelabuhan...</div>`;
+
+            try {
+                const res = await fetch(`manifest_api.php?action=get_reff&reff=PELABUHAN&q=${encodeURIComponent(q)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && json.data && json.data.length > 0) {
+                    let html = '<table class="table" style="margin:0; width:100%; font-size:11px;">';
+                    html += '<thead style="position:sticky; top:0; background:var(--bg-card); z-index:1;"><tr><th style="width:75px;">Kode</th><th>Nama Pelabuhan / Lokasi</th><th style="width:70px; text-align:center;">Aksi</th></tr></thead><tbody>';
+                    json.data.forEach(item => {
+                        html += `
+                            <tr style="cursor:pointer;" onclick="selectPortFromModal('${escapeHtml(item.kode)}', '${escapeHtml(item.teks)}')">
+                                <td><span class="badge badge-info" style="font-family:monospace; font-size:11px;">${escapeHtml(item.kode)}</span></td>
+                                <td>${escapeHtml(item.teks)}</td>
+                                <td style="text-align:center;"><button type="button" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:10px;">Pilih</button></td>
+                            </tr>
+                        `;
+                    });
+                    html += '</tbody></table>';
+                    list.innerHTML = html;
+                } else {
+                    list.innerHTML = `<div style="padding:16px; text-align:center; color:var(--text-muted); font-size:11px;">Tidak ditemukan pelabuhan dengan kata kunci "<strong>${escapeHtml(q)}</strong>".</div>`;
+                }
+            } catch (e) {
+                list.innerHTML = `<div style="padding:16px; text-align:center; color:var(--danger); font-size:11px;">Gagal mencari: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function selectPortFromModal(kode, teks) {
+            if (activePortTargetSelectId) {
+                setSelectOrAddOption(activePortTargetSelectId, kode, teks);
+            }
+            closeSearchPortModal();
+        }
+
         function openModalBL() {
             if (!document.getElementById('m_nomor_aju').value) {
                 showWarning('Silakan isi dan simpan Header Manifes terlebih dahulu!');
                 return;
             }
+            const titleEl = document.getElementById('modalBlTitle');
+            if (titleEl) titleEl.textContent = '➕ Tambah House B/L (HBL)';
+            
+            document.getElementById('formHouseBl').reset();
+            document.getElementById('bl_orig_nomor_host_bl').value = '';
+            
+            const now = new Date().toISOString().slice(0, 10);
+            document.getElementById('bl_tgl_bl').value = now;
+            document.getElementById('bl_tgl_host_bl').value = now;
+            document.getElementById('bl_npwp_penerima').value = document.getElementById('m_id_perusahaan')?.value || '<?= htmlspecialchars($sessionNpwp) ?>';
+            document.getElementById('bl_nama_penerima').value = document.getElementById('m_nama_perusahaan')?.value || '<?= htmlspecialchars($sessionCmpName) ?>';
+            document.getElementById('bl_alamat_penerima').value = document.getElementById('m_alamat_perusahaan')?.value || '<?= htmlspecialchars($alamat ?: "-") ?>';
+            document.getElementById('bl_berat').value = '100.00';
+            document.getElementById('bl_dimensi').value = '0.00';
+            document.getElementById('bl_jumlah_kemasan').value = '1';
+            document.getElementById('bl_mother_vessel').value = document.getElementById('m_sarana_pengangkut')?.value || '';
+            
+            setSelectOrAddOption('bl_jenis_kemasan', 'CT', 'Carton');
+            setSelectOrAddOption('bl_pelabuhan_asal', 'CNSHZ', 'Shenzhen');
+            setSelectOrAddOption('bl_pelabuhan_bongkar', 'IDTPP', 'Tanjung Priok');
+            setSelectOrAddOption('bl_pelabuhan_akhir', 'IDTPP', 'Tanjung Priok');
+            
+            document.getElementById('bl_kode_hs').value = '0101';
+            document.getElementById('bl_uraian_barang').value = 'BARANG IMPOR';
+            document.getElementById('bl_no_container').value = '';
+            document.getElementById('bl_ukuran_container').value = '20';
+            document.getElementById('bl_type_container').value = '1';
+            document.getElementById('bl_nomor_segel').value = 'SEAL01';
+
             document.getElementById('modalHouseBl').style.display = 'flex';
         }
 
         function closeModalBL() {
             document.getElementById('modalHouseBl').style.display = 'none';
+        }
+
+        function editHouseBlModal(nomorHostBl) {
+            if (!currentLoadedBls || currentLoadedBls.length === 0) return;
+            const b = currentLoadedBls.find(x => String(x.nomor_host_bl) === String(nomorHostBl));
+            if (!b) {
+                showError(`Data House B/L '${nomorHostBl}' tidak ditemukan.`);
+                return;
+            }
+
+            const titleEl = document.getElementById('modalBlTitle');
+            if (titleEl) titleEl.textContent = `✏️ Edit House B/L: ${nomorHostBl}`;
+
+            document.getElementById('bl_orig_nomor_host_bl').value = b.nomor_host_bl || '';
+            document.getElementById('bl_nomor_bl').value = b.nomor_bl || '';
+            document.getElementById('bl_tgl_bl').value = b.tanggal_bl ? b.tanggal_bl.substring(0, 10) : '';
+            document.getElementById('bl_nomor_host_bl').value = b.nomor_host_bl || '';
+            document.getElementById('bl_tgl_host_bl').value = b.tanggal_host_bl ? b.tanggal_host_bl.substring(0, 10) : '';
+            document.getElementById('bl_nama_pengirim').value = b.nama_pengirim || '';
+            document.getElementById('bl_alamat_pengirim').value = b.alamat_pengirim || '';
+            document.getElementById('bl_npwp_penerima').value = b.npwp_penerima || b.id_penerima || '';
+            document.getElementById('bl_nama_penerima').value = b.nama_penerima || '';
+            document.getElementById('bl_alamat_penerima').value = b.alamat_penerima || '';
+            document.getElementById('bl_berat').value = b.berat || '0';
+            document.getElementById('bl_dimensi').value = b.dimensi || b.volume || '0';
+            document.getElementById('bl_jumlah_kemasan').value = b.jumlahKemasan || b.jumlah_kemasan || 1;
+            document.getElementById('bl_mother_vessel').value = b.mother_vessel || b.nama_sarana_pengangkut || document.getElementById('m_sarana_pengangkut')?.value || '';
+
+            // Dropdown binds
+            const kemasanVal = b.jenisKemasan || b.kode_kemasan || 'CT';
+            setSelectOrAddOption('bl_jenis_kemasan', kemasanVal, kemasanVal);
+
+            const asalVal = b.kode_pelabuhan_asal || 'CNSHZ';
+            setSelectOrAddOption('bl_pelabuhan_asal', asalVal, asalVal);
+
+            const bongkarVal = b.kode_pelabuhan_bongkar || 'IDTPP';
+            setSelectOrAddOption('bl_pelabuhan_bongkar', bongkarVal, bongkarVal);
+
+            const akhirVal = b.kode_pelabuhan_akhir || bongkarVal || 'IDTPP';
+            setSelectOrAddOption('bl_pelabuhan_akhir', akhirVal, akhirVal);
+
+            // HS
+            let hsCode = '0101';
+            let hsDesc = 'BARANG IMPOR';
+            if (b.hs_items && b.hs_items.length > 0) {
+                hsCode = b.hs_items[0].kode_hs || hsCode;
+                hsDesc = b.hs_items[0].uraian_barang || hsDesc;
+            } else if (b.kode_hs) {
+                hsCode = b.kode_hs;
+                hsDesc = b.uraian_barang || hsDesc;
+            }
+            document.getElementById('bl_kode_hs').value = hsCode;
+            document.getElementById('bl_uraian_barang').value = hsDesc;
+
+            // Container
+            let petiNo = '';
+            let petiSize = '20';
+            let petiType = '1';
+            let petiSeal = 'SEAL01';
+            if (b.petikemas && b.petikemas.length > 0) {
+                petiNo = b.petikemas[0].nomor_container || '';
+                petiSize = b.petikemas[0].ukuran_container || '20';
+                petiType = b.petikemas[0].type_container || '1';
+                petiSeal = b.petikemas[0].nomor_segel || 'SEAL01';
+            } else if (b.nomor_container) {
+                petiNo = b.nomor_container;
+                petiSize = b.ukuran_container || '20';
+                petiType = b.type_container || '1';
+                petiSeal = b.nomor_segel || 'SEAL01';
+            }
+            document.getElementById('bl_no_container').value = petiNo;
+            document.getElementById('bl_ukuran_container').value = petiSize;
+            document.getElementById('bl_type_container').value = petiType;
+            document.getElementById('bl_nomor_segel').value = petiSeal;
+
+            document.getElementById('modalHouseBl').style.display = 'flex';
+        }
+
+        async function deleteHouseBl(nomorHostBl) {
+            const aju = document.getElementById('m_nomor_aju')?.value;
+            if (!aju) return;
+            const ok = await showConfirm(`Apakah Anda yakin ingin menghapus House B/L '<strong>${escapeHtml(nomorHostBl)}</strong>'?`, 'Hapus House B/L', 'Ya, Hapus', 'Batal', 'warning');
+            if (!ok) return;
+
+            const fData = new FormData();
+            fData.append('action', 'delete_bl');
+            fData.append('cmp_id', activeCmpId);
+            fData.append('nomor_aju', aju);
+            fData.append('nomor_host_bl', nomorHostBl);
+
+            try {
+                const res = await fetch('manifest_api.php', { method: 'POST', body: fData });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    showSuccess(json.message);
+                    editManifest(aju);
+                } else {
+                    showError(json.message);
+                }
+            } catch (e) {
+                showError('Error: ' + e.message);
+            }
         }
 
         async function saveHouseBl(e) {
@@ -1023,6 +1780,7 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             fData.append('action', 'save_bl');
             fData.append('cmp_id', activeCmpId);
             fData.append('nomor_aju', aju);
+            fData.append('orig_nomor_host_bl', document.getElementById('bl_orig_nomor_host_bl').value);
             fData.append('nomor_bl', document.getElementById('bl_nomor_bl').value);
             fData.append('tanggal_bl', document.getElementById('bl_tgl_bl').value);
             fData.append('nomor_host_bl', document.getElementById('bl_nomor_host_bl').value);
@@ -1151,6 +1909,24 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             } catch (err) { showError('Error: ' + err.message); }
         }
 
+        function executeCekLengkap() {
+            const aju = (document.getElementById('m_nomor_aju')?.value || currentNomorAju || '').trim();
+            if (!aju) {
+                showWarning('Silakan pilih atau simpan data Header Manifes terlebih dahulu!');
+                return;
+            }
+            actionCekLengkap(aju);
+        }
+
+        function executeKirimManifes() {
+            const aju = (document.getElementById('m_nomor_aju')?.value || currentNomorAju || '').trim();
+            if (!aju) {
+                showWarning('Silakan pilih atau simpan data Header Manifes terlebih dahulu!');
+                return;
+            }
+            actionKirim(aju);
+        }
+
         async function actionCekLengkap(nomorAju) {
             const fData = new FormData();
             fData.append('action', 'api_cek_lengkap');
@@ -1235,6 +2011,14 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
                         confirmButtonText: 'Tutup'
                     });
                     loadManifestList();
+                } else if (json.status === 'WARNING') {
+                    Swal.fire({
+                        ...getSwalThemeOptions(),
+                        icon: 'info',
+                        title: 'Status Manifes',
+                        html: json.message,
+                        confirmButtonText: 'Mengerti'
+                    });
                 } else {
                     showError(json.message);
                 }
@@ -1341,9 +2125,155 @@ $sessionNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
             navigator.clipboard.writeText(JSON.stringify(lastInquiryData, null, 2)).then(() => showSuccess('Hasil pencarian disalin ke clipboard!'));
         }
 
+        // =========================================================================
+        // IMPORT EXCEL BACKUP CEISA 4.0
+        // =========================================================================
+        function openImportManifestModal() {
+            document.getElementById('modalImportManifest').style.display = 'flex';
+            document.getElementById('selectedManifestFileName').style.display = 'none';
+            document.getElementById('selectedManifestFileName').innerText = '';
+            document.getElementById('fileExcelManifest').value = '';
+            document.getElementById('btnSubmitImportManifest').disabled = true;
+            document.getElementById('importProgressManifest').style.display = 'none';
+            document.getElementById('importResultManifest').style.display = 'none';
+        }
+
+        function closeImportManifestModal() {
+            document.getElementById('modalImportManifest').style.display = 'none';
+        }
+
+        function handleManifestFileSelected(input) {
+            if (input.files && input.files[0]) {
+                const file = input.files[0];
+                const label = document.getElementById('selectedManifestFileName');
+                label.innerText = `📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+                label.style.display = 'block';
+                document.getElementById('btnSubmitImportManifest').disabled = false;
+                document.getElementById('importResultManifest').style.display = 'none';
+            }
+        }
+
+        async function submitImportManifest() {
+            const fileInput = document.getElementById('fileExcelManifest');
+            if (!fileInput.files || !fileInput.files[0]) {
+                alert('Silakan pilih file Excel (.xlsx) terlebih dahulu.');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const formData = new FormData();
+            formData.append('action', 'import_excel');
+            formData.append('excel_file', file);
+            formData.append('cmp_id', activeCmpId);
+
+            const btnSubmit = document.getElementById('btnSubmitImportManifest');
+            const progressEl = document.getElementById('importProgressManifest');
+            const resultEl = document.getElementById('importResultManifest');
+
+            btnSubmit.disabled = true;
+            btnSubmit.innerText = '⏳ Mengimpor...';
+            progressEl.style.display = 'block';
+            resultEl.style.display = 'none';
+
+            try {
+                const resp = await fetch('manifest_api.php', {
+                    method: 'POST',
+                    body: formData
+                });
+                const res = await resp.json();
+
+                progressEl.style.display = 'none';
+                btnSubmit.disabled = false;
+                btnSubmit.innerText = '🚀 Mulai Impor Data';
+
+                if (res.status === 'OK') {
+                    const firstAju = res.data && res.data[0] ? res.data[0] : null;
+                    let detailStr = '';
+                    if (firstAju) {
+                        detailStr = `<div style="margin-top:8px; line-height:1.7;">
+                            <b>No Aju:</b> ${firstAju.nomor_aju}<br>
+                            <b>Sarana Pengangkut:</b> ${firstAju.sarana_pengangkut} (Voyage: ${firstAju.nomor_voyage})<br>
+                            <b>Jumlah HBL:</b> ${firstAju.total_hbl} | <b>Petikemas:</b> ${firstAju.total_container} | <b>HS:</b> ${firstAju.total_hs} | <b>Dokumen:</b> ${firstAju.total_dokumen}
+                        </div>`;
+                    }
+
+                    resultEl.style.display = 'block';
+                    resultEl.style.background = 'rgba(16, 185, 129, 0.1)';
+                    resultEl.style.border = '1px solid #10b981';
+                    resultEl.style.color = 'var(--text)';
+                    resultEl.innerHTML = `
+                        <div style="font-weight:700; color:#10b981; font-size:13px;">✅ ${res.message}</div>
+                        ${detailStr}
+                        <div style="margin-top:12px; display:flex; gap:8px;">
+                            ${firstAju ? `<button class="btn btn-primary btn-sm" onclick="closeImportManifestModal(); editManifest('${firstAju.nomor_aju}')">✏️ Buka di Form Editor</button>` : ''}
+                            <button class="btn btn-secondary btn-sm" onclick="closeImportManifestModal(); loadManifestList()">📋 Lihat Daftar</button>
+                        </div>
+                    `;
+
+                    loadManifestList();
+                } else {
+                    resultEl.style.display = 'block';
+                    resultEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                    resultEl.style.border = '1px solid #ef4444';
+                    resultEl.style.color = '#ef4444';
+                    resultEl.innerHTML = `<b>❌ Gagal Impor:</b> ${res.message || 'Terjadi kesalahan saat memproses Excel.'}`;
+                }
+            } catch (err) {
+                progressEl.style.display = 'none';
+                btnSubmit.disabled = false;
+                btnSubmit.innerText = '🚀 Mulai Impor Data';
+
+                resultEl.style.display = 'block';
+                resultEl.style.background = 'rgba(239, 68, 68, 0.1)';
+                resultEl.style.border = '1px solid #ef4444';
+                resultEl.style.color = '#ef4444';
+                resultEl.innerHTML = `<b>❌ Error:</b> ${err.message}`;
+            }
+        }
+
         // Initialize on load
         window.addEventListener('DOMContentLoaded', () => {
             loadManifestList();
+
+            const initParamAju = <?= json_encode(trim($_GET['nomor_aju'] ?? '')) ?>;
+            if (initParamAju) {
+                setTimeout(() => editManifest(initParamAju), 200);
+            }
+
+            window.addEventListener('message', (e) => {
+                if (e.data && e.data.type === 'EDIT_MANIFEST' && e.data.nomorAju) {
+                    editManifest(e.data.nomorAju);
+                }
+            });
+
+            // Drag and drop support
+            const dropZone = document.getElementById('dropZoneManifest');
+            if (dropZone) {
+                ['dragenter', 'dragover'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropZone.style.borderColor = 'var(--primary)';
+                        dropZone.style.background = 'var(--bg-base)';
+                    }, false);
+                });
+                ['dragleave', 'drop'].forEach(eventName => {
+                    dropZone.addEventListener(eventName, (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        dropZone.style.borderColor = 'var(--border)';
+                        dropZone.style.background = 'var(--bg-input)';
+                    }, false);
+                });
+                dropZone.addEventListener('drop', (e) => {
+                    const dt = e.dataTransfer;
+                    const files = dt.files;
+                    if (files && files[0]) {
+                        document.getElementById('fileExcelManifest').files = files;
+                        handleManifestFileSelected(document.getElementById('fileExcelManifest'));
+                    }
+                }, false);
+            }
         });
     </script>
 </body>

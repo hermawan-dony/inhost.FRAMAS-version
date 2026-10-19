@@ -14,7 +14,8 @@ $cmp_key = !empty($cmp_id) ? $cmp_id : 'default';
 // Fungsi untuk memeriksa apakah mfatoken perusahaan masih valid (cache session & file shared)
 $tokenCacheFile = sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $cmp_key) . '.json';
 
-function get_cached_mfatoken($cmp_key, $tokenCacheFile) {
+if (!function_exists('get_cached_mfatoken')) {
+    function get_cached_mfatoken($cmp_key, $tokenCacheFile) {
     $expiry_time = 480; // 8 menit (CEISA token berlaku 10 menit, pakai margin aman 8 menit)
 
     // 1. Cek memory session
@@ -41,6 +42,7 @@ function get_cached_mfatoken($cmp_key, $tokenCacheFile) {
     }
 
     return null;
+    }
 }
 
 $activeToken = get_cached_mfatoken($cmp_key, $tokenCacheFile);
@@ -86,7 +88,10 @@ if (empty($activeToken)) {
             "Sec-Fetch-Dest: empty",
             "Sec-Fetch-Mode: cors",
             "Sec-Fetch-Site: same-site",
-            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            "sec-ch-ua: \"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"",
+            "sec-ch-ua-mobile: ?0",
+            "sec-ch-ua-platform: \"Windows\"",
+            "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
         ],
     ]);
 

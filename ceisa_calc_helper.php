@@ -610,21 +610,53 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         $fixedBarang = 0;
         $fixedBahanBaku = 0;
 
-        // 1. Perbaiki bc_ceisa_barang
+        // 1. Bersihkan karakter non-digit pada HS Code yang sudah ada
+        $cleanB = $koneksi->query("SELECT id, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
+        if ($cleanB) {
+            while ($cb = $cleanB->fetch_assoc()) {
+                $rawHs = trim($cb['hs']);
+                $cleaned = preg_replace('/[^0-9]/', '', $rawHs);
+                if ($cleaned !== $rawHs) {
+                    $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$cleaned' WHERE id = " . intval($cb['id']));
+                    $fixedBarang++;
+                }
+            }
+        }
+        $cleanBb = $koneksi->query("SELECT id, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
+        if ($cleanBb) {
+            while ($cbb = $cleanBb->fetch_assoc()) {
+                $rawHs = trim($cbb['hs']);
+                $cleaned = preg_replace('/[^0-9]/', '', $rawHs);
+                if ($cleaned !== $rawHs) {
+                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$cleaned' WHERE id = " . intval($cbb['id']));
+                    $fixedBahanBaku++;
+                }
+            }
+        }
+
+        // 2. Isi HS Code kosong pada bc_ceisa_barang
         $bRes = $koneksi->query("SELECT id, seri_barang, kode_barang, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
         if ($bRes) {
             while ($b = $bRes->fetch_assoc()) {
                 $kb = $koneksi->real_escape_string(trim($b['kode_barang']));
                 if (empty($kb)) continue;
 
-                // Cari dari bc_1ab2
                 $hsFound = '';
+                // Cek dari bc_1ab2
                 $q1 = $koneksi->query("SELECT POS_TARIF FROM bc_1ab2 WHERE kode_barang = '$kb' AND CAST(POS_TARIF AS UNSIGNED) > 0 ORDER BY TANGGAL_DAFTAR DESC LIMIT 1");
                 if ($q1 && $r1 = $q1->fetch_assoc()) {
                     $hsFound = trim($r1['POS_TARIF']);
                 }
 
-                // Fallback riwayat bc_ceisa_barang
+                // Cek dari master bc_material
+                if (empty($hsFound)) {
+                    $qMat = $koneksi->query("SELECT POS_TARIF FROM bc_material WHERE KODE_BARANG = '$kb' AND CAST(POS_TARIF AS UNSIGNED) > 0 LIMIT 1");
+                    if ($qMat && $rm = $qMat->fetch_assoc()) {
+                        $hsFound = trim($rm['POS_TARIF']);
+                    }
+                }
+
+                // Cek dari riwayat transaksi bc_ceisa_barang terdahulu
                 if (empty($hsFound)) {
                     $q2 = $koneksi->query("SELECT hs FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY id DESC LIMIT 1");
                     if ($q2 && $r2 = $q2->fetch_assoc()) {
@@ -633,14 +665,17 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 }
 
                 if (!empty($hsFound)) {
-                    $escHs = $koneksi->real_escape_string($hsFound);
-                    $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$escHs' WHERE id = " . intval($b['id']));
-                    $fixedBarang++;
+                    $cleanedHs = preg_replace('/[^0-9]/', '', $hsFound);
+                    if (!empty($cleanedHs)) {
+                        $escHs = $koneksi->real_escape_string($cleanedHs);
+                        $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$escHs' WHERE id = " . intval($b['id']));
+                        $fixedBarang++;
+                    }
                 }
             }
         }
 
-        // 2. Perbaiki bc_ceisa_bahanbaku
+        // 3. Isi HS Code kosong pada bc_ceisa_bahanbaku
         $bbRes = $koneksi->query("SELECT id, seri_barang, seri_bahan_baku, kode_barang, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
         if ($bbRes) {
             while ($bb = $bbRes->fetch_assoc()) {
@@ -651,6 +686,13 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 $q1 = $koneksi->query("SELECT POS_TARIF FROM bc_1ab2 WHERE kode_barang = '$kb' AND CAST(POS_TARIF AS UNSIGNED) > 0 ORDER BY TANGGAL_DAFTAR DESC LIMIT 1");
                 if ($q1 && $r1 = $q1->fetch_assoc()) {
                     $hsFound = trim($r1['POS_TARIF']);
+                }
+
+                if (empty($hsFound)) {
+                    $qMat = $koneksi->query("SELECT POS_TARIF FROM bc_material WHERE KODE_BARANG = '$kb' AND CAST(POS_TARIF AS UNSIGNED) > 0 LIMIT 1");
+                    if ($qMat && $rm = $qMat->fetch_assoc()) {
+                        $hsFound = trim($rm['POS_TARIF']);
+                    }
                 }
 
                 if (empty($hsFound)) {
@@ -668,9 +710,12 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 }
 
                 if (!empty($hsFound)) {
-                    $escHs = $koneksi->real_escape_string($hsFound);
-                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$escHs' WHERE id = " . intval($bb['id']));
-                    $fixedBahanBaku++;
+                    $cleanedHs = preg_replace('/[^0-9]/', '', $hsFound);
+                    if (!empty($cleanedHs)) {
+                        $escHs = $koneksi->real_escape_string($cleanedHs);
+                        $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$escHs' WHERE id = " . intval($bb['id']));
+                        $fixedBahanBaku++;
+                    }
                 }
             }
         }
@@ -685,35 +730,76 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
 
     /**
      * 7. Utility FIX NETTO (ue_fixnetto)
-     * Mengisi netto barang kosong dengan rasio historis (netto / jumlah_satuan) * current_jumlah_satuan.
+     * Mengisi netto barang kosong dengan rasio historis (netto / jumlah_satuan) * current_jumlah_satuan,
+     * mengecek master material bc_material, menstandarkan netto <= bruto, serta menyinkronkan total header.
      */
     function ceisa_fix_netto($koneksi, $nomor_aju) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
         $fixedCount = 0;
 
-        $bRes = $koneksi->query("SELECT id, seri_barang, kode_barang, jumlah_satuan, netto FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND (netto IS NULL OR netto <= 0)");
+        $bRes = $koneksi->query("SELECT id, seri_barang, kode_barang, jumlah_satuan, netto, bruto FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
         if ($bRes) {
             while ($b = $bRes->fetch_assoc()) {
+                $id = intval($b['id']);
                 $kb = $koneksi->real_escape_string(trim($b['kode_barang']));
                 $jml = floatval($b['jumlah_satuan'] ?? 0);
-                if (empty($kb) || $jml <= 0) continue;
+                $netto = floatval($b['netto'] ?? 0);
+                $bruto = floatval($b['bruto'] ?? 0);
+                $changed = false;
 
-                // Cari rasio historis (netto / jumlah_satuan)
-                $q = $koneksi->query("SELECT (netto / jumlah_satuan) as net_satuan FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND netto > 0 AND jumlah_satuan > 0 ORDER BY id DESC LIMIT 1");
-                if ($q && $r = $q->fetch_assoc()) {
-                    $ratio = floatval($r['net_satuan']);
-                    if ($ratio > 0) {
-                        $calcNetto = round($ratio * $jml, 4);
-                        $koneksi->query("UPDATE bc_ceisa_barang SET netto = $calcNetto WHERE id = " . intval($b['id']));
-                        $fixedCount++;
+                if ($netto <= 0) {
+                    $calcNetto = 0;
+                    // 1. Rasio historis dari bc_ceisa_barang
+                    if (!empty($kb) && $jml > 0) {
+                        $q = $koneksi->query("SELECT (netto / jumlah_satuan) as net_satuan FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND netto > 0 AND jumlah_satuan > 0 ORDER BY id DESC LIMIT 1");
+                        if ($q && $r = $q->fetch_assoc()) {
+                            $ratio = floatval($r['net_satuan']);
+                            if ($ratio > 0) {
+                                $calcNetto = round($ratio * $jml, 4);
+                            }
+                        }
                     }
+
+                    // 2. Master berat dari bc_material
+                    if ($calcNetto <= 0 && !empty($kb) && $jml > 0) {
+                        $qMat = $koneksi->query("SELECT BERAT FROM bc_material WHERE KODE_BARANG = '$kb' AND BERAT > 0 LIMIT 1");
+                        if ($qMat && $rm = $qMat->fetch_assoc()) {
+                            $calcNetto = round(floatval($rm['BERAT']) * $jml, 4);
+                        }
+                    }
+
+                    // 3. Fallback dari bruto
+                    if ($calcNetto <= 0 && $bruto > 0) {
+                        $calcNetto = round($bruto * 0.9, 4);
+                    }
+
+                    if ($calcNetto > 0) {
+                        $netto = $calcNetto;
+                        $changed = true;
+                    }
+                }
+
+                // Validasi Bruto: Bruto harus >= Netto
+                if ($netto > 0) {
+                    if ($bruto <= 0 || $bruto < $netto) {
+                        $bruto = round($netto * 1.05, 4);
+                        $changed = true;
+                    }
+                }
+
+                if ($changed) {
+                    $koneksi->query("UPDATE bc_ceisa_barang SET netto = $netto, bruto = $bruto WHERE id = $id");
+                    $fixedCount++;
                 }
             }
         }
 
+        // Sinkronkan ke akumulasi header
+        ceisa_sync_header_totals($koneksi, $nomor_aju);
+
         return [
             'status' => 'OK',
-            'message' => "FIX NETTO selesai! Diperbarui $fixedCount baris Barang berdasarkan riwayat rasio bobot satuan.",
+            'message' => "FIX NETTO selesai! Diperbarui $fixedCount baris Barang beserta sinkronisasi total bobot Header.",
             'fixed_count' => $fixedCount
         ];
     }
@@ -985,14 +1071,421 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         }
         $insBb->close();
 
-        // Otomatis generate Bahan Baku Tarif
+        // Otomatis generate Bahan Baku Tarif & Pungutan
         $resTarif = ceisa_generate_bahanbaku_tarif($koneksi, $nomor_aju);
+        ceisa_calc_pungutan($koneksi, $nomor_aju);
 
         return [
             'status' => 'OK',
-            'message' => "Sukses transfer $inserted baris ke Bahan Baku & dibuatkan otomatis " . intval($resTarif['count'] ?? 0) . " baris Bahan Baku Tarif!",
+            'message' => "Sukses transfer $inserted baris ke Bahan Baku & dibuatkan otomatis " . intval($resTarif['count'] ?? 0) . " baris Bahan Baku Tarif beserta rekonsiliasi Pungutan!",
             'inserted_bb' => $inserted,
             'inserted_tarif' => $resTarif['count'] ?? 0
+        ];
+    }
+
+    /**
+     * 13. Mesin Trace FIFO (ue_trace & ue_traceall)
+     * Otomatis mencocokkan kebutuhan bahan baku dari BOM dengan saldo pemasukan di bc_1ab2 (AB = 'A') secara First-In First-Out.
+     */
+    function ceisa_trace_fifo($koneksi, $nomor_aju) {
+        $escAju = $koneksi->real_escape_string($nomor_aju);
+
+        // Ambil info header dokumen
+        $hRes = $koneksi->query("SELECT cmp_id, kode_dokumen, ndpbm FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        if (!$hRes || !($hdr = $hRes->fetch_assoc())) {
+            return ['status' => 'ERROR', 'message' => 'Header dokumen tidak ditemukan.'];
+        }
+        $cmp_id = $hdr['cmp_id'] ?? '';
+        $ndpbm = floatval($hdr['ndpbm'] ?? 1);
+        if ($ndpbm <= 0) $ndpbm = 1;
+
+        // Pastikan BOM terisi di bc_ceisa_barangbom
+        $chkBom = $koneksi->query("SELECT COUNT(1) FROM bc_ceisa_barangbom WHERE aju = '$escAju'")->fetch_row()[0] ?? 0;
+        if ($chkBom == 0) {
+            $resBom = ceisa_load_all_bom($koneksi, $nomor_aju);
+            if ($resBom['status'] === 'ERROR') {
+                return $resBom;
+            }
+        }
+
+        // Ambil seluruh komponen BOM yang dibutuhkan
+        $bomsRes = $koneksi->query("SELECT id, seri, kode_barang_parent, kode_barang, uraian, kode_satuan, qty FROM bc_ceisa_barangbom WHERE aju = '$escAju' ORDER BY seri ASC, id ASC");
+        if (!$bomsRes || $bomsRes->num_rows == 0) {
+            return ['status' => 'WARNING', 'message' => 'Tidak ada komponen BOM yang ditemukan untuk AJU ini. Pastikan Master BOM telah diset.'];
+        }
+
+        $boms = [];
+        while ($r = $bomsRes->fetch_assoc()) {
+            $boms[] = $r;
+        }
+
+        // Bersihkan data trace lama untuk AJU ini
+        $koneksi->query("DELETE FROM bc_ceisa_tracebb WHERE aju = '$escAju' OR nomor_aju = '$escAju'");
+
+        $seq = 0;
+        $totalTracedRows = 0;
+        $unmatchedItems = 0;
+        $insStmt = $koneksi->prepare("INSERT INTO bc_ceisa_tracebb 
+            (cmp_id, id, aju, nomor_aju, seri, seri_barang, id_bom, id_barang,
+             kode_brg, kode_barang, nama_brg, uraian, sat, satuan, qty_use,
+             jenis_bc, kode_dokumen_asal, no_daftar, nomor_daftar_asal,
+             tgl_daftar, tanggal_daftar_asal, nomor_aju_asal, seri_barang_asal,
+             hs, nama_bs, harga, cif, ndpbm, gross, netto, set_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        $setBy = 'AUTO-FIFO ' . date('Ymd H:i');
+
+        foreach ($boms as $bom) {
+            $idBom = $bom['id'];
+            $seriBrg = intval($bom['seri']);
+            $kdKomp = trim($bom['kode_barang']);
+            $uraianKomp = trim($bom['uraian'] ?? $kdKomp);
+            $satKomp = trim($bom['kode_satuan'] ?? 'PCE');
+            $qtyNeeded = floatval($bom['qty'] ?? 0);
+            if ($qtyNeeded <= 0) continue;
+
+            $remQty = $qtyNeeded;
+            $escKomp = $koneksi->real_escape_string($kdKomp);
+
+            // Cari saldo masuk di bc_1ab2 (AB = 'A') diurutkan FIFO: TANGGAL_DAFTAR ASC, ID ASC
+            $sqlStock = "SELECT 
+                a.ID, a.BC, a.NOMOR_AJU, a.NOMOR_DAFTAR, a.TANGGAL_DAFTAR, a.SERI_BARANG,
+                a.KODE_BARANG, a.URAIAN, COALESCE(a.QTY_AKTUAL, a.QTY, 0) as QTY_AKTUAL, a.UNIT,
+                a.POS_TARIF, a.NILAI, a.HARGA_PENYERAHAN, a.NDPBM, a.CIF, a.NAMA_BS, a.GROSS, a.NETTO,
+                COALESCE((SELECT SUM(x.qty_use) FROM bc_ceisa_tracebb x WHERE x.nomor_aju = a.NOMOR_AJU AND x.seri_barang = a.SERI_BARANG), 0) as used_qty
+                FROM bc_1ab2 a
+                WHERE a.AB = 'A' AND a.KODE_BARANG = '$escKomp'
+                HAVING (QTY_AKTUAL - used_qty) > 0.000001
+                ORDER BY a.TANGGAL_DAFTAR ASC, a.ID ASC";
+
+            $stockRes = $koneksi->query($sqlStock);
+            if ($stockRes && $stockRes->num_rows > 0) {
+                while ($stock = $stockRes->fetch_assoc()) {
+                    if ($remQty <= 0.000001) break;
+
+                    $avail = floatval($stock['QTY_AKTUAL']) - floatval($stock['used_qty']);
+                    if ($avail <= 0) continue;
+
+                    $takeQty = min($remQty, $avail);
+                    $seq++;
+                    $uuid = md5(uniqid(rand(), true));
+
+                    $bcAsal = trim($stock['BC'] ?? '23');
+                    $noDaftar = trim($stock['NOMOR_DAFTAR'] ?? '');
+                    $tglDaftar = trim($stock['TANGGAL_DAFTAR'] ?? '');
+                    $ajuAsal = trim($stock['NOMOR_AJU'] ?? '');
+                    $seriAsal = intval($stock['SERI_BARANG'] ?? 1);
+                    $hs = preg_replace('/[^0-9]/', '', trim($stock['POS_TARIF'] ?? ''));
+                    $supplier = trim($stock['NAMA_BS'] ?? '');
+                    $itemNdpbm = floatval($stock['NDPBM'] ?? $ndpbm);
+                    if ($itemNdpbm <= 0) $itemNdpbm = $ndpbm;
+
+                    $stockQty = floatval($stock['QTY_AKTUAL']);
+                    if ($stockQty <= 0) $stockQty = 1;
+                    $unitCif = floatval($stock['CIF'] ?? 0) / $stockQty;
+                    if ($unitCif <= 0 && floatval($stock['NILAI'] ?? 0) > 0) {
+                        $unitCif = floatval($stock['NILAI']) / $stockQty;
+                    }
+                    $unitHarga = floatval($stock['HARGA_PENYERAHAN'] ?? 0) / $stockQty;
+                    if ($unitHarga <= 0) $unitHarga = $unitCif * $itemNdpbm;
+
+                    $itemGross = round((floatval($stock['GROSS'] ?? 0) / $stockQty) * $takeQty, 4);
+                    $itemNetto = round((floatval($stock['NETTO'] ?? 0) / $stockQty) * $takeQty, 4);
+
+                    $insStmt->bind_param('ssssiisisssssdsssssssisdddddds',
+                        $cmp_id, $uuid, $nomor_aju, $nomor_aju, $seq, $seriBrg, $idBom, $seriBrg,
+                        $kdKomp, $kdKomp, $uraianKomp, $uraianKomp, $satKomp, $satKomp, $takeQty,
+                        $bcAsal, $bcAsal, $noDaftar, $noDaftar,
+                        $tglDaftar, $tglDaftar, $ajuAsal, $seriAsal,
+                        $hs, $supplier, $unitHarga, $unitCif, $itemNdpbm, $itemGross, $itemNetto, $setBy
+                    );
+                    $insStmt->execute();
+                    $totalTracedRows++;
+
+                    $remQty -= $takeQty;
+                }
+            }
+
+            // Jika masih ada sisa kebutuhan yang belum teralokasi dari bc_1ab2
+            if ($remQty > 0.000001) {
+                $unmatchedItems++;
+                $seq++;
+                $uuid = md5(uniqid(rand(), true));
+
+                // Ambil info master material jika ada
+                $hsFallback = ''; $hargaFallback = 0; $satFallback = $satKomp;
+                $matRes = $koneksi->query("SELECT POS_TARIF, UNIT_PRICE, KODE_SATUAN FROM bc_material WHERE KODE_BARANG = '$escKomp' LIMIT 1");
+                if ($matRes && $mr = $matRes->fetch_assoc()) {
+                    $hsFallback = preg_replace('/[^0-9]/', '', trim($mr['POS_TARIF'] ?? ''));
+                    $hargaFallback = floatval($mr['UNIT_PRICE'] ?? 0);
+                    if (!empty($mr['KODE_SATUAN'])) $satFallback = trim($mr['KODE_SATUAN']);
+                }
+                $cifFallback = ($ndpbm > 0) ? round($hargaFallback / $ndpbm, 4) : 0;
+                $bcFallback = '40'; // Ditandai sebagai lokal / standby
+
+                $insStmt->bind_param('ssssiisisssssdsssssssisdddddds',
+                    $cmp_id, $uuid, $nomor_aju, $nomor_aju, $seq, $seriBrg, $idBom, $seriBrg,
+                    $kdKomp, $kdKomp, $uraianKomp, $uraianKomp, $satFallback, $satFallback, $remQty,
+                    $bcFallback, $bcFallback, '-', '-',
+                    CURDATE(), CURDATE(), '-', 1,
+                    $hsFallback, 'LOKAL / STANDBY IT INVENTORY', $hargaFallback, $cifFallback, $ndpbm, 0, 0, $setBy
+                );
+                $insStmt->execute();
+                $totalTracedRows++;
+            }
+        }
+        $insStmt->close();
+
+        // Update rata-rata harga dan CIF kembali ke bc_ceisa_barangbom
+        $koneksi->query("UPDATE bc_ceisa_barangbom ni
+            JOIN (
+                SELECT id_bom,
+                    SUM(COALESCE(harga, 0) * qty_use) / NULLIF(SUM(qty_use), 0) AS avg_harga,
+                    SUM(COALESCE(cif, 0) * qty_use) / NULLIF(SUM(qty_use), 0) AS avg_cif
+                FROM bc_ceisa_tracebb
+                WHERE aju = '$escAju'
+                GROUP BY id_bom
+            ) na ON ni.id = na.id_bom
+            SET ni.harga_penyerahan = ROUND(ni.qty * COALESCE(na.avg_harga, 0), 2),
+                ni.cif = ROUND(ni.qty * COALESCE(na.avg_cif, 0), 2)
+            WHERE ni.aju = '$escAju'");
+
+        return [
+            'status' => 'OK',
+            'message' => "Trace FIFO selesai! Berhasil menghubungkan $totalTracedRows baris dokumen asal ke BOM. " .
+                         ($unmatchedItems > 0 ? "($unmatchedItems komponen dialokasikan saldo standby)." : ""),
+            'total_rows' => $totalTracedRows,
+            'unmatched' => $unmatchedItems
+        ];
+    }
+
+    /**
+     * 14. Quick Picker Master Barang (bc_material)
+     */
+    function ceisa_get_material_picker($koneksi, $search = '', $klas = '', $limit = 60) {
+        $where = ["(AKTIF = 1 OR AKTIF IS NULL OR AKTIF = 'Y' OR AKTIF = '1')"];
+        if (!empty($search)) {
+            $esc = $koneksi->real_escape_string($search);
+            $where[] = "(KODE_BARANG LIKE '%$esc%' OR URAIAN LIKE '%$esc%' OR MODEL LIKE '%$esc%' OR POS_TARIF LIKE '%$esc%')";
+        }
+        if (!empty($klas)) {
+            $escK = $koneksi->real_escape_string($klas);
+            $where[] = "KLAS = '$escK'";
+        }
+        $whereSql = implode(' AND ', $where);
+        $q = $koneksi->query("SELECT KODE_BARANG, URAIAN, MODEL, POS_TARIF, KODE_SATUAN, UNIT_PRICE, BERAT, KLAS 
+            FROM bc_material WHERE $whereSql ORDER BY KODE_BARANG ASC LIMIT " . intval($limit));
+        $data = [];
+        if ($q) {
+            while ($r = $q->fetch_assoc()) {
+                $data[] = [
+                    'kode_barang' => $r['KODE_BARANG'],
+                    'uraian' => $r['URAIAN'],
+                    'model' => $r['MODEL'],
+                    'pos_tarif' => preg_replace('/[^0-9]/', '', $r['POS_TARIF'] ?? ''),
+                    'kode_satuan' => $r['KODE_SATUAN'] ?: 'PCE',
+                    'unit_price' => floatval($r['UNIT_PRICE'] ?? 0),
+                    'berat' => floatval($r['BERAT'] ?? 0),
+                    'klas' => $r['KLAS']
+                ];
+            }
+        }
+        return ['status' => 'OK', 'data' => $data];
+    }
+
+    /**
+     * 15. Insert Barang dari Master (Quick Picker bc_material)
+     */
+    function ceisa_insert_from_material($koneksi, $nomor_aju, $items) {
+        $escAju = $koneksi->real_escape_string($nomor_aju);
+        if (empty($items) || !is_array($items)) {
+            return ['status' => 'ERROR', 'message' => 'Tidak ada barang yang dipilih.'];
+        }
+
+        $hRes = $koneksi->query("SELECT cmp_id, ndpbm FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        if (!$hRes || !($hdr = $hRes->fetch_assoc())) {
+            return ['status' => 'ERROR', 'message' => 'Header AJU tidak ditemukan.'];
+        }
+        $cmp_id = $hdr['cmp_id'] ?? '';
+        $ndpbm = floatval($hdr['ndpbm'] ?? 1);
+        if ($ndpbm <= 0) $ndpbm = 1;
+
+        $maxSeri = intval($koneksi->query("SELECT MAX(seri_barang) FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'")->fetch_row()[0] ?? 0);
+
+        $insStmt = $koneksi->prepare("INSERT INTO bc_ceisa_barang 
+            (cmp_id, nomor_aju, seri_barang, kode_barang, hs, uraian, merek, tipe, ukuran, spesifikasi_lain, 
+             kode_satuan, jumlah_satuan, kode_kemasan, jumlah_kemasan, netto, bruto, volume, cif, cif_rupiah, fob, harga_satuan, harga_penyerahan, nilai_barang, kode_guna_barang, kode_kondisi_barang)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        $inserted = 0;
+        foreach ($items as $it) {
+            $maxSeri++;
+            $kb = trim($it['kode_barang'] ?? '');
+            if (empty($kb)) continue;
+
+            $hs = preg_replace('/[^0-9]/', '', trim($it['pos_tarif'] ?? ''));
+            $uraian = trim($it['uraian'] ?? $kb);
+            $sat = trim($it['kode_satuan'] ?? 'PCE');
+            $jml = floatval($it['jumlah_satuan'] ?? 1);
+            if ($jml <= 0) $jml = 1;
+            $hargaSat = floatval($it['unit_price'] ?? 0);
+            $cif = round($jml * $hargaSat, 2);
+            $cifRupiah = round($cif * $ndpbm, 2);
+            $berat = floatval($it['berat'] ?? 0);
+            $netto = round($berat * $jml, 4);
+            if ($netto <= 0) $netto = 1.0;
+            $bruto = round($netto * 1.05, 4);
+            $merek = '-'; $tipe = '-'; $ukuran = '-'; $spek = '-';
+            $kemasan = 'PK'; $jmlKemas = 1.0; $vol = 0.0;
+            $guna = '1'; $kondisi = '1';
+
+            $insStmt->bind_param('ssissssssssdssddddddddsss',
+                $cmp_id, $nomor_aju, $maxSeri, $kb, $hs, $uraian, $merek, $tipe, $ukuran, $spek,
+                $sat, $jml, $kemasan, $jmlKemas, $netto, $bruto, $vol, $cif, $cifRupiah, $cif, $hargaSat, $cifRupiah, $cifRupiah, $guna, $kondisi
+            );
+            $insStmt->execute();
+            $inserted++;
+        }
+        $insStmt->close();
+
+        ceisa_sync_header_totals($koneksi, $nomor_aju);
+
+        return [
+            'status' => 'OK',
+            'message' => "Berhasil menambahkan $inserted barang dari master ke dokumen AJU ini!",
+            'inserted_count' => $inserted
+        ];
+    }
+
+    /**
+     * 16. Quick Picker Dokumen Masuk Eks BC (bc_1ab2 AB = 'A')
+     */
+    function ceisa_get_incoming_picker($koneksi, $search = '', $bc = '', $limit = 60) {
+        $where = ["a.AB = 'A'"];
+        if (!empty($search)) {
+            $esc = $koneksi->real_escape_string($search);
+            $where[] = "(a.NOMOR_AJU LIKE '%$esc%' OR a.NOMOR_DAFTAR LIKE '%$esc%' OR a.KODE_BARANG LIKE '%$esc%' OR a.URAIAN LIKE '%$esc%' OR a.NAMA_BS LIKE '%$esc%')";
+        }
+        if (!empty($bc)) {
+            $escB = $koneksi->real_escape_string($bc);
+            $where[] = "a.BC = '$escB'";
+        }
+        $whereSql = implode(' AND ', $where);
+        $sql = "SELECT a.ID, a.BC, a.NOMOR_AJU, a.NOMOR_DAFTAR, a.TANGGAL_DAFTAR, a.SERI_BARANG,
+            a.KODE_BARANG, a.URAIAN, a.QTY, a.QTY_AKTUAL, a.UNIT, a.POS_TARIF, a.NILAI, a.CIF, a.NDPBM, a.HARGA_PENYERAHAN, a.NAMA_BS, a.GROSS, a.NETTO,
+            COALESCE((SELECT SUM(x.qty_use) FROM bc_ceisa_tracebb x WHERE x.nomor_aju = a.NOMOR_AJU AND x.seri_barang = a.SERI_BARANG), 0) as already_used
+            FROM bc_1ab2 a
+            WHERE $whereSql
+            ORDER BY a.TANGGAL_DAFTAR DESC, a.ID DESC
+            LIMIT " . intval($limit);
+
+        $q = $koneksi->query($sql);
+        $data = [];
+        if ($q) {
+            while ($r = $q->fetch_assoc()) {
+                $total = floatval($r['QTY_AKTUAL'] ?: $r['QTY']);
+                $used = floatval($r['already_used'] ?? 0);
+                $avail = max(0, $total - $used);
+                $data[] = [
+                    'id' => $r['ID'],
+                    'bc' => $r['BC'],
+                    'nomor_aju' => $r['NOMOR_AJU'],
+                    'nomor_daftar' => $r['NOMOR_DAFTAR'],
+                    'tanggal_daftar' => $r['TANGGAL_DAFTAR'],
+                    'seri_barang' => intval($r['SERI_BARANG']),
+                    'kode_barang' => $r['KODE_BARANG'],
+                    'uraian' => $r['URAIAN'],
+                    'qty_total' => $total,
+                    'qty_avail' => $avail,
+                    'unit' => $r['UNIT'] ?: 'PCE',
+                    'pos_tarif' => preg_replace('/[^0-9]/', '', $r['POS_TARIF'] ?? ''),
+                    'cif' => floatval($r['CIF'] ?? 0),
+                    'harga' => floatval($r['HARGA_PENYERAHAN'] ?? 0),
+                    'ndpbm' => floatval($r['NDPBM'] ?? 1),
+                    'nama_bs' => $r['NAMA_BS'],
+                    'gross' => floatval($r['GROSS'] ?? 0),
+                    'netto' => floatval($r['NETTO'] ?? 0)
+                ];
+            }
+        }
+        return ['status' => 'OK', 'data' => $data];
+    }
+
+    /**
+     * 17. Insert Bahan Baku dari Dokumen Masuk (Quick Picker bc_1ab2)
+     */
+    function ceisa_insert_from_incoming($koneksi, $nomor_aju, $seri_barang_target, $items) {
+        $escAju = $koneksi->real_escape_string($nomor_aju);
+        $seriTarget = intval($seri_barang_target);
+        if ($seriTarget <= 0) $seriTarget = 1;
+
+        if (empty($items) || !is_array($items)) {
+            return ['status' => 'ERROR', 'message' => 'Tidak ada dokumen masuk yang dipilih.'];
+        }
+
+        $hRes = $koneksi->query("SELECT cmp_id, ndpbm FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        if (!$hRes || !($hdr = $hRes->fetch_assoc())) {
+            return ['status' => 'ERROR', 'message' => 'Header AJU tidak ditemukan.'];
+        }
+        $cmp_id = $hdr['cmp_id'] ?? '';
+        $ndpbm = floatval($hdr['ndpbm'] ?? 1);
+        if ($ndpbm <= 0) $ndpbm = 1;
+
+        $maxBbSeri = intval($koneksi->query("SELECT MAX(seri_bahan_baku) FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND seri_barang = $seriTarget")->fetch_row()[0] ?? 0);
+
+        $insBb = $koneksi->prepare("INSERT INTO bc_ceisa_bahanbaku 
+            (cmp_id, nomor_aju, seri_barang, seri_bahan_baku, kode_asal_bahan_baku, hs, kode_barang, uraian, merek, tipe, ukuran, spesifikasi_lain, kode_satuan, jumlah_satuan, kode_dokumen_asal, nomor_daftar_asal, tanggal_daftar_asal, nomor_aju_asal, seri_barang_asal, netto, bruto, cif, cif_rupiah, ndpbm, harga_penyerahan)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        $inserted = 0;
+        foreach ($items as $it) {
+            $maxBbSeri++;
+            $bcAsal = trim($it['bc'] ?? '23');
+            $asalBb = ($bcAsal === '40') ? '1' : '0';
+            $hs = preg_replace('/[^0-9]/', '', trim($it['pos_tarif'] ?? ''));
+            $kb = trim($it['kode_barang'] ?? '-');
+            $uraian = trim($it['uraian'] ?? $kb);
+            $sat = trim($it['unit'] ?? 'PCE');
+            $qty = floatval($it['qty_pakai'] ?? 1);
+            if ($qty <= 0) $qty = 1;
+
+            $noDaftar = trim($it['nomor_daftar'] ?? '');
+            $tglDaftar = trim($it['tanggal_daftar'] ?? '');
+            $ajuAsal = trim($it['nomor_aju'] ?? '');
+            $seriAsal = intval($it['seri_barang'] ?? 1);
+
+            $itemNdpbm = floatval($it['ndpbm'] ?? $ndpbm);
+            if ($itemNdpbm <= 0) $itemNdpbm = $ndpbm;
+
+            $unitCif = floatval($it['unit_cif'] ?? 0);
+            $cifTot = round($unitCif * $qty, 2);
+            $cifRupiah = round($cifTot * $itemNdpbm, 2);
+
+            $unitHarga = floatval($it['unit_harga'] ?? 0);
+            $penyerahan = round($unitHarga * $qty, 2);
+
+            $netto = floatval($it['netto'] ?? 0);
+            $gross = floatval($it['gross'] ?? 0);
+            $merek = '-'; $tipe = '-'; $ukuran = '-'; $spek = '-';
+
+            $insBb->bind_param('ssiissssssssdsdsssssddddd',
+                $cmp_id, $nomor_aju, $seriTarget, $maxBbSeri, $asalBb, $hs, $kb, $uraian, $merek, $tipe, $ukuran, $spek,
+                $sat, $qty, $bcAsal, $noDaftar, $tglDaftar, $ajuAsal, $seriAsal, $netto, $gross, $cifTot, $cifRupiah, $itemNdpbm, $penyerahan
+            );
+            $insBb->execute();
+            $inserted++;
+        }
+        $insBb->close();
+
+        // Urutkan & generate tarif bahan baku otomatis
+        ceisa_seq_bahanbaku($koneksi, $nomor_aju);
+        ceisa_generate_bahanbaku_tarif($koneksi, $nomor_aju);
+        ceisa_calc_pungutan($koneksi, $nomor_aju);
+
+        return [
+            'status' => 'OK',
+            'message' => "Berhasil menambahkan $inserted bahan baku dari dokumen masuk dan langsung mengenerate tarifnya!",
+            'inserted_count' => $inserted
         ];
     }
 }

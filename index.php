@@ -44,12 +44,14 @@ if ($action === 'login') {
             $_SESSION['allowed_menus'] = ['*'];
             $_SESSION['allowed_docs']  = ['*'];
 
-            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
             if ($cRes && $cr = $cRes->fetch_assoc()) {
                 $_SESSION['company_cmp_id']     = $cr['cmp_id'];
                 $_SESSION['company_name']       = $cr['cmp_name'];
                 $_SESSION['company_npwp']       = $cr['npwp'];
                 $_SESSION['is_inv']             = (int)$cr['IS_INV'];
+                $_SESSION['company_roles']      = $cr['company_roles'] ?: 'tpb';
+                $_SESSION['company_erp_name']   = $cr['ERP_Name'] ?: '-';
                 $_SESSION['company_logo']       = $cr['logo'] ?? '';
                 $_SESSION['company_subdomain']  = $cr['subdomain'] ?? '';
                 $_SESSION['company_card_color'] = $cr['card_color'] ?? '';
@@ -58,6 +60,8 @@ if ($action === 'login') {
                 $_SESSION['company_name']       = 'FRAMAS INDO';
                 $_SESSION['company_npwp']       = '010816064431000';
                 $_SESSION['is_inv']             = 1;
+                $_SESSION['company_roles']      = 'tpb';
+                $_SESSION['company_erp_name']   = '-';
                 $_SESSION['company_logo']       = '';
                 $_SESSION['company_subdomain']  = 'framas';
                 $_SESSION['company_card_color'] = '';
@@ -72,7 +76,7 @@ if ($action === 'login') {
     }
 
     // B. Login Khusus Akun PERUSAHAAN (Master atau User Spesifik)
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $cmp_id, $cmp_id);
         $stmt->execute();
@@ -103,6 +107,8 @@ if ($action === 'login') {
                         $_SESSION['company_name']      = $comp['cmp_name'];
                         $_SESSION['company_npwp']      = $comp['npwp'];
                         $_SESSION['is_inv']            = (int)$comp['IS_INV'];
+                        $_SESSION['company_roles']     = $comp['company_roles'] ?: 'tpb';
+                        $_SESSION['company_erp_name']  = $comp['ERP_Name'] ?: '-';
                         $_SESSION['company_logo']      = $comp['logo'] ?? '';
                         $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
                         $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
@@ -135,6 +141,8 @@ if ($action === 'login') {
                     $_SESSION['company_name']      = $comp['cmp_name'];
                     $_SESSION['company_npwp']      = $comp['npwp'];
                     $_SESSION['is_inv']            = (int)$comp['IS_INV'];
+                    $_SESSION['company_roles']     = $comp['company_roles'] ?: 'tpb';
+                    $_SESSION['company_erp_name']  = $comp['ERP_Name'] ?: '-';
                     $_SESSION['company_logo']      = $comp['logo'] ?? '';
                     $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
                     $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
@@ -171,7 +179,7 @@ if ($action === 'switch_company') {
         exit;
     }
 
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $targetCmp, $targetCmp);
         $stmt->execute();
@@ -181,19 +189,23 @@ if ($action === 'switch_company') {
             $_SESSION['company_name']       = $comp['cmp_name'];
             $_SESSION['company_npwp']       = $comp['npwp'];
             $_SESSION['is_inv']             = (int)$comp['IS_INV'];
+            $_SESSION['company_roles']      = $comp['company_roles'] ?: 'tpb';
+            $_SESSION['company_erp_name']   = $comp['ERP_Name'] ?: '-';
             $_SESSION['company_logo']       = $comp['logo'] ?? '';
             $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
             $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
             echo json_encode([
-                'status'     => 'OK',
-                'cmp_id'     => $comp['cmp_id'],
-                'cmp_name'   => $comp['cmp_name'],
-                'npwp'       => $comp['npwp'],
-                'logo'       => $comp['logo'] ?? '',
-                'card_color' => $comp['card_color'] ?? '',
-                'subdomain'  => $comp['subdomain'] ?? '',
-                'is_inv'     => (int)$comp['IS_INV'],
-                'message'    => "Berhasil beralih ke perusahaan [{$comp['cmp_id']}] {$comp['cmp_name']}!"
+                'status'        => 'OK',
+                'cmp_id'        => $comp['cmp_id'],
+                'cmp_name'      => $comp['cmp_name'],
+                'npwp'          => $comp['npwp'],
+                'logo'          => $comp['logo'] ?? '',
+                'card_color'    => $comp['card_color'] ?? '',
+                'subdomain'     => $comp['subdomain'] ?? '',
+                'is_inv'        => (int)$comp['IS_INV'],
+                'company_roles' => $comp['company_roles'] ?: 'tpb',
+                'erp_name'      => $comp['ERP_Name'] ?: '-',
+                'message'       => "Berhasil beralih ke perusahaan [{$comp['cmp_id']}] {$comp['cmp_name']}!"
             ]);
         } else {
             echo json_encode(['status' => 'ERROR', 'message' => "Perusahaan '$targetCmp' tidak ditemukan."]);
@@ -478,23 +490,57 @@ $sessionLogo      = $_SESSION['company_logo'] ?? '';
 $sessionSubdomain = $_SESSION['company_subdomain'] ?? '';
 $sessionCardColor = $_SESSION['company_card_color'] ?? '';
 
-// Ambil status IS_INV, logo & card_color langsung dari database untuk perusahaan aktif
+// Ambil status IS_INV, logo, card_color, company_roles & ERP_Name langsung dari database untuk perusahaan aktif
 $sessionIsInv = 1;
+$sessionCompanyRoles = 'tpb';
+$sessionErpName = '-';
 if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
-    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain, IFNULL(card_color, '') as card_color FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
+    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
     if ($qInv && $rInv = $qInv->fetch_assoc()) {
         $sessionIsInv = (int)$rInv['IS_INV'];
         $_SESSION['is_inv'] = $sessionIsInv;
         $sessionLogo = $rInv['logo'] ?? '';
         $sessionSubdomain = $rInv['subdomain'] ?? '';
         $sessionCardColor = $rInv['card_color'] ?? '';
+        $sessionCompanyRoles = $rInv['company_roles'] ?: 'tpb';
+        $sessionErpName = $rInv['ERP_Name'] ?: '-';
         $_SESSION['company_logo'] = $sessionLogo;
         $_SESSION['company_subdomain'] = $sessionSubdomain;
         $_SESSION['company_card_color'] = $sessionCardColor;
+        $_SESSION['company_roles'] = $sessionCompanyRoles;
+        $_SESSION['company_erp_name'] = $sessionErpName;
     } elseif (isset($_SESSION['is_inv'])) {
         $sessionIsInv = (int)$_SESSION['is_inv'];
+        $sessionCompanyRoles = $_SESSION['company_roles'] ?? 'tpb';
+        $sessionErpName = $_SESSION['company_erp_name'] ?? '-';
     }
+} else {
+    $sessionCompanyRoles = $_SESSION['company_roles'] ?? 'tpb';
+    $sessionErpName = $_SESSION['company_erp_name'] ?? '-';
 }
+
+// Resolusi Peran & Hak Akses Dokumen Perusahaan
+$activeRolesList = array_filter(array_map('trim', explode(',', strtolower($sessionCompanyRoles))));
+if (empty($activeRolesList)) {
+    $activeRolesList = ['tpb'];
+}
+$hasRoleManifest = in_array('manifest', $activeRolesList);
+$hasRolePib      = in_array('pib', $activeRolesList);
+$hasRolePeb      = in_array('peb', $activeRolesList);
+$hasRoleTpb      = in_array('tpb', $activeRolesList);
+$hasRolePpkek    = in_array('ppkek', $activeRolesList);
+
+// Perusahaan HANYA berperan Manifest (tanpa dokumen BC kepabeanan lainnya)
+$isManifestOnlyCompany = ($hasRoleManifest && !$hasRolePib && !$hasRolePeb && !$hasRoleTpb && !$hasRolePpkek);
+
+// Dokumen pabean standar ada jika memiliki salah satu dari PIB, PEB, TPB, atau PPKEK
+$hasStandardCustomsDocs = ($hasRolePib || $hasRolePeb || $hasRoleTpb || $hasRolePpkek);
+
+// Apakah ERP yang dipakai adalah Odoo
+$isOdooErpCompany = (strtoupper(trim($sessionErpName)) === 'ODOO');
+
+// Rule User: yang perlu Modul Inventory HANYA TPB & PPKEK, selain itu HIDE
+$isInventoryModuleAllowed = ($hasRoleTpb || $hasRolePpkek) && ($sessionIsInv === 1 || $userRole === 'bc');
 
 /**
  * Helper menghitung style inline dan variabel CSS untuk card perusahaan di sidebar
@@ -561,8 +607,12 @@ $initialTab = $_GET['tab'] ?? '';
 if (empty($initialTab)) {
     if ($userRole === 'bc') {
         $initialTab = 'it_inventory_home';
+    } elseif ($isManifestOnlyCompany) {
+        $initialTab = 'manifest_ceisa';
+    } elseif (!$hasStandardCustomsDocs) {
+        $initialTab = $hasRoleManifest ? 'manifest_ceisa' : 'daftar_dokumen';
     } elseif (!isMenuAllowed('daftar_dokumen')) {
-        $initialTab = 'it_inventory_1a';
+        $initialTab = $isInventoryModuleAllowed ? 'it_inventory_1a' : ($hasRoleManifest ? 'manifest_ceisa' : 'transfer');
     } else {
         $initialTab = 'daftar_dokumen';
     }
@@ -572,7 +622,14 @@ if ($userRole === 'bc') {
     if (strpos($initialTab, 'it_inventory') !== 0) {
         $initialTab = 'it_inventory_home';
     }
-} elseif ($sessionIsInv === 0 && $initialTab !== 'inv_tarif' && (strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0)) {
+} elseif ($isManifestOnlyCompany) {
+    // Jika hanya role manifest, tab pabean standar atau inventory diarahkan ke manifest_ceisa
+    if (in_array($initialTab, ['daftar_dokumen', 'transfer', 'editor', 'import', 'load_erp_odoo', 'dokap', 'tracking']) || strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0) {
+        $initialTab = 'manifest_ceisa';
+    }
+} elseif (!$isInventoryModuleAllowed && (strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0)) {
+    $initialTab = $hasStandardCustomsDocs ? 'daftar_dokumen' : 'manifest_ceisa';
+} elseif ($initialTab === 'load_erp_odoo' && (!$hasStandardCustomsDocs || !$isOdooErpCompany)) {
     $initialTab = 'daftar_dokumen';
 }
 $initialAju = trim($_GET['nomor_aju'] ?? '');
@@ -593,7 +650,8 @@ $breadcrumbTitlesPhp = [
     'transfer'        => 'Data Host to Host',
     'editor'          => 'Form Editor Dokumen',
     'import'          => 'Import Excel Dokumen',
-    'manifest'        => 'Manifes Online (BC 1.1)',
+    'manifest_ceisa'  => 'Manifest Ceisa 4.0',
+    'manifest'        => 'Manifest Host to Host',
     'dokap'           => 'Upload Dokumen Pelengkap',
     'load_erp_odoo'   => 'Load ERP Data - Odoo to CEISA 4.0',
     'tracking'        => 'Tracking Respon Pabean',
@@ -644,6 +702,8 @@ if ($initialTab === 'editor') {
     $initSrc = "/user_management.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'import') {
     $initSrc = "/import_excel.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
+} elseif ($initialTab === 'manifest_ceisa') {
+    $initSrc = "/manifest_ceisa.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'manifest') {
     $initSrc = "/manifest.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'dokap') {
@@ -2498,12 +2558,12 @@ if ($initialTab === 'editor') {
                 </div>
                 <?php else: ?>
                 <!-- Group 1: DOKUMEN PABEAN -->
-                <div class="menu-group">
+                <div class="menu-group" id="menu-group-dokumen-pabean" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                     <div class="kt-menu__section">
                         <h4 class="kt-menu__section-text">DOKUMEN PABEAN</h4>
                     </div>
                     <?php if (isMenuAllowed('daftar_dokumen')): ?>
-                    <div class="kt-menu__item <?= ($initialTab === 'daftar_dokumen') ? 'active' : '' ?>" id="nav-item-daftar_dokumen" onclick="switchMainTab('daftar_dokumen')">
+                    <div class="kt-menu__item <?= ($initialTab === 'daftar_dokumen') ? 'active' : '' ?>" id="nav-item-daftar_dokumen" onclick="switchMainTab('daftar_dokumen')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
                                 <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
@@ -2517,7 +2577,7 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
 
                     <?php if (isMenuAllowed('transfer')): ?>
-                    <div class="kt-menu__item <?= ($initialTab === 'transfer') ? 'active' : '' ?>" id="nav-item-transfer" onclick="switchMainTab('transfer')">
+                    <div class="kt-menu__item <?= ($initialTab === 'transfer') ? 'active' : '' ?>" id="nav-item-transfer" onclick="switchMainTab('transfer')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
                                 <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
@@ -2531,7 +2591,7 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
 
                     <?php if (isMenuAllowed('editor')): ?>
-                    <div class="kt-menu__item <?= ($initialTab === 'editor') ? 'active' : '' ?>" id="nav-item-editor" onclick="switchMainTab('editor')">
+                    <div class="kt-menu__item <?= ($initialTab === 'editor') ? 'active' : '' ?>" id="nav-item-editor" onclick="switchMainTab('editor')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">✏️</span>
                             <span class="kt-menu__link-text">Form Editor Dokumen</span>
@@ -2541,7 +2601,7 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
 
                     <?php if (isMenuAllowed('import')): ?>
-                    <div class="kt-menu__item <?= ($initialTab === 'import') ? 'active' : '' ?>" id="nav-item-import" onclick="switchMainTab('import')">
+                    <div class="kt-menu__item <?= ($initialTab === 'import') ? 'active' : '' ?>" id="nav-item-import" onclick="switchMainTab('import')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">📥</span>
                             <span class="kt-menu__link-text">Import Excel Dokumen</span>
@@ -2551,7 +2611,7 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
 
                     <?php if (isMenuAllowed('load_erp_odoo')): ?>
-                    <div class="kt-menu__item <?= ($initialTab === 'load_erp_odoo') ? 'active' : '' ?>" id="nav-item-load_erp_odoo" onclick="switchMainTab('load_erp_odoo')">
+                    <div class="kt-menu__item <?= ($initialTab === 'load_erp_odoo') ? 'active' : '' ?>" id="nav-item-load_erp_odoo" onclick="switchMainTab('load_erp_odoo')" style="display: <?= ($hasStandardCustomsDocs && $isOdooErpCompany) ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">🔌</span>
                             <span class="kt-menu__link-text">Load ERP (Odoo)</span>
@@ -2560,18 +2620,8 @@ if ($initialTab === 'editor') {
                     </div>
                     <?php endif; ?>
 
-                    <?php if (isMenuAllowed('manifest')): ?>
-                    <div class="kt-menu__item" id="nav-item-manifest" onclick="switchMainTab('manifest')">
-                        <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🚢</span>
-                            <span class="kt-menu__link-text">Manifes Online (BC 1.1)</span>
-                            <i class="kt-menu__ver-arrow">›</i>
-                        </a>
-                    </div>
-                    <?php endif; ?>
-
                     <?php if (isMenuAllowed('dokap')): ?>
-                    <div class="kt-menu__item" id="nav-item-dokap" onclick="switchMainTab('dokap')">
+                    <div class="kt-menu__item <?= ($initialTab === 'dokap') ? 'active' : '' ?>" id="nav-item-dokap" onclick="switchMainTab('dokap')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">📎</span>
                             <span class="kt-menu__link-text">Upload Dokap Pabean</span>
@@ -2581,7 +2631,7 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
 
                     <?php if (isMenuAllowed('tracking')): ?>
-                    <div class="kt-menu__item" id="nav-item-tracking" onclick="switchMainTab('tracking')">
+                    <div class="kt-menu__item <?= ($initialTab === 'tracking') ? 'active' : '' ?>" id="nav-item-tracking" onclick="switchMainTab('tracking')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">🔍</span>
                             <span class="kt-menu__link-text">Tracking Respon Pabean</span>
@@ -2591,9 +2641,40 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
                 </div>
 
-                <!-- Group: Modul Inventory (Hanya tampil jika IS_INV = 1 atau Role BC) -->
-                <?php if (($sessionIsInv === 1 || $userRole === 'bc') && (isMenuAllowed('inventory_modul') || isMenuAllowed('inv_material') || isMenuAllowed('inv_bom') || isMenuAllowed('inv_stock_transfer') || isMenuAllowed('inv_warehouse_in') || isMenuAllowed('inv_scan27') || isMenuAllowed('it_inventory') || isMenuAllowed('inv_unposting_appv') || isMenuAllowed('inv_stok_awal') || isMenuAllowed('inv_adjust_spp'))): ?>
-                <div class="menu-group" id="menu-group-inventory-modul">
+                <!-- Group 1B: MANIFES ONLINE (BC 1.1) -->
+                <div class="menu-group" id="menu-group-manifes" style="display: <?= $hasRoleManifest ? '' : 'none' ?>;">
+                    <div class="kt-menu__section">
+                        <h4 class="kt-menu__section-text">MANIFES ONLINE (BC 1.1)</h4>
+                    </div>
+                    <?php if (isMenuAllowed('manifest')): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'manifest_ceisa') ? 'active' : '' ?>" id="nav-item-manifest_ceisa" onclick="switchMainTab('manifest_ceisa')">
+                        <a class="kt-menu__link">
+                            <span class="kt-menu__link-icon">
+                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
+                                    <path d="M928 140H96c-17.7 0-32 14.3-32 32v496c0 17.7 14.3 32 32 32h380v112H304c-8.8 0-16 7.2-16 16v48c0 4.4 3.6 8 8 8h432c4.4 0 8-3.6 8-8v-48c0-8.8-7.2-16-16-16H548V700h380c17.7 0 32-14.3 32-32V172c0-17.7-14.3-32-32-32zm-40 488H136V212h752v416z"></path>
+                                </svg>
+                            </span>
+                            <span class="kt-menu__link-text">Manifest Ceisa 4.0</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <div class="kt-menu__item <?= ($initialTab === 'manifest') ? 'active' : '' ?>" id="nav-item-manifest" onclick="switchMainTab('manifest')">
+                        <a class="kt-menu__link">
+                            <span class="kt-menu__link-icon">
+                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
+                                    <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 376H520V184h320v304zm-360-304v304H184V184h320zm-320 376h320v304H184V488zm360 304V488h320v304H544z"></path>
+                                </svg>
+                            </span>
+                            <span class="kt-menu__link-text">Manifest Host to Host</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Group: Modul Inventory (HANYA TPB & PPKEK) -->
+                <?php if (isMenuAllowed('inventory_modul') || isMenuAllowed('inv_material') || isMenuAllowed('inv_bom') || isMenuAllowed('inv_stock_transfer') || isMenuAllowed('inv_warehouse_in') || isMenuAllowed('inv_scan27') || isMenuAllowed('it_inventory') || isMenuAllowed('inv_unposting_appv') || isMenuAllowed('inv_stok_awal') || isMenuAllowed('inv_adjust_spp')): ?>
+                <div class="menu-group" id="menu-group-inventory-modul" style="display: <?= $isInventoryModuleAllowed ? '' : 'none' ?>;">
                     <div class="kt-menu__section">
                         <h4 class="kt-menu__section-text">MODUL INVENTORY</h4>
                     </div>
@@ -2835,7 +2916,7 @@ if ($initialTab === 'editor') {
 
                 <!-- Group: REFERENSI -->
                 <?php if (isMenuAllowed('referensi') || isMenuAllowed('inv_tarif')): ?>
-                <div class="menu-group">
+                <div class="menu-group" id="menu-group-referensi" style="display: <?= $isManifestOnlyCompany ? 'none' : '' ?>;">
                     <div class="kt-menu__section">
                         <h4 class="kt-menu__section-text">REFERENSI</h4>
                     </div>
@@ -3217,15 +3298,88 @@ if ($initialTab === 'editor') {
             attachIframeSync(initMainIframe);
         }
 
-        function setItInventoryVisibility(isInv) {
-            currentIsInv = parseInt(isInv);
-            const invModulGroup = document.getElementById('menu-group-inventory-modul');
-            if (invModulGroup) {
-                invModulGroup.style.display = (currentIsInv === 1 || isBcRole) ? '' : 'none';
-            }
-            if (currentIsInv === 0 && !isBcRole && currentTab && (currentTab.startsWith('it_inventory') || currentTab.startsWith('inv_'))) {
+        let currentCompanyRoles = <?= json_encode($sessionCompanyRoles) ?>;
+        let currentErpName = <?= json_encode($sessionErpName) ?>;
+
+        function applyRoleMenuVisibility(rolesStr, erpName, isInv) {
+            if (rolesStr !== undefined && rolesStr !== null) currentCompanyRoles = rolesStr;
+            if (erpName !== undefined && erpName !== null) currentErpName = erpName;
+            if (isInv !== undefined && isInv !== null) currentIsInv = parseInt(isInv);
+
+            if (isBcRole) return; // Role Pejabat Bea Cukai khusus laporan IT Inventory
+
+            const roles = (currentCompanyRoles || 'tpb').toLowerCase().split(',').map(s => s.trim());
+            const hasManifest = roles.includes('manifest');
+            const hasPib = roles.includes('pib');
+            const hasPeb = roles.includes('peb');
+            const hasTpb = roles.includes('tpb');
+            const hasPpkek = roles.includes('ppkek');
+            const isManifestOnly = (hasManifest && !hasPib && !hasPeb && !hasTpb && !hasPpkek);
+            const hasCustoms = (hasPib || hasPeb || hasTpb || hasPpkek);
+            const isOdoo = ((currentErpName || '').toUpperCase() === 'ODOO');
+            const canInventory = ((hasTpb || hasPpkek) && (currentIsInv === 1));
+
+            // Section Dokumen Pabean
+            const grpPabean = document.getElementById('menu-group-dokumen-pabean');
+            if (grpPabean) grpPabean.style.display = hasCustoms ? '' : 'none';
+
+            // Section Manifes Online
+            const grpMan = document.getElementById('menu-group-manifes');
+            if (grpMan) grpMan.style.display = hasManifest ? '' : 'none';
+
+            // Item Dokumen Pabean
+            const elDash = document.getElementById('nav-item-daftar_dokumen');
+            if (elDash) elDash.style.display = hasCustoms ? '' : 'none';
+
+            const elTrans = document.getElementById('nav-item-transfer');
+            if (elTrans) elTrans.style.display = hasCustoms ? '' : 'none';
+
+            const elEdit = document.getElementById('nav-item-editor');
+            if (elEdit) elEdit.style.display = hasCustoms ? '' : 'none';
+
+            const elImp = document.getElementById('nav-item-import');
+            if (elImp) elImp.style.display = hasCustoms ? '' : 'none';
+
+            const elOdoo = document.getElementById('nav-item-load_erp_odoo');
+            if (elOdoo) elOdoo.style.display = (hasCustoms && isOdoo) ? '' : 'none';
+
+            const elDokap = document.getElementById('nav-item-dokap');
+            if (elDokap) elDokap.style.display = hasCustoms ? '' : 'none';
+
+            const elTrack = document.getElementById('nav-item-tracking');
+            if (elTrack) elTrack.style.display = hasCustoms ? '' : 'none';
+
+            // Item Manifes Online
+            const elManCeisa = document.getElementById('nav-item-manifest_ceisa');
+            if (elManCeisa) elManCeisa.style.display = hasManifest ? '' : 'none';
+
+            const elMan = document.getElementById('nav-item-manifest');
+            if (elMan) elMan.style.display = hasManifest ? '' : 'none';
+
+            // Section Modul Inventory (HANYA TPB & PPKEK)
+            const grpInv = document.getElementById('menu-group-inventory-modul');
+            if (grpInv) grpInv.style.display = canInventory ? '' : 'none';
+
+            // Section Referensi (Sembunyikan untuk Manifest-Only)
+            const grpRef = document.getElementById('menu-group-referensi');
+            if (grpRef) grpRef.style.display = isManifestOnly ? 'none' : '';
+
+            // Fallback tab bila tab aktif saat ini disembunyikan
+            if (isManifestOnly) {
+                if (currentTab !== 'manifest_ceisa' && currentTab !== 'manifest' && currentTab !== 'company' && currentTab !== 'app_settings' && currentTab !== 'docs' && currentTab !== 'db' && currentTab !== 'user_management') {
+                    switchMainTab('manifest_ceisa');
+                }
+            } else if (!canInventory && (currentTab.startsWith('it_inventory') || currentTab.startsWith('inv_'))) {
+                switchMainTab(hasCustoms ? 'daftar_dokumen' : 'manifest_ceisa');
+            } else if (currentTab === 'load_erp_odoo' && (!hasCustoms || !isOdoo)) {
                 switchMainTab('daftar_dokumen');
+            } else if ((currentTab === 'manifest' || currentTab === 'manifest_ceisa') && !hasManifest) {
+                switchMainTab(hasCustoms ? 'daftar_dokumen' : 'company');
             }
+        }
+
+        function setItInventoryVisibility(isInv) {
+            applyRoleMenuVisibility(undefined, undefined, isInv);
         }
 
         const breadcrumbTitles = {
@@ -3233,7 +3387,8 @@ if ($initialTab === 'editor') {
             'transfer': 'Data Host to Host',
             'editor': 'Form Editor Dokumen',
             'import': 'Import Excel Dokumen',
-            'manifest': 'Manifes Online (BC 1.1)',
+            'manifest_ceisa': 'Manifest Ceisa 4.0',
+            'manifest': 'Manifest Host to Host',
             'dokap': 'Upload Dokumen Pelengkap',
             'load_erp_odoo': 'Load ERP Data - Odoo to CEISA 4.0',
             'tracking': 'Tracking Respon Pabean',
@@ -3284,7 +3439,14 @@ if ($initialTab === 'editor') {
             }
             if (tabId === 'import') return `/import_excel.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'load_erp_odoo') return `/load_erp_odoo.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'manifest') return `/manifest.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'manifest_ceisa') return `/manifest_ceisa.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'manifest') {
+                const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;
+                const ajuParam = (effectiveAju && String(effectiveAju).trim() !== '') 
+                    ? `&nomor_aju=${encodeURIComponent(String(effectiveAju).trim())}` 
+                    : '';
+                return `/manifest.php?cmp_id=${encodeURIComponent(cmpId)}${ajuParam}&embedded=1${adminParam}${themeParam}`;
+            }
             if (tabId === 'dokap') return `/upload_dokap.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'tracking') return `/statusaju.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'user_management') return `/user_management.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
@@ -3435,6 +3597,58 @@ if ($initialTab === 'editor') {
                     wrapper.appendChild(ifrm);
                     window.tabIframes['transfer'] = ifrm;
                 }
+            } else if (tabId === 'manifest') {
+                if (window.tabIframes['manifest']) {
+                    const targetUrl = getTabUrl('manifest', currentCmpId, currentAjuParam);
+                    if (currentAjuParam && window.tabIframes['manifest'].getAttribute('data-aju') !== currentAjuParam) {
+                        window.tabIframes['manifest'].src = targetUrl;
+                        window.tabIframes['manifest'].setAttribute('data-aju', currentAjuParam);
+                    }
+                    window.tabIframes['manifest'].style.display = 'block';
+                    syncIframeState(window.tabIframes['manifest']);
+                    try {
+                        if (currentAjuParam && window.tabIframes['manifest'].contentWindow && typeof window.tabIframes['manifest'].contentWindow.editManifest === 'function') {
+                            window.tabIframes['manifest'].contentWindow.editManifest(currentAjuParam);
+                        } else if (window.tabIframes['manifest'].contentWindow && typeof window.tabIframes['manifest'].contentWindow.loadManifestList === 'function') {
+                            window.tabIframes['manifest'].contentWindow.loadManifestList();
+                        }
+                    } catch(e) {}
+                } else {
+                    const ifrm = document.createElement('iframe');
+                    ifrm.className = 'iframe-container';
+                    ifrm.style.width = '100%';
+                    ifrm.style.height = '100%';
+                    ifrm.style.border = 'none';
+                    ifrm.style.display = 'block';
+                    ifrm.setAttribute('data-tab', 'manifest');
+                    ifrm.setAttribute('data-aju', currentAjuParam);
+                    ifrm.src = getTabUrl('manifest', currentCmpId, currentAjuParam);
+                    attachIframeSync(ifrm);
+                    wrapper.appendChild(ifrm);
+                    window.tabIframes['manifest'] = ifrm;
+                }
+            } else if (tabId === 'manifest_ceisa') {
+                if (window.tabIframes['manifest_ceisa']) {
+                    window.tabIframes['manifest_ceisa'].style.display = 'block';
+                    syncIframeState(window.tabIframes['manifest_ceisa']);
+                    try {
+                        if (window.tabIframes['manifest_ceisa'].contentWindow && typeof window.tabIframes['manifest_ceisa'].contentWindow.loadPortalData === 'function') {
+                            window.tabIframes['manifest_ceisa'].contentWindow.loadPortalData();
+                        }
+                    } catch(e) {}
+                } else {
+                    const ifrm = document.createElement('iframe');
+                    ifrm.className = 'iframe-container';
+                    ifrm.style.width = '100%';
+                    ifrm.style.height = '100%';
+                    ifrm.style.border = 'none';
+                    ifrm.style.display = 'block';
+                    ifrm.setAttribute('data-tab', 'manifest_ceisa');
+                    ifrm.src = getTabUrl('manifest_ceisa', currentCmpId, currentAjuParam);
+                    attachIframeSync(ifrm);
+                    wrapper.appendChild(ifrm);
+                    window.tabIframes['manifest_ceisa'] = ifrm;
+                }
             } else {
                 if (window.tabIframes[tabId]) {
                     window.tabIframes[tabId].style.display = 'block';
@@ -3505,6 +3719,14 @@ if ($initialTab === 'editor') {
                 if (grp.id === 'menu-group-inventory-modul' && currentIsInv === 0 && !isBcRole) {
                     grp.style.display = 'none';
                     return;
+                }
+                if (grp.id === 'menu-group-referensi') {
+                    const roles = (currentCompanyRoles || 'tpb').toLowerCase().split(',').map(s => s.trim());
+                    const isManOnly = (roles.includes('manifest') && !roles.includes('pib') && !roles.includes('peb') && !roles.includes('tpb') && !roles.includes('ppkek'));
+                    if (isManOnly) {
+                        grp.style.display = 'none';
+                        return;
+                    }
                 }
                 let anyVisibleInGroup = false;
                 const items = grp.querySelectorAll('.kt-menu__item');
@@ -3800,9 +4022,7 @@ if ($initialTab === 'editor') {
                 const json = await res.json();
                 if (json.status === 'OK') {
                     currentCmpId = json.cmp_id;
-                    if (json.is_inv !== undefined) {
-                        setItInventoryVisibility(json.is_inv);
-                    }
+                    applyRoleMenuVisibility(json.company_roles, json.erp_name, json.is_inv);
                     if (json.card_color !== undefined) {
                         applySidebarCompanyCardColor(json.card_color);
                     }
@@ -4115,9 +4335,7 @@ if ($initialTab === 'editor') {
                 }
             } else if (e.data.type === 'COMPANY_CHANGED') {
                 if (e.data.cmp_id) currentCmpId = e.data.cmp_id;
-                if (e.data.is_inv !== undefined) {
-                    setItInventoryVisibility(e.data.is_inv);
-                }
+                applyRoleMenuVisibility(e.data.company_roles, e.data.erp_name, e.data.is_inv);
                 if (e.data.cmp_name) {
                     const userGreeting = document.querySelector('.kt-header__topbar-username');
                     if (userGreeting) {
@@ -4357,6 +4575,7 @@ if ($initialTab === 'editor') {
         window.onload = function() {
             loadSavedTheme();
             loadSidebarPinState();
+            applyRoleMenuVisibility();
 
             const iframe = document.getElementById('mainFrame');
             if (iframe) {

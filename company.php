@@ -241,6 +241,30 @@ if ($action === 'save') {
             ADD COLUMN insw_api_url VARCHAR(255) NULL DEFAULT 'https://api.insw.go.id/document' AFTER insw_token");
     }
 
+    // Auto check / add company_roles column if not exists
+    $chkColRole = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'company_roles'");
+    if ($chkColRole && $chkColRole->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN company_roles VARCHAR(150) NOT NULL DEFAULT 'tpb' AFTER IS_INV");
+    }
+
+    // Ambil input roles perusahaan (array dari form checkbox atau string)
+    $rolesInput = $_POST['company_roles'] ?? [];
+    if (!is_array($rolesInput)) {
+        $rolesInput = explode(',', (string)$rolesInput);
+    }
+    $validRoles = ['manifest', 'pib', 'peb', 'tpb', 'ppkek'];
+    $cleanRoles = [];
+    foreach ($rolesInput as $r) {
+        $r = strtolower(trim($r));
+        if (in_array($r, $validRoles) && !in_array($r, $cleanRoles)) {
+            $cleanRoles[] = $r;
+        }
+    }
+    if (empty($cleanRoles)) {
+        $cleanRoles = ['tpb'];
+    }
+    $company_roles = implode(',', $cleanRoles);
+
     if ($mode === 'add') {
         // Cek duplikasi cmp_id
         $checkStmt = $koneksi->prepare("SELECT cmp_id FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
@@ -260,8 +284,8 @@ if ($action === 'save') {
             username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, is_final,
             token_ceisa, api_key_ceisa, insw_client_id, insw_client_secret, insw_token, insw_api_url,
             ERP_Name, ERP_User, ERP_Password, ERP_Constring,
-            AI_Name, AI_API_Key, is_active, IS_INV, allow_lowercase_code, alert_it_inv_unposted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            AI_Name, AI_API_Key, is_active, IS_INV, company_roles, allow_lowercase_code, alert_it_inv_unposted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $koneksi->prepare($sql);
         if (!$stmt) {
@@ -270,13 +294,13 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssssssssssssssssiiii",
+            "ssssssssssssssssssssssssssssssiisii",
             $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $allow_lowercase_code, $alert_it_inv_unposted
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allow_lowercase_code, $alert_it_inv_unposted
         );
         
         if ($stmt->execute()) {
@@ -294,7 +318,7 @@ if ($action === 'save') {
             username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, id_user_ceisa = ?, is_final = ?,
             token_ceisa = ?, api_key_ceisa = ?, insw_client_id = ?, insw_client_secret = ?, insw_token = ?, insw_api_url = ?,
             ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
-            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
+            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, company_roles = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
             WHERE cmp_id = ?";
             
         $stmt = $koneksi->prepare($sql);
@@ -304,13 +328,13 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssssssssssssssiiiis",
+            "sssssssssssssssssssssssssssssiisiis",
             $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
         );
         
         if ($stmt->execute()) {
@@ -319,6 +343,8 @@ if ($action === 'save') {
                 $_SESSION['company_name']            = $cmp_name;
                 $_SESSION['company_npwp']            = $npwp;
                 $_SESSION['is_inv']                  = $is_inv;
+                $_SESSION['company_roles']           = $company_roles;
+                $_SESSION['company_erp_name']        = $erp_name;
                 $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
                 $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
                 $_SESSION['company_alert_it_inv_unposted'] = $alert_it_inv_unposted;
@@ -460,7 +486,7 @@ if ($action === 'set_active') {
         exit;
     }
     
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(allow_lowercase_code, 0) as allow_lowercase_code, IFNULL(alert_it_inv_unposted, 0) as alert_it_inv_unposted FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(allow_lowercase_code, 0) as allow_lowercase_code, IFNULL(alert_it_inv_unposted, 0) as alert_it_inv_unposted, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("s", $cmp_id);
         $stmt->execute();
@@ -471,6 +497,8 @@ if ($action === 'set_active') {
             $_SESSION['company_name']            = $comp['cmp_name'];
             $_SESSION['company_npwp']            = $comp['npwp'];
             $_SESSION['is_inv']                  = (int)$comp['IS_INV'];
+            $_SESSION['company_roles']           = $comp['company_roles'] ?: 'tpb';
+            $_SESSION['company_erp_name']        = $comp['ERP_Name'] ?: '-';
             $_SESSION['company_allow_lowercase'] = (int)$comp['allow_lowercase_code'];
             $_SESSION['allow_lowercase_code']    = (int)$comp['allow_lowercase_code'];
             $_SESSION['company_alert_it_inv_unposted'] = (int)$comp['alert_it_inv_unposted'];
@@ -486,6 +514,8 @@ if ($action === 'set_active') {
                 'logo'     => $comp['logo'] ?? '',
                 'card_color' => $comp['card_color'] ?? '',
                 'is_inv'   => (int)$comp['IS_INV'],
+                'company_roles' => $comp['company_roles'] ?: 'tpb',
+                'erp_name' => $comp['ERP_Name'] ?: '-',
                 'allow_lowercase_code' => (int)$comp['allow_lowercase_code'],
                 'alert_it_inv_unposted' => (int)$comp['alert_it_inv_unposted'],
                 'message'  => "Berhasil menetapkan [{$comp['cmp_id']}] {$comp['cmp_name']} sebagai perusahaan aktif di portal!"
@@ -2191,6 +2221,74 @@ $theme = $_GET['theme'] ?? 'light';
                                 </select>
                             </div>
 
+                            <!-- ROLE & RUANG LINGKUP DOKUMEN PERUSAHAAN -->
+                            <div class="form-group full-width" style="margin:4px 0 6px; padding:12px 14px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:8px;">
+                                <label class="form-label" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                                    <span><strong>🎭 Role & Ruang Lingkup Dokumen Perusahaan</strong> <span class="req">*</span></span>
+                                    <span class="form-hint" style="font-size:10px;">Bisa dicentang lebih dari satu</span>
+                                </label>
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px; margin-top:6px;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="manifest" id="role_manifest" style="margin-top:3px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🚢</span> Manifest
+                                            </div>
+                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Manifes Online (BC 1.1). Jika hanya ini, menu dokumen pabean & inventory di-hide.
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="pib" id="role_pib" style="margin-top:3px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>📥</span> PIB
+                                            </div>
+                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Pemberitahuan Impor Barang untuk Dipakai (BC 2.0).
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="peb" id="role_peb" style="margin-top:3px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>📤</span> PEB
+                                            </div>
+                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Pemberitahuan Ekspor Barang (BC 3.0).
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="tpb" id="role_tpb" style="margin-top:3px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🏭</span> TPB
+                                            </div>
+                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Semua BC TPB (BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1, dll kecuali PPKEK). Menampilkan Modul Inventory.
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="ppkek" id="role_ppkek" style="margin-top:3px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>⚡</span> PPKEK
+                                            </div>
+                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Dokumen Kawasan Ekonomi Khusus (PPKEK saja). Menampilkan Modul Inventory.
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
+                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:8px;">
+                                    💡 <em>Aturan Sistem:</em> Modul Inventory <strong>HANYA</strong> tampil untuk role <strong>TPB & PPKEK</strong>. Menu <strong>Load ERP (Odoo)</strong> hanya tampil jika ERP diset ke <strong>ODOO</strong>.
+                                </div>
+                            </div>
+
                             <div class="form-group full-width">
                                 <label class="form-label">
                                     <span>Alamat Lengkap Perusahaan / Lokasi Pabrik</span>
@@ -2840,6 +2938,18 @@ $theme = $_GET['theme'] ?? 'light';
                                 ` : `
                                     <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px; font-style:italic;">Subdomain: -</div>
                                 `}
+                                <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:3px;">
+                                    ${(() => {
+                                        const roles = (row.company_roles || 'tpb').toLowerCase().split(',').map(s => s.trim());
+                                        let html = '';
+                                        if (roles.includes('manifest')) html += '<span class="ant-badge ant-badge-cyan" style="font-size:8.5px; padding:1px 5px;" title="Role: Manifes Online (BC 1.1)">🚢 MANIFEST</span>';
+                                        if (roles.includes('pib')) html += '<span class="ant-badge ant-badge-blue" style="font-size:8.5px; padding:1px 5px;" title="Role: PIB (BC 2.0)">📥 PIB</span>';
+                                        if (roles.includes('peb')) html += '<span class="ant-badge ant-badge-orange" style="font-size:8.5px; padding:1px 5px; background:#fff7e6; color:#d46b08; border-color:#ffd591;" title="Role: PEB (BC 3.0)">📤 PEB</span>';
+                                        if (roles.includes('tpb')) html += '<span class="ant-badge ant-badge-purple" style="font-size:8.5px; padding:1px 5px;" title="Role: Semua TPB kecuali PPKEK">🏭 TPB</span>';
+                                        if (roles.includes('ppkek')) html += '<span class="ant-badge ant-badge-gold" style="font-size:8.5px; padding:1px 5px;" title="Role: PPKEK saja">⚡ PPKEK</span>';
+                                        return html;
+                                    })()}
+                                </div>
                             </div>
                         </div>
                         <div style="font-size:9.5px; color:var(--text-muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; margin-top:3px;" title="${escapeHtml(row.alamat || '-')}">
@@ -3270,6 +3380,13 @@ $theme = $_GET['theme'] ?? 'light';
             if (pEl) pEl.value = '';
             document.getElementById('totpPreviewBox').style.display = 'none';
 
+            // Roles default
+            if (document.getElementById('role_manifest')) document.getElementById('role_manifest').checked = false;
+            if (document.getElementById('role_pib')) document.getElementById('role_pib').checked = false;
+            if (document.getElementById('role_peb')) document.getElementById('role_peb').checked = false;
+            if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = true;
+            if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = false;
+
             setLogoPreview('');
             document.getElementById('f_subdomain').value = '';
             document.getElementById('f_logo_file').value = '';
@@ -3316,6 +3433,14 @@ $theme = $_GET['theme'] ?? 'light';
                         document.getElementById('f_alamat').value = d.alamat || '';
                         document.getElementById('f_app_password').value = d.app_password || '1234';
                         document.getElementById('f_is_active').value = (d.is_active !== null && d.is_active !== undefined) ? d.is_active : '1';
+
+                        // Roles
+                        const roles = (d.company_roles || 'tpb').toLowerCase().split(',').map(s => s.trim());
+                        if (document.getElementById('role_manifest')) document.getElementById('role_manifest').checked = roles.includes('manifest');
+                        if (document.getElementById('role_pib')) document.getElementById('role_pib').checked = roles.includes('pib');
+                        if (document.getElementById('role_peb')) document.getElementById('role_peb').checked = roles.includes('peb');
+                        if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = roles.includes('tpb');
+                        if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = roles.includes('ppkek');
 
                         document.getElementById('f_kode_kantor').value = d.kode_kantor || '';
                         document.getElementById('f_kode_jenis_tpb').value = d.kode_jenis_tpb || '';
@@ -3474,6 +3599,15 @@ $theme = $_GET['theme'] ?? 'light';
                         const cardColorVal = document.getElementById('f_card_color') ? document.getElementById('f_card_color').value.trim() : '';
                         const cmpNameVal = document.getElementById('f_cmp_name') ? document.getElementById('f_cmp_name').value.trim() : '';
                         const logoVal = document.getElementById('f_logo') ? document.getElementById('f_logo').value.trim() : '';
+                        const rolesArr = [];
+                        if (document.getElementById('role_manifest') && document.getElementById('role_manifest').checked) rolesArr.push('manifest');
+                        if (document.getElementById('role_pib') && document.getElementById('role_pib').checked) rolesArr.push('pib');
+                        if (document.getElementById('role_peb') && document.getElementById('role_peb').checked) rolesArr.push('peb');
+                        if (document.getElementById('role_tpb') && document.getElementById('role_tpb').checked) rolesArr.push('tpb');
+                        if (document.getElementById('role_ppkek') && document.getElementById('role_ppkek').checked) rolesArr.push('ppkek');
+                        const rolesVal = rolesArr.length ? rolesArr.join(',') : 'tpb';
+                        const erpVal = document.getElementById('f_ERP_Name') ? document.getElementById('f_ERP_Name').value.trim() : '-';
+
                         if (sessionActiveCmp === cmpIdVal) {
                             window.parent.postMessage({
                                 type: 'COMPANY_CHANGED',
@@ -3481,7 +3615,9 @@ $theme = $_GET['theme'] ?? 'light';
                                 cmp_name: cmpNameVal,
                                 logo: logoVal,
                                 card_color: cardColorVal,
-                                is_inv: isInvVal
+                                is_inv: isInvVal,
+                                company_roles: rolesVal,
+                                erp_name: erpVal
                             }, '*');
                         }
                     }
@@ -3669,7 +3805,9 @@ $theme = $_GET['theme'] ?? 'light';
                                         cmp_name: res.cmp_name || cmpName,
                                         logo: res.logo || '',
                                         card_color: res.card_color || '',
-                                        is_inv: res.is_inv
+                                        is_inv: res.is_inv,
+                                        company_roles: res.company_roles || 'tpb',
+                                        erp_name: res.erp_name || '-'
                                     }, '*');
                                 }
                                 // Trigger parent header update bila ada fungsi switch

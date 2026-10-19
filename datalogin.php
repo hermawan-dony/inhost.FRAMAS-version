@@ -70,7 +70,9 @@ if (!function_exists('ceisa_get_company')) {
 // Deteksi Company Identifier dari berbagai kemungkinan parameter input
 $target_cmp = null;
 
-if (!empty($_REQUEST['cmp_id'])) {
+if (!empty($cmp_id)) {
+    $target_cmp = $cmp_id;
+} elseif (!empty($_REQUEST['cmp_id'])) {
     $target_cmp = $_REQUEST['cmp_id'];
 } elseif (!empty($_REQUEST['npwp'])) {
     $target_cmp = $_REQUEST['npwp'];
@@ -78,6 +80,8 @@ if (!empty($_REQUEST['cmp_id'])) {
     $target_cmp = $_REQUEST['nomor_aju'];
 } elseif (!empty($_REQUEST['aju'])) {
     $target_cmp = $_REQUEST['aju'];
+} elseif (!empty($_SESSION['company_cmp_id'])) {
+    $target_cmp = $_SESSION['company_cmp_id'];
 } elseif (!empty($_SESSION['cmp_id'])) {
     $target_cmp = $_SESSION['cmp_id'];
 } elseif (!empty($_SERVER['HTTP_X_COMPANY_ID'])) {

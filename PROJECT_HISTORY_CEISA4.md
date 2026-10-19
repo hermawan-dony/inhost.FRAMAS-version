@@ -5102,7 +5102,372 @@ Delapan (8) tabel yang distandardisasi:
 - File berhasil dideploy ke server remote Alibaba Cloud (`/source/public/`) dan disinkronkan ke lokal `www/`.
 
 ---
-*Dokumen ini diperbarui secara berkala sebagai catatan riwayat lengkap proyek.*
+
+## 🚀 16. ADOPSI INTERFACE POWERBUILDER (TAHAP 1 - 4) & OPTIMASI SWITCH TAB
+
+> **Tanggal Implementasi:** 18 - 19 Oktober 2026  
+> **Status:** Selesai, Teruji & Live di Server Production
+
+### A. Fitur PowerBuilder Interface yang Diadopsi (`editor.php` & `ceisa_calc_helper.php`)
+1. **Tahap 1 (Utilitas Cepat Tab Barang)**:
+   - `FIX HS CODE` (`ceisa_fix_hs_code`): Membersihkan karakter non-digit dan mengisi otomatis pos tarif kosong berdasarkan data referensi historis IT Inventory `bc_1ab2`, master `bc_material`, dan dokumen sejenis.
+   - `FIX NETTO` (`ceisa_fix_netto`): Menghitung otomatis netto berdasarkan rasio historis per satuan barang, fallback berat master `bc_material.BERAT`, dan batas maksimal bruto.
+   - `Edit Seri` & `Delete ALL Trace`: Utilitas pembersihan dan penataan seri trace secara aman.
+2. **Tahap 2 (Dual Sub-Panel BOM & Trace Dokumen Asal)**:
+   - Tampilan collapsible sub-panel di bawah grid barang untuk tabel Komponen BOM (`bc_ceisa_barangbom`) dan Dokumen Asal Eks-BC (`bc_ceisa_tracebb`).
+3. **Tahap 3 (Mesin Trace FIFO & Transfer Bahan Baku)**:
+   - Mesin alokasi saldo pemasukan IT Inventory `bc_1ab2` (`AB = 'A'`) secara First-In First-Out (`ceisa_trace_fifo`).
+   - Transfer hasil trace otomatis ke tab Bahan Baku (`bc_ceisa_bahanbaku`) dan Bahan Baku Tarif (`bc_ceisa_bahanbakutarif`) dengan auto pungutan BM, PPN, PPH.
+4. **Tahap 4 (Menu Klik Kanan & Quick Pickers)**:
+   - Context menu klik kanan pada grid editor.
+   - Quick Picker modal: Tambah dari Master Barang (`bc_material`) dan Tambah dari Dokumen Masuk Eks-BC (`bc_1ab2`).
+
+### B. Optimasi Kecepatan Pindah Tab (Tab Switching Instant)
+- **Eliminasi Forced Reflow**: Menghentikan eksekusi rekursif `autoResizeAllTextareas` setiap kali ganti tab. Auto-resize hanya dieksekusi satu kali per panel saat pertama kali dibuka (`data-resized`).
+- **Efisiensi Swap Panel**: Menghapus `querySelectorAll('.panel')` massal dan beralih ke active panel tracking tunggal.
+- **Caching Rekap Tarif**: Menambahkan dirty flag `_recapTarifDirty` sehingga rekap pungutan tidak lagi melakukan HTTP AJAX request berulang setiap kali berpindah ke tab tarif.
+- **Batch DOM Insertion**: Menggunakan `DocumentFragment` pada saat populate grid barang, bahan baku, dan tarif sehingga rendering 480+ baris menjadi instan tanpa reflow per baris.
+
+---
+
+## 🚀 17. MODUL IMPORTER EXCEL BACKUP CEISA 4.0 MANIFES ONLINE / NVOCC (`CeisaManifestXlsxImporter.php`)
+
+> **Tanggal Implementasi:** 19 Oktober 2026  
+> **Status:** Selesai, Teruji & Live di Server Production
+
+### A. Latar Belakang & Kebutuhan
+- Pada Portal CEISA 4.0 (menu *Manifest Online* -> *NVOCC*), Bea Cukai menyediakan menu **"Back-Up"** pada setiap dokumen manifes Outward (BC 1.1) yang menghasilkan file Excel (`.xlsx`).
+- Pengguna membutuhkan alur kerja cepat:
+  `Unduh Back-Up Excel dari Portal CEISA 4.0` ➔ `Impor ke Aplikasi Lokal` ➔ `Review / Edit` ➔ `Posting Ulang via H2H API`.
+
+### B. Solusi & Implementasi Teknis
+1. **Engine Importer Native (`CeisaManifestXlsxImporter.php`)**:
+   - Membaca 7 sheet dokumen resmi CEISA 4.0 NVOCC tanpa library eksternal (menggunakan `ZipArchive` + `SimpleXML`):
+     - `NVOCC`: Data Header Sarana Pengangkut, Voyage, Tanggal Berangkat/Tiba, Kode Kantor, dan ID Perusahaan.
+     - `MASTER`: Data Master B/L dan Pos BC 1.1.
+     - `BL`: Data House B/L (HBL), Shippers, Consignee, Notify Party, Pelabuhan, Berat, Kemasan, dan Kontainer.
+     - `BL HS`: Rincian Pos Tarif HS Code dan Uraian Barang per HBL.
+     - `BL PETIKEMAS TERANGKUT`: Rincian nomor kontainer, ukuran, tipe, segel, dan driver (`fl_terangkut = '01'`).
+     - `BL PETIKEMAS TERTINGGAL`: Rincian kontainer yang tertinggal (`fl_terangkut = '02'`).
+     - `BL DOKUMEN`: Dokumen pelengkap pabean asal (PEB/Invoice/BL).
+   - Penanganan otomatis format tanggal/jam serial Excel (e.g. `46318.40431712963` dikonversi presisi ke `2026-10-23 09:42:13`).
+   - Pemetaan relasi ID Excel (UUID) antar-sheet (`Id Bl` ke `nomor_host_bl`) secara otomatis.
+   - Status awal dokumen otomatis disetel ke **"Draft"** untuk keamanan sebelum diposting.
+
+2. **Antarmuka Pengguna & Integrasi API (`manifest.php` & `manifest_api.php`)**:
+   - Tombol **"📥 Import Excel Backup"** di header halaman Manifes BC 1.1.
+   - Modal drag-and-drop file picker dengan visualisasi nama file dan ukuran.
+   - Action handler `action=import_excel` di `manifest_api.php`.
+   - Ringkasan impor interaktif pasca-unggah: Menampilkan Nomor AJU, Kapal, Voyage, Total HBL, Total Kontainer, Total Pos HS, dan tombol pintas *"✏️ Buka di Form Editor"* atau *"📋 Lihat Daftar"*.
+
+### C. Pengujian Nyata dengan File Backup
+- Pengujian langsung menggunakan file cadangan `C:\dp\data-manifest.xlsx` (AJU `07010047031520261019440525` - MV SINAR SUNDA V.246N):
+  - **Hasil Impor:** 1 Dokumen AJU, 2 House B/L, 7 Kontainer, 4 Pos HS, 2 Dokumen Lampiran.
+  - **Validasi Payload:** Lolos validasi `CeisaManifestBuilder::buildPayload()` menghasilkan 8.007 bytes JSON OpenAPI yang siap dikirim (*Draft*) ke CEISA 4.0 Bea Cukai.
+
+---
+
+## Pembaruan 19 Oktober 2026: Sistem Aturan Menu & Visibilitas Dokumen Berdasarkan Role Perusahaan
+
+### A. Ringkasan Kebutuhan & Spesifikasi
+Menambahkan konfigurasi peran/role perusahaan yang fleksibel (multi-select/checkbox) pada tabel `bc_ceisa_company` dan antarmuka `company.php`, dengan aturan visibilitas menu sidebar portal CEISA 4.0 (`index.php`) serta opsi dokumen pada form editor (`editor.php`):
+1. **Manifest (`manifest`)**: Hanya menampilkan menu *Manifes Online (BC 1.1)*. Jika perusahaan bertipe *Manifest-only*, seluruh menu Dokumen Pabean standar (Dashboard, Host-to-Host, Form Editor, Import Excel, Dokap, Tracking) serta Modul Inventory disembunyikan. Tab awal default diarahkan ke `manifest`.
+2. **PIB (`pib`)**: Menampilkan dokumen kepabeanan impor untuk dipakai (BC 2.0).
+3. **PEB (`peb`)**: Menampilkan dokumen kepabeanan ekspor umum (BC 3.0).
+4. **TPB (`tpb`)**: Menampilkan seluruh dokumen Tempat Penimbunan Berikat / Kawasan Berikat (BC 2.3, BC 4.0, BC 2.5, BC 2.7, BC 1.6, BC 4.1, BC 2.6.1, BC 2.6.2, BC 2.8, BC 3.3).
+5. **PPKEK (`ppkek`)**: Menampilkan dokumen Kawasan Ekonomi Khusus (BC 6.1.1, BC 6.1.3, BC 6.3.1).
+6. **Aturan Modul Inventory**: **HANYA TPB & PPKEK** yang diizinkan menampilkan kelompok menu **MODUL INVENTORY** (Data Master Barang, Koreksi Klasifikasi, BOM, Jaminan, Mutasi Produksi, Warehouse In/Out/BC27, IT Inventory 1A-1D). Perusahaan di luar TPB & PPKEK (Manifest-only, PIB-only, PEB-only) disembunyikan total dari Modul Inventory.
+7. **Aturan Menu Load ERP (Odoo)**: Menu *Load ERP (Odoo)* hanya muncul apabila ERP perusahaan yang aktif bernilai **Odoo** (`strtoupper($ERP_Name) === 'ODOO'`).
+
+---
+
+### B. Implementasi Teknis & Perubahan Kode
+
+1. **Migrasi Skema Basis Data RDS (`bc_ceisa_company`)**:
+   - Menambahkan kolom `company_roles VARCHAR(150) NOT NULL DEFAULT 'tpb' AFTER IS_INV`.
+   - Menginisialisasi role `manifest` dengan `IS_INV = 0` untuk perusahaan logistik pelayaran (`TVL`).
+   - Menginisialisasi role `tpb` dengan `IS_INV = 1` dan `ERP_Name = 'ODOO'` untuk `080167772504400` (PT RODA MAJU BAHAGIA).
+
+2. **Kelola Perusahaan (`company.php` & `www/company.php`)**:
+   - Penambahan kartu centang (checkbox cards) interaktif pada `#tab-profil` modal perusahaan:
+     - 🚢 Manifest (`manifest`)
+     - 📥 PIB (`pib`)
+     - 📤 PEB (`peb`)
+     - 🏭 TPB (`tpb`)
+     - ⚡ PPKEK (`ppkek`)
+   - Penyimpanan data multiselect role dipisahkan koma pada handler `action=save` (INSERT & UPDATE).
+   - Render badge visual role pada tabel daftar perusahaan:
+     - Badge biru laut: `🚢 MANIFEST`
+     - Badge biru langit: `📥 PIB`
+     - Badge hijau: `📤 PEB`
+     - Badge oranye: `🏭 TPB`
+     - Badge ungu: `⚡ PPKEK`
+   - Sinkronisasi realtime melalui `window.parent.postMessage({ type: 'COMPANY_CHANGED', company_roles, erp_name, is_inv, ... })` saat data disimpan atau perusahaan aktif diubah.
+
+3. **Portal Utama & Navigasi Sidebar (`index.php` & `www/index.php`)**:
+   - Parsing sesi dan database untuk menghitung `$hasRoleManifest`, `$hasRolePib`, `$hasRolePeb`, `$hasRoleTpb`, `$hasRolePpkek`, `$isManifestOnlyCompany`, `$hasStandardCustomsDocs`, `$isOdooErpCompany`, `$isInventoryModuleAllowed`.
+   - Logika penentuan tab aktif awal (`$initialTab`) otomatis mengarahkan perusahaan *Manifest-only* ke tab `manifest`.
+   - DOM Sidebar Menu:
+     - Elemen HTML dipertahankan di dalam DOM dengan atribut inline `style="display: ..."` berdasarkan evaluasi awal PHP, sehingga peralihan perusahaan secara client-side via JavaScript dapat langsung menampilkan/menyembunyikan menu tanpa perlu refresh (F5).
+     - Fungsi JavaScript `applyRoleMenuVisibility(rolesStr, erpName, isInv)` secara dinamis mengontrol visibilitas:
+       - Item Dokumen Pabean standar (Dashboard, Transfer, Editor, Import, Dokap, Tracking).
+       - Item `Load ERP (Odoo)`.
+       - Item `Manifes Online (BC 1.1)`.
+       - Group `MODUL INVENTORY`.
+     - Integrasi fungsi `applyRoleMenuVisibility` pada:
+       - Panggilan `switchCompany(cmpId)`.
+       - Event listener `window.addEventListener('message')` (`COMPANY_CHANGED` & `UPDATE_IS_INV`).
+       - Event inisialisasi awal `window.onload`.
+
+4. **Form Editor Dokumen Pabean (`editor.php` & `www/editor.php`)**:
+   - Dropdown `#entryDocBc` (Jenis Dokumen BC) disesuaikan secara dinamis sesuai role perusahaan aktif:
+     - PIB: BC 2.0.
+     - PEB: BC 3.0.
+     - TPB: BC 2.3, 4.0, 2.5, 2.7, 1.6, 4.1, 2.6.1, 2.6.2, 2.8, 3.3.
+     - PPKEK: BC 6.1.1, 6.1.3, 6.3.1.
+   - Guard pengaman: jika dokumen AJU lama yang dibuka memiliki kode dokumen di luar daftar role saat ini, sistem otomatis menambahkan opsi tersebut ke dalam dropdown agar dokumen eksisting tetap dapat dilihat dan diedit dengan aman tanpa kendala.
+   - Fungsi `resetEntryDraft()` secara dinamis memilih opsi pertama yang tersedia sesuai role perusahaan.
+
+---
+
+## Perbaikan 19 Oktober 2026: Perbaikan Tombol Hapus, Cek Status, dan Cek Kelengkapan Manifes BC 1.1
+
+### A. Masalah yang Ditemukan
+1. **Tombol Hapus tidak bereaksi (Hapus ga jalan)**:
+   - Terjadi `ReferenceError: escapeHtml is not defined` pada saat memanggil `actionDelete(nomorAju)` di `manifest.php`. Akibatnya, eksekusi JavaScript berhenti seketika sebelum dialog konfirmasi SweetAlert sempat muncul.
+2. **Cek Status error (HTTP 500)**:
+   - Pengguna menekan tombol ⏱️ Cek Status pada dokumen yang berstatus **Draft** atau **Ready** (belum dikirim via `POST /manifes/nvocc/kirim`).
+   - Endpoint status tracking CEISA OpenAPI (`/manifes/nvocc/status/{nomorAju}`) hanya memiliki record setelah dokumen dikirim resmi ke Bea Cukai. Sebelum dikirim, server Bea Cukai mengembalikan HTTP 500 `{"error":"Terjadi Kesalahan","status":"false"}`.
+3. **Cek Kelengkapan error ("Data Tidak ditemukan")**:
+   - Pengguna menekan tombol 🔍 Cek Kelengkapan pada baris manifes kosong (Jml HBL: 0) yang belum pernah diunggah sebagai draft ke CEISA.
+   - Endpoint Bea Cukai `POST /manifes/nvocc/cek-lengkap` mencari nomor AJU pada tabel draft Bea Cukai. Karena draft belum pernah dikirim, Bea Cukai mengembalikan error 400: `"Data Tidak ditemukan"`.
+
+---
+
+### B. Solusi & Perbaikan yang Diterapkan
+1. **Perbaikan Tombol Hapus ([manifest.php](file:///c:/dp/g-ceisa/manifest.php) & [manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php))**:
+   - Menambahkan fungsi helper `escapeHtml(str)` secara global pada `manifest.php`.
+   - Pada `manifest_api.php` (`action === 'delete_manifes'`), pemanggilan `DELETE /manifes/nvocc/draft` hanya dilakukan jika dokumen memang sudah pernah terdaftar di CEISA (`id_nvocc_header` tidak kosong).
+   - Penghapusan data lokal dilakukan secara menyeluruh dan bertingkat (*cascading*) pada 8 tabel terkait: `bc_ceisa_manifes_bl_dokumen`, `bc_ceisa_manifes_bl_petikemas`, `bc_ceisa_manifes_bl_hs`, `bc_ceisa_manifes_bl`, `bc_ceisa_manifes_master_bl`, `bc_ceisa_manifes_kelompok_pos`, `bc_ceisa_manifes_header`, dan `bc_ceisa_manifes_respon_logs`.
+   - Pengujian sukses: dokumen draft kosong berhasil dihapus seketika dengan respon `{"status":"OK"}`.
+
+2. **Penyempurnaan Cek Status ([manifest.php](file:///c:/dp/g-ceisa/manifest.php) & [manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php))**:
+   - Jika dokumen masih berstatus **Draft** atau **Ready** (belum dikirim), sistem memberikan penjelasan informatif:
+     > *"Manifes [Nomor AJU] saat ini berstatus [DRAFT/READY]. Dokumen belum dikirim secara resmi ke Bea Cukai. Status respon resmi dan nomor dokumen BC 1.1 baru akan diterbitkan setelah dokumen dikirim melalui tombol 🚀 Kirim."*
+   - Menghilangkan pesan galat teknis mentah "HTTP 500" dan menggantinya dengan dialog peringatan/informasi yang mudah dipahami pengguna.
+
+3. **Penyempurnaan Cek Kelengkapan ([manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php))**:
+   - Validasi lokal keberadaan House B/L (HBL): jika `total_hbl === 0`, sistem langsung memberikan instruksi yang jelas:
+     > *"Manifes belum memiliki House B/L (HBL). Silakan lengkapi data pos/BL melalui tombol Edit ✏️ atau gunakan 📥 Import Excel Backup sebelum melakukan Cek Kelengkapan."*
+   - Auto-Recovery untuk dokumen yang sudah memiliki data HBL: jika server Bea Cukai merespon *"Data Tidak ditemukan"*, sistem otomatis menyusun payload JSON NVOCC, mengirimkannya sebagai draft (`POST /manifes/nvocc/draft`), lalu otomatis melanjutkan pengecekan kelengkapan secara mulus (*seamless*).
+
+---
+
+## Pembaruan 19 Oktober 2026: Penyembunyian Menu "REFERENSI" Khusus Perusahaan Manifest-Only
+
+### A. Latar Belakang & Permintaan
+Pengguna meminta agar kelompok menu **REFERENSI** (yang berisi *Master Data Referensi* dan *Master Tarif BM dari Kode HS*) disembunyikan apabila perusahaan yang sedang aktif **hanya memiliki role Manifest** (*Manifest-only*), karena perusahaan ekspedisi/agen pelayaran/NVOCC tidak memerlukan referensi tarif kepabeanan maupun modul referensi internal TPB/Kawasan Berikat.
+
+### B. Implementasi Perubahan ([index.php](file:///c:/dp/g-ceisa/index.php))
+1. **Pemberian ID & Tampilan Awal PHP**:
+   - Menambahkan atribut `id="menu-group-referensi"` dan `style="display: <?= $isManifestOnlyCompany ? 'none' : '' ?>;"` pada elemen kontainer `<div class="menu-group">` bagian REFERENSI.
+   - Kondisi PHP `$isManifestOnlyCompany` yang telah terdefinisi sebelumnya langsung diterapkan pada render awal halaman.
+2. **Pengendalian Dinamis JavaScript (`applyRoleMenuVisibility`)**:
+   - Menambahkan manipulasi visibilitas elemen `#menu-group-referensi`:
+     ```javascript
+     const grpRef = document.getElementById('menu-group-referensi');
+     if (grpRef) grpRef.style.display = isManifestOnly ? 'none' : '';
+     ```
+   - Ketika beralih ke perusahaan dengan role TPB, PIB, PEB, atau PPKEK, kelompok menu REFERENSI secara otomatis ditampilkan kembali.
+3. **Penyempurnaan Fitur Pencarian Menu Sidebar (`filterSidebarMenu`)**:
+   - Menambahkan guard proteksi agar saat pengguna mengetik kata kunci pada kotak pencarian menu sidebar, menu REFERENSI tetap disembunyikan jika role perusahaan saat ini adalah *Manifest-only*.
+
+---
+
+## Pembaruan 19 Oktober 2026: Fitur RENAME AJU, COPY / DUPLIKAT AJU, dan Auto-Fallback Impor Manifes
+
+### A. Latar Belakang & Pertanyaan Pengguna
+1. **Mengapa saat Simpan Header diminta mengisi Alamat Perusahaan dan Tanggal Tiba, padahal sebelumnya hasil impor Excel?**
+   - Format file Excel ekspor/backup resmi CEISA 4.0 (`data-manifest.xlsx`) pada sheet `NVOCC` **tidak memiliki kolom Alamat Perusahaan**, dan untuk manifes Outward (keberangkatan luar negeri/ekspor) kolom `Tanggal Tiba` dikosongkan oleh CEISA.
+   - Master data profil perusahaan (`bc_ceisa_company`) untuk profil TVL saat itu kolom `alamat`-nya masih kosong.
+   - Akibatnya saat diimpor, kolom `alamat_perusahaan` dan `tanggal_tiba` di database bernilai kosong/NULL. Pada form editor web lama, kedua input memiliki atribut HTML5 `required` kaku sehingga memunculkan validasi browser *"Please fill out this field."*.
+2. **Mengapa saat klik "Generate No Aju", sistem membuat AJU baru kosong dan bukan me-rename AJU?**
+   - Tombol lama *"🎲 Generate No Aju"* awalnya dibuat untuk membuat draft baru dari nol (*fresh draft*).
+   - Ketika diklik, tombol tersebut hanya mengisi teks acak pada input nomor AJU. Saat disimpan, nomor AJU baru tersimpan sebagai baris terpisah tanpa ada data House B/L (karena data House B/L dokumen asal masih tersimpan di nomor AJU yang lama). Dokumen lama tidak hilang, tetapi nomor baru tersebut belum memiliki pos.
+
+---
+
+### B. Solusi & Fitur Baru yang Diimplementasikan
+1. **Auto-Fallback Cerdas Saat Impor Excel ([CeisaManifestXlsxImporter.php](file:///c:/dp/g-ceisa/CeisaManifestXlsxImporter.php))**:
+   - Jika kolom `Tanggal Tiba` kosong pada sheet `NVOCC` Excel (khususnya Outward), sistem otomatis mengisi estimasi tiba: `tanggal_berangkat + 24 jam` (atau `+1 hari`).
+   - Jika `alamat_perusahaan` tidak ada di Excel dan kosong di profil perusahaan, sistem otomatis mengisi nilai default `-`.
+   - Menghilangkan validasi browser yang memblokir secara kaku pada form editor ([manifest.php](file:///c:/dp/g-ceisa/manifest.php)), serta menyediakan auto-kalkulasi tanggal tiba pada JavaScript jika pengguna membuka dokumen dengan tanggal tiba kosong.
+
+2. **Fitur RENAME AJU (Ganti Nomor AJU Secara Menyeluruh)**:
+   - Backend API: `POST /manifest_api.php?action=rename_aju` ([manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php)).
+   - Melakukan update bertingkat (*cascading update*) pada 8 tabel basis data secara transaksional (`atomic ACID transaction`):
+     - `bc_ceisa_manifes_header`
+     - `bc_ceisa_manifes_master_bl`
+     - `bc_ceisa_manifes_kelompok_pos`
+     - `bc_ceisa_manifes_bl`
+     - `bc_ceisa_manifes_bl_hs`
+     - `bc_ceisa_manifes_bl_petikemas`
+     - `bc_ceisa_manifes_bl_dokumen`
+     - `bc_ceisa_manifes_respon_logs`
+   - Seluruh data House B/L, kemasan, kontainer, dan dokumen pelengkap tetap utuh terhubung ke nomor AJU yang baru.
+   - Antarmuka UI: Tombol **`✏️ Rename AJU`** di header card dan link cepat di samping label Nomor AJU.
+
+3. **Fitur COPY / DUPLIKAT AJU**:
+   - Backend API: `POST /manifest_api.php?action=copy_aju` ([manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php)).
+   - Menyalin seluruh data manifes (Header + Master BL + Kelompok Pos + House BL + HS Barang + Petikemas + Dokumen Pelengkap) ke nomor AJU baru dengan status reset ke **`Draft`** dan identitas referensi remote (`id_nvocc_header`, `id_nvocc_master`, `id_nvocc_bl`, `nomor_bc11`) dikosongkan.
+   - Dokumen baru siap ditinjau dan dikirim ke portal CEISA tanpa perlu input ulang atau impor ulang file.
+   - Antarmuka UI: Tombol **`📋 Copy AJU`** di Form Editor Manifes dan tombol aksi cepat **`📋`** pada setiap baris di tabel Daftar Manifes.
+
+4. **Dialog Panduan Interaktif pada Tombol "Generate No Aju"**:
+   - Jika dokumen aktif sedang dibuka di form editor dan pengguna menekan tombol *🎲 Generate No Aju*, sistem menampilkan SweetAlert interaktif:
+     > *"Dokumen [Nomor AJU] sedang aktif dibuka. Apakah Anda bermaksud ME-RENAME nomor AJU dokumen ini, atau membuat DRAFT BARU KOSONG?"*
+   - Pilihan: **`✏️ Rename AJU Ini`**, **`🆕 Buat Draft Baru Kosong`**, atau **`Batal`**.
+   - Mencegah pengguna salah paham antara me-rename atau membuat draft baru.
+
+5. **Pembersihan Tombol Duplikat "Ganti Tema" ([manifest.php](file:///c:/dp/g-ceisa/manifest.php))**:
+   - Menghapus tombol `🌓 Ganti Tema` pada baris atas halaman Manifes karena tombol pengatur tema sudah tersedia secara global di top navbar portal `index.php` (`[ ☀️ | 🌙 ]`), dan modul manifes sudah secara otomatis tersinkronisasi mengikuti tema portal utama.
+
+---
+
+## Pembaruan 19 Oktober 2026: Diagnostik & Solusi Komprehensif "Gagal Drafting: HTTP Error 500" & "Token Tidak Sesuai" pada Manifes NVOCC CEISA 4.0
+
+### A. Analisis Akar Masalah (Root Cause Analysis)
+Berdasarkan investigasi menyeluruh dan pengujian interaktif ke server API Gateway Bea Cukai (`https://apis-gw.beacukai.go.id`) dan OpenAPI Portal resmi webMethods (`https://openapi.beacukai.go.id`), ditemukan faktor-faktor penyebab kendala pengiriman manifes:
+1. **Polusi Token Sesi Antar-Perusahaan (*Session Token Cross-Pollution*)**:
+   - Pemanggilan API pada `manifest_api.php` sebelumnya menggunakan token global `$_SESSION["token"]`. Ketika pengguna sebelumnya membuka PT Roda Maju Bahagia (RMB, NPWP `080167772504400`) lalu beralih ke TVL Global Logistik (NPWP `0033093287048000`), token JWT milik RMB masih terbawa.
+   - Gateway Bea Cukai memverifikasi klaim `identitas` pada token Bearer dengan nomor AJU dokumen. Ketika terjadi ketidakcocokan, CEISA menolak dengan respon: `{"status":"Failed","message":"Token Tidak Sesuai"}`.
+2. **Kode Kantor Pabean Hardcoded (`009000`) vs `070100` Tanjung Perak**:
+   - Input Kode Kantor pada `manifest.php` sebelumnya terisi nilai statis `009000` (Tanjung Priok).
+   - Dokumen nomor AJU `00900000330920261019815452` diawali `009000` sementara pelabuhan muat/tujuan adalah Tanjung Perak (`070100`), sehingga backend CEISA menolak drafting dengan HTTP 500.
+3. **Inversi Tanggal Keberangkatan & Kedatangan**:
+   - Pada draf yang bermasalah, `tanggal_tiba` (`2026-10-19`) tercatat lebih awal dari `tanggal_berangkat` (`2026-10-23`), yang secara logika pabean ditolak oleh validasi CEISA.
+4. **Header Wajib OpenAPI Gateway**:
+   - Gateway `openapi-manifes` Bea Cukai mewajibkan header resmi `beacukai-api-key: [CLIENT_API_KEY]`.
+5. **Tombol Bottom Bar Form Editor**:
+   - Fungsi pembantu `executeCekLengkap()` dan `executeKirimManifes()` belum terdefinisi pada JavaScript `manifest.php`, sehingga klik tombol pada bagian bawah form editor tidak mengeksekusi aksi.
+
+### B. Solusi & Perbaikan yang Diterapkan
+1. **Isolasi Token Perusahaan & Auto-Refresh Login ([manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php))**:
+   - Menyimpan dan membaca token secara terisolasi per perusahaan (`$_SESSION["token_" . $activeCmp]`) dan cache disk lokal (`ceisa_nle_token_{cmp}.json`).
+   - Jika token kedaluwarsa atau belum ada, sistem secara otomatis melakukan autentikasi ulang ke `https://apis-gw.beacukai.go.id/v1/openapi-auth/user/login` menggunakan kredensial resmi perusahaan aktif.
+   - Menyuntikkan header wajib `beacukai-api-key` dari basis data `bc_ceisa_company`.
+2. **Validasi & Penyesuaian Otomatis Form Editor ([manifest.php](file:///c:/dp/g-ceisa/manifest.php))**:
+   - Mengambil Kode Kantor resmi perusahaan secara dinamis (`$sessionKodeKantor`, misal `070100` untuk TVL).
+   - Menambahkan dropdown pilihan `Jenis Manifes`: `11` (Kedatangan / Inward) dan `12` (Keberangkatan / Outward).
+   - Validasi pintar pada penyimpanan Header: jika 6 digit awalan Nomor AJU berbeda dengan Kode Kantor, sistem menawarkan penyesuaian otomatis.
+   - Validasi urutan waktu: mencegah `tanggal_tiba` disimpan lebih awal dari `tanggal_berangkat`.
+   - Mengimplementasikan fungsi `executeCekLengkap()` dan `executeKirimManifes()` sehingga tombol pada bagian bawah editor langsung berfungsi.
+3. **Validasi Builder JSON ([CeisaManifestBuilder.php](file:///c:/dp/g-ceisa/CeisaManifestBuilder.php))**:
+   - Memastikan keutuhan skema `JsonNvocc` sesuai standar OpenAPI Swagger resmi Bea Cukai.
+   - Menambahkan validasi awalan 6 digit nomor AJU terhadap kode kantor dan urutan tanggal sebelum payload dikirim.
+4. **Sinkronisasi & Deployment ke Server Remote**:
+   - Memperbarui file `manifest.php`, `manifest_api.php`, dan `CeisaManifestBuilder.php` pada `/source/public/` dan `c:\dp\g-ceisa\www/`.
+   - Memperbaiki data dokumen di basis data (`tanggal_tiba = 2026-10-24 09:42:00` dan `jenis_manifes = 12`).
+
+---
+
+## 📌 45. IMPLEMENTASI DUAL-PAGE MANIFES BC 1.1: DASHBOARD CEISA 4.0 & DOKUMEN HOST TO HOST (19 OKTOBER 2026)
+
+### A. Latar Belakang & Kebutuhan Pengguna
+Mengikuti arsitektur Modul Dokumen Pabean Bea Cukai yang memisahkan antara:
+1. **Dashboard Ceisa 4.0** (Tampilan pelaporan & pemantauan resmi portal web CEISA 4.0)
+2. **Data Host to Host** (Pengelolaan teknis, input drafting, payload JSON, dan transaksi H2H)
+
+Pengguna meminta Manifes Online (BC 1.1 / NVOCC) dibuatkan 2 halaman yang terpisah:
+1. **Versi CEISA 4.0 (`manifest_ceisa.php`)**: Mereplikasi 100% tampilan antarmuka resmi portal Bea Cukai (`portal.beacukai.go.id/manifes` > `SINGLE CORE > Manifes Online > NVOCC > Browse Data NVOCC`), lengkap dengan 10 kolom tabel, warna lencana status CEISA (`DRAFT`, `READY`, `PENERIMAAN`, `REKON`, `PERSETUJUAN PERBAIKAN`, `REJECT`), tombol aksi `Menu ▾`, footer resmi BSSN & CEISA Care, serta fitur **Tarik Data Live dari Portal CEISA 4.0** (`/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{NPWP_15}`).
+2. **Versi Inputan Host to Host (`manifest.php`)**: Halaman khusus untuk perekaman data, form drafting pos & House B/L, kemasan/petikemas, impor excel backup, kalkulasi bruto, dan OpenAPI JSON builder.
+
+### B. Rincian Implementasi & Modifikasi File
+
+#### 1. Pembuatan Modul [manifest_ceisa.php](file:///c:/dp/g-ceisa/manifest_ceisa.php)
+- **Tampilan Resmi Portal CEISA 4.0**:
+  - Breadcrumb: `CEISA 4.0`
+  - Header: Folder icon `📁 Browse Data NVOCC` dengan tombol Ant Design biru `➕ Pembuatan Dokumen Baru` (terhubung langsung ke Form Editor Host to Host).
+  - Toolbar aksi atas: `📥 Restore Data`, `⚡ Filter Data` (laci filter interaktif), `🔄 Perbaharui Data`, dan `🌐 Tarik dari CEISA 4.0 (Live API)`.
+  - 10 Kolom Tabel Resmi:
+    1. `Nomor Pengajuan` (dengan sort icon & pencarian cepat)
+    2. `Kode Kantor`
+    3. `Nomor Voyage / Flight`
+    4. `Jenis Dokumen` (`Outward (BC 1.1)` / `Inward (BC 1.1)`)
+    5. `Nomor Daftar`
+    6. `Tanggal Daftar`
+    7. `Status` (Lencana status CEISA: Draft abu-abu, Ready hijau muda, Penerimaan hijau tua, Rekon oranye, Persetujuan Perbaikan zaitun, Reject merah)
+    8. `Sarana Angkut`
+    9. `Tanggal` (Berangkat / Tiba)
+    10. `Action`: Tombol dropdown `Menu ▾` (Edit di Host to Host, Cek Status, Cek Kelengkapan, Kirim CEISA, Rekon, Lihat JSON, Copy AJU, Hapus).
+  - Footer resmi: `2019 © Direktorat Jenderal Bea dan Cukai · Digital Signature Supported By BSSN 🛡️` dan tombol `🎧 Layanan CEISA Care`.
+
+#### 2. Penambahan Sinkronisasi Portal Live pada [manifest_api.php](file:///c:/dp/g-ceisa/manifest_api.php)
+- Menambahkan aksi `action === 'sync_ceisa_portal'`.
+- Menghubungi endpoint resmi webMethods Portal:
+  `GET https://apis-gw.beacukai.go.id/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{NPWP_15}`
+  dengan header:
+  - `Beacukai-Api-Key: 6222a75e-1dbb-493e-9461-27f721097e9c`
+  - `Authorization: Bearer [PORTAL_JWT_TOKEN]`
+  - `Origin: https://portal.beacukai.go.id`
+- Melakukan pemetaan (*mapping*) dan *upsert* otomatis ke tabel `bc_ceisa_manifes_header` untuk perusahaan aktif.
+
+#### 3. Penataan Menu Navigasi & Routing pada [index.php](file:///c:/dp/g-ceisa/index.php)
+- Memisahkan grup menu **MANIFES ONLINE (BC 1.1)** menjadi seksi mandiri dengan 2 sub-menu:
+  1. `Dashboard Ceisa 4.0` (tab `manifest_ceisa` -> memuat `/manifest_ceisa.php`)
+  2. `Data Host to Host` (tab `manifest` -> memuat `/manifest.php`)
+- Menyesuaikan logika visibilitas peran:
+  - Perusahaan *Manifest-Only* (seperti PT TVL) secara otomatis membuka tab `manifest_ceisa` sebagai halaman utama, sementara Dokumen Pabean biasa, Modul Inventory, dan Referensi disembunyikan.
+- Mengintegrasikan siklus hidup *iframe* dan *postMessage* komunikasi antar-tab.
+
+#### 4. Penyempurnaan Tampilan [manifest.php](file:///c:/dp/g-ceisa/manifest.php)
+- Menghapus banner header besar yang redundant (*"Manifes BC 1.1 / NVOCC (Host-to-Host OpenAPI)"*).
+- Menyatukan tombol aksi `📥 Import Excel Backup` dan `➕ Buat Manifes Baru` ke dalam bilah subtab horizontal yang ringkas.
+- Menambahkan pendeteksi otomatis parameter `nomor_aju` pada saat halaman dimuat untuk *deep-linking* edit dokumen.
+
+### C. Hasil Deployment & Verifikasi
+- Seluruh file telah disalin ke `c:\dp\g-ceisa\www/` dan di-deploy ke server remote Ubuntu `/source/public/`.
+- Verifikasi PHP Syntax Linting menunjukkan 0 error pada seluruh file.
+---
+
+## 📑 89. STANDARISASI DROPDOWN REFERENSI KEMASAN & PELABUHAN PADA MODAL HOUSE B/L (HBL) DENGAN PENCARIAN 91.000+ PELABUHAN DUNIA & PERBAIKAN FITUR EDIT / HAPUS HBL
+
+### A. Latar Belakang & Permintaan Pengguna
+- Pada modal *"Tambah / Edit House B/L (HBL)"* di [`manifest.php`](file:///c:/dp/g-ceisa/manifest.php), field **Jenis Kemasan**, **Pelabuhan Asal**, **Pelabuhan Bongkar**, dan **Pelabuhan Akhir** sebelumnya berupa input teks bebas (`<input type="text">`).
+- Hal ini rentan kesalahan pengetikan (*typo*), format kode tidak seragam dengan tabel referensi resmi Bea Cukai (`bc_ceisa_reff`), serta tombol `✏️ Edit` pada daftar House BL sebelumnya belum memunculkan isi data ke modal.
+
+### B. Implementasi & Solusi Teknis
+1. **Dropdown Referensi Jenis Kemasan**:
+   - Diambil langsung dari tabel `bc_ceisa_reff WHERE reff = 'JENIS KEMASAN'` (382 jenis kemasan resmi CEISA: CT, BX, PK, BG, dll).
+   - Ditampilkan dalam elemen `<select id="bl_jenis_kemasan">` lengkap dengan kode dan keterangannya.
+
+2. **Dropdown Bertingkat Pelabuhan Asal, Bongkar & Akhir**:
+   - Query cerdas dari `bc_ceisa_reff WHERE reff = 'PELABUHAN'` mengelompokkan 817 pelabuhan utama:
+     - `⭐ Pelabuhan Populer & Internasional` (CNSHZ, CNSHA, CNNGB, SGSIN, MYPKG, HKHKG, KRPUS, USLAX, NLRTM, DEHAM, dll).
+     - `🇮🇩 Pelabuhan Utama Indonesia` (IDTPP, IDTPS, IDSRG, IDBLW, IDMAK, IDBTH, dll).
+     - `Pelabuhan Indonesia Lainnya` (770+ pelabuhan kepulauan nusantara).
+
+3. **Pencarian Real-Time 91.000+ Pelabuhan Dunia (`modalSearchPort`)**:
+   - Untuk pelabuhan internasional lainnya di luar daftar populer, disediakan tombol & opsi `"🔍 Cari Pelabuhan Lainnya di Dunia..."`.
+   - Menggunakan modal interaktif dengan *debounce search* (250ms) yang memanggil `manifest_api.php?action=get_reff&reff=PELABUHAN&q=...`.
+   - Pengguna cukup mengetik 2 karakter (misal nama kota atau kode UN/LOCODE) dan sekali klik tombol `Pilih` untuk otomatis memilih pelabuhan tersebut.
+
+4. **Preservasi Nilai Dinamis (`setSelectOrAddOption`)**:
+   - Jika dokumen hasil impor Excel memiliki kode pelabuhan khusus atau placeholder sementara (seperti `XXX`), fungsi JavaScript `setSelectOrAddOption()` secara otomatis menyisipkan `<option value="XXX" selected>XXX</option>` sehingga data lama tidak hilang atau ter-reset.
+
+5. **Fitur Edit & Hapus House B/L Lengkap**:
+   - Diimplementasikan fungsi `editHouseBlModal(nomorHostBl)` yang mengambil data baris dari array `currentLoadedBls`, mengisi seluruh field formulir (Master BL, House BL, Pengirim, Penerima, Kemasan, Pelabuhan, HS Item, Petikemas), dan membuka modal dalam mode Edit.
+   - Ditambahkan hidden input `bl_orig_nomor_host_bl` dan penanganan *rename* HBL di backend `manifest_api.php`.
+   - Ditambahkan tombol `🗑️` dan handler `deleteHouseBl()` serta endpoint `action === 'delete_bl'` untuk menghapus pos House BL yang tidak dibutuhkan.
+
+### C. Hasil Deployment & Verifikasi
+- File lokal disinkronkan ke `c:\dp\g-ceisa\www/` dan di-deploy ke `/source/public/` pada server remote Ubuntu.
+- Pengujian PHP Linting (`php -l`): **0 syntax error**.
+- Pengujian lookup API `get_reff` untuk pelabuhan Shanghai (`q=SHANGHAI`): **Berhasil 100%** mengembalikan kode pelabuhan UN/LOCODE secara instan.
+
+
+
+
 
 
 

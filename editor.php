@@ -36,13 +36,49 @@ if (empty($filterCmp) && !empty($selectedAjuParam) && isset($koneksi) && $koneks
     }
 }
 $companyErpName = '-';
+$companyRoles = 'tpb';
 if (!empty($filterCmp) && isset($koneksi) && $koneksi) {
-    $qErp = $koneksi->query("SELECT ERP_Name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "' LIMIT 1");
+    $qErp = $koneksi->query("SELECT ERP_Name, IFNULL(company_roles, 'tpb') AS company_roles FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "' LIMIT 1");
     if ($qErp && $rErp = $qErp->fetch_assoc()) {
         $companyErpName = trim($rErp['ERP_Name'] ?? '-');
+        $companyRoles = trim($rErp['company_roles'] ?? 'tpb');
     }
 }
 $isErpConfigured = (!empty($companyErpName) && $companyErpName !== '-' && strtoupper($companyErpName) !== 'NONE');
+
+// Katalog Dokumen Pabean Berdasarkan Role Perusahaan
+$allBcCatalog = [
+    '23'  => ['label' => 'BC 2.3 - Impor TPB / Kawasan Berikat', 'role' => 'tpb'],
+    '40'  => ['label' => 'BC 4.0 - Pemasukan TLDDP ke TPB',     'role' => 'tpb'],
+    '30'  => ['label' => 'BC 3.0 - Pemberitahuan Ekspor (PEB)',   'role' => 'peb'],
+    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb'],
+    '27'  => ['label' => 'BC 2.7 - Pengeluaran Antar TPB',       'role' => 'tpb'],
+    '20'  => ['label' => 'BC 2.0 - Impor untuk Dipakai (PIB)',    'role' => 'pib'],
+    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'tpb'],
+    '41'  => ['label' => 'BC 4.1 - Pengeluaran Sementara ke TLDDP', 'role' => 'tpb'],
+    '261' => ['label' => 'BC 2.6.1 - Pengeluaran Subkontrak',     'role' => 'tpb'],
+    '262' => ['label' => 'BC 2.6.2 - Pemasukan Subkontrak',      'role' => 'tpb'],
+    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'tpb'],
+    '33'  => ['label' => 'BC 3.3 - Ekspor dari TPB',             'role' => 'tpb'],
+    '611' => ['label' => 'BC 6.1.1 - Pemasukan ke KEK',          'role' => 'ppkek'],
+    '613' => ['label' => 'BC 6.1.3 - Pengeluaran dari KEK',       'role' => 'ppkek'],
+    '631' => ['label' => 'BC 6.3.1 - Cukai',                     'role' => 'ppkek'],
+];
+
+$activeEditorRoles = array_filter(array_map('trim', explode(',', strtolower($companyRoles))));
+if (empty($activeEditorRoles)) $activeEditorRoles = ['tpb'];
+
+$allowedBcOptions = [];
+foreach ($allBcCatalog as $code => $info) {
+    if (in_array($info['role'], $activeEditorRoles)) {
+        $allowedBcOptions[$code] = $info['label'];
+    }
+}
+if (empty($allowedBcOptions)) {
+    foreach ($allBcCatalog as $code => $info) {
+        $allowedBcOptions[$code] = $info['label'];
+    }
+}
 $whereCmp = !empty($filterCmp) ? "WHERE a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'" : "";
 
 // Ambil daftar AJU untuk selector dropdown
@@ -1905,6 +1941,72 @@ if ($action === 'transfer_trace_to_bb') {
     exit;
 }
 
+// Mulai Trace FIFO Dokumen Asal
+if ($action === 'trace_fifo') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+    $res = ceisa_trace_fifo($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Get Master Material
+if ($action === 'get_material_picker') {
+    header('Content-Type: application/json; charset=utf-8');
+    $search = trim($_GET['search'] ?? '');
+    $klas = trim($_GET['klas'] ?? '');
+    $limit = intval($_GET['limit'] ?? 60);
+    $res = ceisa_get_material_picker($koneksi, $search, $klas, $limit);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Insert from Material
+if ($action === 'insert_from_material') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $rawItems = $_POST['items'] ?? '[]';
+    $items = json_decode($rawItems, true);
+    if (!is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Format item tidak valid.']);
+        exit;
+    }
+    $res = ceisa_insert_from_material($koneksi, $nomor_aju, $items);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Get Incoming Documents (bc_1ab2 AB = 'A')
+if ($action === 'get_incoming_picker') {
+    header('Content-Type: application/json; charset=utf-8');
+    $search = trim($_GET['search'] ?? '');
+    $bc = trim($_GET['bc'] ?? '');
+    $limit = intval($_GET['limit'] ?? 60);
+    $res = ceisa_get_incoming_picker($koneksi, $search, $bc, $limit);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Insert from Incoming Documents
+if ($action === 'insert_from_incoming') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $seri_barang = intval($_POST['seri_barang'] ?? 1);
+    $rawItems = $_POST['items'] ?? '[]';
+    $items = json_decode($rawItems, true);
+    if (!is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Format item dokumen masuk tidak valid.']);
+        exit;
+    }
+    $res = ceisa_insert_from_incoming($koneksi, $nomor_aju, $seri_barang, $items);
+    echo json_encode($res);
+    exit;
+}
+
 // Get Recap Tarif (Summary Box)
 if ($action === 'get_recap_tarif') {
     header('Content-Type: application/json; charset=utf-8');
@@ -3758,6 +3860,39 @@ if ($action === 'ai_inject') {
             border-color: rgba(255, 255, 255, 0.35);
             border-top-color: #ffffff;
         }
+
+        /* Context Menu (DataWindow Style) */
+        .context-menu {
+            position: fixed;
+            z-index: 99999;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+            min-width: 220px;
+            padding: 4px 0;
+            font-size: 11px;
+            display: none;
+        }
+        .context-menu-item {
+            padding: 7px 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-main);
+            transition: all .15s;
+            user-select: none;
+        }
+        .context-menu-item:hover {
+            background: rgba(56, 189, 248, 0.12);
+            color: var(--primary);
+        }
+        .context-menu-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 0;
+        }
     </style>
 </head>
 <?php 
@@ -3881,21 +4016,15 @@ $isEditMode = !empty($selectedAjuParam);
                     <span>1. Jenis Dokumen BC</span>
                 </div>
                 <select id="entryDocBc" onchange="onEntryBcChange(this.value)" style="font-weight:700; color:var(--primary);">
-                    <option value="23" selected>BC 2.3 - Impor TPB / Kawasan Berikat</option>
-                    <option value="40">BC 4.0 - Pemasukan TLDDP ke TPB</option>
-                    <option value="30">BC 3.0 - Pemberitahuan Ekspor (PEB)</option>
-                    <option value="25">BC 2.5 - Pengeluaran TPB ke TLDDP</option>
-                    <option value="27">BC 2.7 - Pengeluaran Antar TPB</option>
-                    <option value="20">BC 2.0 - Impor untuk Dipakai (PIB)</option>
-                    <option value="16">BC 1.6 - Pemasukan ke PLB</option>
-                    <option value="41">BC 4.1 - Pengeluaran Sementara ke TLDDP</option>
-                    <option value="261">BC 2.6.1 - Pengeluaran Subkontrak</option>
-                    <option value="262">BC 2.6.2 - Pemasukan Subkontrak</option>
-                    <option value="28">BC 2.8 - Impor dari PLB</option>
-                    <option value="33">BC 3.3 - Ekspor dari TPB</option>
-                    <option value="611">BC 6.1.1 - Pemasukan ke KEK</option>
-                    <option value="613">BC 6.1.3 - Pengeluaran dari KEK</option>
-                    <option value="631">BC 6.3.1 - Cukai</option>
+                    <?php 
+                    $firstBc = true;
+                    foreach ($allowedBcOptions as $bcCode => $bcLabel): 
+                    ?>
+                        <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                    <?php 
+                        $firstBc = false;
+                    endforeach; 
+                    ?>
                 </select>
                 <div style="display:flex; gap:4px; margin-top:2px;">
                     <button type="button" class="btn btn-secondary btn-xs" style="flex:1;" onclick="openConfigAjuModal()">⚙️ Konfig AJU</button>
@@ -4387,6 +4516,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-secondary btn-sm" onclick="fixHsCode()" title="Isi otomatis Pos Tarif (HS Code) yang kosong dari data historis atau referensi">🔍 FIX HS CODE</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="fixNetto()" title="Isi otomatis Netto yang kosong berdasarkan rasio historis per satuan">⚖️ FIX NETTO</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="editSeriBarang()" title="Tata ulang nomor urut Seri Barang 1..N">🔢 Edit Seri</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openMaterialPickerModal()" style="font-weight:700;" title="Pilih dan masukkan barang dari master material bc_material">📦 Tambah dari Master Barang</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow('barang')">➕ Tambah Barang</button>
                     <button type="button" class="btn btn-success btn-sm" onclick="saveTable('barang')">💾 Simpan Barang</button>
                 </div>
@@ -4413,7 +4543,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
                         <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Komponen Bahan Baku / Bill of Material (BOM) ::</span>
                         <div style="display:flex; gap:6px;">
-                            <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()">📥 Load ALL BOM Barang</button>
+                            <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()" title="Ambil BOM seluruh barang dari master bc_ceisa_bom">📥 Load ALL BOM Barang</button>
                             <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('barangbom')">➕ Tambah BOM</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="saveTable('barangbom')">💾 Simpan BOM</button>
                         </div>
@@ -4437,9 +4567,11 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
 
                 <div style="background:var(--bg-secondary); border-radius:6px; border:1px solid var(--border-color); padding:10px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
                         <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Tracking Dokumen Asal / Eks BC ::</span>
-                        <div style="display:flex; gap:6px;">
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-primary btn-xs" onclick="startFifoTrace()" style="font-weight:700; background:#2563eb; border-color:#1d4ed8; color:#fff;" title="Otomatis mencocokkan BOM dengan saldo masuk bc_1ab2 secara FIFO">⚡ Mulai Trace FIFO (Auto)</button>
+                            <button type="button" class="btn btn-info btn-xs" onclick="openIncomingPickerModal('trace')" style="background:#0891b2; border-color:#0e7490; color:#fff;" title="Pilih manual dokumen pemasukan eks-BC dari IT Inventory">📥 Tambah Dokumen Asal</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="transferTraceToBahanBaku()" style="font-weight:700;">🔄 Transfer Data Trace ke Bahan Baku</button>
                             <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('tracebb')">➕ Tambah Trace</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="saveTable('tracebb')">💾 Simpan Trace</button>
@@ -4535,6 +4667,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-warning btn-sm" onclick="generateBahanBakuTarif()" style="font-weight:700;" title="Generate otomatis baris tarif untuk seluruh bahan baku (BM, PPH, PPN)">⚡ Generate Bahan Baku Tarif</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="fixHsCode()" title="Isi Pos Tarif (HS Code) kosong pada Bahan Baku">🔍 FIX HS CODE</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="seqBahanBaku()" title="Urutkan Seri Bahan Baku 1..N per Seri Barang">🔢 Urutkan Seri BB</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openIncomingPickerModal('bahanbaku')" style="font-weight:700;" title="Pilih dan masukkan dokumen pemasukan eks-BC dari IT Inventory">📥 Tambah dari Dokumen Masuk (Eks BC)</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbaku')">➕ Tambah Bahan Baku</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('bahanbaku')">💾 Simpan Bahan Baku</button>
                 </div>
@@ -6136,6 +6269,153 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
+    <!-- QUICK PICKER MODAL: MASTER BARANG (bc_material) -->
+    <div class="modal-overlay" id="modalMaterialPicker">
+        <div class="modal" style="max-width:920px; width:95vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(37, 99, 235, 0.1), transparent);">
+                <div>
+                    <h3 style="color:#2563eb; display:flex; align-items:center; gap:6px;">
+                        <span>📦 Tambah Barang dari Master Material (<code>bc_material</code>)</span>
+                    </h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                        Pilih barang jadi / bahan dari master produk untuk dimasukkan langsung ke tabel Rincian Barang dokumen AJU ini.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalMaterialPicker')">✕</button>
+            </div>
+            <div class="modal-body" style="padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; flex:1; max-width:550px;">
+                        <input type="text" id="searchMaterialPicker" placeholder="Cari Kode Barang / Uraian / HS Code / Model..." onkeyup="debounceSearchMaterial()" style="flex:1; font-size:11px; padding:6px 10px;">
+                        <select id="filterKlasMaterialPicker" onchange="loadMaterialPickerList()" style="width:140px; font-size:11px;">
+                            <option value="">-- Semua Klas --</option>
+                            <option value="FG">FG (Barang Jadi)</option>
+                            <option value="WIP">WIP (Barang Setengah Jadi)</option>
+                            <option value="RAW">RAW (Bahan Baku)</option>
+                            <option value="SCRAP">SCRAP (Sisa/Scrap)</option>
+                            <option value="MESIN">MESIN (Peralatan)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span id="badgeSelectedMaterialCount" style="font-size:11px; font-weight:700; color:var(--primary); background:rgba(37, 99, 235, 0.1); padding:4px 8px; border-radius:4px;">0 item dipilih</span>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="loadMaterialPickerList()">🔄 Segarkan</button>
+                    </div>
+                </div>
+
+                <div style="max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                    <table class="datagrid" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th style="width:36px; text-align:center;">
+                                    <input type="checkbox" id="chkSelectAllMaterial" onchange="toggleSelectAllMaterial(this.checked)">
+                                </th>
+                                <th style="width:120px;">Kode Barang</th>
+                                <th>Uraian Barang</th>
+                                <th style="width:95px;">HS Code</th>
+                                <th style="width:65px;">Satuan</th>
+                                <th style="width:75px; text-align:right;">Berat (Kg)</th>
+                                <th style="width:85px; text-align:right;">Harga Satuan</th>
+                                <th style="width:90px; text-align:right;">Qty Masuk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyMaterialPicker"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalMaterialPicker')">Batal</button>
+                <button type="button" class="btn btn-primary" onclick="insertSelectedMaterials()" style="font-weight:700;">
+                    ➕ Masukkan Barang Terpilih ke Dokumen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- QUICK PICKER MODAL: DOKUMEN MASUK EKS-BC (bc_1ab2) -->
+    <div class="modal-overlay" id="modalIncomingPicker">
+        <div class="modal" style="max-width:980px; width:96vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(8, 145, 178, 0.1), transparent);">
+                <div>
+                    <h3 style="color:#0891b2; display:flex; align-items:center; gap:6px;">
+                        <span>📥 Pilih Dokumen Pemasukan Eks-BC (<code>bc_1ab2</code> IT Inventory)</span>
+                    </h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                        Pilih saldo dokumen pemasukan (BC 2.3 / 4.0 / 2.7 / 2.0) dari IT Inventory untuk dialokasikan ke Bahan Baku atau Tracking Trace.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalIncomingPicker')">✕</button>
+            </div>
+            <div class="modal-body" style="padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; flex:1; max-width:620px; align-items:center;">
+                        <div id="wrapperTargetSeri" style="display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:10px; font-weight:700; white-space:nowrap;">Target Barang:</label>
+                            <select id="selectTargetSeriBarang" style="font-size:11px; padding:4px 6px;"></select>
+                        </div>
+                        <input type="text" id="searchIncomingPicker" placeholder="Cari No AJU / No Daftar / Kode Barang / Supplier..." onkeyup="debounceSearchIncoming()" style="flex:1; font-size:11px; padding:6px 10px;">
+                        <select id="filterBcIncomingPicker" onchange="loadIncomingPickerList()" style="width:110px; font-size:11px;">
+                            <option value="">-- Semua BC --</option>
+                            <option value="23">BC 2.3</option>
+                            <option value="40">BC 4.0</option>
+                            <option value="27">BC 2.7</option>
+                            <option value="20">BC 2.0</option>
+                            <option value="262">BC 2.6.2</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span id="badgeSelectedIncomingCount" style="font-size:11px; font-weight:700; color:#0891b2; background:rgba(8, 145, 178, 0.1); padding:4px 8px; border-radius:4px;">0 dokumen dipilih</span>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="loadIncomingPickerList()">🔄 Segarkan</button>
+                    </div>
+                </div>
+
+                <div style="max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                    <table class="datagrid" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th style="width:36px; text-align:center;">Pilih</th>
+                                <th style="width:45px; text-align:center;">BC</th>
+                                <th style="width:140px;">No AJU Asal</th>
+                                <th style="width:120px;">No / Tgl Daftar</th>
+                                <th style="width:105px;">Kode Barang</th>
+                                <th>Uraian & Supplier</th>
+                                <th style="width:60px;">Sat</th>
+                                <th style="width:85px; text-align:right;">Saldo Sisa</th>
+                                <th style="width:95px; text-align:right;">Qty Pakai</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyIncomingPicker"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalIncomingPicker')">Batal</button>
+                <button type="button" class="btn btn-primary" id="btnInsertIncoming" onclick="insertSelectedIncoming()" style="font-weight:700; background:#0891b2; border-color:#0e7490;">
+                    ➕ Masukkan ke Dokumen
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONTEXT MENU (KLIK KANAN) -->
+    <div id="editorContextMenu" class="context-menu">
+        <div id="ctxHeaderTitle" style="padding:4px 14px; font-weight:700; color:var(--text-muted); font-size:10px; border-bottom:1px solid var(--border); margin-bottom:2px;">AKSI BARIS</div>
+        <div id="ctxBarangOptions">
+            <div class="context-menu-item" onclick="triggerContextAction('add_material')">📦 Tambah dari Master Barang</div>
+            <div class="context-menu-item" onclick="triggerContextAction('fifo_trace')">⚡ Mulai Trace FIFO Dokumen Asal</div>
+            <div class="context-menu-item" onclick="triggerContextAction('toggle_trace')">🔍 Show / Hide Trace Panel</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_hs')">🔍 FIX HS CODE</div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_netto')">⚖️ FIX NETTO</div>
+        </div>
+        <div id="ctxBahanBakuOptions" style="display:none;">
+            <div class="context-menu-item" onclick="triggerContextAction('add_incoming')">📥 Tambah dari Dokumen Masuk (Eks BC)</div>
+            <div class="context-menu-item" onclick="triggerContextAction('generate_bbt')">⚡ Generate Bahan Baku Tarif</div>
+            <div class="context-menu-item" onclick="triggerContextAction('seq_bb')">🔢 Urutkan Seri Bahan Baku</div>
+        </div>
+        <div class="context-menu-divider"></div>
+        <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">❌ Hapus Baris Ini</div>
+    </div>
+
     <script>
         // Jika dibuka langsung di browser luar iframe portal, alihkan ke index.php agar sidebar menu tetap tampil
         if (window.self === window.top) {
@@ -6197,7 +6477,10 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         function resetEntryDraft() {
-            document.getElementById('entryDocBc').value = '23';
+            const docBcEl = document.getElementById('entryDocBc');
+            if (docBcEl && docBcEl.options.length > 0) {
+                docBcEl.selectedIndex = 0;
+            }
             document.getElementById('entryValuta').value = 'USD';
             document.getElementById('entryNdpbmDate').value = new Date().toISOString().slice(0, 10);
             fetchLiveNdpbm('USD');
@@ -7992,6 +8275,7 @@ $isEditMode = !empty($selectedAjuParam);
                 loadErpProfile();
             }
             initAiReader();
+            initEditorContextMenu();
         }
 
         async function changeAju(aju) {
@@ -8061,7 +8345,19 @@ $isEditMode = !empty($selectedAjuParam);
                     const entryAjuEl = document.getElementById('entryAjuDisplay');
                     if (entryAjuEl) entryAjuEl.innerText = aju ? aju : '- Silakan Buat Dokumen -';
                     const entryBcEl = document.getElementById('entryDocBc');
-                    if (entryBcEl && kodeDokumen) entryBcEl.value = kodeDokumen;
+                    if (entryBcEl && kodeDokumen) {
+                        let optFound = false;
+                        for (let i = 0; i < entryBcEl.options.length; i++) {
+                            if (entryBcEl.options[i].value === String(kodeDokumen)) { optFound = true; break; }
+                        }
+                        if (!optFound) {
+                            const opt = document.createElement('option');
+                            opt.value = kodeDokumen;
+                            opt.textContent = `BC ${kodeDokumen}`;
+                            entryBcEl.appendChild(opt);
+                        }
+                        entryBcEl.value = kodeDokumen;
+                    }
                     const entryValutaEl = document.getElementById('entryValuta');
                     if (entryValutaEl && currentData.header?.kode_valuta) entryValutaEl.value = currentData.header.kode_valuta;
                     const entryNdpbmEl = document.getElementById('entryNdpbmVal');
@@ -8385,19 +8681,32 @@ $isEditMode = !empty($selectedAjuParam);
                 if (!tbody) return;
                 tbody.innerHTML = '';
 
+                // Gunakan DocumentFragment agar insert dilakukan satu kali ke DOM (menghindari reflow per baris)
+                const frag = document.createDocumentFragment();
                 rows.forEach((r, idx) => {
                     const tr = createGridRow(t, r, idx);
-                    tbody.appendChild(tr);
+                    frag.appendChild(tr);
                 });
+                tbody.appendChild(frag);
 
                 // Hitung total footer untuk tabel ini
                 updateTableTotals(t);
             });
 
-            // Pastikan seluruh select referensi memiliki lebar pas dan textarea auto-resize
+            // Reset flag resized pada semua panel agar textarea akan di-resize ulang saat panel pertama kali dibuka setelah load data
+            document.querySelectorAll('.panel').forEach(p => { delete p.dataset.resized; });
+
+            // Tandai recap tarif perlu reload (data baru saja dimuat)
+            _recapTarifDirty = true;
+
+            // Pastikan seluruh select referensi memiliki lebar pas dan textarea auto-resize pada panel yang sedang aktif
             setTimeout(() => {
                 document.querySelectorAll('table.datagrid td select.cell-select').forEach(autoSizeSelect);
-                autoResizeAllTextareas();
+                const activePnl = document.querySelector('.panel.active');
+                if (activePnl) {
+                    autoResizeAllTextareas(activePnl);
+                    activePnl.dataset.resized = '1';
+                }
             }, 60);
         }
 
@@ -8687,25 +8996,45 @@ $isEditMode = !empty($selectedAjuParam);
             updateTableTotals(tableKey);
         }
 
+        // Track panel aktif sebelumnya untuk swap yang efisien
+        let _activePanelEl = null;
+        let _recapTarifDirty = true; // flag: perlu reload recap tarif
+
         function switchTab(tabName) {
             activeTab = tabName;
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
 
+            // Swap tab button active
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
             if (activeBtn) activeBtn.classList.add('active');
 
+            // Swap panel: hide panel lama, tampilkan yang baru
+            if (_activePanelEl) _activePanelEl.classList.remove('active');
             const activePnl = document.getElementById('panel-' + tabName);
             if (activePnl) {
                 activePnl.classList.add('active');
-                requestAnimationFrame(() => {
-                    autoResizeAllTextareas(activePnl);
-                });
+                _activePanelEl = activePnl;
+                // autoResizeAllTextareas HANYA jika panel ini belum pernah di-resize
+                // (ditandai dengan data-resized="1" setelah populateGrids)
+                if (!activePnl.dataset.resized) {
+                    requestAnimationFrame(() => {
+                        autoResizeAllTextareas(activePnl);
+                        activePnl.dataset.resized = '1';
+                    });
+                }
+            } else {
+                _activePanelEl = null;
             }
-            if (tabName === 'barangtarif' || tabName === 'bahanbakutarif') {
+
+            // Hanya reload recap tarif jika dirty (data berubah sejak terakhir ditampilkan)
+            if ((tabName === 'barangtarif' || tabName === 'bahanbakutarif') && _recapTarifDirty) {
                 loadRecapTarif();
+                _recapTarifDirty = false;
             }
         }
+
+        // Tandai recap tarif perlu reload saat ada simpan/hitung
+        function markRecapTarifDirty() { _recapTarifDirty = true; }
 
         window.addEventListener('resize', () => {
             if (window._taResizeTimer) clearTimeout(window._taResizeTimer);
@@ -9765,10 +10094,12 @@ $isEditMode = !empty($selectedAjuParam);
                             const tbody = document.querySelector(`#table-${tbl} tbody`);
                             if (tbody) {
                                 tbody.innerHTML = '';
+                                const frag = document.createDocumentFragment();
                                 (currentData[tbl]).forEach((r, idx) => {
                                     const tr = createGridRow(tbl, r, idx);
-                                    tbody.appendChild(tr);
+                                    frag.appendChild(tr);
                                 });
+                                tbody.appendChild(frag);
                                 setTimeout(() => {
                                     document.querySelectorAll(`#table-${tbl} select.cell-select`).forEach(autoSizeSelect);
                                 }, 50);
@@ -9777,6 +10108,9 @@ $isEditMode = !empty($selectedAjuParam);
                             if (countBadge) countBadge.innerText = currentData[tbl].length;
                             updateTableTotals(tbl);
                         });
+                        // Tandai recap tarif perlu reload
+                        markRecapTarifDirty();
+                        loadRecapTarif();
                     }
 
                     showSuccess(json.message, 'Kalkulasi Tarif Sukses');
@@ -10837,6 +11171,481 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch(e) {
                 Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // =============================================================
+        // TAHAP 3: MESIN TRACE FIFO DOKUMEN ASAL
+        // =============================================================
+
+        async function startFifoTrace() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Silakan buka atau pilih dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            const confirmRes = await Swal.fire({
+                title: '⚡ Jalankan Mesin Trace FIFO?',
+                html: `Sistem akan:<br>
+                    <div style="text-align:left; font-size:12px; margin-top:6px; line-height:1.7;">
+                    1. Membaca kebutuhan komponen BOM pada setiap barang.<br>
+                    2. Mencocokkan saldo pemasukan di <b>IT Inventory (bc_1ab2)</b> secara <b>First-In First-Out</b>.<br>
+                    3. Mengisi tabel Tracking Eks-BC (<code>bc_ceisa_tracebb</code>) dengan No AJU, No Daftar, Tgl Daftar, HS, & Nilai CIF asal.
+                    </div><br>
+                    Lanjutkan proses trace otomatis?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#2563eb',
+                confirmButtonText: '⚡ Ya, Mulai Trace FIFO'
+            });
+            if (!confirmRes.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Sedang Melacak Saldo FIFO...',
+                text: 'Mencocokkan komponen BOM dengan pemasukan IT Inventory...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const resp = await fetch(`editor.php?action=trace_fifo&nomor_aju=${encodeURIComponent(currentAju)}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    // Pastikan panel trace terbuka agar user langsung melihat hasilnya
+                    const pnl = document.getElementById('traceSubPanel');
+                    const btn = document.getElementById('btnToggleTrace');
+                    if (pnl) pnl.style.display = 'block';
+                    if (btn) btn.innerHTML = '🔍 Hide Trace';
+
+                    await Swal.fire({
+                        title: 'Trace FIFO Selesai!',
+                        html: `<div style="text-align:left; font-size:12px; line-height:1.7;">
+                            <b>✅ Hasil Pelacakan FIFO:</b><br>
+                            • Total baris dokumen asal terhubung: <b>${data.total_rows || 0}</b> baris.<br>
+                            ${data.unmatched > 0 ? `• Komponen saldo standby: <b>${data.unmatched}</b> item.<br>` : ''}
+                            <br>
+                            💡 <i>Klik tombol <b>"🔄 Transfer Data Trace ke Bahan Baku"</b> jika Anda ingin memindahkan data trace ini ke tab Bahan Baku & mengenerate tarifnya!</i>
+                        </div>`,
+                        icon: 'success'
+                    });
+
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire(data.status === 'WARNING' ? 'Perhatian' : 'Gagal Trace', data.message || 'Terjadi kendala saat melacak data.', data.status === 'WARNING' ? 'warning' : 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message || 'Gagal memanggil API Trace FIFO.', 'error');
+            }
+        }
+
+        // =============================================================
+        // TAHAP 4: QUICK PICKER MASTER BARANG (bc_material)
+        // =============================================================
+
+        let materialPickerCache = [];
+        let searchMaterialTimer = null;
+
+        function openMaterialPickerModal() {
+            document.getElementById('modalMaterialPicker').style.display = 'flex';
+            document.getElementById('searchMaterialPicker').value = '';
+            document.getElementById('filterKlasMaterialPicker').value = '';
+            loadMaterialPickerList();
+        }
+
+        function debounceSearchMaterial() {
+            if (searchMaterialTimer) clearTimeout(searchMaterialTimer);
+            searchMaterialTimer = setTimeout(loadMaterialPickerList, 300);
+        }
+
+        async function loadMaterialPickerList() {
+            const tbody = document.getElementById('tbodyMaterialPicker');
+            if (!tbody) return;
+            const search = encodeURIComponent((document.getElementById('searchMaterialPicker')?.value || '').trim());
+            const klas = encodeURIComponent(document.getElementById('filterKlasMaterialPicker')?.value || '');
+
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat master barang...</td></tr>';
+
+            try {
+                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}`);
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    materialPickerCache = res.data || [];
+                    renderMaterialPickerTable(materialPickerCache);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:red; padding:15px;">Gagal: ${res.message}</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:red; padding:15px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderMaterialPickerTable(list) {
+            const tbody = document.getElementById('tbodyMaterialPicker');
+            const chkAll = document.getElementById('chkSelectAllMaterial');
+            if (chkAll) chkAll.checked = false;
+            updateSelectedMaterialBadge();
+
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:20px;">Tidak ada barang yang cocok.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            list.forEach((m, idx) => {
+                const kb = escapeHtml(m.kode_barang || '');
+                const uraian = escapeHtml(m.uraian || '');
+                const hs = escapeHtml(m.pos_tarif || '');
+                const sat = escapeHtml(m.kode_satuan || 'PCE');
+                const berat = Number(m.berat || 0);
+                const price = Number(m.unit_price || 0);
+
+                html += `<tr>
+                    <td style="text-align:center;">
+                        <input type="checkbox" class="chk-material-row" data-idx="${idx}" onchange="updateSelectedMaterialBadge()">
+                    </td>
+                    <td style="font-family:monospace; font-weight:700;">${kb}</td>
+                    <td>${uraian}</td>
+                    <td style="font-family:monospace;">${hs}</td>
+                    <td>${sat}</td>
+                    <td style="text-align:right;">${berat.toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
+                    <td style="text-align:right;">${price.toLocaleString('id-ID', {minimumFractionDigits: 2})}</td>
+                    <td style="text-align:right;">
+                        <input type="number" step="0.0001" min="0.0001" value="1.0000" class="input-sm inp-material-qty" data-idx="${idx}" style="width:75px; text-align:right;">
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function toggleSelectAllMaterial(checked) {
+            document.querySelectorAll('.chk-material-row').forEach(c => c.checked = checked);
+            updateSelectedMaterialBadge();
+        }
+
+        function updateSelectedMaterialBadge() {
+            const checkedCount = document.querySelectorAll('.chk-material-row:checked').length;
+            const badge = document.getElementById('badgeSelectedMaterialCount');
+            if (badge) badge.innerText = `${checkedCount} item dipilih`;
+        }
+
+        async function insertSelectedMaterials() {
+            if (!currentAju) return;
+            const checkedBoxes = document.querySelectorAll('.chk-material-row:checked');
+            if (checkedBoxes.length === 0) {
+                Swal.fire('Perhatian', 'Pilih minimal satu barang untuk dimasukkan.', 'warning');
+                return;
+            }
+
+            const itemsToInsert = [];
+            checkedBoxes.forEach(chk => {
+                const idx = parseInt(chk.dataset.idx, 10);
+                const mat = materialPickerCache[idx];
+                if (mat) {
+                    const qtyInp = document.querySelector(`.inp-material-qty[data-idx="${idx}"]`);
+                    const qtyVal = qtyInp ? parseFloat(qtyInp.value) || 1 : 1;
+                    itemsToInsert.push({
+                        kode_barang: mat.kode_barang,
+                        uraian: mat.uraian,
+                        pos_tarif: mat.pos_tarif,
+                        kode_satuan: mat.kode_satuan,
+                        unit_price: mat.unit_price,
+                        berat: mat.berat,
+                        jumlah_satuan: qtyVal
+                    });
+                }
+            });
+
+            Swal.fire({
+                title: 'Memasukkan Barang...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const fd = new FormData();
+                fd.append('nomor_aju', currentAju);
+                fd.append('items', JSON.stringify(itemsToInsert));
+
+                const resp = await fetch('editor.php?action=insert_from_material', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    closeModal('modalMaterialPicker');
+                    await Swal.fire('Sukses', res.message, 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // =============================================================
+        // TAHAP 4: QUICK PICKER DOKUMEN MASUK EKS-BC (bc_1ab2)
+        // =============================================================
+
+        let incomingPickerCache = [];
+        let incomingSourceContext = 'bahanbaku'; // 'bahanbaku' or 'trace'
+        let searchIncomingTimer = null;
+
+        function openIncomingPickerModal(sourceContext = 'bahanbaku') {
+            incomingSourceContext = sourceContext;
+            const modal = document.getElementById('modalIncomingPicker');
+            modal.style.display = 'flex';
+
+            // Populate Target Seri Barang dropdown from current table-barang
+            const selectTarget = document.getElementById('selectTargetSeriBarang');
+            const wrapperTarget = document.getElementById('wrapperTargetSeri');
+            if (selectTarget) {
+                selectTarget.innerHTML = '';
+                const barangRows = document.querySelectorAll('#table-barang tbody tr');
+                if (barangRows.length > 0) {
+                    barangRows.forEach(tr => {
+                        const seriInp = tr.querySelector('input[data-col="seri_barang"]');
+                        const kbInp = tr.querySelector('input[data-col="kode_barang"]');
+                        const seriVal = seriInp ? seriInp.value : '1';
+                        const kbVal = kbInp ? kbInp.value : '';
+                        const opt = document.createElement('option');
+                        opt.value = seriVal;
+                        opt.innerText = `Seri ${seriVal}: ${kbVal}`;
+                        selectTarget.appendChild(opt);
+                    });
+                    if (wrapperTarget) wrapperTarget.style.display = 'flex';
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = '1';
+                    opt.innerText = 'Seri 1 (Default)';
+                    selectTarget.appendChild(opt);
+                }
+            }
+
+            document.getElementById('searchIncomingPicker').value = '';
+            document.getElementById('filterBcIncomingPicker').value = '';
+            loadIncomingPickerList();
+        }
+
+        function debounceSearchIncoming() {
+            if (searchIncomingTimer) clearTimeout(searchIncomingTimer);
+            searchIncomingTimer = setTimeout(loadIncomingPickerList, 300);
+        }
+
+        async function loadIncomingPickerList() {
+            const tbody = document.getElementById('tbodyIncomingPicker');
+            if (!tbody) return;
+            const search = encodeURIComponent((document.getElementById('searchIncomingPicker')?.value || '').trim());
+            const bc = encodeURIComponent(document.getElementById('filterBcIncomingPicker')?.value || '');
+
+            tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat saldo pemasukan IT Inventory...</td></tr>';
+
+            try {
+                const resp = await fetch(`editor.php?action=get_incoming_picker&search=${search}&bc=${bc}`);
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    incomingPickerCache = res.data || [];
+                    renderIncomingPickerTable(incomingPickerCache);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:red; padding:15px;">Gagal: ${res.message}</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:red; padding:15px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderIncomingPickerTable(list) {
+            const tbody = document.getElementById('tbodyIncomingPicker');
+            updateSelectedIncomingBadge();
+
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:var(--text-muted); padding:20px;">Tidak ada dokumen pemasukan yang cocok.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            list.forEach((doc, idx) => {
+                const bc = escapeHtml(doc.bc || '');
+                const aju = escapeHtml(doc.nomor_aju || '');
+                const noDaftar = escapeHtml(doc.nomor_daftar || '-');
+                const tglDaftar = escapeHtml(doc.tanggal_daftar || '-');
+                const kb = escapeHtml(doc.kode_barang || '');
+                const uraian = escapeHtml(doc.uraian || '');
+                const supplier = escapeHtml(doc.nama_bs || '');
+                const sat = escapeHtml(doc.unit || 'PCE');
+                const avail = Number(doc.qty_avail || 0);
+
+                html += `<tr>
+                    <td style="text-align:center;">
+                        <input type="checkbox" class="chk-incoming-row" data-idx="${idx}" onchange="updateSelectedIncomingBadge()">
+                    </td>
+                    <td style="text-align:center; font-weight:700;"><span class="badge" style="background:#0891b2; color:#fff;">BC ${bc}</span></td>
+                    <td style="font-family:monospace; font-size:10.5px;">${aju}</td>
+                    <td style="font-size:10.5px;"><b>${noDaftar}</b><br><span style="color:var(--text-muted); font-size:9.5px;">${tglDaftar}</span></td>
+                    <td style="font-family:monospace; font-weight:700;">${kb}</td>
+                    <td style="font-size:11px;">${uraian}<br><small style="color:var(--text-muted);">${supplier}</small></td>
+                    <td>${sat}</td>
+                    <td style="text-align:right; font-weight:700; color:#10b981;">${avail.toLocaleString('id-ID', {minimumFractionDigits: 4})}</td>
+                    <td style="text-align:right;">
+                        <input type="number" step="0.0001" min="0.0001" max="${avail > 0 ? avail : 999999}" value="${avail > 0 ? Math.min(avail, 1.0) : 1.0}" class="input-sm inp-incoming-qty" data-idx="${idx}" style="width:85px; text-align:right;">
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function updateSelectedIncomingBadge() {
+            const count = document.querySelectorAll('.chk-incoming-row:checked').length;
+            const badge = document.getElementById('badgeSelectedIncomingCount');
+            if (badge) badge.innerText = `${count} dokumen dipilih`;
+        }
+
+        async function insertSelectedIncoming() {
+            if (!currentAju) return;
+            const checkedBoxes = document.querySelectorAll('.chk-incoming-row:checked');
+            if (checkedBoxes.length === 0) {
+                Swal.fire('Perhatian', 'Pilih minimal satu dokumen pemasukan untuk dimasukkan.', 'warning');
+                return;
+            }
+
+            const targetSeri = document.getElementById('selectTargetSeriBarang')?.value || '1';
+            const itemsToInsert = [];
+
+            checkedBoxes.forEach(chk => {
+                const idx = parseInt(chk.dataset.idx, 10);
+                const doc = incomingPickerCache[idx];
+                if (doc) {
+                    const qtyInp = document.querySelector(`.inp-incoming-qty[data-idx="${idx}"]`);
+                    const qtyVal = qtyInp ? parseFloat(qtyInp.value) || 1 : 1;
+                    itemsToInsert.push({
+                        bc: doc.bc,
+                        nomor_aju: doc.nomor_aju,
+                        nomor_daftar: doc.nomor_daftar,
+                        tanggal_daftar: doc.tanggal_daftar,
+                        seri_barang: doc.seri_barang,
+                        kode_barang: doc.kode_barang,
+                        uraian: doc.uraian,
+                        pos_tarif: doc.pos_tarif,
+                        unit: doc.unit,
+                        qty_pakai: qtyVal,
+                        unit_cif: doc.cif > 0 ? doc.cif / (doc.qty_total || 1) : 0,
+                        unit_harga: doc.harga > 0 ? doc.harga / (doc.qty_total || 1) : 0,
+                        ndpbm: doc.ndpbm,
+                        gross: doc.gross,
+                        netto: doc.netto
+                    });
+                }
+            });
+
+            Swal.fire({
+                title: 'Memasukkan Dokumen Asal...',
+                text: 'Memasukkan data ke Bahan Baku & mengkalkulasi tarif...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const fd = new FormData();
+                fd.append('nomor_aju', currentAju);
+                fd.append('seri_barang', targetSeri);
+                fd.append('items', JSON.stringify(itemsToInsert));
+
+                const resp = await fetch('editor.php?action=insert_from_incoming', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    closeModal('modalIncomingPicker');
+                    await Swal.fire('Sukses', res.message, 'success');
+                    await reloadCurrentAju();
+                    loadRecapTarif();
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // =============================================================
+        // CONTEXT MENU (KLIK KANAN) CONTROLLER
+        // =============================================================
+
+        let activeContextRow = null;
+        let activeContextTable = null;
+
+        function initEditorContextMenu() {
+            const ctx = document.getElementById('editorContextMenu');
+            if (!ctx) return;
+
+            document.addEventListener('contextmenu', function(e) {
+                const tr = e.target.closest('tr');
+                if (!tr) {
+                    ctx.style.display = 'none';
+                    return;
+                }
+                const table = tr.closest('table');
+                if (!table) {
+                    ctx.style.display = 'none';
+                    return;
+                }
+
+                if (table.id === 'table-barang') {
+                    e.preventDefault();
+                    activeContextRow = tr;
+                    activeContextTable = 'barang';
+                    document.getElementById('ctxBarangOptions').style.display = 'block';
+                    document.getElementById('ctxBahanBakuOptions').style.display = 'none';
+                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BARANG';
+
+                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
+                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
+                    ctx.style.display = 'block';
+                } else if (table.id === 'table-bahanbaku') {
+                    e.preventDefault();
+                    activeContextRow = tr;
+                    activeContextTable = 'bahanbaku';
+                    document.getElementById('ctxBarangOptions').style.display = 'none';
+                    document.getElementById('ctxBahanBakuOptions').style.display = 'block';
+                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BAHAN BAKU';
+
+                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
+                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
+                    ctx.style.display = 'block';
+                } else {
+                    ctx.style.display = 'none';
+                }
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!e.target.closest('#editorContextMenu')) {
+                    ctx.style.display = 'none';
+                }
+            });
+        }
+
+        function triggerContextAction(act) {
+            const ctx = document.getElementById('editorContextMenu');
+            if (ctx) ctx.style.display = 'none';
+
+            if (act === 'add_material') {
+                openMaterialPickerModal();
+            } else if (act === 'fifo_trace') {
+                startFifoTrace();
+            } else if (act === 'toggle_trace') {
+                toggleTracePanel();
+            } else if (act === 'fix_hs') {
+                fixHsCode();
+            } else if (act === 'fix_netto') {
+                fixNetto();
+            } else if (act === 'add_incoming') {
+                openIncomingPickerModal('bahanbaku');
+            } else if (act === 'generate_bbt') {
+                generateBahanBakuTarif();
+            } else if (act === 'seq_bb') {
+                seqBahanBaku();
+            } else if (act === 'delete_row') {
+                if (activeContextRow) {
+                    activeContextRow.remove();
+                    if (activeContextTable) updateTableTotals(activeContextTable);
+                    showToast('Baris dihapus. Klik Simpan untuk memperbarui database.');
+                }
             }
         }
 

@@ -1052,6 +1052,11 @@ MessageBox("Daftar AJU", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</p
                     <tr><th>Aksi Internal (<code>action</code>)</th><th>Metode HTTP</th><th>Endpoint OpenAPI Bea Cukai</th><th>Keterangan</th></tr>
                 </thead>
                 <tbody>
+                    <tr><td><code>get_list</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=get_list&amp;source={h2h|portal}</code></td><td>Mengambil daftar dokumen manifes dengan pemisahan tegas antara dokumen lokal Host to Host (<code>source=h2h</code>) dan dokumen monitoring Portal CEISA 4.0 (<code>source=portal</code>).</td></tr>
+                    <tr><td><code>sync_ceisa_portal</code></td><td><code>POST</code></td><td><code>/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{npwp}</code></td><td>Menarik dan menyinkronkan seluruh dokumen NVOCC yang terdaftar di Portal CEISA 4.0 Bea Cukai secara live dengan autentikasi MFA Token.</td></tr>
+                    <tr><td><code>get_detail_nvocc</code></td><td><code>GET</code></td><td><code>/v3/ManifesSchema/v1/TdNvoccHeader/GetOneNVOCCHeader/{idNvocc}</code></td><td>Mengambil rincian dokumen header, status kelompok pos, dan daftar Master B/L resmi dari server CEISA 4.0.</td></tr>
+                    <tr><td><code>cek_rekon</code></td><td><code>GET / POST</code></td><td><code>/manifest_api.php?action=cek_rekon</code></td><td>Memeriksa status respon rekonsiliasi (rekon) NVOCC langsung dari Gateway Bea Cukai dan memperbarui database lokal.</td></tr>
+                    <tr><td><code>pdf_manifest.php</code></td><td><code>GET</code></td><td><code>/report-manifes-v2/v1/jasper/get-file-nvocc/{idNvocc}</code></td><td>Mengunduh dan menampilkan dokumen PDF resmi dari Jasper Report Service Bea Cukai dengan fitur smart local caching (0ms).</td></tr>
                     <tr><td><code>api_draft</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/draft</code></td><td>Mengirim payload <code>JsonNvocc</code> draft baru ke CEISA 4.0 dan mendapatkan <code>idNvoccHeader</code>.</td></tr>
                     <tr><td><code>api_cek_lengkap</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/cek-lengkap?nomorAju={nomorAju}</code></td><td>Mengecek kelengkapan dokumen manifes. Status otomatis berubah menjadi <strong>Ready</strong> jika valid.</td></tr>
                     <tr><td><code>api_kirim</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/kirim</code></td><td>Mengirim data manifes yang sudah berstatus <em>Ready</em> ke Bea Cukai. Status berubah menjadi <strong>Terkirim</strong>.</td></tr>
@@ -1073,11 +1078,20 @@ MessageBox("Daftar AJU", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</p
                 <div class="snippet-pane pane-curl active">
                     <div class="code-block with-tabs">
                         <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-<pre># 1. Kirim Draft NVOCC ke Gateway Manifes:
+<pre># 1. Unduh / Cetak Dokumen PDF Resmi dari Bea Cukai (Jasper Report Service):
+curl -X GET "http://[server-ip]/pdf_manifest.php?nomor_aju=07010047031520261019276745&amp;cmp_id=TVL" -o "manifes.pdf"
+
+# 2. Ambil Daftar Dokumen Manifes Host to Host (Terisolasi dari Data Portal):
+curl -X GET "http://[server-ip]/manifest_api.php?action=get_list&amp;source=h2h&amp;cmp_id=TVL"
+
+# 3. Sinkronisasi Data NVOCC Langsung dari Portal CEISA 4.0:
+curl -X POST "http://[server-ip]/manifest_api.php?action=sync_ceisa_portal&amp;cmp_id=TVL"
+
+# 4. Kirim Draft NVOCC ke Gateway Manifes:
 curl -X POST "http://[server-ip]/manifest_api.php" \
   -d "action=api_draft&amp;nomor_aju=00001103006520261015000001&amp;cmp_id=010000000000000"
 
-# 2. Cek Pos Manifes Inward Berdasarkan No &amp; Tgl B/L:
+# 5. Cek Pos Manifes Inward Berdasarkan No &amp; Tgl B/L:
 curl -X GET "http://[server-ip]/manifest_api.php?action=api_inward&amp;no_bl=MSK123456&amp;tgl_bl=2026-10-15&amp;kode_kantor=040300&amp;cmp_id=010000000000000"</pre>
                     </div>
                 </div>
