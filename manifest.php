@@ -78,6 +78,37 @@ if (empty($reffPelabuhan['populer']) && empty($reffPelabuhan['utama_id'])) {
         ['kode' => 'IDBLW', 'teks' => 'Belawan, Medan']
     ];
 }
+
+// Ambil Referensi Bendera / Negara dari bc_ceisa_reff
+$reffNegara = [];
+$sqlNegara = "SELECT kode, teks,
+              CASE 
+                  WHEN kode = 'PA' THEN 1
+                  WHEN kode = 'ID' THEN 2
+                  WHEN kode IN ('SG', 'MY', 'CN', 'HK', 'TW', 'JP', 'KR', 'TH', 'VN', 'PH', 'IN', 'US', 'NL', 'DE', 'GB', 'AU', 'LR', 'MH', 'BS', 'CY', 'MT') THEN 3
+                  ELSE 4
+              END as grp_order
+              FROM bc_ceisa_reff 
+              WHERE reff = 'NEGARA' 
+                AND (status IS NULL OR status <> 'N')
+              ORDER BY grp_order ASC, kode ASC";
+$qNegara = $koneksi->query($sqlNegara);
+if ($qNegara) {
+    while ($rn = $qNegara->fetch_assoc()) {
+        $reffNegara[] = $rn;
+    }
+}
+if (empty($reffNegara)) {
+    $reffNegara = [
+        ['kode' => 'PA', 'teks' => 'PANAMA'],
+        ['kode' => 'ID', 'teks' => 'INDONESIA'],
+        ['kode' => 'SG', 'teks' => 'SINGAPORE'],
+        ['kode' => 'MY', 'teks' => 'MALAYSIA'],
+        ['kode' => 'LR', 'teks' => 'LIBERIA'],
+        ['kode' => 'MH', 'teks' => 'MARSHALL ISLANDS'],
+        ['kode' => 'HK', 'teks' => 'HONG KONG']
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -582,7 +613,14 @@ if (empty($reffPelabuhan['populer']) && empty($reffPelabuhan['utama_id'])) {
                     </div>
                     <div class="form-group">
                         <label>Bendera / Kode Negara</label>
-                        <input type="text" id="m_kode_negara" class="form-control" value="PA" required>
+                        <select id="m_kode_negara" class="form-control" required>
+                            <option value="">-- Pilih Bendera / Negara --</option>
+                            <?php foreach ($reffNegara as $rn): ?>
+                                <option value="<?= htmlspecialchars($rn['kode']) ?>" <?= ($rn['kode'] === 'PA') ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($rn['kode']) ?> - <?= htmlspecialchars($rn['teks']) ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
                     <div class="form-group">
                         <label>Tanggal Berangkat</label>
@@ -1324,6 +1362,7 @@ if (empty($reffPelabuhan['populer']) && empty($reffPelabuhan['utama_id'])) {
             document.getElementById('m_tgl_berangkat').value = tglBerangkat;
             document.getElementById('m_tgl_tiba').value = tglTiba;
             document.getElementById('m_alamat_perusahaan').value = '<?= htmlspecialchars($alamat ?: "-") ?>';
+            setSelectOrAddOption('m_kode_negara', 'PA', 'PA - PANAMA');
         }
 
         // =========================================================================
@@ -1355,7 +1394,7 @@ if (empty($reffPelabuhan['populer']) && empty($reffPelabuhan['utama_id'])) {
                 document.getElementById('m_sarana_pengangkut').value = h.nama_sarana_pengangkut || '';
                 document.getElementById('m_imo_number').value = h.imo_number || '';
                 document.getElementById('m_call_sign').value = h.call_sign || '';
-                document.getElementById('m_kode_negara').value = h.kode_negara || 'PA';
+                setSelectOrAddOption('m_kode_negara', h.kode_negara || 'PA', h.kode_negara || 'PA');
                 document.getElementById('m_flwaktu_tempuh').value = h.flwaktu_tempuh || '24';
 
                 if (h.tanggal_berangkat) {
