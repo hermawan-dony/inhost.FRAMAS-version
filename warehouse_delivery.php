@@ -15,6 +15,29 @@ $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['
 $sessionCmpId = trim($_GET['cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($cmp_id ?? '')));
 $theme = trim($_GET['theme'] ?? ($_SESSION['theme'] ?? 'light'));
 
+// Resolusi Hak Akses Dokumen Perusahaan
+$targetCmpId = !empty($sessionCmpId) ? $sessionCmpId : ($_SESSION['company_cmp_id'] ?? '');
+$companyRoles = 'tpb';
+$companyAllowedDocsStr = null;
+if (!empty($targetCmpId) && isset($koneksi) && $koneksi) {
+    $qComp = $koneksi->query("SELECT IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($targetCmpId) . "' LIMIT 1");
+    if ($qComp && $rComp = $qComp->fetch_assoc()) {
+        $companyRoles = $rComp['company_roles'];
+        $companyAllowedDocsStr = $rComp['allowed_docs'];
+    }
+}
+$companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
+
+if (!function_exists('isWhOutDocPermitted')) {
+    function isWhOutDocPermitted($d) {
+        global $isAdmin, $targetCmpId, $companyAllowedDocs;
+        if (!empty($isAdmin) && (empty($targetCmpId) || $targetCmpId === 'ALL')) {
+            return true;
+        }
+        return in_array((string)$d, $companyAllowedDocs);
+    }
+}
+
 // -------------------------------------------------------------
 // AJAX API ENDPOINTS
 // -------------------------------------------------------------
@@ -32,7 +55,14 @@ if ($action === 'list') {
     $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
 
     $escCmp = $koneksi->real_escape_string($filter_cmp);
-    $outboundBcs = "'25','261','27','30','41','33','331','613'";
+    $allOutboundCodes = ['25', '41', '261', '27', '613', '631', '30', '33', '331'];
+    $allowedOutboundWh = (!empty($isAdmin) && (empty($filter_cmp) || $filter_cmp === 'ALL')) 
+        ? $allOutboundCodes 
+        : array_values(array_filter($allOutboundCodes, 'isWhOutDocPermitted'));
+    if (empty($allowedOutboundWh)) {
+        $allowedOutboundWh = ['__NONE__'];
+    }
+    $outboundBcs = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedOutboundWh)) . "'";
 
     $where = [];
     if (!empty($escCmp)) {
@@ -42,7 +72,7 @@ if ($action === 'list') {
     // WAJIB: HANYA TAMPILKAN DOKUMEN YANG SUDAH MENDAPATKAN NOMOR DAFTAR DARI BEA CUKAI
     $where[] = "h.nomor_daftar IS NOT NULL AND TRIM(h.nomor_daftar) != '' AND TRIM(h.nomor_daftar) != '-'";
 
-    if (!empty($filter_bc)) {
+    if (!empty($filter_bc) && isWhOutDocPermitted($filter_bc)) {
         $where[] = "h.kode_dokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
     } else {
         $where[] = "h.kode_dokumen IN ($outboundBcs)";
@@ -924,13 +954,15 @@ if ($action === 'detail_tab') {
                             <label>Dokumen Pengeluaran</label>
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen Keluar</option>
-                                <option value="25">BC 2.5 (Pengeluaran KB ke TLDDP)</option>
-                                <option value="30">BC 3.0 (Ekspor PEB)</option>
-                                <option value="41">BC 4.1 (Pengeluaran TLDDP)</option>
-                                <option value="261">BC 2.6.1 (Subkon Keluar)</option>
-                                <option value="27">BC 2.7 (TPB ke TPB OUT)</option>
-                                <option value="33">BC 3.3 (Ekspor PLB)</option>
-                                <option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option>
+                                <?php if (isWhOutDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran KB ke TLDDP)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Keluar)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET PLB)</option><?php endif; ?>
                             </select>
                         </div>
                         <div class="filter-col">

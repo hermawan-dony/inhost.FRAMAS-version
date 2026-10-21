@@ -106,6 +106,7 @@ if ($action === 'save') {
 
     $defaultTheme = trim($_POST['default_theme'] ?? 'light');
     $defaultSide  = trim($_POST['default_sidebar'] ?? 'pinned');
+    $sidebarIcon  = trim($_POST['sidebar_icon_style'] ?? 'colored');
     $pageSize     = trim($_POST['default_page_size'] ?? '25');
     $toastDur     = trim($_POST['toast_duration'] ?? '2600');
 
@@ -152,6 +153,7 @@ if ($action === 'save') {
         'default_tahun_buku' => $tahunBuku,
         'default_theme'      => $defaultTheme,
         'default_sidebar'    => $defaultSide,
+        'sidebar_icon_style' => $sidebarIcon,
         'default_page_size'  => $pageSize,
         'toast_duration'     => $toastDur
     ];
@@ -948,12 +950,12 @@ $currentSettings = getAppSettings($koneksi);
                     <div class="form-row">
                         <div class="form-group">
                             <label>
-                                <span>Tema Default Pengguna Baru</span>
-                                <span class="hint">Tema visual saat pertama kali membuka portal</span>
+                                <span>Gaya Ikon Sidebar Portal (Icon Style)</span>
+                                <span class="hint">Pilih gaya visual ikon menu pada bilah navigasi kiri</span>
                             </label>
-                            <select class="form-control" id="inp_default_theme" name="default_theme">
-                                <option value="light" <?= ($currentSettings['default_theme'] === 'light') ? 'selected' : '' ?>>☀️ Light Theme (Terang / Standar)</option>
-                                <option value="dark" <?= ($currentSettings['default_theme'] === 'dark') ? 'selected' : '' ?>>🌙 Dark Theme (Gelap Modern)</option>
+                            <select class="form-control" id="inp_sidebar_icon_style" name="sidebar_icon_style" onchange="applySidebarIconPreview(this.value)">
+                                <option value="colored" <?= (($currentSettings['sidebar_icon_style'] ?? 'colored') === 'colored') ? 'selected' : '' ?>>🎨 Ikon Berwarna / Emoji (Vibrant & Ceria) - Default Rekomendasi</option>
+                                <option value="monochrome" <?= (($currentSettings['sidebar_icon_style'] ?? 'colored') === 'monochrome') ? 'selected' : '' ?>>🏛️ Ikon Monokrom (Ant Design Vector Minimalis)</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -971,6 +973,16 @@ $currentSettings = getAppSettings($koneksi);
                     <div class="form-row">
                         <div class="form-group">
                             <label>
+                                <span>Tema Default Pengguna Baru</span>
+                                <span class="hint">Tema visual saat pertama kali membuka portal</span>
+                            </label>
+                            <select class="form-control" id="inp_default_theme" name="default_theme">
+                                <option value="light" <?= ($currentSettings['default_theme'] === 'light') ? 'selected' : '' ?>>☀️ Light Theme (Terang / Standar)</option>
+                                <option value="dark" <?= ($currentSettings['default_theme'] === 'dark') ? 'selected' : '' ?>>🌙 Dark Theme (Gelap Modern)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
                                 <span>Default Jumlah Baris Tabel (Pagination)</span>
                                 <span class="hint">Jumlah item default yang tampil di setiap tabel</span>
                             </label>
@@ -981,6 +993,9 @@ $currentSettings = getAppSettings($koneksi);
                                 <option value="100" <?= ($currentSettings['default_page_size'] === '100') ? 'selected' : '' ?>>100 baris per halaman</option>
                             </select>
                         </div>
+                    </div>
+
+                    <div class="form-row">
                         <div class="form-group">
                             <label>
                                 <span>Durasi Popup Toast (Milidetik)</span>
@@ -988,6 +1003,9 @@ $currentSettings = getAppSettings($koneksi);
                             </label>
                             <input type="number" class="form-control" id="inp_toast_duration" name="toast_duration" 
                                    value="<?= htmlspecialchars($currentSettings['toast_duration']) ?>" min="1000" max="10000" step="100">
+                        </div>
+                        <div class="form-group">
+                            <!-- Spacer alignment -->
                         </div>
                     </div>
                 </div>
@@ -1085,6 +1103,27 @@ $currentSettings = getAppSettings($koneksi);
                 urlInput.value = 'https://apis-gw.beacukai.go.id';
             }
         }
+
+        function applySidebarIconPreview(style) {
+            const valid = (style === 'monochrome') ? 'monochrome' : 'colored';
+            localStorage.setItem('ceisa_icon_style', valid);
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'CEISA_CHANGE_ICON_STYLE',
+                        style: valid
+                    }, '*');
+                }
+            } catch(e) {}
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            const localStyle = localStorage.getItem('ceisa_icon_style');
+            const sel = document.getElementById('inp_sidebar_icon_style');
+            if (sel && localStyle) {
+                sel.value = localStyle;
+            }
+        });
 
         function getSettingsApiUrl() {
             var search = window.location.search || '';

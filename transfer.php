@@ -15,26 +15,42 @@ $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? '');
 $companyTitle = !empty($_SESSION['company_name']) ? $_SESSION['company_name'] : 'PT. SN UNGGUL';
 
 // Ambil daftar profil perusahaan aktif untuk filter
+$targetCompanyRoles = 'tpb';
+$targetCompanyAllowedDocs = null;
 $companies = [];
 if (isset($koneksi) && $koneksi) {
-    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company ORDER BY cmp_name ASC");
     if ($resComp) {
         while ($r = $resComp->fetch_assoc()) {
             if ($r['cmp_id'] === $sessionCmpId) {
                 $companyTitle = $r['cmp_name'];
+                $targetCompanyRoles = $r['company_roles'];
+                $targetCompanyAllowedDocs = $r['allowed_docs'];
             }
             $companies[] = $r;
         }
     }
 }
 
+// Resolusi Dokumen BC yang diizinkan untuk perusahaan ini (mengacu pada allowed_docs kelola perusahaan & preset role)
+$companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+
 $userAllowedDocs = $_SESSION['allowed_docs'] ?? ['*'];
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
-        global $isAdmin, $userAllowedDocs;
-        if (!empty($isAdmin)) return true;
-        if (empty($userAllowedDocs) || in_array('*', $userAllowedDocs) || in_array('ALL', $userAllowedDocs)) return true;
-        return in_array((string)$d, $userAllowedDocs);
+        global $isAdmin, $sessionCmpId, $companyAllowedDocs, $userAllowedDocs;
+        // Jika Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
+        if (!empty($isAdmin) && empty($sessionCmpId)) {
+            return true;
+        }
+        // Jika ada perusahaan aktif, batasi sesuai allowed_docs perusahaan
+        if (!empty($sessionCmpId)) {
+            return in_array((string)$d, $companyAllowedDocs);
+        }
+        if (empty($userAllowedDocs) || in_array('*', $userAllowedDocs) || in_array('ALL', $userAllowedDocs)) {
+            return in_array((string)$d, $companyAllowedDocs);
+        }
+        return in_array((string)$d, $userAllowedDocs) && in_array((string)$d, $companyAllowedDocs);
     }
 }
 
@@ -2352,26 +2368,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn ant-btn-warning" onclick="unpostItInventoryActiveAju()" title="Batalkan Posting IT Inventory untuk Membuka Kunci Edit">
                             <span>&#128228; Unposting</span>
                         </button>
-                        <button type="button" class="ant-btn" onclick="openManualResponModal()" title="Set Manual Respon / Isi Nomor & Tanggal Daftar / SPPB">
-                            <span>📝 Set Manual Respon</span>
-                        </button>
-                        <button type="button" class="ant-btn" onclick="viewJsonActiveAju()" title="Lihat Data JSON CEISA 4.0">
-                            <span>&#128065;&#65039; View JSON</span>
-                        </button>
                         <button type="button" class="ant-btn" onclick="openEditorForm()" title="Buka Form Entri AJU Baru">
                             <span>&#10133; Entri AJU Baru</span>
-                        </button>
-                        <button type="button" class="ant-btn" onclick="openCopyModal()" title="Salin Dokumen Lengkap ke Nomor AJU Baru">
-                            <span>&#128203; Copy AJU</span>
-                        </button>
-                        <button type="button" class="ant-btn" onclick="openRenameModal()" title="Ubah Nomor AJU Dokumen">
-                            <span>&#9999;&#65039; Rename AJU</span>
-                        </button>
-                        <button type="button" class="ant-btn" onclick="editActiveAju()" title="Edit Dokumen di Form Editor">
-                            <span>&#128196; Edit AJU</span>
-                        </button>
-                        <button type="button" class="ant-btn ant-btn-danger" style="color:#ff4d4f; border-color:#ffa39e;" onclick="deleteActiveAju()" title="Hapus Semua Data Staging Dokumen AJU Terpilih">
-                            <span>🗑️ Hapus AJU</span>
                         </button>
                         <button type="button" class="ant-btn" onclick="loadList()" title="Muat Ulang Data">
                             <span>&#128259; Muat Ulang</span>
@@ -2390,21 +2388,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <label>Dokumen BC</label>
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen</option>
-                                <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                                <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                                <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                                <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
                                 <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
                                 <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                                <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                                <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                                <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                                <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
+                                <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
+                                <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
+                                <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
+                                <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
+                                <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
+                                    <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
+                                <?php endif; ?>
                             </select>
                         </div>
 

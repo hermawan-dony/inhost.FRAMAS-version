@@ -18,7 +18,25 @@ if (empty($activeCmp) || $activeCmp === 'default') {
 
 $initialAju = trim($_GET['nomor_aju'] ?? '');
 $initialBl  = trim($_GET['no_bl'] ?? ($_GET['nomor_host_bl'] ?? ''));
+$initialVessel = trim($_GET['vessel'] ?? ($_GET['nama_sarana_pengangkut'] ?? ''));
 $initialTab = trim($_GET['tab'] ?? 'vessel'); // 'vessel' | 'container' | 'bl'
+
+// Jika ada parameter nomor_aju, ambil kapal dan BL terkait dari database jika belum diisi spesifik
+if (!empty($initialAju)) {
+    $escAju = $koneksi->real_escape_string($initialAju);
+    if (empty($initialVessel)) {
+        $qAjuHdr = $koneksi->query("SELECT nama_sarana_pengangkut FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+        if ($qAjuHdr && $rAjuHdr = $qAjuHdr->fetch_assoc()) {
+            $initialVessel = trim($rAjuHdr['nama_sarana_pengangkut'] ?? '');
+        }
+    }
+    if (empty($initialBl)) {
+        $qAjuDtl = $koneksi->query("SELECT nomor_host_bl FROM bc_ceisa_manifes_detail WHERE nomor_aju = '{$escAju}' AND nomor_host_bl IS NOT NULL AND nomor_host_bl != '' LIMIT 1");
+        if ($qAjuDtl && $rAjuDtl = $qAjuDtl->fetch_assoc()) {
+            $initialBl = trim($rAjuDtl['nomor_host_bl'] ?? '');
+        }
+    }
+}
 
 // Ambil daftar perusahaan aktif
 $companies = [];
@@ -765,7 +783,7 @@ if (empty($manifestBls)) {
                         <label for="inputVesselName"><i class="fa-solid fa-ship"></i> Nama Sarana Pengangkut (Nama Kapal)</label>
                         <div class="combobox-wrapper" id="wrapVessel">
                             <div class="combobox-input-wrap">
-                                <input type="text" id="inputVesselName" list="vesselDatalist" class="form-control" style="font-weight: 700; text-transform: uppercase;" value="SINAR SUNDA" required autocomplete="off" onfocus="openCombobox('wrapVessel')" oninput="filterComboboxOptions('wrapVessel', this.value)">
+                                <input type="text" id="inputVesselName" list="vesselDatalist" class="form-control" style="font-weight: 700; text-transform: uppercase;" placeholder="Pilih atau ketik nama kapal..." value="<?= htmlspecialchars($initialVessel) ?>" autocomplete="off" onfocus="openCombobox('wrapVessel')" oninput="filterComboboxOptions('wrapVessel', this.value)">
                                 <button type="button" class="btn-combobox-toggle" onclick="toggleCombobox('wrapVessel')" title="Tampilkan Pilihan Sarana Pengangkut">
                                     <i class="fa-solid fa-chevron-down"></i>
                                 </button>
@@ -969,7 +987,7 @@ if (empty($manifestBls)) {
                         <label for="inputHostBl"><i class="fa-solid fa-barcode"></i> Nomor Host BL / Master BL (Kode Dok 740 / 705)</label>
                         <div class="combobox-wrapper" id="wrapBl">
                             <div class="combobox-input-wrap">
-                                <input type="text" id="inputHostBl" list="blDatalist" class="form-control" style="font-weight: 700; text-transform: uppercase;" value="<?= htmlspecialchars($initialBl ?: 'SUB600398100') ?>" required autocomplete="off" onfocus="openCombobox('wrapBl')" oninput="filterComboboxOptions('wrapBl', this.value)">
+                                <input type="text" id="inputHostBl" list="blDatalist" class="form-control" style="font-weight: 700; text-transform: uppercase;" placeholder="Ketik atau pilih nomor B/L..." value="<?= htmlspecialchars($initialBl) ?>" autocomplete="off" onfocus="openCombobox('wrapBl')" oninput="filterComboboxOptions('wrapBl', this.value)">
                                 <button type="button" class="btn-combobox-toggle" onclick="toggleCombobox('wrapBl')" title="Tampilkan Pilihan BL Manifes">
                                     <i class="fa-solid fa-chevron-down"></i>
                                 </button>
@@ -1124,14 +1142,17 @@ if (empty($manifestBls)) {
         let activeBlItem = null;
         let linkedAju = '<?= htmlspecialchars($initialAju) ?>';
 
-        // Inisialisasi Saat Dokumen Siap
+        // Inisialisasi Saat Dokumen Siap (Hanya jalankan inkuiri otomatis jika input terisi dari parameter URL)
         document.addEventListener('DOMContentLoaded', () => {
             if (currentTab === 'vessel') {
-                triggerGetVessel();
+                const v = (document.getElementById('inputVesselName')?.value || '').trim();
+                if (v) triggerGetVessel();
             } else if (currentTab === 'container') {
-                triggerGetContainer();
+                const c = (document.getElementById('inputContainerNo')?.value || '').trim();
+                if (c) triggerGetContainer();
             } else if (currentTab === 'bl') {
-                triggerGetBl();
+                const b = (document.getElementById('inputHostBl')?.value || '').trim();
+                if (b) triggerGetBl();
             }
         });
 

@@ -458,6 +458,12 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
      * Mengelompokkan total bayar/fasilitas per kode pungutan & fasilitas,
      * membulatkan ke ribuan (CEIL/round), dan mengupdate bc_ceisa_pungutan.
      */
+    if (!function_exists('ceisa_calc_pungutan')) {
+        function ceisa_calc_pungutan($koneksi, $nomor_aju) {
+            return ceisa_calculate_pungutan($koneksi, $nomor_aju);
+        }
+    }
+
     function ceisa_calculate_pungutan($koneksi, $nomor_aju) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
 
@@ -610,34 +616,47 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         $fixedBarang = 0;
         $fixedBahanBaku = 0;
 
-        // 1. Bersihkan karakter non-digit pada HS Code yang sudah ada
-        $cleanB = $koneksi->query("SELECT id, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
+        // 1. Bersihkan karakter non-digit pada HS Code yang sudah ada di bc_ceisa_barang
+        $cleanB = $koneksi->query("SELECT seri_barang, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
         if ($cleanB) {
             while ($cb = $cleanB->fetch_assoc()) {
                 $rawHs = trim($cb['hs']);
                 $cleaned = preg_replace('/[^0-9]/', '', $rawHs);
                 if ($cleaned !== $rawHs) {
-                    $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$cleaned' WHERE id = " . intval($cb['id']));
+                    $seriB = intval($cb['seri_barang']);
+                    $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$cleaned' WHERE nomor_aju = '$escAju' AND seri_barang = $seriB");
                     $fixedBarang++;
                 }
             }
         }
-        $cleanBb = $koneksi->query("SELECT id, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
+
+        // Bersihkan karakter non-digit pada HS Code di bc_ceisa_bahanbaku
+        $cleanBb = $koneksi->query("SELECT seri_barang, seri_bahan_baku, kode_barang, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND hs IS NOT NULL AND hs != ''");
         if ($cleanBb) {
             while ($cbb = $cleanBb->fetch_assoc()) {
                 $rawHs = trim($cbb['hs']);
                 $cleaned = preg_replace('/[^0-9]/', '', $rawHs);
                 if ($cleaned !== $rawHs) {
-                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$cleaned' WHERE id = " . intval($cbb['id']));
+                    $seriB = intval($cbb['seri_barang']);
+                    $seriBb = intval($cbb['seri_bahan_baku']);
+                    $kb = $koneksi->real_escape_string($cbb['kode_barang']);
+                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$cleaned' WHERE nomor_aju = '$escAju' AND seri_barang = $seriB AND seri_bahan_baku = $seriBb AND kode_barang = '$kb'");
                     $fixedBahanBaku++;
                 }
             }
         }
 
+        // Bersihkan juga pada bc_ceisa_tracebb jika ada
+        $chkTrace = $koneksi->query("SHOW TABLES LIKE 'bc_ceisa_tracebb'");
+        if ($chkTrace && $chkTrace->num_rows > 0) {
+            $koneksi->query("UPDATE bc_ceisa_tracebb SET hs = REPLACE(REPLACE(REPLACE(hs, '.', ''), ' ', ''), '-', '') WHERE (aju = '$escAju' OR nomor_aju = '$escAju') AND hs IS NOT NULL AND hs != ''");
+        }
+
         // 2. Isi HS Code kosong pada bc_ceisa_barang
-        $bRes = $koneksi->query("SELECT id, seri_barang, kode_barang, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
+        $bRes = $koneksi->query("SELECT seri_barang, kode_barang, hs FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
         if ($bRes) {
             while ($b = $bRes->fetch_assoc()) {
+                $seriB = intval($b['seri_barang']);
                 $kb = $koneksi->real_escape_string(trim($b['kode_barang']));
                 if (empty($kb)) continue;
 
@@ -658,7 +677,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
 
                 // Cek dari riwayat transaksi bc_ceisa_barang terdahulu
                 if (empty($hsFound)) {
-                    $q2 = $koneksi->query("SELECT hs FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY id DESC LIMIT 1");
+                    $q2 = $koneksi->query("SELECT hs FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY nomor_aju DESC, seri_barang DESC LIMIT 1");
                     if ($q2 && $r2 = $q2->fetch_assoc()) {
                         $hsFound = trim($r2['hs']);
                     }
@@ -668,7 +687,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                     $cleanedHs = preg_replace('/[^0-9]/', '', $hsFound);
                     if (!empty($cleanedHs)) {
                         $escHs = $koneksi->real_escape_string($cleanedHs);
-                        $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$escHs' WHERE id = " . intval($b['id']));
+                        $koneksi->query("UPDATE bc_ceisa_barang SET hs = '$escHs' WHERE nomor_aju = '$escAju' AND seri_barang = $seriB");
                         $fixedBarang++;
                     }
                 }
@@ -676,9 +695,11 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         }
 
         // 3. Isi HS Code kosong pada bc_ceisa_bahanbaku
-        $bbRes = $koneksi->query("SELECT id, seri_barang, seri_bahan_baku, kode_barang, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
+        $bbRes = $koneksi->query("SELECT seri_barang, seri_bahan_baku, kode_barang, hs FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' AND (hs IS NULL OR hs = '' OR hs = '0' OR CAST(hs AS UNSIGNED) = 0)");
         if ($bbRes) {
             while ($bb = $bbRes->fetch_assoc()) {
+                $seriB = intval($bb['seri_barang']);
+                $seriBb = intval($bb['seri_bahan_baku']);
                 $kb = $koneksi->real_escape_string(trim($bb['kode_barang']));
                 if (empty($kb)) continue;
 
@@ -696,14 +717,14 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 }
 
                 if (empty($hsFound)) {
-                    $q2 = $koneksi->query("SELECT hs FROM bc_ceisa_bahanbaku WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY id DESC LIMIT 1");
+                    $q2 = $koneksi->query("SELECT hs FROM bc_ceisa_bahanbaku WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY nomor_aju DESC, seri_barang DESC, seri_bahan_baku DESC LIMIT 1");
                     if ($q2 && $r2 = $q2->fetch_assoc()) {
                         $hsFound = trim($r2['hs']);
                     }
                 }
 
                 if (empty($hsFound)) {
-                    $q3 = $koneksi->query("SELECT hs FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY id DESC LIMIT 1");
+                    $q3 = $koneksi->query("SELECT hs FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND CAST(hs AS UNSIGNED) > 0 ORDER BY nomor_aju DESC, seri_barang DESC LIMIT 1");
                     if ($q3 && $r3 = $q3->fetch_assoc()) {
                         $hsFound = trim($r3['hs']);
                     }
@@ -713,7 +734,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                     $cleanedHs = preg_replace('/[^0-9]/', '', $hsFound);
                     if (!empty($cleanedHs)) {
                         $escHs = $koneksi->real_escape_string($cleanedHs);
-                        $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$escHs' WHERE id = " . intval($bb['id']));
+                        $koneksi->query("UPDATE bc_ceisa_bahanbaku SET hs = '$escHs' WHERE nomor_aju = '$escAju' AND seri_barang = $seriB AND seri_bahan_baku = $seriBb AND kode_barang = '$kb'");
                         $fixedBahanBaku++;
                     }
                 }
@@ -737,10 +758,10 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
         $fixedCount = 0;
 
-        $bRes = $koneksi->query("SELECT id, seri_barang, kode_barang, jumlah_satuan, netto, bruto FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
+        $bRes = $koneksi->query("SELECT seri_barang, kode_barang, jumlah_satuan, netto, bruto FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
         if ($bRes) {
             while ($b = $bRes->fetch_assoc()) {
-                $id = intval($b['id']);
+                $seri = intval($b['seri_barang']);
                 $kb = $koneksi->real_escape_string(trim($b['kode_barang']));
                 $jml = floatval($b['jumlah_satuan'] ?? 0);
                 $netto = floatval($b['netto'] ?? 0);
@@ -751,7 +772,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                     $calcNetto = 0;
                     // 1. Rasio historis dari bc_ceisa_barang
                     if (!empty($kb) && $jml > 0) {
-                        $q = $koneksi->query("SELECT (netto / jumlah_satuan) as net_satuan FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND netto > 0 AND jumlah_satuan > 0 ORDER BY id DESC LIMIT 1");
+                        $q = $koneksi->query("SELECT (netto / jumlah_satuan) as net_satuan FROM bc_ceisa_barang WHERE kode_barang = '$kb' AND netto > 0 AND jumlah_satuan > 0 ORDER BY nomor_aju DESC, seri_barang DESC LIMIT 1");
                         if ($q && $r = $q->fetch_assoc()) {
                             $ratio = floatval($r['net_satuan']);
                             if ($ratio > 0) {
@@ -788,7 +809,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 }
 
                 if ($changed) {
-                    $koneksi->query("UPDATE bc_ceisa_barang SET netto = $netto, bruto = $bruto WHERE id = $id");
+                    $koneksi->query("UPDATE bc_ceisa_barang SET netto = $netto, bruto = $bruto WHERE nomor_aju = '$escAju' AND seri_barang = $seri");
                     $fixedCount++;
                 }
             }
@@ -810,7 +831,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
     function ceisa_edit_seri_barang($koneksi, $nomor_aju) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
 
-        $bRes = $koneksi->query("SELECT id, seri_barang FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' ORDER BY id ASC");
+        $bRes = $koneksi->query("SELECT seri_barang, kode_barang FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' ORDER BY seri_barang ASC");
         if (!$bRes || $bRes->num_rows == 0) {
             return ['status' => 'WARNING', 'message' => 'Tidak ada data barang.', 'count' => 0];
         }
@@ -822,20 +843,34 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
 
         $koneksi->begin_transaction();
         try {
-            $seq = 1;
-            foreach ($items as $item) {
+            // Step 1: Assign temporary negative values to avoid duplicate key conflicts on PK (cmp_id, nomor_aju, seri_barang)
+            foreach ($items as $idx => $item) {
                 $oldSeri = intval($item['seri_barang']);
-                $newSeri = $seq;
-                $rowId = intval($item['id']);
+                $tempSeri = -($idx + 1);
+                $kb = $koneksi->real_escape_string($item['kode_barang']);
 
-                if ($oldSeri !== $newSeri) {
-                    $koneksi->query("UPDATE bc_ceisa_barang SET seri_barang = $newSeri WHERE id = $rowId");
-                    $koneksi->query("UPDATE bc_ceisa_barangtarif SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
-                    $koneksi->query("UPDATE bc_ceisa_barangdokumen SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
-                    $koneksi->query("UPDATE bc_ceisa_barangentitas SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
-                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
-                    $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
-                }
+                $koneksi->query("UPDATE bc_ceisa_barang SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri AND kode_barang = '$kb' LIMIT 1");
+                $koneksi->query("UPDATE bc_ceisa_barangtarif SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+                $koneksi->query("UPDATE bc_ceisa_barangdokumen SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+                $koneksi->query("UPDATE bc_ceisa_barangentitas SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakudokumen SET seri_barang = $tempSeri WHERE nomor_aju = '$escAju' AND seri_barang = $oldSeri");
+            }
+
+            // Step 2: Assign sequential 1..N
+            $seq = 1;
+            foreach ($items as $idx => $item) {
+                $tempSeri = -($idx + 1);
+                $newSeri = $seq;
+
+                $koneksi->query("UPDATE bc_ceisa_barang SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri LIMIT 1");
+                $koneksi->query("UPDATE bc_ceisa_barangtarif SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
+                $koneksi->query("UPDATE bc_ceisa_barangdokumen SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
+                $koneksi->query("UPDATE bc_ceisa_barangentitas SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakudokumen SET seri_barang = $newSeri WHERE nomor_aju = '$escAju' AND seri_barang = $tempSeri");
                 $seq++;
             }
             $koneksi->commit();
@@ -845,7 +880,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 'message' => "Urutan Seri Barang berhasil ditata ulang menjadi 1 s/d " . ($seq - 1) . ".",
                 'count' => count($items)
             ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $koneksi->rollback();
             return ['status' => 'ERROR', 'message' => 'Gagal merapikan seri barang: ' . $e->getMessage()];
         }
@@ -857,7 +892,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
     function ceisa_seq_bahanbaku($koneksi, $nomor_aju) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
 
-        $bbRes = $koneksi->query("SELECT id, seri_barang, seri_bahan_baku FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' ORDER BY seri_barang ASC, id ASC");
+        $bbRes = $koneksi->query("SELECT seri_barang, seri_bahan_baku, kode_barang, kode_dokumen_asal, nomor_daftar_asal FROM bc_ceisa_bahanbaku WHERE nomor_aju = '$escAju' ORDER BY seri_barang ASC, seri_bahan_baku ASC, kode_barang ASC");
         if (!$bbRes || $bbRes->num_rows == 0) {
             return ['status' => 'OK', 'message' => 'Tidak ada bahan baku untuk diurutkan.', 'count' => 0];
         }
@@ -869,11 +904,24 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
 
         $koneksi->begin_transaction();
         try {
+            // Step 1: Assign temporary negative values to avoid collisions
+            foreach ($items as $idx => $item) {
+                $currentBrg = intval($item['seri_barang']);
+                $oldSeq = intval($item['seri_bahan_baku']);
+                $kb = $koneksi->real_escape_string($item['kode_barang']);
+                $tempSeq = -($idx + 1);
+
+                $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_bahan_baku = $tempSeq WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $oldSeq AND kode_barang = '$kb' LIMIT 1");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_bahan_baku = $tempSeq WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $oldSeq");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakudokumen SET seri_bahan_baku = $tempSeq WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $oldSeq");
+            }
+
+            // Step 2: Assign sequential 1..N per seri_barang
             $lastSeriBrg = null;
             $seqBb = 1;
             $updated = 0;
 
-            foreach ($items as $item) {
+            foreach ($items as $idx => $item) {
                 $currentBrg = intval($item['seri_barang']);
                 if ($lastSeriBrg !== $currentBrg) {
                     $seqBb = 1;
@@ -882,15 +930,11 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                     $seqBb++;
                 }
 
-                $rowId = intval($item['id']);
-                $oldSeq = intval($item['seri_bahan_baku']);
-
-                if ($oldSeq !== $seqBb) {
-                    $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_bahan_baku = $seqBb WHERE id = $rowId");
-                    $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_bahan_baku = $seqBb WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $oldSeq");
-                    $koneksi->query("UPDATE bc_ceisa_bahanbakudokumen SET seri_bahan_baku = $seqBb WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $oldSeq");
-                    $updated++;
-                }
+                $tempSeq = -($idx + 1);
+                $koneksi->query("UPDATE bc_ceisa_bahanbaku SET seri_bahan_baku = $seqBb WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $tempSeq LIMIT 1");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakutarif SET seri_bahan_baku = $seqBb WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $tempSeq");
+                $koneksi->query("UPDATE bc_ceisa_bahanbakudokumen SET seri_bahan_baku = $seqBb WHERE nomor_aju = '$escAju' AND seri_barang = $currentBrg AND seri_bahan_baku = $tempSeq");
+                $updated++;
             }
 
             $koneksi->commit();
@@ -899,7 +943,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 'message' => "Urutan Seri Bahan Baku berhasil ditata ulang per Seri Barang. $updated baris diperbarui.",
                 'count' => count($items)
             ];
-        } catch (Exception $e) {
+        } catch (\Throwable $e) {
             $koneksi->rollback();
             return ['status' => 'ERROR', 'message' => 'Gagal mengurutkan seri bahan baku: ' . $e->getMessage()];
         }
@@ -923,17 +967,28 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
     /**
      * 11. Load All BOM dari Master (ue_bomall / ue_bomload)
      * Mengambil struktur bill of material dari bc_ceisa_bom ke bc_ceisa_barangbom.
+     * Jika targetSeri dispesifikasikan, hanya memuat BOM untuk seri barang tersebut.
      */
-    function ceisa_load_all_bom($koneksi, $nomor_aju) {
+    function ceisa_load_all_bom($koneksi, $nomor_aju, $targetSeri = null) {
         $escAju = $koneksi->real_escape_string($nomor_aju);
 
         $hRes = $koneksi->query("SELECT cmp_id FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
         $cmp_id = ($hRes && $hr = $hRes->fetch_assoc()) ? $hr['cmp_id'] : '';
 
+        // Bersihkan BOM lama: jika per seri, hapus seri tersebut; jika all, hapus seluruh aju
+        if ($targetSeri !== null && intval($targetSeri) > 0) {
+            $tSeri = intval($targetSeri);
+            $koneksi->query("DELETE FROM bc_ceisa_barangbom WHERE aju = '$escAju' AND seri = $tSeri");
+            $seriSql = " AND seri_barang = $tSeri";
+        } else {
+            $koneksi->query("DELETE FROM bc_ceisa_barangbom WHERE aju = '$escAju'");
+            $seriSql = "";
+        }
+
         // Ambil barang pada AJU
-        $bRes = $koneksi->query("SELECT seri_barang, kode_barang, uraian, jumlah_satuan, kode_satuan, harga_penyerahan, cif FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
+        $bRes = $koneksi->query("SELECT seri_barang, kode_barang, uraian, jumlah_satuan, kode_satuan, harga_penyerahan, cif FROM bc_ceisa_barang WHERE nomor_aju = '$escAju' $seriSql");
         if (!$bRes || $bRes->num_rows == 0) {
-            return ['status' => 'WARNING', 'message' => 'Data barang kosong.'];
+            return ['status' => 'WARNING', 'message' => 'Data barang kosong atau tidak ditemukan.'];
         }
 
         $insCount = 0;
@@ -974,9 +1029,13 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
             }
         }
 
+        $msg = ($targetSeri !== null && intval($targetSeri) > 0)
+            ? "BOM Barang Seri #$targetSeri berhasil dimuat! ($insCount komponen)"
+            : "BOM seluruh barang berhasil dimuat! Ditambahkan $insCount baris komponen ke tabel tracking.";
+
         return [
             'status' => 'OK',
-            'message' => "BOM berhasil dimuat! Ditambahkan $insCount baris komponen ke tabel tracking.",
+            'message' => $msg,
             'count' => $insCount
         ];
     }
@@ -1127,11 +1186,10 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         $unmatchedItems = 0;
         $insStmt = $koneksi->prepare("INSERT INTO bc_ceisa_tracebb 
             (cmp_id, id, aju, nomor_aju, seri, seri_barang, id_bom, id_barang,
-             kode_brg, kode_barang, nama_brg, uraian, sat, satuan, qty_use,
-             jenis_bc, kode_dokumen_asal, no_daftar, nomor_daftar_asal,
-             tgl_daftar, tanggal_daftar_asal, nomor_aju_asal, seri_barang_asal,
+             kode_brg, nama_brg, sat, qty_use,
+             jenis_bc, no_daftar, tgl_daftar,
              hs, nama_bs, harga, cif, ndpbm, gross, netto, set_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
         $setBy = 'AUTO-FIFO ' . date('Ymd H:i');
 
@@ -1192,11 +1250,10 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                     $itemGross = round((floatval($stock['GROSS'] ?? 0) / $stockQty) * $takeQty, 4);
                     $itemNetto = round((floatval($stock['NETTO'] ?? 0) / $stockQty) * $takeQty, 4);
 
-                    $insStmt->bind_param('ssssiisisssssdsssssssisdddddds',
-                        $cmp_id, $uuid, $nomor_aju, $nomor_aju, $seq, $seriBrg, $idBom, $seriBrg,
-                        $kdKomp, $kdKomp, $uraianKomp, $uraianKomp, $satKomp, $satKomp, $takeQty,
-                        $bcAsal, $bcAsal, $noDaftar, $noDaftar,
-                        $tglDaftar, $tglDaftar, $ajuAsal, $seriAsal,
+                    $insStmt->bind_param('ssssiisissssdsssdddddds',
+                        $cmp_id, $uuid, $nomor_aju, $ajuAsal, $seq, $seriAsal, $idBom, $seriBrg,
+                        $kdKomp, $uraianKomp, $satKomp, $takeQty,
+                        $bcAsal, $noDaftar, $tglDaftar,
                         $hs, $supplier, $unitHarga, $unitCif, $itemNdpbm, $itemGross, $itemNetto, $setBy
                     );
                     $insStmt->execute();
@@ -1223,11 +1280,10 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
                 $cifFallback = ($ndpbm > 0) ? round($hargaFallback / $ndpbm, 4) : 0;
                 $bcFallback = '40'; // Ditandai sebagai lokal / standby
 
-                $insStmt->bind_param('ssssiisisssssdsssssssisdddddds',
-                    $cmp_id, $uuid, $nomor_aju, $nomor_aju, $seq, $seriBrg, $idBom, $seriBrg,
-                    $kdKomp, $kdKomp, $uraianKomp, $uraianKomp, $satFallback, $satFallback, $remQty,
-                    $bcFallback, $bcFallback, '-', '-',
-                    CURDATE(), CURDATE(), '-', 1,
+                $insStmt->bind_param('ssssiisissssdsssdddddds',
+                    $cmp_id, $uuid, $nomor_aju, '-', $seq, 1, $idBom, $seriBrg,
+                    $kdKomp, $uraianKomp, $satFallback, $remQty,
+                    $bcFallback, '-', CURDATE(),
                     $hsFallback, 'LOKAL / STANDBY IT INVENTORY', $hargaFallback, $cifFallback, $ndpbm, 0, 0, $setBy
                 );
                 $insStmt->execute();
@@ -1354,6 +1410,50 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
             'status' => 'OK',
             'message' => "Berhasil menambahkan $inserted barang dari master ke dokumen AJU ini!",
             'inserted_count' => $inserted
+        ];
+    }
+
+    /**
+     * 15b. Insert Komponen BOM dari Master Barang (Quick Picker bc_material)
+     */
+    function ceisa_insert_bom_from_material($koneksi, $nomor_aju, $seri, $kode_barang_parent, $items) {
+        $escAju = $koneksi->real_escape_string($nomor_aju);
+        $seri = intval($seri);
+        $escParent = $koneksi->real_escape_string($kode_barang_parent);
+
+        if (empty($items) || !is_array($items)) {
+            return ['status' => 'ERROR', 'message' => 'Tidak ada komponen yang dipilih.'];
+        }
+
+        $hRes = $koneksi->query("SELECT cmp_id FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        $cmp_id = ($hRes && $hr = $hRes->fetch_assoc()) ? $hr['cmp_id'] : '';
+
+        $insCount = 0;
+        foreach ($items as $it) {
+            $kb = trim($it['kode_barang'] ?? '');
+            if (empty($kb)) continue;
+            $uraian = trim($it['uraian'] ?? $kb);
+            $sat = trim($it['kode_satuan'] ?? 'PCE');
+            $qty = floatval($it['qty'] ?? 1);
+            if ($qty <= 0) $qty = 1;
+            $uuid = md5(uniqid(rand(), true));
+
+            $escKb = $koneksi->real_escape_string($kb);
+            $escUraian = $koneksi->real_escape_string($uraian);
+            $escSat = $koneksi->real_escape_string($sat);
+
+            $sql = "INSERT INTO bc_ceisa_barangbom 
+                (cmp_id, id, kode_barang_parent, kode_barang, uraian, kode_satuan, qty, aju, seri)
+                VALUES ('$cmp_id', '$uuid', '$escParent', '$escKb', '$escUraian', '$escSat', $qty, '$escAju', $seri)";
+            if ($koneksi->query($sql)) {
+                $insCount++;
+            }
+        }
+
+        return [
+            'status' => 'OK',
+            'message' => "Berhasil menambahkan $insCount komponen ke BOM Barang Seri #$seri ($kode_barang_parent)!",
+            'inserted_count' => $insCount
         ];
     }
 
@@ -1485,6 +1585,72 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
         return [
             'status' => 'OK',
             'message' => "Berhasil menambahkan $inserted bahan baku dari dokumen masuk dan langsung mengenerate tarifnya!",
+            'inserted_count' => $inserted
+        ];
+    }
+
+    /**
+     * 18. Insert Dokumen Masuk Eks-BC langsung ke Trace Eks-BC (bc_ceisa_tracebb)
+     */
+    function ceisa_insert_trace_from_incoming($koneksi, $nomor_aju, $seri_barang, $id_bom, $items) {
+        $escAju = $koneksi->real_escape_string($nomor_aju);
+        $seri = intval($seri_barang);
+        $escIdBom = $koneksi->real_escape_string($id_bom);
+
+        if (empty($items) || !is_array($items)) {
+            return ['status' => 'ERROR', 'message' => 'Tidak ada dokumen asal yang dipilih.'];
+        }
+
+        $hRes = $koneksi->query("SELECT cmp_id, ndpbm FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        $cmp_id = ($hRes && $hr = $hRes->fetch_assoc()) ? $hr['cmp_id'] : '';
+
+        $inserted = 0;
+        foreach ($items as $it) {
+            $uuid = md5(uniqid(rand(), true));
+            $bc = trim($it['bc'] ?? '');
+            $noAjuAsal = trim($it['nomor_aju'] ?? '');
+            $noDaftar = trim($it['nomor_daftar'] ?? '');
+            $tglDaftar = trim($it['tanggal_daftar'] ?? '');
+            $kb = trim($it['kode_barang'] ?? '');
+            $nama = trim($it['uraian'] ?? $kb);
+            $sat = trim($it['unit'] ?? 'PCE');
+            $qtyUse = floatval($it['qty_pakai'] ?? 1);
+            $hs = trim($it['pos_tarif'] ?? '');
+            $harga = floatval($it['unit_harga'] ?? 0);
+            $cif = floatval($it['unit_cif'] ?? 0);
+            $ndpbm = floatval($it['ndpbm'] ?? 1);
+            $gross = floatval($it['gross'] ?? 0);
+            $netto = floatval($it['netto'] ?? 0);
+            $setBy = 'MANUAL-PICKER ' . date('Ymd H:i');
+
+            $escBc = $koneksi->real_escape_string($bc);
+            $escAjuAsal = $koneksi->real_escape_string($noAjuAsal);
+            $escNoDaf = $koneksi->real_escape_string($noDaftar);
+            $escTglDaf = $koneksi->real_escape_string($tglDaftar);
+            $escKb = $koneksi->real_escape_string($kb);
+            $escNama = $koneksi->real_escape_string($nama);
+            $escSat = $koneksi->real_escape_string($sat);
+            $escHs = $koneksi->real_escape_string($hs);
+
+            $sql = "INSERT INTO bc_ceisa_tracebb 
+                (cmp_id, id, aju, nomor_aju, seri, seri_barang, id_bom, id_barang,
+                 kode_brg, nama_brg, sat, qty_use,
+                 jenis_bc, no_daftar, tgl_daftar,
+                 hs, nama_bs, harga, cif, ndpbm, gross, netto, set_by)
+                VALUES
+                ('$cmp_id', '$uuid', '$escAju', '$escAjuAsal', $seri, 1, '$escIdBom', 0,
+                 '$escKb', '$escNama', '$escSat', $qtyUse,
+                 '$escBc', '$escNoDaf', '$escTglDaf',
+                 '$escHs', '', $harga, $cif, $ndpbm, $gross, $netto, '$setBy')";
+
+            if ($koneksi->query($sql)) {
+                $inserted++;
+            }
+        }
+
+        return [
+            'status' => 'OK',
+            'message' => "Berhasil menambahkan $inserted dokumen asal ke tracking eks-BC!",
             'inserted_count' => $inserted
         ];
     }

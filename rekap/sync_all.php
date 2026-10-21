@@ -224,16 +224,22 @@ $npwp_variants = array_unique($npwp_variants);
           <label class="font-weight-bold mt-2">Filter Jenis Dokumen (Opsional)</label>
           <select id="filter_bc" class="form-control form-control-sm" style="font-size:11px; height:26px;">
             <option value="">Semua Dokumen Bea Cukai</option>
-            <option value="16">BC 1.6</option>
-            <option value="20">BC 2.0</option>
-            <option value="23">BC 2.3</option>
-            <option value="25">BC 2.5</option>
-            <option value="27">BC 2.7</option>
-            <option value="30">BC 3.0</option>
-            <option value="40">BC 4.0</option>
-            <option value="41">BC 4.1</option>
-            <option value="261">BC 2.6.1</option>
-            <option value="262">BC 2.6.2</option>
+            <option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option>
+            <option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option>
+            <option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option>
+            <option value="25">BC 2.5 (Pengeluaran TPB)</option>
+            <option value="23">BC 2.3 (Impor TPB)</option>
+            <option value="40">BC 4.0 (Pemasukan TLDDP)</option>
+            <option value="27">BC 2.7 (TPB ke TPB)</option>
+            <option value="41">BC 4.1 (Pengeluaran TLDDP)</option>
+            <option value="261">BC 2.6.1 (Subkon Luar)</option>
+            <option value="262">BC 2.6.2 (Subkon Masuk)</option>
+            <option value="20">BC 2.0 (Impor PIB)</option>
+            <option value="30">BC 3.0 (Ekspor PEB)</option>
+            <option value="16">BC 1.6 (Pemasukan PLB)</option>
+            <option value="28">BC 2.8 (Impor PLB)</option>
+            <option value="33">BC 3.3 (Ekspor PLB)</option>
+            <option value="331">BC 3.3.1 (P3BET PLB)</option>
           </select>
         </div>
       </div>

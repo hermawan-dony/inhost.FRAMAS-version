@@ -12,14 +12,110 @@ $sessionCmpId = $_SESSION['cmp_id'] ?? ($cmp_id ?? '');
 $targetCmp = $_GET['cmp_id'] ?? $sessionCmpId;
 
 // Pastikan data login sesuai company yang dipilih
-if (!empty($targetCmp) && $targetCmp !== $cmp_id) {
+$companyRoles = 'tpb';
+$allowedDocsStr = null;
+
+if (!empty($targetCmp)) {
     $cRow = ceisa_get_company($targetCmp);
     if ($cRow) {
         $namaperusahaan = $cRow['cmp_name'];
         $npwp           = $cRow['npwp'];
         $cmp_id         = $cRow['cmp_id'];
+        $companyRoles   = $cRow['company_roles'] ?? 'tpb';
+        $allowedDocsStr = $cRow['allowed_docs'] ?? null;
     }
 }
+if (empty($namaperusahaan)) {
+    $cRow = ceisa_get_company($cmp_id);
+    if ($cRow) {
+        $namaperusahaan = $cRow['cmp_name'];
+        $npwp           = $cRow['npwp'];
+        $companyRoles   = $cRow['company_roles'] ?? 'tpb';
+        $allowedDocsStr = $cRow['allowed_docs'] ?? null;
+    }
+}
+
+// Resolusi hak akses dokumen perusahaan (mengacu setting perusahaan & preset role)
+$allowedDocs = ceisa_resolve_allowed_docs($companyRoles, $allowedDocsStr);
+
+// Master Katalog Metadata Dokumen (Pemasukan / Masuk vs Pengeluaran / Keluar)
+$masterCatalog = [
+    // Inbound (Masuk)
+    '611'  => ['code' => '611',  'label' => 'PPKEK 6.1.1', 'short' => 'PPKEK 6.1.1', 'type' => 'masuk',  'field' => 'bc611'],
+    '16'   => ['code' => '16',   'label' => 'BC 1.6',       'short' => 'BC 1.6',       'type' => 'masuk',  'field' => 'bc16'],
+    '20'   => ['code' => '20',   'label' => 'BC 2.0',       'short' => 'BC 2.0',       'type' => 'masuk',  'field' => 'bc20'],
+    '23'   => ['code' => '23',   'label' => 'BC 2.3',       'short' => 'BC 2.3',       'type' => 'masuk',  'field' => 'bc23'],
+    '40'   => ['code' => '40',   'label' => 'BC 4.0',       'short' => 'BC 4.0',       'type' => 'masuk',  'field' => 'bc40'],
+    '27IN' => ['code' => '27IN', 'label' => 'BC 2.7 IN',    'short' => 'BC 2.7 IN',    'type' => 'masuk',  'field' => 'bc27in', 'base_code' => '27'],
+    '262'  => ['code' => '262',  'label' => 'BC 2.6.2',     'short' => 'BC 2.6.2',     'type' => 'masuk',  'field' => 'bc262'],
+    '28'   => ['code' => '28',   'label' => 'BC 2.8',       'short' => 'BC 2.8',       'type' => 'masuk',  'field' => 'bc28'],
+
+    // Outbound (Keluar)
+    '613'  => ['code' => '613',  'label' => 'PPKEK 6.1.3', 'short' => 'PPKEK 6.1.3', 'type' => 'keluar', 'field' => 'bc613'],
+    '27'   => ['code' => '27',   'label' => 'BC 2.7',       'short' => 'BC 2.7',       'type' => 'keluar', 'field' => 'bc27',   'base_code' => '27'],
+    '25'   => ['code' => '25',   'label' => 'BC 2.5',       'short' => 'BC 2.5',       'type' => 'keluar', 'field' => 'bc25'],
+    '41'   => ['code' => '41',   'label' => 'BC 4.1',       'short' => 'BC 4.1',       'type' => 'keluar', 'field' => 'bc41'],
+    '261'  => ['code' => '261',  'label' => 'BC 2.6.1',     'short' => 'BC 2.6.1',     'type' => 'keluar', 'field' => 'bc261'],
+    '30'   => ['code' => '30',   'label' => 'BC 3.0',       'short' => 'BC 3.0',       'type' => 'keluar', 'field' => 'bc30'],
+    '33'   => ['code' => '33',   'label' => 'BC 3.3',       'short' => 'BC 3.3',       'type' => 'keluar', 'field' => 'bc33'],
+    '331'  => ['code' => '331',  'label' => 'BC 3.3.1',     'short' => 'BC 3.3.1',     'type' => 'keluar', 'field' => 'bc331'],
+    '631'  => ['code' => '631',  'label' => 'PPKEK 6.3.1', 'short' => 'PPKEK 6.3.1', 'type' => 'keluar', 'field' => 'bc631'],
+];
+
+// Susun kolom Masuk dan Keluar yang diizinkan untuk profil perusahaan ini
+$activeMasukCols = [];
+$activeKeluarCols = [];
+
+foreach ($masterCatalog as $key => $meta) {
+    $base = (string)($meta['base_code'] ?? $meta['code']);
+    if (in_array($base, $allowedDocs, true)) {
+        if ($meta['type'] === 'masuk') {
+            $activeMasukCols[] = $meta;
+        } else {
+            $activeKeluarCols[] = $meta;
+        }
+    }
+}
+
+// Tambahkan kode dokumen tambahan di allowed_docs jika ada yang belum tercakup di katalog standar
+foreach ($allowedDocs as $docCode) {
+    $docCode = (string)$docCode;
+    $found = false;
+    foreach ($masterCatalog as $meta) {
+        $base = (string)($meta['base_code'] ?? $meta['code']);
+        if ($base === $docCode) {
+            $found = true;
+            break;
+        }
+    }
+    if (!$found) {
+        $meta = [
+            'code'  => $docCode,
+            'label' => "BC $docCode",
+            'short' => "BC $docCode",
+            'type'  => in_array($docCode, ['16', '20', '23', '40', '262', '28', '611']) ? 'masuk' : 'keluar',
+            'field' => 'bc' . preg_replace('/[^a-zA-Z0-9]/', '', $docCode)
+        ];
+        if ($meta['type'] === 'masuk') {
+            $activeMasukCols[] = $meta;
+        } else {
+            $activeKeluarCols[] = $meta;
+        }
+    }
+}
+
+// Fallback aman bila pengaturan kosong
+if (empty($activeMasukCols) && empty($activeKeluarCols)) {
+    foreach ($masterCatalog as $key => $meta) {
+        if (in_array((string)$key, ['23', '40', '27IN', '262'], true)) {
+            $activeMasukCols[] = $meta;
+        } elseif (in_array((string)$key, ['27', '25', '41', '261'], true)) {
+            $activeKeluarCols[] = $meta;
+        }
+    }
+}
+
+$allActiveCols = array_merge($activeMasukCols, $activeKeluarCols);
 
 $belum_selesai = isset($_GET['belum_selesai']) && $_GET['belum_selesai'] == '1' ? 1 : 0;
 
@@ -33,40 +129,19 @@ if (!empty($cleanCmpId)) {
     $whereCmp = "WHERE (cmp_id = '$cleanCmpId' OR cmp_id = '' OR cmp_id IS NULL)";
 }
 
+// Bangun query agregasi dinamis sesuai kolom aktif perusahaan
+$sumSelects = [];
+foreach ($allActiveCols as $meta) {
+    $escCode = $koneksi->real_escape_string($meta['code']);
+    $field = $meta['field'];
+    $sumSelects[] = "SUM(CASE WHEN kodeDokumen = '$escCode' THEN 1 ELSE 0 END) AS {$field}";
+    $sumSelects[] = "SUM(CASE WHEN kodeDokumen = '$escCode' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) AS {$field}_unfin";
+}
+$sumSql = implode(",\n    ", $sumSelects);
+
 $query = "
 SELECT ym, 
-    SUM(CASE WHEN kodeDokumen = '16' THEN 1 ELSE 0 END) bc16,
-    SUM(CASE WHEN kodeDokumen = '16' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc16_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '20' THEN 1 ELSE 0 END) bc20,
-    SUM(CASE WHEN kodeDokumen = '20' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc20_unfin,
-
-    SUM(CASE WHEN kodeDokumen = '23' THEN 1 ELSE 0 END) bc23,
-    SUM(CASE WHEN kodeDokumen = '23' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc23_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '40' THEN 1 ELSE 0 END) bc40,
-    SUM(CASE WHEN kodeDokumen = '40' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc40_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '27IN' THEN 1 ELSE 0 END) bc27in,
-    SUM(CASE WHEN kodeDokumen = '27IN' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc27in_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '262' THEN 1 ELSE 0 END) bc262,
-    SUM(CASE WHEN kodeDokumen = '262' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc262_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '27' THEN 1 ELSE 0 END) bc27,
-    SUM(CASE WHEN kodeDokumen = '27' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc27_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '25' THEN 1 ELSE 0 END) bc25,
-    SUM(CASE WHEN kodeDokumen = '25' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc25_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '41' THEN 1 ELSE 0 END) bc41,
-    SUM(CASE WHEN kodeDokumen = '41' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc41_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '261' THEN 1 ELSE 0 END) bc261,
-    SUM(CASE WHEN kodeDokumen = '261' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc261_unfin,
-    
-    SUM(CASE WHEN kodeDokumen = '30' THEN 1 ELSE 0 END) bc30,
-    SUM(CASE WHEN kodeDokumen = '30' AND namaProses <> 'Selesai Proses' THEN 1 ELSE 0 END) bc30_unfin
+    $sumSql
 FROM 
 (
     SELECT date_format(tanggalDaftar, '%Y-%m') ym, tanggalDaftar, namaProses, idPerusahaan, nomorAju,
@@ -338,39 +413,45 @@ if ($cRes) {
         <thead>
           <tr>
             <th rowspan="2" style="width:90px; background:#fafafa;">Periode</th>
-            <th colspan="6" class="th-masuk">📥 DOKUMEN MASUK</th>
-            <th colspan="5" class="th-keluar">📤 DOKUMEN KELUAR</th>
+            <?php if (!empty($activeMasukCols)): ?>
+              <th colspan="<?= count($activeMasukCols) ?>" class="th-masuk">📥 DOKUMEN MASUK</th>
+            <?php endif; ?>
+            <?php if (!empty($activeKeluarCols)): ?>
+              <th colspan="<?= count($activeKeluarCols) ?>" class="th-keluar">📤 DOKUMEN KELUAR</th>
+            <?php endif; ?>
           </tr>
           <tr>
-            <th class="th-masuk">BC 1.6</th>
-            <th class="th-masuk">BC 2.0</th>
-            <th class="th-masuk">BC 2.3</th>
-            <th class="th-masuk">BC 4.0</th>
-            <th class="th-masuk">BC 2.7 IN</th>
-            <th class="th-masuk">BC 2.6.2</th>
-            <th class="th-keluar">BC 2.7</th>
-            <th class="th-keluar">BC 2.5</th>
-            <th class="th-keluar">BC 4.1</th>
-            <th class="th-keluar">BC 2.6.1</th>
-            <th class="th-keluar">BC 3.0</th>
+            <?php foreach ($activeMasukCols as $meta): ?>
+              <th class="th-masuk" title="<?= htmlspecialchars($meta['label']) ?>"><?= htmlspecialchars($meta['label']) ?></th>
+            <?php endforeach; ?>
+            <?php foreach ($activeKeluarCols as $meta): ?>
+              <th class="th-keluar" title="<?= htmlspecialchars($meta['label']) ?>"><?= htmlspecialchars($meta['label']) ?></th>
+            <?php endforeach; ?>
           </tr>
         </thead>
         <tbody>
           <?php 
           $hasRows = false;
+          $totalsPerCol = [];
+          $unfinPerCol = [];
+          foreach ($allActiveCols as $idx => $meta) {
+              $totalsPerCol[$idx] = 0;
+              $unfinPerCol[$idx] = 0;
+          }
+
           while ($row = $result->fetch_assoc()): 
             $hasRows = true;
           ?>
             <tr>
               <td style="font-weight:600; background:#fafafa; font-family:monospace;"><?= htmlspecialchars($row['ym']) ?></td>
               <?php
-              $bc_types = [
-                  '16' => 'bc16', '20' => 'bc20', '23' => 'bc23', '40' => 'bc40', '27IN' => 'bc27in', '262' => 'bc262',
-                  '27' => 'bc27', '25' => 'bc25', '41' => 'bc41', '261' => 'bc261', '30' => 'bc30'
-              ];
-              foreach ($bc_types as $code => $field) {
-                  $total = (int)$row[$field];
-                  $unfin = (int)$row[$field . '_unfin'];
+              foreach ($allActiveCols as $idx => $meta) {
+                  $code = $meta['code'];
+                  $field = $meta['field'];
+                  $total = (int)($row[$field] ?? 0);
+                  $unfin = (int)($row[$field . '_unfin'] ?? 0);
+                  $totalsPerCol[$idx] += $total;
+                  $unfinPerCol[$idx] += $unfin;
                   
                   if ($belum_selesai && $unfin > 0) {
                       $display_text = "<span>{$total}</span> / <span class='unfin-count'>{$unfin}</span>";
@@ -389,9 +470,30 @@ if ($cRes) {
           <?php endwhile; ?>
           <?php if (!$hasRows): ?>
             <tr>
-              <td colspan="12" style="padding:24px; color:#8c8c8c;">
+              <td colspan="<?= 1 + count($allActiveCols) ?>" style="padding:24px; color:#8c8c8c;">
                 Belum ada data dokumen CEISA 4.0 yang tersimpan pada tabel `bc_ceisa_data`. Silakan lakukan Sync ALL DATA.
               </td>
+            </tr>
+          <?php else: ?>
+            <!-- Total Summary Baris Bawah -->
+            <tr style="background:#fafafa; font-weight:bold; border-top:2px solid #d9d9d9;">
+              <td style="background:#f0f0f0;">TOTAL</td>
+              <?php
+              foreach ($allActiveCols as $idx => $meta) {
+                  $tot = $totalsPerCol[$idx];
+                  $unf = $unfinPerCol[$idx];
+                  if ($belum_selesai && $unf > 0) {
+                      $txt = "<span>{$tot}</span> / <span class='unfin-count'>{$unf}</span>";
+                  } else {
+                      $txt = "<span>{$tot}</span>";
+                  }
+                  if ($tot > 0) {
+                      echo "<td style='font-weight:700;'>{$txt}</td>";
+                  } else {
+                      echo "<td style='color:#bfbfbf;'>0</td>";
+                  }
+              }
+              ?>
             </tr>
           <?php endif; ?>
         </tbody>
@@ -456,7 +558,12 @@ function showDetails(ym, kodeDokumen) {
   currentYm = ym;
   currentKodeDokumen = kodeDokumen;
 
-  document.getElementById('modal-subtitle').innerText = `(BC ${kodeDokumen} • Periode ${ym})`;
+  let docTitle = 'BC ' + kodeDokumen;
+  if (kodeDokumen === '611') docTitle = 'PPKEK 6.1.1';
+  else if (kodeDokumen === '613') docTitle = 'PPKEK 6.1.3';
+  else if (kodeDokumen === '27IN') docTitle = 'BC 2.7 IN';
+
+  document.getElementById('modal-subtitle').innerText = `(${docTitle} • Periode ${ym})`;
   $('#modal-progress-container').hide();
   $('#btn-modal-refresh').prop('disabled', false).html('<i class="fas fa-sync-alt mr-1"></i> REFRESH DATA BELUM SELESAI');
   document.getElementById('modal-detail-body').innerHTML = '<p class="text-center py-4 text-muted"><i class="fas fa-spinner fa-spin fa-2x text-primary"></i> Memuat detail data dokumen...</p>';
@@ -492,7 +599,7 @@ function showDetails(ym, kodeDokumen) {
               <th style="width:85px;">No Daftar</th>
               <th style="width:200px;">Nomor AJU</th>
               <th>Nama Perusahaan</th>
-              <th style="width:60px;">Dok</th>
+              <th style="width:75px;">Dok</th>
               <th style="width:50px;">Jalur</th>
               <th>Nama Proses</th>
               <th>Nama Respon</th>
@@ -510,6 +617,11 @@ function showDetails(ym, kodeDokumen) {
         if (j === 'M') jalurClass = 'badge-jalur-m';
         else if (j === 'K') jalurClass = 'badge-jalur-k';
 
+        let rowDocLabel = 'BC ' + (row.kodeDokumen || '');
+        if (row.kodeDokumen === '611') rowDocLabel = 'PPKEK 6.1.1';
+        else if (row.kodeDokumen === '613') rowDocLabel = 'PPKEK 6.1.3';
+        else if (row.kodeDokumen === '27IN') rowDocLabel = 'BC 2.7 IN';
+
         const isUnfin = row.namaProses !== 'Selesai Proses';
         const pdfButton = row.pdf ? `
           <a href="/pdf.php?aju=${encodeURIComponent(row.nomorAju)}&pdf=${encodeURIComponent(row.pdf)}&cmp_id=${encodeURIComponent(activeCmpId)}&view=1" target="_blank" class="btn btn-sm btn-outline-danger" style="padding:1px 5px; font-size:10px;" title="Buka PDF">
@@ -526,7 +638,7 @@ function showDetails(ym, kodeDokumen) {
             <td class="text-center font-weight-bold">${row.nomorDaftar || '-'}</td>
             <td class="text-monospace font-weight-bold" style="color:#0050b3;">${row.nomorAju}</td>
             <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(row.namaPerusahaan)}">${escapeHtml(row.namaPerusahaan)}</td>
-            <td class="text-center font-weight-bold">BC ${row.kodeDokumen}</td>
+            <td class="text-center font-weight-bold">${rowDocLabel}</td>
             <td class="text-center"><span class="badge-jalur ${jalurClass}">${j || '-'}</span></td>
             <td>${escapeHtml(row.namaProses || '-')}</td>
             <td>${escapeHtml(row.namaRespon || '-')}</td>

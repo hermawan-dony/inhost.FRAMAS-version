@@ -211,10 +211,11 @@ if ($action === 'get_list') {
 
     // Filter Isolasi: 'portal' vs 'h2h'
     if ($source === 'portal') {
-        $where .= " AND h.asal_data = 'PORTAL'";
+        // Tampilkan dokumen portal murni, hasil sinkronisasi, dokumen hasil restore, atau dokumen yang memiliki id_nvocc_header resmi
+        $where .= " AND (h.asal_data IN ('PORTAL', 'BOTH') OR (h.id_nvocc_header IS NOT NULL AND h.id_nvocc_header <> ''))";
     } elseif ($source === 'h2h' || $source === '' || $source === 'local') {
-        // Default untuk H2H: HANYA tampilkan data lokal Host to Host, dokumen portal tidak boleh masuk
-        $where .= " AND (h.asal_data = 'H2H' OR h.asal_data = 'S' OR (h.asal_data <> 'PORTAL' AND h.asal_data IS NOT NULL))";
+        // Default untuk H2H: Tampilkan dokumen lokal Host to Host & BOTH (dokumen portal murni diisolasi)
+        $where .= " AND (h.asal_data IN ('H2H', 'BOTH', 'S') OR (h.asal_data <> 'PORTAL' AND h.asal_data IS NOT NULL))";
     }
 
     if (!empty($search)) {
@@ -270,9 +271,9 @@ if ($action === 'get_list') {
     // Hitung Stats Ringkasan sesuai filter sumber
     $sourceCond = "";
     if ($source === 'portal') {
-        $sourceCond = " AND asal_data = 'PORTAL'";
+        $sourceCond = " AND (asal_data IN ('PORTAL', 'BOTH') OR (id_nvocc_header IS NOT NULL AND id_nvocc_header <> ''))";
     } elseif ($source === 'h2h' || $source === '' || $source === 'local') {
-        $sourceCond = " AND (asal_data = 'H2H' OR asal_data = 'S' OR (asal_data <> 'PORTAL' AND asal_data IS NOT NULL))";
+        $sourceCond = " AND (asal_data IN ('H2H', 'BOTH', 'S') OR (asal_data <> 'PORTAL' AND asal_data IS NOT NULL))";
     }
 
     $stats = [
@@ -1511,9 +1512,9 @@ if ($action === 'upload_portal_restore') {
             }
         }
 
-        // Simpan id_nvocc_header yang didapat
+        // Simpan id_nvocc_header yang didapat dan tandai sebagai BOTH agar terlihat di Portal maupun H2H
         if (!empty($targetIdNvocc)) {
-            $koneksi->query("UPDATE bc_ceisa_manifes_header SET id_nvocc_header = '{$targetIdNvocc}' WHERE nomor_aju = '{$escAju}'");
+            $koneksi->query("UPDATE bc_ceisa_manifes_header SET id_nvocc_header = '{$targetIdNvocc}', asal_data = IF(asal_data = 'H2H', 'BOTH', asal_data) WHERE nomor_aju = '{$escAju}'");
         }
 
         // Lakukan Cek Lengkap (Validasi) secara otomatis
@@ -2412,7 +2413,8 @@ if ($action === 'sync_ceisa_portal') {
         $chk = $koneksi->query("SELECT nomor_aju, asal_data, status FROM bc_ceisa_manifes_header WHERE nomor_aju = '{$escAju}' AND cmp_id = '{$escCmp}' LIMIT 1");
         if ($chk && $chk->num_rows > 0) {
             $existing = $chk->fetch_assoc();
-            $targetAsal = ($existing['asal_data'] === 'H2H') ? 'H2H' : 'PORTAL';
+            // Jika dokumen sebelumnya tercatat di H2H dan kini terbukti ada di Portal CEISA, tandai BOTH agar tampil di Portal dan H2H
+            $targetAsal = ($existing['asal_data'] === 'H2H' || $existing['asal_data'] === 'BOTH') ? 'BOTH' : 'PORTAL';
             $finalStt = (strtolower($existing['status'] ?? '') === 'terkirim' && in_array(strtolower($escStt), ['draft', 'ready'])) ? 'Terkirim' : $escStt;
             $finalResp = ($finalStt === 'Terkirim' && strtolower($existing['status'] ?? '') === 'terkirim') ? "IFNULL(respon_terakhir, 'Sync Portal: {$escStt}')" : "'Sync Portal: {$escStt}'";
             $sqlUp = "UPDATE bc_ceisa_manifes_header SET

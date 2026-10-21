@@ -15,6 +15,29 @@ $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['
 $sessionCmpId = trim($_GET['cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($cmp_id ?? '')));
 $theme = trim($_GET['theme'] ?? ($_SESSION['theme'] ?? 'light'));
 
+// Resolusi Hak Akses Dokumen Perusahaan
+$targetCmpId = !empty($sessionCmpId) ? $sessionCmpId : ($_SESSION['company_cmp_id'] ?? '');
+$companyRoles = 'tpb';
+$companyAllowedDocsStr = null;
+if (!empty($targetCmpId) && isset($koneksi) && $koneksi) {
+    $qComp = $koneksi->query("SELECT IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($targetCmpId) . "' LIMIT 1");
+    if ($qComp && $rComp = $qComp->fetch_assoc()) {
+        $companyRoles = $rComp['company_roles'];
+        $companyAllowedDocsStr = $rComp['allowed_docs'];
+    }
+}
+$companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
+
+if (!function_exists('isWhDocPermitted')) {
+    function isWhDocPermitted($d) {
+        global $isAdmin, $targetCmpId, $companyAllowedDocs;
+        if (!empty($isAdmin) && (empty($targetCmpId) || $targetCmpId === 'ALL')) {
+            return true;
+        }
+        return in_array((string)$d, $companyAllowedDocs);
+    }
+}
+
 // -------------------------------------------------------------
 // AJAX API ENDPOINTS
 // -------------------------------------------------------------
@@ -32,7 +55,14 @@ if ($action === 'list') {
     $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
 
     $escCmp = $koneksi->real_escape_string($filter_cmp);
-    $inboundBcs = "'16','20','23','40','262','28','611','27'";
+    $allInboundCodes = ['23', '40', '262', '27', '611', '20', '16', '28'];
+    $allowedInboundWh = (!empty($isAdmin) && (empty($filter_cmp) || $filter_cmp === 'ALL')) 
+        ? $allInboundCodes 
+        : array_values(array_filter($allInboundCodes, 'isWhDocPermitted'));
+    if (empty($allowedInboundWh)) {
+        $allowedInboundWh = ['__NONE__'];
+    }
+    $inboundBcs = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedInboundWh)) . "'";
 
     $where = [];
     if (!empty($escCmp)) {
@@ -42,7 +72,7 @@ if ($action === 'list') {
     // WAJIB: HANYA TAMPILKAN DOKUMEN YANG SUDAH MENDAPATKAN NOMOR DAFTAR DARI BEA CUKAI
     $where[] = "h.nomor_daftar IS NOT NULL AND TRIM(h.nomor_daftar) != '' AND TRIM(h.nomor_daftar) != '-'";
 
-    if (!empty($filter_bc)) {
+    if (!empty($filter_bc) && isWhDocPermitted($filter_bc)) {
         $where[] = "h.kode_dokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
     } else {
         $where[] = "h.kode_dokumen IN ($inboundBcs)";
@@ -925,14 +955,14 @@ if ($action === 'detail_tab') {
                             <label>Dokumen Pemasukan</label>
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen Masuk</option>
-                                <option value="23">BC 2.3 (Impor Kawasan Berikat)</option>
-                                <option value="40">BC 4.0 (Pemasukan TLDDP)</option>
-                                <option value="16">BC 1.6 (Pemasukan PLB)</option>
-                                <option value="20">BC 2.0 (Impor PIB)</option>
-                                <option value="262">BC 2.6.2 (Subkon Masuk)</option>
-                                <option value="27">BC 2.7 (TPB ke TPB IN)</option>
-                                <option value="28">BC 2.8 (Impor PLB)</option>
-                                <option value="611">PPKEK 6.1.1 (Pemasukan KEK)</option>
+                                <?php if (isWhDocPermitted('23')): ?><option value="23">BC 2.3 (Impor Kawasan Berikat)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB IN)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan KEK)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
                             </select>
                         </div>
                         <div class="filter-col">

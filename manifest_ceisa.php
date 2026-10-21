@@ -100,7 +100,7 @@ if (empty($cachedToken) && !empty($currentCmpRow['token_ceisa'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manifest Ceisa 4.0 - Browse Data NVOCC</title>
+    <title>Manifes Ceisa 4.0 - Browse Data NVOCC</title>
     <script>
         (function() {
             var theme = localStorage.getItem('ceisa_theme') || 'light';
@@ -780,7 +780,7 @@ if (empty($cachedToken) && !empty($currentCmpRow['token_ceisa'])) {
     <div class="portal-breadcrumb" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
         <div>
             <span>CEISA 4.0</span> <span style="margin:0 4px; color:var(--text-muted);">/</span>
-            <span>Manifest Ceisa 4.0</span> <span style="margin:0 4px; color:var(--text-muted);">/</span>
+            <span>Manifes Ceisa 4.0</span> <span style="margin:0 4px; color:var(--text-muted);">/</span>
             <span style="color:var(--text-heading); font-weight:600;">Browse Data NVOCC</span>
         </div>
         <div style="font-size:9px; color:var(--text-muted);">
@@ -1181,7 +1181,7 @@ if (empty($cachedToken) && !empty($currentCmpRow['token_ceisa'])) {
         let hasAutoSynced = false;
         function loadPortalData(forceLiveSync = false) {
             const tbody = document.getElementById('portalTableBody');
-            tbody.innerHTML = `<tr><td colspan="10" class="table-loading"><span class="spinner"></span> Memuat data dokumen NVOCC (Manifest Ceisa 4.0)...</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="10" class="table-loading"><span class="spinner"></span> Memuat data dokumen NVOCC (Manifes Ceisa 4.0)...</td></tr>`;
 
             const search = document.getElementById('filterSearch').value.trim();
             const jenis = document.getElementById('filterJenis').value;

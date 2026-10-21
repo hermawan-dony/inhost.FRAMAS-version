@@ -37,40 +37,43 @@ if (empty($filterCmp) && !empty($selectedAjuParam) && isset($koneksi) && $koneks
 }
 $companyErpName = '-';
 $companyRoles = 'tpb';
+$companyAllowedDocsStr = null;
 if (!empty($filterCmp) && isset($koneksi) && $koneksi) {
-    $qErp = $koneksi->query("SELECT ERP_Name, IFNULL(company_roles, 'tpb') AS company_roles FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "' LIMIT 1");
+    $qErp = $koneksi->query("SELECT ERP_Name, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "' LIMIT 1");
     if ($qErp && $rErp = $qErp->fetch_assoc()) {
         $companyErpName = trim($rErp['ERP_Name'] ?? '-');
         $companyRoles = trim($rErp['company_roles'] ?? 'tpb');
+        $companyAllowedDocsStr = $rErp['allowed_docs'] ?? null;
     }
 }
 $isErpConfigured = (!empty($companyErpName) && $companyErpName !== '-' && strtoupper($companyErpName) !== 'NONE');
 
+// Resolusi Dokumen BC yang Diizinkan untuk Perusahaan ini (mengacu allowed_docs & preset role)
+$companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
+
 // Katalog Dokumen Pabean Berdasarkan Role Perusahaan
 $allBcCatalog = [
+    '611' => ['label' => 'BC 6.1.1 - Pemasukan ke KEK',          'role' => 'ppkek'],
+    '613' => ['label' => 'BC 6.1.3 - Pengeluaran dari KEK',       'role' => 'ppkek'],
+    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb'],
     '23'  => ['label' => 'BC 2.3 - Impor TPB / Kawasan Berikat', 'role' => 'tpb'],
     '40'  => ['label' => 'BC 4.0 - Pemasukan TLDDP ke TPB',     'role' => 'tpb'],
     '30'  => ['label' => 'BC 3.0 - Pemberitahuan Ekspor (PEB)',   'role' => 'peb'],
-    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb'],
     '27'  => ['label' => 'BC 2.7 - Pengeluaran Antar TPB',       'role' => 'tpb'],
     '20'  => ['label' => 'BC 2.0 - Impor untuk Dipakai (PIB)',    'role' => 'pib'],
-    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'tpb'],
+    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'plb'],
     '41'  => ['label' => 'BC 4.1 - Pengeluaran Sementara ke TLDDP', 'role' => 'tpb'],
     '261' => ['label' => 'BC 2.6.1 - Pengeluaran Subkontrak',     'role' => 'tpb'],
     '262' => ['label' => 'BC 2.6.2 - Pemasukan Subkontrak',      'role' => 'tpb'],
-    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'tpb'],
-    '33'  => ['label' => 'BC 3.3 - Ekspor dari TPB',             'role' => 'tpb'],
-    '611' => ['label' => 'BC 6.1.1 - Pemasukan ke KEK',          'role' => 'ppkek'],
-    '613' => ['label' => 'BC 6.1.3 - Pengeluaran dari KEK',       'role' => 'ppkek'],
-    '631' => ['label' => 'BC 6.3.1 - Cukai',                     'role' => 'ppkek'],
+    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'plb'],
+    '33'  => ['label' => 'BC 3.3 - Ekspor dari PLB',             'role' => 'plb'],
+    '331' => ['label' => 'BC 3.3.1 - P3BET PLB',                 'role' => 'plb'],
+    '631' => ['label' => 'PPKEK 6.3.1 - Pengeluaran ke LDP',     'role' => 'ppkek'],
 ];
-
-$activeEditorRoles = array_filter(array_map('trim', explode(',', strtolower($companyRoles))));
-if (empty($activeEditorRoles)) $activeEditorRoles = ['tpb'];
 
 $allowedBcOptions = [];
 foreach ($allBcCatalog as $code => $info) {
-    if (in_array($info['role'], $activeEditorRoles)) {
+    if (in_array((string)$code, $companyAllowedDocs)) {
         $allowedBcOptions[$code] = $info['label'];
     }
 }
@@ -86,10 +89,9 @@ $ajuList = [];
 if (isset($koneksi) && $koneksi) {
     $resAju = $koneksi->query("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
         IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
-        IFNULL(p.jml, 0) AS posted
+        (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
         FROM bc_ceisa_header a
         LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
-        LEFT JOIN (SELECT nomor_aju, COUNT(1) AS jml FROM bc_ceisa_aju_posted GROUP BY nomor_aju) p ON a.nomor_aju = p.nomor_aju
         $whereCmp
         ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC LIMIT 100");
     if ($resAju) {
@@ -110,10 +112,9 @@ if (isset($koneksi) && $koneksi) {
         if (!$foundInList) {
             $stmtSelected = $koneksi->prepare("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
                 IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
-                IFNULL(p.jml, 0) AS posted
+                (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
                 FROM bc_ceisa_header a
                 LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
-                LEFT JOIN (SELECT nomor_aju, COUNT(1) AS jml FROM bc_ceisa_aju_posted GROUP BY nomor_aju) p ON a.nomor_aju = p.nomor_aju
                 WHERE a.nomor_aju = ? LIMIT 1");
             if ($stmtSelected) {
                 $stmtSelected->bind_param("s", $selectedAjuParam);
@@ -837,8 +838,8 @@ if ($action === 'load_all') {
         'barangvd'         => "SELECT * FROM bc_ceisa_barangvd WHERE nomor_aju = %s ORDER BY seri_barang ASC",
         'bahanbakudokumen' => "SELECT * FROM bc_ceisa_bahanbakudokumen WHERE nomor_aju = %s ORDER BY seri_barang ASC, seri_bahan_baku ASC, seri_dokumen ASC",
         'kesiapanbarang'   => "SELECT * FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = %s LIMIT 1",
-        'barangbom'        => "SELECT * FROM bc_ceisa_barangbom WHERE aju = %s ORDER BY seri ASC, id ASC",
-        'tracebb'          => "SELECT * FROM bc_ceisa_tracebb WHERE aju = %s OR nomor_aju = %s ORDER BY seri_barang ASC, id ASC"
+        'barangbom'        => "SELECT id, cmp_id, aju, seri, kode_barang_parent, kode_barang, uraian, kode_satuan, qty, harga_penyerahan, cif FROM bc_ceisa_barangbom WHERE aju = %s ORDER BY seri ASC, id ASC",
+        'tracebb'          => "SELECT id, cmp_id, id_bom, aju, nomor_aju, seri, seri_barang, kode_brg AS kode_barang, kode_brg, nama_brg AS nama_barang, nama_brg AS uraian, nama_brg, qty_use, sat AS satuan, sat, jenis_bc, no_daftar, tgl_daftar, hs, harga, cif, ndpbm, gross, netto FROM bc_ceisa_tracebb WHERE aju = %s OR nomor_aju = %s ORDER BY seri_barang ASC, id ASC"
     ];
 
     if (empty($nomor_aju)) {
@@ -854,7 +855,12 @@ if ($action === 'load_all') {
             $cnt = substr_count($sqlTemplate, '%s');
             $args = array_fill(0, $cnt, $escaped);
             $sql = vsprintf($sqlTemplate, $args);
-            $res = $koneksi->query($sql);
+            try {
+                $res = $koneksi->query($sql);
+            } catch (Throwable $e) {
+                error_log("Error loading table $key for aju $nomor_aju: " . $e->getMessage());
+                $res = false;
+            }
             if ($res) {
                 if ($key === 'header' || $key === 'kesiapanbarang') {
                     $row = $res->fetch_assoc() ?: [];
@@ -1368,6 +1374,19 @@ if ($action === 'save_table') {
                 $filteredRow['cmp_id'] = $cmp_id;
             }
 
+            // Pemetaan alias untuk tracebb
+            if ($tableKey === 'tracebb') {
+                if (isset($validCols['kode_brg']) && empty($filteredRow['kode_brg']) && !empty($row['kode_barang'])) {
+                    $filteredRow['kode_brg'] = $row['kode_barang'];
+                }
+                if (isset($validCols['nama_brg']) && empty($filteredRow['nama_brg']) && !empty($row['nama_barang'])) {
+                    $filteredRow['nama_brg'] = $row['nama_barang'];
+                }
+                if (isset($validCols['sat']) && empty($filteredRow['sat']) && !empty($row['satuan'])) {
+                    $filteredRow['sat'] = $row['satuan'];
+                }
+            }
+
             if (!empty($filteredRow)) {
                 $cols = array_keys($filteredRow);
                 $quotedCols = array_map(function($c) { return "`$c`"; }, $cols);
@@ -1858,8 +1877,12 @@ if ($action === 'fix_hs_code') {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
         exit;
     }
-    $res = ceisa_fix_hs_code($koneksi, $nomor_aju);
-    echo json_encode($res);
+    try {
+        $res = ceisa_fix_hs_code($koneksi, $nomor_aju);
+        echo json_encode($res);
+    } catch (\Throwable $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal FIX HS CODE: ' . $e->getMessage()]);
+    }
     exit;
 }
 
@@ -1871,8 +1894,12 @@ if ($action === 'fix_netto') {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
         exit;
     }
-    $res = ceisa_fix_netto($koneksi, $nomor_aju);
-    echo json_encode($res);
+    try {
+        $res = ceisa_fix_netto($koneksi, $nomor_aju);
+        echo json_encode($res);
+    } catch (\Throwable $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal FIX NETTO: ' . $e->getMessage()]);
+    }
     exit;
 }
 
@@ -1884,8 +1911,12 @@ if ($action === 'edit_seri') {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
         exit;
     }
-    $res = ceisa_edit_seri_barang($koneksi, $nomor_aju);
-    echo json_encode($res);
+    try {
+        $res = ceisa_edit_seri_barang($koneksi, $nomor_aju);
+        echo json_encode($res);
+    } catch (\Throwable $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mengurutkan seri barang: ' . $e->getMessage()]);
+    }
     exit;
 }
 
@@ -1897,8 +1928,12 @@ if ($action === 'seq_bahanbaku') {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
         exit;
     }
-    $res = ceisa_seq_bahanbaku($koneksi, $nomor_aju);
-    echo json_encode($res);
+    try {
+        $res = ceisa_seq_bahanbaku($koneksi, $nomor_aju);
+        echo json_encode($res);
+    } catch (\Throwable $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mengurutkan seri bahan baku: ' . $e->getMessage()]);
+    }
     exit;
 }
 
@@ -1924,6 +1959,21 @@ if ($action === 'load_all_bom') {
         exit;
     }
     $res = ceisa_load_all_bom($koneksi, $nomor_aju);
+    echo json_encode($res);
+    exit;
+}
+
+// Load BOM untuk Barang Tertentu (ue_bomload per seri)
+if ($action === 'load_bom_barang') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? '');
+    $seri = intval($_REQUEST['seri'] ?? 0);
+    if (empty($nomor_aju) || $seri <= 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU dan Seri Barang tidak valid.']);
+        exit;
+    }
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $res = ceisa_load_all_bom($koneksi, $nomor_aju, $seri);
     echo json_encode($res);
     exit;
 }
@@ -1980,6 +2030,24 @@ if ($action === 'insert_from_material') {
     exit;
 }
 
+// Quick Picker: Insert BOM from Material (bc_material)
+if ($action === 'insert_bom_from_material') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $seri = intval($_POST['seri'] ?? 0);
+    $kode_barang_parent = trim($_POST['kode_barang_parent'] ?? '');
+    $rawItems = $_POST['items'] ?? '[]';
+    $items = json_decode($rawItems, true);
+    if (empty($nomor_aju) || $seri <= 0 || !is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Format komponen atau parameter barang tidak valid.']);
+        exit;
+    }
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $res = ceisa_insert_bom_from_material($koneksi, $nomor_aju, $seri, $kode_barang_parent, $items);
+    echo json_encode($res);
+    exit;
+}
+
 // Quick Picker: Get Incoming Documents (bc_1ab2 AB = 'A')
 if ($action === 'get_incoming_picker') {
     header('Content-Type: application/json; charset=utf-8');
@@ -2003,6 +2071,24 @@ if ($action === 'insert_from_incoming') {
         exit;
     }
     $res = ceisa_insert_from_incoming($koneksi, $nomor_aju, $seri_barang, $items);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Insert Trace from Incoming Documents
+if ($action === 'insert_trace_from_incoming') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $seri_barang = intval($_POST['seri_barang'] ?? 1);
+    $id_bom = trim($_POST['id_bom'] ?? '');
+    $rawItems = $_POST['items'] ?? '[]';
+    $items = json_decode($rawItems, true);
+    if (!is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Format item dokumen masuk tidak valid.']);
+        exit;
+    }
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $res = ceisa_insert_trace_from_incoming($koneksi, $nomor_aju, $seri_barang, $id_bom, $items);
     echo json_encode($res);
     exit;
 }
@@ -2780,8 +2866,13 @@ if ($action === 'ai_inject') {
             padding: 6px 10px;
             flex: 1;
             overflow-y: auto;
+            position: relative;
         }
-        .panel { display: none; }
+        .panel {
+            display: none;
+            position: relative;
+            min-height: 250px;
+        }
         .panel.active { display: block; }
 
         /* Form Layout for Header */
@@ -2964,7 +3055,8 @@ if ($action === 'ai_inject') {
             z-index: 10;
         }
         table.datagrid th {
-            padding: 5px 8px;
+            position: relative;
+            padding: 5px 14px 5px 8px;
             color: var(--text-muted);
             font-weight: 700;
             font-size: 9.5px;
@@ -2973,6 +3065,74 @@ if ($action === 'ai_inject') {
             box-shadow: inset 0 -1px 0 var(--border);
             background: var(--bg-input);
             user-select: none;
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        table.datagrid th:hover {
+            color: var(--text-main);
+            background: rgba(24, 144, 255, 0.08);
+        }
+        table.datagrid th.no-sort,
+        table.datagrid th.th-action {
+            cursor: default !important;
+            padding-right: 8px !important;
+        }
+        table.datagrid th.no-sort:hover,
+        table.datagrid th.th-action:hover {
+            color: var(--text-muted) !important;
+            background: var(--bg-input) !important;
+        }
+
+        /* Sorting Indicators */
+        table.datagrid th .th-sort-icon {
+            display: inline-block;
+            margin-left: 5px;
+            font-size: 9px;
+            line-height: 1;
+            opacity: 0.35;
+            transition: opacity 0.15s, color 0.15s;
+            vertical-align: middle;
+            pointer-events: none;
+        }
+        table.datagrid th:hover .th-sort-icon {
+            opacity: 0.75;
+        }
+        table.datagrid th.sort-asc,
+        table.datagrid th.sort-desc {
+            color: var(--primary) !important;
+            background: rgba(24, 144, 255, 0.12) !important;
+        }
+        table.datagrid th.sort-asc .th-sort-icon,
+        table.datagrid th.sort-desc .th-sort-icon {
+            opacity: 1 !important;
+            color: var(--primary) !important;
+            font-weight: 900 !important;
+        }
+
+        /* Column Resizer Handle */
+        .col-resizer {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 7px;
+            height: 100%;
+            cursor: col-resize;
+            user-select: none;
+            z-index: 15;
+            background: transparent;
+            transition: background-color 0.15s;
+        }
+        .col-resizer:hover,
+        .col-resizer.resizing {
+            background-color: var(--primary);
+            box-shadow: 0 0 4px var(--primary);
+        }
+        body.grid-resizing {
+            cursor: col-resize !important;
+            user-select: none !important;
+        }
+        body.grid-resizing * {
+            user-select: none !important;
         }
         table.datagrid td {
             padding: 2px 4px;
@@ -3022,6 +3182,27 @@ if ($action === 'ai_inject') {
         }
         table.datagrid tbody tr:hover {
             background: rgba(24, 144, 255, 0.04);
+        }
+
+        /* Master-Detail Selected Row Highlight (PowerBuilder 1:1 interaction) */
+        table.datagrid tbody tr.selected-row,
+        table.datagrid tbody tr.selected-row > td {
+            background-color: #dbeafe !important;
+            border-color: #93c5fd !important;
+        }
+        [data-theme="dark"] table.datagrid tbody tr.selected-row,
+        [data-theme="dark"] table.datagrid tbody tr.selected-row > td {
+            background-color: #1e3a8a !important;
+            border-color: #3b82f6 !important;
+        }
+        table.datagrid tbody tr.selected-row > td:first-child {
+            border-left: 4px solid #2563eb !important;
+            font-weight: 700;
+        }
+        #table-barang tbody tr,
+        #table-barangbom tbody tr,
+        #table-tracebb tbody tr {
+            cursor: pointer;
         }
 
         /* Standar input di dalam cell (Full Width 100% sesuai lebar kolom) */
@@ -3118,152 +3299,24 @@ if ($action === 'ai_inject') {
             padding-right: 2px !important;
         }
 
-        /* Lebar proporsional & presisi untuk kolom-kolom select / dropdown */
-        table.datagrid th[data-col="kode_kemasan"],
-        table.datagrid td[data-col="kode_kemasan"] {
-            width: 125px !important;
-            min-width: 125px !important;
-            max-width: 125px !important;
-        }
-        table.datagrid td[data-col="kode_kemasan"] select.cell-select {
-            width: 100% !important;
-            max-width: 125px !important;
-        }
-
+        /* Lebar awal standar untuk kolom-kolom tabel (bebas di-resize & di-sort pengguna) */
+        table.datagrid th[data-col="kode_kemasan"] { width: 125px; min-width: 60px; }
         table.datagrid th[data-col="kode_negara_asal"],
-        table.datagrid td[data-col="kode_negara_asal"],
         table.datagrid th[data-col="kode_negara"],
-        table.datagrid td[data-col="kode_negara"],
         table.datagrid th[data-col="kode_bendera"],
-        table.datagrid td[data-col="kode_bendera"],
-        #table-pengangkut th[data-col="kode_bendera"],
-        #table-pengangkut td[data-col="kode_bendera"] {
-            width: 135px !important;
-            min-width: 135px !important;
-            max-width: 135px !important;
-        }
-        table.datagrid td[data-col="kode_negara_asal"] select.cell-select,
-        table.datagrid td[data-col="kode_negara"] select.cell-select,
-        table.datagrid td[data-col="kode_bendera"] select.cell-select,
-        #table-pengangkut td[data-col="kode_bendera"] select.cell-select {
-            width: 100% !important;
-            max-width: 135px !important;
-        }
-
-        /* Kolom Kode Bank pada Tab Bank Devisa: terkunci presisi 140px */
+        #table-pengangkut th[data-col="kode_bendera"] { width: 135px; min-width: 60px; }
         table.datagrid th[data-col="kode"],
-        table.datagrid td[data-col="kode"],
-        #table-bankdevisa th[data-col="kode"],
-        #table-bankdevisa td[data-col="kode"] {
-            width: 140px !important;
-            min-width: 140px !important;
-            max-width: 140px !important;
-        }
-        table.datagrid td[data-col="kode"] select.cell-select,
-        #table-bankdevisa td[data-col="kode"] select.cell-select {
-            width: 100% !important;
-            max-width: 140px !important;
-        }
-
-        /* Kolom teks fleksibel yang menyerap sisa ruang tabel agar kolom select tidak melar */
-        #table-pengangkut th[data-col="nama_pengangkut"],
-        #table-pengangkut td[data-col="nama_pengangkut"] {
-            width: 100% !important;
-            min-width: 180px !important;
-        }
-        #table-bankdevisa th[data-col="nama"],
-        #table-bankdevisa td[data-col="nama"] {
-            width: 100% !important;
-            min-width: 200px !important;
-        }
-
-        table.datagrid th[data-col="kode_dokumen"],
-        table.datagrid td[data-col="kode_dokumen"] {
-            width: 145px !important;
-            min-width: 145px !important;
-            max-width: 145px !important;
-        }
-        table.datagrid td[data-col="kode_dokumen"] select.cell-select {
-            width: 100% !important;
-            max-width: 145px !important;
-        }
-
-        table.datagrid th[data-col="kode_entitas"],
-        table.datagrid td[data-col="kode_entitas"] {
-            width: 130px !important;
-            min-width: 130px !important;
-            max-width: 130px !important;
-        }
-        table.datagrid td[data-col="kode_entitas"] select.cell-select {
-            width: 100% !important;
-            max-width: 130px !important;
-        }
-
-        table.datagrid th[data-col="kode_jenis_identitas"],
-        table.datagrid td[data-col="kode_jenis_identitas"] {
-            width: 125px !important;
-            min-width: 125px !important;
-            max-width: 125px !important;
-        }
-        table.datagrid td[data-col="kode_jenis_identitas"] select.cell-select {
-            width: 100% !important;
-            max-width: 125px !important;
-        }
-
-        table.datagrid th[data-col="kode_cara_angkut"],
-        table.datagrid td[data-col="kode_cara_angkut"] {
-            width: 110px !important;
-            min-width: 110px !important;
-            max-width: 110px !important;
-        }
-        table.datagrid td[data-col="kode_cara_angkut"] select.cell-select {
-            width: 100% !important;
-            max-width: 110px !important;
-        }
-
-        table.datagrid th[data-col="kode_ukuran_kontainer"],
-        table.datagrid td[data-col="kode_ukuran_kontainer"] {
-            width: 105px !important;
-            min-width: 105px !important;
-            max-width: 105px !important;
-        }
-        table.datagrid td[data-col="kode_ukuran_kontainer"] select.cell-select {
-            width: 100% !important;
-            max-width: 105px !important;
-        }
-
-        table.datagrid th[data-col="kode_jenis_kontainer"],
-        table.datagrid td[data-col="kode_jenis_kontainer"] {
-            width: 115px !important;
-            min-width: 115px !important;
-            max-width: 115px !important;
-        }
-        table.datagrid td[data-col="kode_jenis_kontainer"] select.cell-select {
-            width: 100% !important;
-            max-width: 115px !important;
-        }
-
-        table.datagrid th[data-col="kode_tipe_kontainer"],
-        table.datagrid td[data-col="kode_tipe_kontainer"] {
-            width: 120px !important;
-            min-width: 120px !important;
-            max-width: 120px !important;
-        }
-        table.datagrid td[data-col="kode_tipe_kontainer"] select.cell-select {
-            width: 100% !important;
-            max-width: 120px !important;
-        }
-
-        table.datagrid th[data-col="kode_kondisi_barang"],
-        table.datagrid td[data-col="kode_kondisi_barang"] {
-            width: 110px !important;
-            min-width: 110px !important;
-            max-width: 110px !important;
-        }
-        table.datagrid td[data-col="kode_kondisi_barang"] select.cell-select {
-            width: 100% !important;
-            max-width: 110px !important;
-        }
+        #table-bankdevisa th[data-col="kode"] { width: 140px; min-width: 60px; }
+        #table-pengangkut th[data-col="nama_pengangkut"] { min-width: 180px; }
+        #table-bankdevisa th[data-col="nama"] { min-width: 200px; }
+        table.datagrid th[data-col="kode_dokumen"] { width: 145px; min-width: 60px; }
+        table.datagrid th[data-col="kode_entitas"] { width: 130px; min-width: 60px; }
+        table.datagrid th[data-col="kode_jenis_identitas"] { width: 125px; min-width: 60px; }
+        table.datagrid th[data-col="kode_cara_angkut"] { width: 110px; min-width: 60px; }
+        table.datagrid th[data-col="kode_ukuran_kontainer"] { width: 105px; min-width: 60px; }
+        table.datagrid th[data-col="kode_jenis_kontainer"] { width: 115px; min-width: 60px; }
+        table.datagrid th[data-col="kode_tipe_kontainer"] { width: 120px; min-width: 60px; }
+        table.datagrid th[data-col="kode_kondisi_barang"] { width: 110px; min-width: 60px; }
 
 
         /* Auto-wrapping textarea (Full Width 100% sesuai lebar kolom) */
@@ -3861,6 +3914,141 @@ if ($action === 'ai_inject') {
             border-top-color: #ffffff;
         }
 
+        /* ========================================================
+           TABLE & PANEL CENTER HOURGLASS LOADER (SMOOTH & RESPONSIVE)
+           ======================================================== */
+        .tab-table-loader {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            min-height: 220px;
+            background: rgba(255, 255, 255, 0.88);
+            backdrop-filter: blur(2.5px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 35;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), visibility 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        html[data-theme="dark"] .tab-table-loader {
+            background: rgba(20, 24, 33, 0.88);
+        }
+        .tab-table-loader.active {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        .tab-table-loader-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 18px 28px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            text-align: center;
+            min-width: 210px;
+        }
+        html[data-theme="dark"] .tab-table-loader-card {
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+        }
+        .hourglass-wrap {
+            position: relative;
+            width: 46px;
+            height: 46px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+        .hourglass-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2.5px solid transparent;
+            border-top-color: var(--primary);
+            border-right-color: #13c2c2;
+            animation: app-spin 0.9s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+        }
+        .hourglass-icon {
+            font-size: 22px;
+            display: inline-block;
+            animation: hourglass-flip 1.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+            filter: drop-shadow(0 2px 5px rgba(24, 144, 255, 0.35));
+            user-select: none;
+        }
+        @keyframes hourglass-flip {
+            0% { transform: rotate(0deg) scale(1); }
+            45% { transform: rotate(180deg) scale(1.12); }
+            50% { transform: rotate(180deg) scale(1); }
+            95% { transform: rotate(360deg) scale(1.12); }
+            100% { transform: rotate(360deg) scale(1); }
+        }
+        .tab-loader-text {
+            font-size: 11.5px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-top: 2px;
+            letter-spacing: 0.2px;
+        }
+        .tab-loader-subtext {
+            font-size: 9.5px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Workspace Full Overlay Loader (Saat Buka Dokumen AJU) */
+        .workspace-loader-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.90);
+            backdrop-filter: blur(3.5px);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 99;
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+            transition: opacity 0.22s ease, visibility 0.22s ease;
+        }
+        html[data-theme="dark"] .workspace-loader-overlay {
+            background: rgba(17, 24, 39, 0.92);
+        }
+        .workspace-loader-overlay.active {
+            opacity: 1;
+            visibility: visible;
+            pointer-events: auto;
+        }
+        .workspace-loader-card {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 24px 34px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+            min-width: 290px;
+            text-align: center;
+        }
+        html[data-theme="dark"] .workspace-loader-card {
+            box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
+        }
+
         /* Context Menu (DataWindow Style) */
         .context-menu {
             position: fixed;
@@ -3893,6 +4081,280 @@ if ($action === 'ai_inject') {
             background: var(--border);
             margin: 4px 0;
         }
+
+        /* ========================================================
+           DROPDOWN MENU KONFIGURASI (GROUPED ACTION BAR)
+           ======================================================== */
+        .config-dropdown-container {
+            position: relative;
+            display: inline-block;
+        }
+        .config-dropdown-menu {
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            width: 310px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+            padding: 6px;
+            z-index: 1000;
+            display: none;
+            opacity: 0;
+            transform: translateY(-5px);
+            transition: opacity 0.15s ease, transform 0.15s ease;
+        }
+        html[data-theme="dark"] .config-dropdown-menu {
+            background: #18202f;
+            border-color: #2b384e;
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.65);
+        }
+        .config-dropdown-menu.show {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .config-dropdown-header {
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 6px 9px 3px 9px;
+        }
+        .config-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 7px 9px;
+            border-radius: 6px;
+            color: var(--text-main);
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            user-select: none;
+        }
+        .config-dropdown-item:hover {
+            background: rgba(24, 144, 255, 0.08);
+            color: var(--primary);
+        }
+        html[data-theme="dark"] .config-dropdown-item:hover {
+            background: rgba(24, 144, 255, 0.16);
+        }
+        .config-dropdown-icon {
+            font-size: 15px;
+            width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .config-dropdown-text {
+            flex: 1;
+            min-width: 0;
+        }
+        .config-dropdown-title {
+            font-size: 11px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+        .config-dropdown-desc {
+            font-size: 9.5px;
+            color: var(--text-muted);
+            line-height: 1.25;
+            margin-top: 1px;
+        }
+        .config-dropdown-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 10px;
+            letter-spacing: 0.3px;
+        }
+        .config-badge-on {
+            background: #e6f7ff;
+            color: #1890ff;
+            border: 1px solid rgba(24, 144, 255, 0.3);
+        }
+        html[data-theme="dark"] .config-badge-on {
+            background: rgba(24, 144, 255, 0.2);
+            color: #40a9ff;
+        }
+        .config-badge-off {
+            background: rgba(140, 140, 140, 0.15);
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+        }
+        .config-dropdown-divider {
+            height: 1px;
+            background: var(--border);
+            margin: 4px 6px;
+        }
+
+        /* ========================================================
+           FLOATING REKAP TARIF WINDOW & LAUNCHER PILL
+           ======================================================== */
+        .floating-summary-window {
+            position: fixed;
+            bottom: 24px;
+            right: 28px;
+            width: 460px;
+            max-width: calc(100vw - 40px);
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.20), 0 2px 8px rgba(0, 0, 0, 0.08);
+            z-index: 1050;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: float-slide-up 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        html[data-theme="dark"] .floating-summary-window {
+            background: #182232;
+            border-color: #2b3a4e;
+            box-shadow: 0 14px 42px rgba(0, 0, 0, 0.65);
+        }
+        @keyframes float-slide-up {
+            from {
+                opacity: 0;
+                transform: translateY(16px) scale(0.97);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+        .floating-summary-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: var(--bg-input);
+            border-bottom: 1px solid var(--border);
+            cursor: move;
+            user-select: none;
+        }
+        .floating-summary-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .drag-handle {
+            font-size: 13px;
+            color: var(--text-muted);
+            cursor: grab;
+            line-height: 1;
+        }
+        .floating-summary-actions {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-float-action {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 12px;
+            color: var(--text-muted);
+            padding: 2px 6px;
+            border-radius: 4px;
+            line-height: 1.2;
+            transition: background 0.15s, color 0.15s;
+        }
+        .btn-float-action:hover {
+            background: rgba(0, 0, 0, 0.08);
+            color: var(--text-main);
+        }
+        html[data-theme="dark"] .btn-float-action:hover {
+            background: rgba(255, 255, 255, 0.12);
+        }
+        .floating-summary-body {
+            padding: 10px 12px;
+            max-height: 320px;
+            overflow-y: auto;
+            font-size: 11px;
+        }
+        .summary-grand-total {
+            display: flex;
+            justify-content: space-between;
+            background: rgba(24, 144, 255, 0.06);
+            border: 1px solid rgba(24, 144, 255, 0.2);
+            border-radius: 6px;
+            padding: 7px 12px;
+            margin-bottom: 8px;
+            font-size: 11px;
+        }
+        html[data-theme="dark"] .summary-grand-total {
+            background: rgba(24, 144, 255, 0.12);
+            border-color: rgba(24, 144, 255, 0.3);
+        }
+        .summary-pungutan-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .summary-pungutan-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-base);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 5px 8px;
+            font-size: 10.5px;
+        }
+        .summary-code-badge {
+            font-weight: 700;
+            color: var(--primary);
+            min-width: 80px;
+        }
+        .summary-val-wrap {
+            display: flex;
+            gap: 10px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Floating Launcher Pill */
+        .floating-summary-pill {
+            position: fixed;
+            bottom: 24px;
+            right: 28px;
+            z-index: 1040;
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: 24px;
+            padding: 7px 14px;
+            box-shadow: 0 6px 18px rgba(24, 144, 255, 0.4);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            font-weight: 600;
+            transition: transform 0.15s, box-shadow 0.15s, background-color 0.15s;
+            user-select: none;
+        }
+        .floating-summary-pill:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 22px rgba(24, 144, 255, 0.5);
+            background: #40a9ff;
+        }
+        .pill-icon {
+            font-size: 13px;
+        }
+        .pill-badge {
+            background: rgba(255, 255, 255, 0.22);
+            padding: 1px 7px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+        }
     </style>
 </head>
 <?php 
@@ -3924,22 +4386,6 @@ $isEditMode = !empty($selectedAjuParam);
                 </select>
                 <button class="btn btn-secondary btn-sm" onclick="reloadCurrentAju()">🔄</button>
             </div>
-            <!-- Dynamic Filters -->
-            <button id="btnToggleCols" class="btn-toggle active" onclick="toggleColumnFilter()" title="Saring kolom sesuai aturan varheader dokumen BC">
-                👁️ Saring Kolom: Aktif
-            </button>
-            <button id="btnToggleTabs" class="btn-toggle active" onclick="toggleTabFilter()" title="Saring tab sesuai jenis dokumen BC aktif">
-                📑 Saring Tab BC: Aktif
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openFilterSettingsModal('tab')" title="Atur Visibilitas Saring Tab (Global & Per Perusahaan)">
-                ⚙️ Atur Tab
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openFilterSettingsModal('kolom')" title="Atur Visibilitas Saring Kolom (Global & Per Perusahaan)">
-                ⚙️ Atur Kolom
-            </button>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openFilterSettingsModal('desimal')" title="Atur Format Desimal / Jumlah Koma Angka (Global & Per Perusahaan)">
-                🔢 Atur Desimal
-            </button>
             <!-- Setup AJU Baru & ERP Integration Buttons -->
             <button id="btnToggleEntry" class="btn btn-warning btn-sm <?= $isEditMode ? '' : 'active' ?>" onclick="toggleEntryPanel()" style="<?= $isEditMode ? 'display:none;' : '' ?>">
                 <?= $isEditMode ? '✨ Setup AJU Baru' : '✕ Tutup Setup' ?>
@@ -3950,9 +4396,73 @@ $isEditMode = !empty($selectedAjuParam);
             <button id="btnTopAiReader" class="btn btn-ai-reader btn-sm" onclick="openAiReaderModal()" title="AI Reader Dokumen Pabean (PDF/Word/Excel/Gambar)">
                 🤖 AI Reader
             </button>
-            <button class="btn btn-secondary btn-sm" onclick="openConfigAjuModal()">
-                ⚙️ Konfig AJU
-            </button>
+
+            <!-- DROPDOWN MENU KONFIGURASI (GROUPED ACTION BAR) -->
+            <div class="config-dropdown-container" id="dropdownConfigMenu">
+                <button type="button" class="btn btn-secondary btn-sm dropdown-toggle" id="btnConfigDropdown" onclick="toggleConfigDropdown(event)" title="Pengaturan & Konfigurasi Dokumen">
+                    ⚙️ Konfigurasi <span style="font-size:8px;margin-left:3px;">▼</span>
+                </button>
+                <div class="config-dropdown-menu" id="configDropdownPanel">
+                    <div class="config-dropdown-header">
+                        ⚙️ Standar Dokumen
+                    </div>
+                    <div class="config-dropdown-item" onclick="openConfigAjuModal(); closeConfigDropdown();">
+                        <span class="config-dropdown-icon">⚙️</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title">Konfig AJU</div>
+                            <div class="config-dropdown-desc">Atur default kantor, valuta, & profil AJU</div>
+                        </div>
+                    </div>
+
+                    <div class="config-dropdown-divider"></div>
+                    <div class="config-dropdown-header">
+                        👁️ Saringan Tampilan
+                    </div>
+                    <div class="config-dropdown-item" id="btnToggleCols" onclick="toggleColumnFilter();">
+                        <span class="config-dropdown-icon">👁️</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title" id="dropTitleCols">Saring Kolom: Aktif</div>
+                            <div class="config-dropdown-desc">Sembunyikan kolom tidak relevan (varheader)</div>
+                        </div>
+                        <span class="config-dropdown-badge config-badge-on" id="dropBadgeCols">ON</span>
+                    </div>
+                    <div class="config-dropdown-item" id="btnToggleTabs" onclick="toggleTabFilter();">
+                        <span class="config-dropdown-icon">📑</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title" id="dropTitleTabs">Saring Tab BC: Aktif</div>
+                            <div class="config-dropdown-desc">Batasi tab sesuai jenis dokumen BC</div>
+                        </div>
+                        <span class="config-dropdown-badge config-badge-on" id="dropBadgeTabs">ON</span>
+                    </div>
+
+                    <div class="config-dropdown-divider"></div>
+                    <div class="config-dropdown-header">
+                        🛠️ Kelola Aturan (Global & Perusahaan)
+                    </div>
+                    <div class="config-dropdown-item" onclick="openFilterSettingsModal('tab'); closeConfigDropdown();">
+                        <span class="config-dropdown-icon">📑</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title">Atur Tab</div>
+                            <div class="config-dropdown-desc">Kelola visibilitas tab per jenis dokumen BC</div>
+                        </div>
+                    </div>
+                    <div class="config-dropdown-item" onclick="openFilterSettingsModal('kolom'); closeConfigDropdown();">
+                        <span class="config-dropdown-icon">📋</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title">Atur Kolom</div>
+                            <div class="config-dropdown-desc">Pilih kolom aktif (Global & Per Perusahaan)</div>
+                        </div>
+                    </div>
+                    <div class="config-dropdown-item" onclick="openFilterSettingsModal('desimal'); closeConfigDropdown();">
+                        <span class="config-dropdown-icon">🔢</span>
+                        <div class="config-dropdown-text">
+                            <div class="config-dropdown-title">Atur Desimal</div>
+                            <div class="config-dropdown-desc">Konfigurasi jumlah koma angka & tarif</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <button class="btn btn-danger btn-sm" id="btnTopDeleteAju" onclick="deleteCurrentAju()" title="Hapus Semua Data Staging Dokumen AJU Ini" style="background:#ff4d4f; border-color:#ff4d4f; color:#fff;">
                 🗑️ Hapus AJU
             </button>
@@ -4158,6 +4668,21 @@ $isEditMode = !empty($selectedAjuParam);
 
     <!-- WORKSPACE PANELS -->
     <div class="workspace">
+
+        <!-- WORKSPACE OVERLAY LOADER (Saat Buka / Pindah Dokumen AJU) -->
+        <div id="workspaceAjuLoader" class="workspace-loader-overlay">
+            <div class="workspace-loader-card">
+                <div class="hourglass-wrap" style="width:52px;height:52px;margin-bottom:12px;">
+                    <div class="hourglass-ring" style="border-width:3px;"></div>
+                    <div class="hourglass-icon" style="font-size:26px;">⏳</div>
+                </div>
+                <div class="tab-loader-text" id="wsLoaderTitle" style="font-size:13px; font-weight:700; color:var(--primary);">Memuat Dokumen Pabean...</div>
+                <div class="tab-loader-subtext" id="wsLoaderDesc" style="font-size:11px; margin-top:4px; color:var(--text-muted);">Menghubungkan ke database & memformat staging AJU...</div>
+                <div class="app-loader-progress-track" style="max-width:200px; margin-top:12px; height:3px;">
+                    <div class="app-loader-progress-bar"></div>
+                </div>
+            </div>
+        </div>
 
         <!-- 1. TAB HEADER -->
         <div class="panel active" id="panel-header">
@@ -4545,11 +5070,16 @@ $isEditMode = !empty($selectedAjuParam);
             <!-- TRACE & BILL OF MATERIAL CONTAINER -->
             <div id="traceSubPanel" style="display:none; margin-top:12px; border-top:2px solid var(--border-color); padding-top:10px;">
                 <div style="background:var(--bg-secondary); border-radius:6px; border:1px solid var(--border-color); padding:10px; margin-bottom:12px;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Komponen Bahan Baku / Bill of Material (BOM) ::</span>
-                        <div style="display:flex; gap:6px;">
-                            <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()" title="Ambil BOM seluruh barang dari master bc_ceisa_bom">📥 Load ALL BOM Barang</button>
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('barangbom')">➕ Tambah BOM</button>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Komponen Bahan Baku / Bill of Material (BOM) ::</span>
+                            <span id="badgeActiveBarangBom" class="badge" style="background:#2563eb; color:#fff; font-size:11px; padding:3px 8px; border-radius:4px; display:none;"></span>
+                        </div>
+                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-info btn-xs" onclick="loadSelectedBarangBom()" title="Ambil BOM untuk barang aktif dari master bc_ceisa_bom (ue_bomload)">📥 Load BOM Barang Ini</button>
+                            <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()" title="Ambil BOM seluruh barang dari master bc_ceisa_bom (ue_bomall)">📥 Load ALL BOM Barang</button>
+                            <button type="button" class="btn btn-warning btn-xs" onclick="openBomMaterialPickerModal()" style="font-weight:700; background:#eab308; border-color:#ca8a04; color:#000;" title="Pilih & masukkan komponen dari master barang (bc_material)">📦 Tambah dari Master Barang</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('barangbom')">➕ Tambah BOM Manual</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="saveTable('barangbom')">💾 Simpan BOM</button>
                         </div>
                     </div>
@@ -4573,12 +5103,15 @@ $isEditMode = !empty($selectedAjuParam);
 
                 <div style="background:var(--bg-secondary); border-radius:6px; border:1px solid var(--border-color); padding:10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                        <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Tracking Dokumen Asal / Eks BC ::</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span style="font-weight:700; font-size:12px; color:var(--text-color);">:: Tracking Dokumen Asal / Eks BC ::</span>
+                            <span id="badgeActiveBomTrace" class="badge" style="background:#0891b2; color:#fff; font-size:11px; padding:3px 8px; border-radius:4px; display:none;"></span>
+                        </div>
                         <div style="display:flex; gap:6px; flex-wrap:wrap;">
                             <button type="button" class="btn btn-primary btn-xs" onclick="startFifoTrace()" style="font-weight:700; background:#2563eb; border-color:#1d4ed8; color:#fff;" title="Otomatis mencocokkan BOM dengan saldo masuk bc_1ab2 secara FIFO">⚡ Mulai Trace FIFO (Auto)</button>
                             <button type="button" class="btn btn-info btn-xs" onclick="openIncomingPickerModal('trace')" style="background:#0891b2; border-color:#0e7490; color:#fff;" title="Pilih manual dokumen pemasukan eks-BC dari IT Inventory">📥 Tambah Dokumen Asal</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="transferTraceToBahanBaku()" style="font-weight:700;">🔄 Transfer Data Trace ke Bahan Baku</button>
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('tracebb')">➕ Tambah Trace</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('tracebb')">➕ Tambah Trace Manual</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="saveTable('tracebb')">💾 Simpan Trace</button>
                         </div>
                     </div>
@@ -4724,31 +5257,12 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                     <button type="button" class="btn btn-warning btn-sm" onclick="generateBarangTarif()" style="font-weight:700;" title="Generate otomatis baris tarif barang">⚡ Generate Barang Tarif</button>
+                    <button type="button" class="btn btn-info btn-sm btn-recap-toggle" onclick="toggleFloatingSummaryTarif()" title="Buka / Tutup Floating Window Rekap Tarif & Pungutan" style="background:#08979c; border-color:#006d75; color:#fff; font-weight:600;">📊 Rekap Tarif</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('barang')" title="Hitung ulang nilai bayar/fasilitas tarif barang">⚡ Hitung Tarif</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangtarif')">➕ Tambah Tarif</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('barangtarif')">💾 Simpan Barang Tarif</button>
                 </div>
-            </div>
-
-            <!-- SUMMARY BOX TARIF (MATCHING POWERBUILDER INTERFACE) -->
-            <div id="summaryTarifBox" style="background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; padding:10px; margin-bottom:12px; max-width:680px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                    <span style="font-weight:700; font-size:12px; color:var(--text-color);">📊 Summary Tarif Pabean & Fasilitas</span>
-                    <button type="button" class="btn btn-secondary btn-xs" onclick="loadRecapTarif()">🔄 Refresh</button>
-                </div>
-                <table class="datagrid" id="table-summary-tarif" style="font-size:11px;">
-                    <thead>
-                        <tr>
-                            <th>Sumber</th>
-                            <th>Kode Pungutan</th>
-                            <th style="text-align:right;">Nilai Bayar (Rp)</th>
-                            <th style="text-align:right;">Nilai Fasilitas (Rp)</th>
-                            <th style="text-align:right;">Sudah Dilunasi (Rp)</th>
-                        </tr>
-                    </thead>
-                    <tbody></tbody>
-                </table>
             </div>
 
             <div class="grid-wrap">
@@ -4792,6 +5306,7 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
                 <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                     <button type="button" class="btn btn-warning btn-sm" onclick="generateBahanBakuTarif()" style="font-weight:700;" title="Generate ulang seluruh Bahan Baku Tarif">⚡ Generate Bahan Baku Tarif</button>
+                    <button type="button" class="btn btn-info btn-sm btn-recap-toggle" onclick="toggleFloatingSummaryTarif()" title="Buka / Tutup Floating Window Rekap Tarif & Pungutan" style="background:#08979c; border-color:#006d75; color:#fff; font-weight:600;">📊 Rekap Tarif</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('bahanbaku')" title="Hitung ulang nilai bayar/fasilitas tarif bahan baku">⚡ Hitung Tarif BB</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbakutarif')">➕ Tambah Tarif BB</button>
@@ -5334,7 +5849,7 @@ $isEditMode = !empty($selectedAjuParam);
                             <option value="33">BC 3.3 - Ekspor dari TPB</option>
                             <option value="611">BC 6.1.1 - Pemasukan ke KEK</option>
                             <option value="613">BC 6.1.3 - Pengeluaran dari KEK</option>
-                            <option value="631">BC 6.3.1 - Cukai</option>
+                            <option value="631">PPKEK 6.3.1 - Pengeluaran ke LDP</option>
                         </select>
                     </div>
 
@@ -5417,43 +5932,43 @@ $isEditMode = !empty($selectedAjuParam);
                 <!-- SUB-PANEL 3: FORMAT DESIMAL (JUMLAH KOMA) -->
                 <div id="subPanelFilterDesimal" style="display:none;">
                     <!-- Penjelasan Rujukan CEISA & Rekomendasi -->
-                    <div style="background:var(--bg-input); border:1px solid var(--border); border-left:4px solid var(--primary); padding:10px 14px; border-radius:4px; margin-bottom:12px; font-size:11px; line-height:1.5;">
-                        <div style="font-weight:700; color:var(--primary); margin-bottom:4px;">💡 Rujukan Standar Format Data OpenAPI CEISA 4.0:</div>
-                        <div style="color:var(--text-main); margin-bottom:4px;">
+                    <div style="background:var(--bg-input); border:1px solid var(--border); border-left:4px solid var(--primary); padding:7px 10px; border-radius:4px; margin-bottom:10px; font-size:9.5px; line-height:1.45;">
+                        <div style="font-weight:700; color:var(--primary); margin-bottom:3px; font-size:10px;">💡 Rujukan Standar Format Data OpenAPI CEISA 4.0:</div>
+                        <div style="color:var(--text-main); margin-bottom:3px;">
                             • <strong>Nilai Uang (CIF, FOB, Harga Penyerahan, Nilai Barang, Tarif):</strong> Format resmi CEISA menggunakan <strong>2 desimal</strong> (contoh: <code>4,208,141.25</code>).<br>
                             • <strong>Jumlah Kemasan:</strong> Umumnya bilangan bulat / <strong>0 desimal</strong> (contoh: <code>95</code>) atau maksimal 2 desimal.<br>
                             • <strong>Jumlah Satuan (Qty):</strong> Database menyimpan hingga <code>decimal(18,4)</code> (contoh: <code>7.0000</code>). Untuk satuan fisik/utuh (<code>NIU</code>, <code>PCE</code>, <code>SET</code>, <code>UNIT</code>) dapat diubah menjadi <strong>0 desimal</strong> (<code>7</code>) atau <strong>2 desimal</strong> (<code>7.00</code>) agar rapi dan tidak mengganggu operator.<br>
                             • <strong>Berat &amp; Ukuran (Netto, Bruto, Volume):</strong> Standar kepabeanan memakai <strong>4 desimal</strong> (contoh: <code>3,841.8340</code>) atau 2 desimal.
                         </div>
-                        <div style="font-size:10px; color:var(--text-muted);">
+                        <div style="font-size:9px; color:var(--text-muted);">
                             * Perubahan format koma di bawah ini berlaku untuk tampilan tabel, form input, dan footer summary. Nilai numerik asli tetap terjaga presisi saat transfer ke server CEISA.
                         </div>
                     </div>
 
                     <!-- Tombol Cepat / Presets (Samakan Semua Kolom) -->
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-                        <div style="font-size:11px; font-weight:700; color:var(--text-main);">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+                        <div style="font-size:10px; font-weight:700; color:var(--text-main);">
                             ⚡ Tombol Cepat (Samakan Semua / Terapkan Preset):
                         </div>
-                        <div style="display:flex; gap:6px; flex-wrap:wrap;">
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(0)" title="Samakan semua kolom angka menjadi bilangan bulat tanpa koma (0 desimal)">⚡ Samakan Semua: 0 Koma</button>
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(2)" title="Samakan semua kolom angka menjadi 2 desimal standar akuntansi">⚡ Samakan Semua: 2 Koma</button>
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(4)" title="Samakan semua kolom angka menjadi 4 desimal teknis bea cukai">⚡ Samakan Semua: 4 Koma</button>
-                            <button type="button" class="btn btn-primary btn-xs" onclick="applyDecimalPreset('optimal')" title="Terapkan rekomendasi optimal: Qty (0), Kemasan (0), Uang (2), Berat (4), Harga (4), Tarif (2)">⭐ Rekomendasi Optimal</button>
+                        <div style="display:flex; gap:5px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(0)" style="font-size:9.5px; padding:2px 6px;" title="Samakan semua kolom angka menjadi bilangan bulat tanpa koma (0 desimal)">⚡ Samakan Semua: 0 Koma</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(2)" style="font-size:9.5px; padding:2px 6px;" title="Samakan semua kolom angka menjadi 2 desimal standar akuntansi">⚡ Samakan Semua: 2 Koma</button>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="equalizeAllDecimals(4)" style="font-size:9.5px; padding:2px 6px;" title="Samakan semua kolom angka menjadi 4 desimal teknis bea cukai">⚡ Samakan Semua: 4 Koma</button>
+                            <button type="button" class="btn btn-primary btn-xs" onclick="applyDecimalPreset('optimal')" style="font-size:9.5px; padding:2px 6px;" title="Terapkan rekomendasi optimal: Qty (0), Kemasan (0), Uang (2), Berat (4), Harga (4), Tarif (2)">⭐ Rekomendasi Optimal</button>
                         </div>
                     </div>
 
                     <!-- Grid Konfigurasi Desimal Per Kategori -->
-                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:10px;">
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:8px;">
                         
                         <!-- 1. Qty / Jumlah Satuan -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">1. Jumlah Satuan (Qty Barang &amp; Bahan Baku)</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">jumlah_satuan (barang, bahanbaku, tarif)</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">1. Jumlah Satuan (Qty Barang &amp; Bahan Baku)</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">jumlah_satuan (barang, bahanbaku, tarif)</div>
                                 </div>
-                                <select id="cfgDecQty" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecQty" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0">0 Desimal (7 - Tanpa Koma)</option>
                                     <option value="1">1 Desimal (7.0)</option>
                                     <option value="2">2 Desimal (7.00)</option>
@@ -5463,20 +5978,20 @@ $isEditMode = !empty($selectedAjuParam);
                                     <option value="6">6 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecQty" style="font-weight:700; font-family:monospace; color:var(--text-main);">7</span>
+                                <span id="prevDecQty" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">7</span>
                             </div>
                         </div>
 
                         <!-- 2. Jumlah Kemasan -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">2. Jumlah Kemasan</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">jumlah_kemasan (barang, kemasan)</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">2. Jumlah Kemasan</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">jumlah_kemasan (barang, kemasan)</div>
                                 </div>
-                                <select id="cfgDecKemasan" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecKemasan" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0" selected>0 Desimal (95 - Bulat)</option>
                                     <option value="1">1 Desimal (95.0)</option>
                                     <option value="2">2 Desimal (95.00)</option>
@@ -5484,40 +5999,40 @@ $isEditMode = !empty($selectedAjuParam);
                                     <option value="4">4 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecKemasan" style="font-weight:700; font-family:monospace; color:var(--text-main);">95</span>
+                                <span id="prevDecKemasan" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">95</span>
                             </div>
                         </div>
 
                         <!-- 3. Nilai Uang & Transaksi -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">3. Nilai Uang / Transaksi (CIF, FOB, Pungutan, dll)</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">cif, fob, harga_penyerahan, nilai_barang, pungutan</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">3. Nilai Uang / Transaksi (CIF, FOB, Pungutan, dll)</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">cif, fob, harga_penyerahan, nilai_barang, pungutan</div>
                                 </div>
-                                <select id="cfgDecUang" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecUang" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0">0 Desimal (Rp 4,208,141)</option>
                                     <option value="2" selected>2 Desimal (Rp 4,208,141.25 - Standar)</option>
                                     <option value="3">3 Desimal</option>
                                     <option value="4">4 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecUang" style="font-weight:700; font-family:monospace; color:var(--text-main);">4,208,141.25</span>
+                                <span id="prevDecUang" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">4,208,141.25</span>
                             </div>
                         </div>
 
                         <!-- 4. Harga Satuan Barang -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">4. Harga Satuan Barang</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">harga_satuan (barang)</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">4. Harga Satuan Barang</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">harga_satuan (barang)</div>
                                 </div>
-                                <select id="cfgDecHargaSatuan" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecHargaSatuan" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0">0 Desimal (601,163)</option>
                                     <option value="2">2 Desimal (601,163.04)</option>
                                     <option value="4" selected>4 Desimal (601,163.0357 - Presisi)</option>
@@ -5525,20 +6040,20 @@ $isEditMode = !empty($selectedAjuParam);
                                     <option value="6">6 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecHargaSatuan" style="font-weight:700; font-family:monospace; color:var(--text-main);">601,163.0357</span>
+                                <span id="prevDecHargaSatuan" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">601,163.0357</span>
                             </div>
                         </div>
 
                         <!-- 5. Berat & Ukuran -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">5. Berat &amp; Ukuran (Netto, Bruto, Volume)</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">netto, bruto, volume (header &amp; barang)</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">5. Berat &amp; Ukuran (Netto, Bruto, Volume)</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">netto, bruto, volume (header &amp; barang)</div>
                                 </div>
-                                <select id="cfgDecBerat" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecBerat" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0">0 Desimal (3,842 kg)</option>
                                     <option value="2">2 Desimal (3,841.83 kg)</option>
                                     <option value="3">3 Desimal (3,841.834 kg)</option>
@@ -5547,20 +6062,20 @@ $isEditMode = !empty($selectedAjuParam);
                                     <option value="6">6 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecBerat" style="font-weight:700; font-family:monospace; color:var(--text-main);">3,841.8340</span>
+                                <span id="prevDecBerat" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">3,841.8340</span>
                             </div>
                         </div>
 
                         <!-- 6. Tarif Pajak & Fasilitas -->
-                        <div style="border:1px solid var(--border); border-radius:6px; padding:10px 12px; background:var(--bg-card);">
-                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                                <div>
-                                    <strong style="font-size:12px; color:var(--text-main);">6. Tarif Pajak / Fasilitas (%)</strong>
-                                    <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">tarif, tarif_ppn_pajak, tarif_ppnbm_pajak</div>
+                        <div style="border:1px solid var(--border); border-radius:6px; padding:7px 10px; background:var(--bg-card);">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; gap:8px;">
+                                <div style="min-width:0;">
+                                    <strong style="font-size:10.5px; color:var(--text-main); display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">6. Tarif Pajak / Fasilitas (%)</strong>
+                                    <div style="font-size:9px; color:var(--text-muted); font-family:monospace; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">tarif, tarif_ppn_pajak, tarif_ppnbm_pajak</div>
                                 </div>
-                                <select id="cfgDecTarif" onchange="updateDecimalLivePreviews()" style="padding:4px 8px; font-size:12px; font-weight:700; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer;">
+                                <select id="cfgDecTarif" onchange="updateDecimalLivePreviews()" style="padding:2px 6px; font-size:10px; font-weight:600; height:24px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--primary); cursor:pointer; flex-shrink:0;">
                                     <option value="0">0 Desimal (11%)</option>
                                     <option value="1">1 Desimal (11.0%)</option>
                                     <option value="2" selected>2 Desimal (11.00% - Standar)</option>
@@ -5568,9 +6083,9 @@ $isEditMode = !empty($selectedAjuParam);
                                     <option value="4">4 Desimal</option>
                                 </select>
                             </div>
-                            <div style="font-size:11px; background:var(--bg-input); padding:6px 10px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:9.5px; background:var(--bg-input); padding:3px 8px; border-radius:4px; display:flex; justify-content:space-between; align-items:center;">
                                 <span style="color:var(--text-muted);">Preview Tampilan:</span>
-                                <span id="prevDecTarif" style="font-weight:700; font-family:monospace; color:var(--text-main);">11.00</span>
+                                <span id="prevDecTarif" style="font-weight:700; font-family:monospace; color:var(--text-main); font-size:10px;">11.00</span>
                             </div>
                         </div>
 
@@ -5699,7 +6214,7 @@ $isEditMode = !empty($selectedAjuParam);
                             <option value="33">BC 3.3</option>
                             <option value="611">BC 6.1.1</option>
                             <option value="613">BC 6.1.3</option>
-                            <option value="631">BC 6.3.1</option>
+                            <option value="631">PPKEK 6.3.1</option>
                         </select>
                     </div>
                     <div>
@@ -6336,6 +6851,67 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
+    <!-- QUICK PICKER MODAL: KOMPONEN BOM DARI MASTER BARANG (bc_material) -->
+    <div class="modal-overlay" id="modalBomMaterialPicker">
+        <div class="modal" style="max-width:920px; width:95vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(234, 179, 8, 0.15), transparent);">
+                <div>
+                    <h3 style="color:#d97706; display:flex; align-items:center; gap:6px;">
+                        <span>📦 Tambah Komponen BOM dari Master Material (<code>bc_material</code>)</span>
+                    </h3>
+                    <div id="bomPickerTargetInfo" style="font-size:11px; color:var(--text-color); margin-top:2px; font-weight:600;">
+                        Target: Barang Seri #1
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalBomMaterialPicker')">✕</button>
+            </div>
+            <div class="modal-body" style="padding:14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap;">
+                    <div style="display:flex; gap:8px; flex:1; max-width:550px;">
+                        <input type="text" id="searchBomMaterialPicker" placeholder="Cari Kode Komponen / Uraian / HS Code / Model..." onkeyup="debounceSearchBomMaterial()" style="flex:1; font-size:11px; padding:6px 10px;">
+                        <select id="filterKlasBomMaterialPicker" onchange="loadBomMaterialPickerList()" style="width:140px; font-size:11px;">
+                            <option value="">-- Semua Klas --</option>
+                            <option value="RAW" selected>RAW (Bahan Baku)</option>
+                            <option value="WIP">WIP (Setengah Jadi)</option>
+                            <option value="FG">FG (Barang Jadi)</option>
+                            <option value="SCRAP">SCRAP (Sisa/Scrap)</option>
+                            <option value="MESIN">MESIN (Peralatan)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span id="badgeSelectedBomMaterialCount" style="font-size:11px; font-weight:700; color:#d97706; background:rgba(234, 179, 8, 0.15); padding:4px 8px; border-radius:4px;">0 komponen dipilih</span>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="loadBomMaterialPickerList()">🔄 Segarkan</button>
+                    </div>
+                </div>
+
+                <div style="max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:6px;">
+                    <table class="datagrid" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th style="width:36px; text-align:center;">
+                                    <input type="checkbox" id="chkSelectAllBomMaterial" onchange="toggleSelectAllBomMaterial(this.checked)">
+                                </th>
+                                <th style="width:130px;">Kode Komponen</th>
+                                <th>Uraian Komponen</th>
+                                <th style="width:95px;">HS Code</th>
+                                <th style="width:65px;">Satuan</th>
+                                <th style="width:80px;">Klas</th>
+                                <th style="width:100px; text-align:right;">Qty Butuh</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyBomMaterialPicker"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalBomMaterialPicker')">Batal</button>
+                <button type="button" class="btn btn-warning" onclick="insertSelectedBomMaterials()" style="font-weight:700; background:#eab308; border-color:#ca8a04; color:#000;">
+                    ➕ Masukkan ke BOM Barang Terpilih
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- QUICK PICKER MODAL: DOKUMEN MASUK EKS-BC (bc_1ab2) -->
     <div class="modal-overlay" id="modalIncomingPicker">
         <div class="modal" style="max-width:980px; width:96vw;">
@@ -6521,6 +7097,30 @@ $isEditMode = !empty($selectedAjuParam);
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">❌ Hapus Baris Ini</div>
     </div>
+
+    <!-- FLOATING REKAP TARIF WINDOW -->
+    <div id="floatingSummaryTarif" class="floating-summary-window" style="display:none;">
+        <div class="floating-summary-header" id="floatingSummaryHeader">
+            <div class="floating-summary-title">
+                <span class="drag-handle" title="Klik dan geser untuk memindahkan posisi window">⠿</span>
+                <span>📊 Rekap Tarif & Pungutan</span>
+            </div>
+            <div class="floating-summary-actions">
+                <button type="button" class="btn-float-action" onclick="loadRecapTarif()" title="Segarkan Data Rekap">🔄</button>
+                <button type="button" class="btn-float-action" onclick="closeFloatingSummaryTarif()" title="Tutup / Sembunyikan">✕</button>
+            </div>
+        </div>
+        <div class="floating-summary-body" id="summaryTarifBox">
+            <!-- Isi rekap di-render secara dinamis oleh loadRecapTarif() -->
+        </div>
+    </div>
+
+    <!-- FLOATING LAUNCHER PILL (Saat Window Ditutup) -->
+    <button type="button" id="btnFloatingSummaryLauncher" class="floating-summary-pill" onclick="openFloatingSummaryTarif()" title="Buka Rekapitulasi Tarif & Pungutan" style="display:none;">
+        <span class="pill-icon">📊</span>
+        <span class="pill-label">Rekap Tarif</span>
+        <span class="pill-badge" id="pillTotalBayar">Rp 0</span>
+    </button>
 
     <script>
         // Jika dibuka langsung di browser luar iframe portal, alihkan ke index.php agar sidebar menu tetap tampil
@@ -8104,12 +8704,7 @@ $isEditMode = !empty($selectedAjuParam);
         function autoSizeSelect(sel) {
             if (!sel) return;
             sel.style.width = '100%';
-            const td = sel.closest('td');
-            if (td && td.style.maxWidth) {
-                sel.style.maxWidth = td.style.maxWidth;
-            } else {
-                sel.style.maxWidth = '100%';
-            }
+            sel.style.maxWidth = '100%';
             sel.style.minWidth = '0';
             sel.style.boxSizing = 'border-box';
         }
@@ -8126,6 +8721,251 @@ $isEditMode = !empty($selectedAjuParam);
         function autoResizeAllTextareas(container) {
             const scope = container || document;
             scope.querySelectorAll('textarea.cell-wrap').forEach(autoResizeTextarea);
+        }
+
+        /* ==========================================================================
+           GRID RESIZING & SORTING SUBSYSTEM (Vanilla JS / Pure CSS)
+           - Drag border header (th) untuk resize kolom tabel secara bebas & instan
+           - Konten dropdown & input otomatis mengikuti lebar kolom baru (100% full width)
+           - Klik header (th) untuk sorting ASC (▲) / DESC (▼) / Natural
+           - Klik 2x resizer untuk me-reset lebar kolom ke standar default
+           - Menyimpan lebar kolom ke localStorage secara persisten
+           ========================================================================== */
+        let _isGridResizing = false;
+
+        function getSavedColumnWidths(tableKey) {
+            try {
+                const raw = localStorage.getItem('ceisa_grid_widths_' + tableKey);
+                return raw ? JSON.parse(raw) : {};
+            } catch (e) {
+                return {};
+            }
+        }
+
+        function saveColumnWidth(tableKey, colKey, width) {
+            try {
+                const saved = getSavedColumnWidths(tableKey);
+                saved[colKey] = width;
+                localStorage.setItem('ceisa_grid_widths_' + tableKey, JSON.stringify(saved));
+            } catch (e) {}
+        }
+
+        function removeSavedColumnWidth(tableKey, colKey) {
+            try {
+                const saved = getSavedColumnWidths(tableKey);
+                delete saved[colKey];
+                localStorage.setItem('ceisa_grid_widths_' + tableKey, JSON.stringify(saved));
+            } catch (e) {}
+        }
+
+        function getGridRowCellValue(tr, colKey) {
+            const el = tr.querySelector(`input[data-col="${colKey}"], select[data-col="${colKey}"], textarea[data-col="${colKey}"]`);
+            if (el) {
+                if (el.tagName === 'SELECT') {
+                    const opt = el.options[el.selectedIndex];
+                    return opt ? (opt.text || opt.value || '') : (el.value || '');
+                }
+                return el.value !== undefined ? el.value.trim() : '';
+            }
+            const td = tr.querySelector(`td[data-col="${colKey}"]`);
+            if (td) {
+                const inner = td.querySelector('input, select, textarea');
+                if (inner) {
+                    if (inner.tagName === 'SELECT') {
+                        const opt = inner.options[inner.selectedIndex];
+                        return opt ? (opt.text || opt.value || '') : (inner.value || '');
+                    }
+                    return inner.value !== undefined ? inner.value.trim() : '';
+                }
+                return td.innerText.trim();
+            }
+            return '';
+        }
+
+        function sortGridTable(table, th, colKey) {
+            if (!table || !th || !colKey) return;
+            const tableKey = table.id ? table.id.replace('table-', '') : '';
+            const tbody = table.querySelector('tbody');
+            if (!tbody) return;
+
+            const trs = Array.from(tbody.querySelectorAll('tr'));
+            if (trs.length <= 1) return;
+
+            let currentDir = th.dataset.sortDir || 'none';
+            let newDir = currentDir === 'asc' ? 'desc' : 'asc';
+
+            table.querySelectorAll('thead tr th').forEach(otherTh => {
+                if (otherTh !== th) {
+                    delete otherTh.dataset.sortDir;
+                    otherTh.classList.remove('sort-asc', 'sort-desc');
+                    const icon = otherTh.querySelector('.th-sort-icon');
+                    if (icon) icon.innerHTML = '⇅';
+                }
+            });
+
+            th.dataset.sortDir = newDir;
+            th.classList.remove('sort-asc', 'sort-desc');
+            th.classList.add(newDir === 'asc' ? 'sort-asc' : 'sort-desc');
+            const myIcon = th.querySelector('.th-sort-icon');
+            if (myIcon) myIcon.innerHTML = newDir === 'asc' ? '▲' : '▼';
+
+            const conf = gridConfigs[tableKey];
+            let colType = 'text';
+            if (conf) {
+                const colDef = conf.find(c => c.key === colKey);
+                if (colDef) {
+                    colType = colDef.type || 'text';
+                    if (colDef.key.startsWith('seri') || colDef.decimals !== undefined) colType = 'number';
+                }
+            } else if (colKey.startsWith('seri')) {
+                colType = 'number';
+            }
+
+            const isNum = colType === 'number';
+            const isDate = colType === 'date' || colKey.includes('tanggal') || colKey.includes('tgl');
+
+            trs.sort((a, b) => {
+                const valA = getGridRowCellValue(a, colKey);
+                const valB = getGridRowCellValue(b, colKey);
+
+                let res = 0;
+                if (isNum) {
+                    const numA = parseFloat(typeof stripNumberCommas === 'function' ? stripNumberCommas(valA) : String(valA).replace(/,/g, '')) || 0;
+                    const numB = parseFloat(typeof stripNumberCommas === 'function' ? stripNumberCommas(valB) : String(valB).replace(/,/g, '')) || 0;
+                    res = numA - numB;
+                } else if (isDate) {
+                    const dateA = valA ? new Date(valA).getTime() : 0;
+                    const dateB = valB ? new Date(valB).getTime() : 0;
+                    res = dateA - dateB;
+                } else {
+                    res = valA.localeCompare(valB, undefined, { numeric: true, sensitivity: 'base' });
+                }
+                return newDir === 'asc' ? res : -res;
+            });
+
+            const frag = document.createDocumentFragment();
+            trs.forEach(tr => frag.appendChild(tr));
+            tbody.appendChild(frag);
+        }
+
+        function setupGridTable(tableKeyOrEl) {
+            let table = null;
+            if (typeof tableKeyOrEl === 'string') {
+                table = document.getElementById(tableKeyOrEl.startsWith('table-') ? tableKeyOrEl : 'table-' + tableKeyOrEl);
+            } else {
+                table = tableKeyOrEl;
+            }
+            if (!table) return;
+
+            const tableKey = table.id ? table.id.replace('table-', '') : '';
+            const ths = table.querySelectorAll('thead tr th');
+            if (ths.length === 0) return;
+
+            const savedWidths = tableKey ? getSavedColumnWidths(tableKey) : {};
+
+            ths.forEach(th => {
+                const colKey = th.dataset.col;
+                const txt = th.innerText.trim().toLowerCase();
+                const isAction = !colKey || txt === 'hapus' || txt === 'aksi' || txt === 'pilih' || th.classList.contains('no-sort') || th.querySelector('input[type="checkbox"]');
+
+                if (isAction) {
+                    th.classList.add('no-sort', 'th-action');
+                    return;
+                }
+
+                // Restore saved width if present
+                if (tableKey && colKey && savedWidths && savedWidths[colKey]) {
+                    const sw = savedWidths[colKey];
+                    th.style.width = sw;
+                    th.style.minWidth = sw;
+                    th.style.maxWidth = sw;
+                }
+
+                // Ensure sort icon exists
+                let sortIcon = th.querySelector('.th-sort-icon');
+                if (!sortIcon) {
+                    sortIcon = document.createElement('span');
+                    sortIcon.className = 'th-sort-icon';
+                    sortIcon.innerHTML = '⇅';
+                    th.appendChild(sortIcon);
+                }
+
+                // Ensure resizer handle exists
+                let resizer = th.querySelector('.col-resizer');
+                if (!resizer) {
+                    resizer = document.createElement('div');
+                    resizer.className = 'col-resizer';
+                    resizer.title = 'Tarik untuk ubah lebar kolom (Klik 2x reset)';
+                    th.appendChild(resizer);
+
+                    // Double click to reset width
+                    resizer.addEventListener('dblclick', function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        th.style.width = '';
+                        th.style.minWidth = '';
+                        th.style.maxWidth = '';
+                        if (tableKey && colKey) {
+                            removeSavedColumnWidth(tableKey, colKey);
+                        }
+                    });
+
+                    // Resizer mousedown logic
+                    resizer.addEventListener('mousedown', function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        _isGridResizing = true;
+
+                        const startX = e.pageX;
+                        const startWidth = th.offsetWidth;
+                        resizer.classList.add('resizing');
+                        document.body.classList.add('grid-resizing');
+
+                        function onMouseMove(moveEvent) {
+                            const diff = moveEvent.pageX - startX;
+                            const newWidth = Math.max(35, startWidth + diff);
+                            const wStr = newWidth + 'px';
+                            th.style.width = wStr;
+                            th.style.minWidth = wStr;
+                            th.style.maxWidth = wStr;
+                        }
+
+                        function onMouseUp() {
+                            document.removeEventListener('mousemove', onMouseMove);
+                            document.removeEventListener('mouseup', onMouseUp);
+                            resizer.classList.remove('resizing');
+                            document.body.classList.remove('grid-resizing');
+
+                            if (th.style.width && tableKey && colKey) {
+                                saveColumnWidth(tableKey, colKey, th.style.width);
+                            }
+
+                            setTimeout(() => {
+                                _isGridResizing = false;
+                            }, 120);
+                        }
+
+                        document.addEventListener('mousemove', onMouseMove);
+                        document.addEventListener('mouseup', onMouseUp);
+                    });
+                }
+
+                // Sorting click on th (idempotent listener)
+                if (!th._hasSortListener) {
+                    th._hasSortListener = true;
+                    th.addEventListener('click', function(e) {
+                        if (_isGridResizing) return;
+                        if (e.target && (e.target.classList.contains('col-resizer') || e.target.tagName === 'INPUT')) return;
+                        sortGridTable(table, th, colKey);
+                    });
+                }
+            });
+        }
+
+        function setupAllGridTables() {
+            document.querySelectorAll('table.datagrid').forEach(table => {
+                setupGridTable(table);
+            });
         }
 
 
@@ -8328,6 +9168,11 @@ $isEditMode = !empty($selectedAjuParam);
             const savedTheme = localStorage.getItem('ceisa_theme') || 'light';
             setTheme(savedTheme);
 
+            // Inisialisasi datagrid column resizing & sorting
+            setupAllGridTables();
+
+            _activePanelEl = document.getElementById('panel-' + activeTab) || document.querySelector('.panel.active');
+
             // Bind format desimal blur untuk semua field angka di Header
             Object.entries(headerNumberDecimals).forEach(([f, dec]) => {
                 const el = document.getElementById('hdr_' + f);
@@ -8382,6 +9227,15 @@ $isEditMode = !empty($selectedAjuParam);
             }
             initAiReader();
             initEditorContextMenu();
+            syncConfigDropdownState();
+
+            // Inisialisasi draggable & visibilitas floating summary tarif
+            const floatWin = document.getElementById('floatingSummaryTarif');
+            const floatHdr = document.getElementById('floatingSummaryHeader');
+            if (floatWin && floatHdr) {
+                makeDraggable(floatWin, floatHdr);
+            }
+            updateFloatingSummaryTabVisibility(activeTab);
         }
 
         async function changeAju(aju) {
@@ -8420,12 +9274,105 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        // ========================================================
+        // TAB & WORKSPACE LOADER HELPERS (SMOOTH & RESPONSIVE UX)
+        // ========================================================
+        function getTabTitle(tabName) {
+            const titles = {
+                'header': 'Header & Identitas',
+                'barang': 'Rincian Barang',
+                'entitas': 'Entitas Dokumen',
+                'dokumen': 'Dokumen Lampiran',
+                'bahanbaku': 'Bahan Baku',
+                'barangtarif': 'Tarif & Pungutan Barang',
+                'bahanbakutarif': 'Tarif Bahan Baku',
+                'kemasan': 'Kemasan',
+                'pengangkut': 'Sarana Pengangkut',
+                'kontainer': 'Kontainer',
+                'pungutan': 'Pungutan',
+                'bankdevisa': 'Bank Devisa',
+                'jaminan': 'Jaminan',
+                'komponenbiaya': 'Komponen Biaya',
+                'barangdokumen': 'Dokumen Fasilitas Barang',
+                'barangentitas': 'Relasi Entitas Barang',
+                'barangspekkhusus': 'Spesifikasi Khusus Barang',
+                'barangvd': 'Voluntary Declaration (VD)',
+                'bahanbakudokumen': 'Dokumen Bahan Baku',
+                'kesiapanbarang': 'Kesiapan Barang Ekspor'
+            };
+            return titles[tabName] || tabName;
+        }
+
+        function createTabLoaderEl(tabName) {
+            const el = document.createElement('div');
+            el.className = 'tab-table-loader';
+            el.id = 'loader-' + tabName;
+            el.innerHTML = `
+                <div class="tab-table-loader-card">
+                    <div class="hourglass-wrap">
+                        <div class="hourglass-ring"></div>
+                        <div class="hourglass-icon">⏳</div>
+                    </div>
+                    <div class="tab-loader-text">Memuat Data ${escapeHtml(getTabTitle(tabName))}...</div>
+                    <div class="tab-loader-subtext">Menyiapkan baris tabel & format kolom</div>
+                </div>
+            `;
+            return el;
+        }
+
+        function showTabLoader(tabName, customTitle) {
+            const pnl = document.getElementById('panel-' + tabName);
+            if (!pnl) return;
+            let loader = pnl.querySelector('.tab-table-loader');
+            if (!loader) {
+                loader = createTabLoaderEl(tabName);
+                pnl.prepend(loader);
+            }
+            const titleEl = loader.querySelector('.tab-loader-text');
+            if (titleEl) {
+                titleEl.innerText = customTitle || `Memuat Data ${getTabTitle(tabName)}...`;
+            }
+            loader.classList.add('active');
+        }
+
+        function hideTabLoader(tabName) {
+            const pnl = document.getElementById('panel-' + tabName);
+            if (!pnl) return;
+            const loader = pnl.querySelector('.tab-table-loader');
+            if (loader) {
+                loader.classList.remove('active');
+            }
+        }
+
+        function showWorkspaceLoader(title, subtitle) {
+            const loader = document.getElementById('workspaceAjuLoader');
+            if (loader) {
+                const tEl = document.getElementById('wsLoaderTitle');
+                if (tEl) tEl.innerText = title || 'Memuat Dokumen Pabean...';
+                const dEl = document.getElementById('wsLoaderDesc');
+                if (dEl) dEl.innerText = subtitle || (currentAju ? `Nomor AJU: ${currentAju}` : 'Memuat data formulir...');
+                loader.classList.add('active');
+            }
+        }
+
+        function hideWorkspaceLoader() {
+            const loader = document.getElementById('workspaceAjuLoader');
+            if (loader) {
+                loader.classList.remove('active');
+            }
+        }
+
         async function loadAjuData(aju) {
             currentAju = aju || '';
             const isEdit = !!currentAju;
             toggleEntryPanel(!isEdit);
             const btnEntry = document.getElementById('btnToggleEntry');
             if (btnEntry) btnEntry.style.display = isEdit ? 'none' : '';
+
+            showWorkspaceLoader(
+                isEdit ? 'Memuat Dokumen Pabean...' : 'Menyiapkan Editor Dokumen...',
+                isEdit ? `Nomor AJU: ${currentAju}` : 'Menghubungkan ke database...'
+            );
 
             const postedBadge = document.getElementById('metaPostedBadge');
             if (postedBadge) {
@@ -8539,12 +9486,15 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch (err) {
                 showError('Koneksi gagal: ' + err.message);
+            } finally {
+                hideWorkspaceLoader();
             }
         }
 
         function setupDatalists() {
             const container = document.getElementById('datalistsContainer');
             container.innerHTML = '';
+            const frag = document.createDocumentFragment();
             for (const [reff, opts] of Object.entries(currentReffOptions)) {
                 const dl = document.createElement('datalist');
                 dl.id = 'dl_reff_' + reff;
@@ -8554,8 +9504,9 @@ $isEditMode = !empty($selectedAjuParam);
                     opt.label = `${o.kode} - ${o.teks}`;
                     dl.appendChild(opt);
                 });
-                container.appendChild(dl);
+                frag.appendChild(dl);
             }
+            container.appendChild(frag);
         }
 
         function populateHeaderSelects() {
@@ -8563,13 +9514,19 @@ $isEditMode = !empty($selectedAjuParam);
             document.querySelectorAll('#panel-header select[data-reff], #panel-kesiapanbarang select[data-reff]').forEach(sel => {
                 const rf = sel.dataset.reff;
                 const opts = currentReffOptions[rf] || [];
-                sel.innerHTML = '<option value="">-- Pilih --</option>';
+                const frag = document.createDocumentFragment();
+                const defaultOpt = document.createElement('option');
+                defaultOpt.value = '';
+                defaultOpt.innerText = '-- Pilih --';
+                frag.appendChild(defaultOpt);
                 opts.forEach(o => {
                     const opt = document.createElement('option');
                     opt.value = o.kode;
                     opt.innerText = `${o.kode} - ${o.teks}`;
-                    sel.appendChild(opt);
+                    frag.appendChild(opt);
                 });
+                sel.innerHTML = '';
+                sel.appendChild(frag);
             });
         }
 
@@ -8623,6 +9580,7 @@ $isEditMode = !empty($selectedAjuParam);
         function renderBarangTableHeader() {
             const theadTr = document.getElementById('thead-row-barang');
             theadTr.innerHTML = '';
+            const savedWidths = getSavedColumnWidths('barang');
             gridConfigs.barang.forEach(col => {
                 const th = document.createElement('th');
                 th.dataset.col = col.key;
@@ -8632,9 +9590,17 @@ $isEditMode = !empty($selectedAjuParam);
                     th.style.maxWidth = '45px';
                     th.style.textAlign = 'center';
                 } else {
-                    if (col.width) th.style.width = col.width;
-                    if (col.minWidth) th.style.minWidth = col.minWidth;
-                    if (col.maxWidth) th.style.maxWidth = col.maxWidth;
+                    if (savedWidths && savedWidths[col.key]) {
+                        const sw = savedWidths[col.key];
+                        th.style.width = sw;
+                        th.style.minWidth = sw;
+                        th.style.maxWidth = sw;
+                    } else if (col.width) {
+                        th.style.width = col.width;
+                        if (col.minWidth) th.style.minWidth = col.minWidth;
+                    } else if (col.minWidth) {
+                        th.style.minWidth = col.minWidth;
+                    }
                     if (col.type === 'number') {
                         th.classList.add('th-number');
                     }
@@ -8649,6 +9615,7 @@ $isEditMode = !empty($selectedAjuParam);
 
             // Action delete th
             const thAction = document.createElement('th');
+            thAction.className = 'no-sort th-action';
             thAction.style.width = '40px';
             thAction.style.minWidth = '40px';
             thAction.style.maxWidth = '40px';
@@ -8656,6 +9623,7 @@ $isEditMode = !empty($selectedAjuParam);
             thAction.innerText = 'Hapus';
             theadTr.appendChild(thAction);
 
+            setupGridTable('barang');
             renderBarangTableFooter();
         }
 
@@ -8763,57 +9731,137 @@ $isEditMode = !empty($selectedAjuParam);
             });
         }
 
+        // Status render per tabel untuk optimalisasi performa (lazy rendering)
+        let _tableRendered = {};
+
+        function renderTableGrid(t) {
+            const rows = currentData[t] || [];
+            const countBadge = document.getElementById('count-' + t);
+            if (countBadge) countBadge.innerText = rows.length;
+
+            // Sinkronisasi class th-number untuk kolom angka di semua tabel & restore saved column widths
+            const theadThs = document.querySelectorAll(`#table-${t} thead tr th`);
+            const conf = gridConfigs[t];
+            const savedWidths = getSavedColumnWidths(t);
+            if (theadThs.length > 0 && conf) {
+                conf.forEach((col, idx) => {
+                    if (theadThs[idx]) {
+                        theadThs[idx].dataset.col = col.key;
+                        if (savedWidths && savedWidths[col.key]) {
+                            const sw = savedWidths[col.key];
+                            theadThs[idx].style.width = sw;
+                            theadThs[idx].style.minWidth = sw;
+                            theadThs[idx].style.maxWidth = sw;
+                        }
+                        if (col.type === 'number' && col.key !== 'seri' && col.key !== 'seri_barang' && col.key !== 'seri_bahan_baku' && col.key !== 'seri_dokumen' && col.key !== 'seri_entitas') {
+                            theadThs[idx].classList.add('th-number');
+                        }
+                    }
+                });
+            }
+            setupGridTable(t);
+
+            const tbody = document.querySelector(`#table-${t} tbody`);
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            // Gunakan DocumentFragment agar insert dilakukan satu kali ke DOM (menghindari reflow berulang)
+            const frag = document.createDocumentFragment();
+            rows.forEach((r, idx) => {
+                const tr = createGridRow(t, r, idx);
+                frag.appendChild(tr);
+            });
+            tbody.appendChild(frag);
+
+            // Jika tabel barang, sinkronkan visibilitas kolom varRules
+            if (t === 'barang' && currentVarRules && currentVarRules.barang) {
+                document.querySelectorAll('#table-barang th[data-col], #table-barang td[data-col]').forEach(el => {
+                    const col = el.dataset.col;
+                    const rule = currentVarRules.barang[col];
+                    if (rule && rule.visible === 0) {
+                        el.classList.add('col-hidden');
+                    } else {
+                        el.classList.remove('col-hidden');
+                    }
+                });
+            }
+
+            // Hitung total footer untuk tabel ini
+            updateTableTotals(t);
+
+            // Jika tabel barang, sinkronkan pemilihan baris aktif untuk BOM & Trace (1:1 PowerBuilder)
+            if (t === 'barang') {
+                const trs = tbody.querySelectorAll('tr');
+                let targetTr = null;
+                let targetData = null;
+                let targetIdx = 0;
+
+                if (activeBarangSeri !== null) {
+                    trs.forEach((tr, idx) => {
+                        if (String(tr.dataset.seri) === String(activeBarangSeri)) {
+                            targetTr = tr;
+                            targetData = rows[idx];
+                            targetIdx = idx;
+                        }
+                    });
+                }
+                if (!targetTr && trs.length > 0) {
+                    targetTr = trs[0];
+                    targetData = rows[0];
+                    targetIdx = 0;
+                }
+
+                if (targetTr && targetData) {
+                    selectBarangRow(targetTr, targetData, targetIdx);
+                } else {
+                    activeBarangSeri = null;
+                    activeBarangKode = '';
+                    activeBarangUraian = '';
+                    activeBarangTr = null;
+                    const badge = document.getElementById('badgeActiveBarangBom');
+                    if (badge) badge.style.display = 'none';
+                    renderBomForActiveBarang();
+                }
+            }
+        }
+
+        function populateTable(tableKey, rows) {
+            if (rows) currentData[tableKey] = rows;
+            renderTableGrid(tableKey);
+            _tableRendered[tableKey] = true;
+            const countBadge = document.getElementById('count-' + tableKey);
+            if (countBadge && rows) countBadge.innerText = rows.length;
+        }
+
         function populateGrids(tables) {
+            // Update counter badges di seluruh tab secara instan (0ms)
             Object.keys(gridConfigs).forEach(t => {
                 const rows = tables[t] || [];
                 const countBadge = document.getElementById('count-' + t);
                 if (countBadge) countBadge.innerText = rows.length;
-
-                // Sinkronisasi class th-number untuk kolom angka di semua tabel (kecuali kolom Seri)
-                const theadThs = document.querySelectorAll(`#table-${t} thead tr th`);
-                const conf = gridConfigs[t];
-                if (theadThs.length > 0 && conf) {
-                    conf.forEach((col, idx) => {
-                        if (theadThs[idx]) {
-                            theadThs[idx].dataset.col = col.key;
-                            if (col.type === 'number' && col.key !== 'seri' && col.key !== 'seri_barang' && col.key !== 'seri_bahan_baku' && col.key !== 'seri_dokumen' && col.key !== 'seri_entitas') {
-                                theadThs[idx].classList.add('th-number');
-                            }
-                        }
-                    });
-                }
-
-                const tbody = document.querySelector(`#table-${t} tbody`);
-                if (!tbody) return;
-                tbody.innerHTML = '';
-
-                // Gunakan DocumentFragment agar insert dilakukan satu kali ke DOM (menghindari reflow per baris)
-                const frag = document.createDocumentFragment();
-                rows.forEach((r, idx) => {
-                    const tr = createGridRow(t, r, idx);
-                    frag.appendChild(tr);
-                });
-                tbody.appendChild(frag);
-
-                // Hitung total footer untuk tabel ini
-                updateTableTotals(t);
             });
 
-            // Reset flag resized pada semua panel agar textarea akan di-resize ulang saat panel pertama kali dibuka setelah load data
+            // Reset status render tabel & flag resized
+            _tableRendered = {};
             document.querySelectorAll('.panel').forEach(p => { delete p.dataset.resized; });
-
-            // Tandai recap tarif perlu reload (data baru saja dimuat)
             _recapTarifDirty = true;
 
-            // Pastikan seluruh select referensi memiliki lebar pas dan textarea auto-resize pada panel yang sedang aktif
+            // Render hanya tab yang sedang aktif jika tab tersebut adalah tabel datagrid
+            if (activeTab && gridConfigs[activeTab]) {
+                renderTableGrid(activeTab);
+                _tableRendered[activeTab] = true;
+            }
+
+            // Pastikan select referensi & textarea di panel aktif ter-resize rapi
             setTimeout(() => {
-                document.querySelectorAll('table.datagrid td select.cell-select').forEach(autoSizeSelect);
                 const activePnl = document.querySelector('.panel.active');
                 if (activePnl) {
+                    activePnl.querySelectorAll('table.datagrid td select.cell-select').forEach(autoSizeSelect);
                     autoResizeAllTextareas(activePnl);
+                    setupAllGridTables();
                     activePnl.dataset.resized = '1';
                 }
-            }, 60);
+            }, 50);
         }
 
         function createGridRow(tableKey, data, idx) {
@@ -8821,12 +9869,32 @@ $isEditMode = !empty($selectedAjuParam);
             const conf = gridConfigs[tableKey];
             if (!conf) return tr;
 
+            if (tableKey === 'barang') {
+                tr.dataset.seri = data.seri_barang || (idx + 1);
+                tr.dataset.kode = data.kode_barang || '';
+                tr.addEventListener('click', function(e) {
+                    if (e.target && (e.target.closest('.btn-danger') || e.target.closest('button'))) return;
+                    selectBarangRow(this, data, idx);
+                });
+            } else if (tableKey === 'barangbom') {
+                tr.dataset.id = data.id || ('bom_' + Math.random().toString(36).substr(2, 9));
+                tr.dataset.seri = data.seri || (activeBarangSeri || 1);
+                tr.dataset.kode = data.kode_barang || '';
+                tr.dataset.kodeParent = data.kode_barang_parent || activeBarangKode;
+                tr.addEventListener('click', function(e) {
+                    if (e.target && (e.target.closest('.btn-danger') || e.target.closest('button'))) return;
+                    selectBomRow(this, data, idx);
+                });
+            } else if (tableKey === 'tracebb') {
+                tr.dataset.id = data.id || ('tr_' + Math.random().toString(36).substr(2, 9));
+                tr.dataset.idBom = data.id_bom || (activeBomId || '');
+                tr.dataset.seriBarang = data.seri_barang || data.seri || (activeBarangSeri || 1);
+                tr.dataset.kodeBarang = data.kode_barang || data.kode_brg || activeBomKode;
+            }
+
             conf.forEach(col => {
                 const td = document.createElement('td');
                 td.dataset.col = col.key;
-                if (col.width) td.style.width = col.width;
-                if (col.minWidth) td.style.minWidth = col.minWidth;
-                if (col.maxWidth) td.style.maxWidth = col.maxWidth;
                 const rawVal = data[col.key] !== null && data[col.key] !== undefined ? data[col.key] : '';
 
                 if (col.type === 'select') {
@@ -8834,7 +9902,6 @@ $isEditMode = !empty($selectedAjuParam);
                     const sel = document.createElement('select');
                     sel.className = 'cell-select';
                     sel.dataset.col = col.key;
-                    if (col.maxWidth) sel.style.maxWidth = col.maxWidth;
 
                     const reffName = col.reff;
                     const opts = currentReffOptions[reffName] || [];
@@ -9068,8 +10135,58 @@ $isEditMode = !empty($selectedAjuParam);
             btnDel.style.padding = '2px 6px';
             btnDel.innerText = '✕';
             btnDel.title = 'Hapus Baris';
-            btnDel.onclick = function() {
-                tr.remove();
+            btnDel.onclick = function(e) {
+                if (e) e.stopPropagation();
+                if (tableKey === 'barangbom') {
+                    const rowId = tr.dataset.id;
+                    if (rowId && currentData.barangbom) {
+                        currentData.barangbom = currentData.barangbom.filter(b => b.id !== rowId);
+                    }
+                    if (rowId && currentData.tracebb) {
+                        currentData.tracebb = currentData.tracebb.filter(t => t.id_bom !== rowId);
+                    }
+                    tr.remove();
+                    if (tr === activeBomTr) {
+                        activeBomTr = null;
+                        activeBomId = null;
+                        activeBomKode = '';
+                        activeBomUraian = '';
+                        clearTraceTable('Komponen BOM telah dihapus.');
+                        const nextTr = document.querySelector('#table-barangbom tbody tr');
+                        if (nextTr) {
+                            nextTr.click();
+                        }
+                    }
+                } else if (tableKey === 'tracebb') {
+                    const rowId = tr.dataset.id;
+                    if (rowId && currentData.tracebb) {
+                        currentData.tracebb = currentData.tracebb.filter(t => t.id !== rowId);
+                    }
+                    tr.remove();
+                } else if (tableKey === 'barang') {
+                    const seri = tr.dataset.seri;
+                    if (seri && currentData.barangbom) {
+                        currentData.barangbom = currentData.barangbom.filter(b => String(b.seri) !== String(seri));
+                    }
+                    if (seri && currentData.tracebb) {
+                        currentData.tracebb = currentData.tracebb.filter(t => String(t.seri_barang || t.seri) !== String(seri));
+                    }
+                    tr.remove();
+                    if (tr === activeBarangTr) {
+                        activeBarangTr = null;
+                        activeBarangSeri = null;
+                        activeBarangKode = '';
+                        activeBarangUraian = '';
+                        const nextTr = document.querySelector('#table-barang tbody tr');
+                        if (nextTr) {
+                            nextTr.click();
+                        } else {
+                            renderBomForActiveBarang();
+                        }
+                    }
+                } else {
+                    tr.remove();
+                }
                 updateTableTotals(tableKey);
             };
             tdAction.appendChild(btnDel);
@@ -9093,6 +10210,31 @@ $isEditMode = !empty($selectedAjuParam);
                     newObj[c.key] = '';
                 }
             });
+
+            if (tableKey === 'barangbom') {
+                if (activeBarangSeri === null) {
+                    Swal.fire('Perhatian', 'Pilih baris barang pada tabel Rincian Barang terlebih dahulu.', 'warning');
+                    return;
+                }
+                newObj['seri'] = activeBarangSeri;
+                newObj['kode_barang_parent'] = activeBarangKode || '';
+                newObj['id'] = 'bom_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+                newObj['kode_satuan'] = 'PCE';
+                newObj['qty'] = 1.0000;
+            } else if (tableKey === 'tracebb') {
+                if (!activeBomId && !activeBomKode) {
+                    Swal.fire('Perhatian', 'Pilih salah satu komponen pada tabel BOM terlebih dahulu.', 'warning');
+                    return;
+                }
+                newObj['seri_barang'] = activeBarangSeri || 1;
+                newObj['kode_barang'] = activeBomKode || '';
+                newObj['nama_barang'] = activeBomUraian || '';
+                newObj['id_bom'] = activeBomId || '';
+                newObj['id'] = 'tr_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+                newObj['satuan'] = 'PCE';
+                newObj['qty_use'] = 1.0000;
+            }
+
             const tr = createGridRow(tableKey, newObj, currentCount);
             tbody.appendChild(tr);
             tr.scrollIntoView({ behavior: 'smooth' });
@@ -9100,43 +10242,87 @@ $isEditMode = !empty($selectedAjuParam);
                 autoResizeAllTextareas(tr);
             });
             updateTableTotals(tableKey);
+
+            if (tableKey === 'barangbom') {
+                selectBomRow(tr, newObj, currentCount);
+            }
         }
 
-        // Track panel aktif sebelumnya untuk swap yang efisien
+        // Track panel aktif & urutan tab switch untuk mencegah race condition
         let _activePanelEl = null;
+        let _tabSwitchSeq = 0;
         let _recapTarifDirty = true; // flag: perlu reload recap tarif
 
         function switchTab(tabName) {
             activeTab = tabName;
+            const seq = ++_tabSwitchSeq;
 
-            // Swap tab button active
+            // 1. INSTAN: Swap tab button active (0ms respon visual langsung)
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             const activeBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
             if (activeBtn) activeBtn.classList.add('active');
 
-            // Swap panel: hide panel lama, tampilkan yang baru
-            if (_activePanelEl) _activePanelEl.classList.remove('active');
+            // 2. INSTAN: Berpindah dulu ke tab baru (tampilkan panel target, sembunyikan panel lain)
+            document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
             const activePnl = document.getElementById('panel-' + tabName);
-            if (activePnl) {
-                activePnl.classList.add('active');
-                _activePanelEl = activePnl;
-                // autoResizeAllTextareas HANYA jika panel ini belum pernah di-resize
-                // (ditandai dengan data-resized="1" setelah populateGrids)
-                if (!activePnl.dataset.resized) {
-                    requestAnimationFrame(() => {
-                        autoResizeAllTextareas(activePnl);
-                        activePnl.dataset.resized = '1';
-                    });
-                }
-            } else {
+            if (!activePnl) {
                 _activePanelEl = null;
+                return;
+            }
+            activePnl.classList.add('active');
+            _activePanelEl = activePnl;
+
+            // Update status visibilitas floating summary tarif
+            updateFloatingSummaryTabVisibility(tabName);
+
+            // 3. Tentukan apakah tab ini butuh render data atau reload rekap tarif
+            const isDatagrid = !!gridConfigs[tabName];
+            const needRender = isDatagrid && !_tableRendered[tabName];
+            const needRecap = (tabName === 'barangtarif' || tabName === 'bahanbakutarif') && _recapTarifDirty;
+
+            // Tampilkan loader hourglass di tengah tabel jika data sedang dimuat/dirender
+            if (needRender || needRecap) {
+                showTabLoader(tabName, `Memuat Data ${getTabTitle(tabName)}...`);
             }
 
-            // Hanya reload recap tarif jika dirty (data berubah sejak terakhir ditampilkan)
-            if ((tabName === 'barangtarif' || tabName === 'bahanbakutarif') && _recapTarifDirty) {
-                loadRecapTarif();
-                _recapTarifDirty = false;
-            }
+            // 4. DEFER eksekusi perenderan data ke paint frame berikutnya:
+            // Browser mengecat tab baru & loader TERLEBIH DAHULU sehingga user langsung melihat perpindahan tab tanpa lag/hang!
+            requestAnimationFrame(() => {
+                setTimeout(async () => {
+                    // Batalkan jika pengguna sudah mengklik tab lain dengan lebih cepat
+                    if (seq !== _tabSwitchSeq) return;
+
+                    try {
+                        // Render tabel jika belum pernah dirender untuk AJU ini
+                        if (needRender) {
+                            renderTableGrid(tabName);
+                            _tableRendered[tabName] = true;
+                        }
+
+                        // Auto-resize textarea jika panel ini belum pernah di-resize
+                        if (!activePnl.dataset.resized) {
+                            autoResizeAllTextareas(activePnl);
+                            activePnl.dataset.resized = '1';
+                        }
+
+                        // Auto-size dropdown referensi & init grid column resizer/sorter
+                        activePnl.querySelectorAll('table.datagrid td select.cell-select').forEach(autoSizeSelect);
+                        setupGridTable(tabName);
+
+                        // Reload rekap tarif jika dirty
+                        if (needRecap) {
+                            await loadRecapTarif();
+                            _recapTarifDirty = false;
+                        }
+                    } catch (err) {
+                        console.error('Error saat render tab ' + tabName + ':', err);
+                    } finally {
+                        if (seq === _tabSwitchSeq) {
+                            hideTabLoader(tabName);
+                        }
+                    }
+                }, 20);
+            });
         }
 
         // Tandai recap tarif perlu reload saat ada simpan/hitung
@@ -9297,22 +10483,70 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        // -------------------------------------------------------------
+        // TOGGLE SARING KOLOM & TAB + DROPDOWN MENU KONFIGURASI
+        // -------------------------------------------------------------
+        function syncConfigDropdownState() {
+            const body = document.body;
+            const isColsActive = body.classList.contains('filter-cols-active');
+            const isTabsActive = body.classList.contains('filter-tabs-active');
+
+            const titleCols = document.getElementById('dropTitleCols');
+            const badgeCols = document.getElementById('dropBadgeCols');
+            if (titleCols) titleCols.innerText = isColsActive ? 'Saring Kolom: Aktif' : 'Saring Kolom: Nonaktif (Semua Tampil)';
+            if (badgeCols) {
+                badgeCols.innerText = isColsActive ? 'ON' : 'OFF';
+                badgeCols.className = 'config-dropdown-badge ' + (isColsActive ? 'config-badge-on' : 'config-badge-off');
+            }
+
+            const titleTabs = document.getElementById('dropTitleTabs');
+            const badgeTabs = document.getElementById('dropBadgeTabs');
+            if (titleTabs) titleTabs.innerText = isTabsActive ? 'Saring Tab BC: Aktif' : 'Saring Tab BC: Nonaktif (Semua Tampil)';
+            if (badgeTabs) {
+                badgeTabs.innerText = isTabsActive ? 'ON' : 'OFF';
+                badgeTabs.className = 'config-dropdown-badge ' + (isTabsActive ? 'config-badge-on' : 'config-badge-off');
+            }
+        }
+
+        function toggleConfigDropdown(e) {
+            if (e) e.stopPropagation();
+            const menu = document.getElementById('configDropdownPanel');
+            const btn = document.getElementById('btnConfigDropdown');
+            if (!menu) return;
+            const isOpen = menu.classList.contains('show');
+            if (isOpen) {
+                closeConfigDropdown();
+            } else {
+                syncConfigDropdownState();
+                menu.classList.add('show');
+                if (btn) btn.classList.add('active');
+            }
+        }
+
+        function closeConfigDropdown() {
+            const menu = document.getElementById('configDropdownPanel');
+            const btn = document.getElementById('btnConfigDropdown');
+            if (menu) menu.classList.remove('show');
+            if (btn) btn.classList.remove('active');
+        }
+
+        document.addEventListener('click', (e) => {
+            const container = document.getElementById('dropdownConfigMenu');
+            if (container && !container.contains(e.target)) {
+                closeConfigDropdown();
+            }
+        });
+
         function toggleColumnFilter() {
             const body = document.body;
             body.classList.toggle('filter-cols-active');
-            const isActive = body.classList.contains('filter-cols-active');
-            const btn = document.getElementById('btnToggleCols');
-            btn.classList.toggle('active', isActive);
-            btn.innerText = isActive ? '👁️ Saring Kolom: Aktif' : '👁️ Saring Kolom: Nonaktif (Semua Tampil)';
+            syncConfigDropdownState();
         }
 
         function toggleTabFilter() {
             const body = document.body;
             body.classList.toggle('filter-tabs-active');
-            const isActive = body.classList.contains('filter-tabs-active');
-            const btn = document.getElementById('btnToggleTabs');
-            btn.classList.toggle('active', isActive);
-            btn.innerText = isActive ? '📑 Saring Tab BC: Aktif' : '📑 Saring Tab BC: Nonaktif (Semua Tampil)';
+            syncConfigDropdownState();
         }
 
         // -------------------------------------------------------------
@@ -10060,21 +11294,33 @@ $isEditMode = !empty($selectedAjuParam);
                 b.innerHTML = '<span class="spinner"></span> Menyimpan...';
             });
 
-            const trs = tbody.querySelectorAll('tr');
-            const rows = [];
-            trs.forEach(tr => {
-                const rowObj = {};
-                tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
-                    if (el.dataset.col) {
-                        let v = el.value !== undefined ? el.value.trim() : '';
-                        if (el.classList.contains('cell-number') || el.type === 'number') {
-                            v = stripNumberCommas(v);
+            let rows = [];
+            if (tableKey === 'barangbom') {
+                syncDomToBomData();
+                rows = currentData.barangbom || [];
+            } else if (tableKey === 'tracebb') {
+                syncDomToTraceData();
+                rows = currentData.tracebb || [];
+            } else {
+                const trs = tbody.querySelectorAll('tr');
+                trs.forEach(tr => {
+                    const rowObj = {};
+                    tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                        if (el.dataset.col) {
+                            let v = el.value !== undefined ? el.value.trim() : '';
+                            if (el.classList.contains('cell-number') || el.type === 'number') {
+                                v = stripNumberCommas(v);
+                            }
+                            rowObj[el.dataset.col] = v;
                         }
-                        rowObj[el.dataset.col] = v;
-                    }
+                    });
+                    rows.push(rowObj);
                 });
-                rows.push(rowObj);
-            });
+            }
+
+            if (tableKey === 'barang') {
+                currentData.barang = rows;
+            }
 
             const formData = new FormData();
             formData.append('action', 'save_table');
@@ -10089,6 +11335,12 @@ $isEditMode = !empty($selectedAjuParam);
                     showSuccess(`Tabel ${tableKey} berhasil disimpan (${rows.length} baris)!`);
                     const countBadge = document.getElementById('count-' + tableKey);
                     if (countBadge) countBadge.innerText = rows.length;
+
+                    if (tableKey === 'barangbom') {
+                        renderBomForActiveBarang();
+                    } else if (tableKey === 'tracebb') {
+                        renderTraceForActiveBom();
+                    }
                 } else {
                     showError(json.message);
                 }
@@ -11073,6 +12325,16 @@ $isEditMode = !empty($selectedAjuParam);
             if (pnl.style.display === 'none' || pnl.style.display === '') {
                 pnl.style.display = 'block';
                 if (btn) btn.innerHTML = '🔍 Hide Trace';
+                if (activeBarangSeri === null) {
+                    const firstTr = document.querySelector('#table-barang tbody tr');
+                    if (firstTr) {
+                        firstTr.click();
+                    } else {
+                        renderBomForActiveBarang();
+                    }
+                } else {
+                    renderBomForActiveBarang();
+                }
             } else {
                 pnl.style.display = 'none';
                 if (btn) btn.innerHTML = '🔍 Show Trace';
@@ -11132,6 +12394,95 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        // =============================================================
+        // FLOATING SUMMARY TARIF & PUNGUTAN CONTROLLER
+        // =============================================================
+
+        function makeDraggable(el, handle) {
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            handle.onmousedown = dragMouseDown;
+
+            function dragMouseDown(e) {
+                if (e.target.closest('button')) return; // Abaikan klik tombol action
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+
+            function elementDrag(e) {
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                el.style.top = (el.offsetTop - pos2) + "px";
+                el.style.left = (el.offsetLeft - pos1) + "px";
+                el.style.bottom = 'auto';
+                el.style.right = 'auto';
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+            }
+        }
+
+        function openFloatingSummaryTarif() {
+            const win = document.getElementById('floatingSummaryTarif');
+            const pill = document.getElementById('btnFloatingSummaryLauncher');
+            if (win) {
+                win.style.display = 'flex';
+                // Jika belum pernah dimuat, load datanya
+                const box = document.getElementById('summaryTarifBox');
+                if (box && (!box.innerHTML || box.innerHTML.trim() === '')) {
+                    loadRecapTarif();
+                }
+            }
+            if (pill) pill.style.display = 'none';
+            localStorage.setItem('ceisa_summary_tarif_open', '1');
+        }
+
+        function closeFloatingSummaryTarif() {
+            const win = document.getElementById('floatingSummaryTarif');
+            const pill = document.getElementById('btnFloatingSummaryLauncher');
+            if (win) win.style.display = 'none';
+            if (pill && (activeTab === 'barangtarif' || activeTab === 'bahanbakutarif')) {
+                pill.style.display = 'flex';
+            }
+            localStorage.setItem('ceisa_summary_tarif_open', '0');
+        }
+
+        function toggleFloatingSummaryTarif() {
+            const win = document.getElementById('floatingSummaryTarif');
+            if (win && win.style.display !== 'none') {
+                closeFloatingSummaryTarif();
+            } else {
+                openFloatingSummaryTarif();
+            }
+        }
+
+        function updateFloatingSummaryTabVisibility(tabName) {
+            const win = document.getElementById('floatingSummaryTarif');
+            const pill = document.getElementById('btnFloatingSummaryLauncher');
+            const isTarifTab = (tabName === 'barangtarif' || tabName === 'bahanbakutarif');
+
+            if (!isTarifTab) {
+                if (win) win.style.display = 'none';
+                if (pill) pill.style.display = 'none';
+            } else {
+                const shouldBeOpen = localStorage.getItem('ceisa_summary_tarif_open') === '1';
+                if (shouldBeOpen) {
+                    if (win) win.style.display = 'flex';
+                    if (pill) pill.style.display = 'none';
+                } else {
+                    if (win) win.style.display = 'none';
+                    if (pill) pill.style.display = 'flex';
+                }
+            }
+        }
+
         async function loadRecapTarif() {
             if (!currentAju) return;
             const box = document.getElementById('summaryTarifBox');
@@ -11140,33 +12491,74 @@ $isEditMode = !empty($selectedAjuParam);
                 const resp = await fetch(`editor.php?action=get_recap_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
-                    let html = '<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">';
-                    html += '<span style="font-weight:700; color:var(--text-color); font-size:11px;">📊 Rekap Tarif & Pungutan:</span>';
                     const allItems = [...(data.barang || []), ...(data.bahanbaku || [])];
                     if (allItems.length === 0) {
-                        html += '<span style="color:var(--text-muted); font-style:italic; font-size:11px;">Belum ada data tarif/pungutan ter-generate. Klik "⚡ Auto-Generate Tarif & Pungutan" untuk menghitung otomatis.</span>';
-                    } else {
-                        const grouped = {};
-                        allItems.forEach(item => {
-                            const k = item.kode_pungutan;
-                            if (!grouped[k]) grouped[k] = { bayar: 0, fasilitas: 0, lunas: 0 };
-                            grouped[k].bayar += Number(item.nilai_bayar || 0);
-                            grouped[k].fasilitas += Number(item.nilai_fasilitas || 0);
-                            grouped[k].lunas += Number(item.nilai_sudah_dilunasi || 0);
-                        });
-                        for (const [pungutan, vals] of Object.entries(grouped)) {
-                            html += `<div style="background:var(--bg-base); padding:4px 10px; border-radius:6px; border:1px solid var(--border-color); font-size:11px;">
-                                <span style="font-weight:700; color:var(--primary);">${escapeHtml(pungutan)}:</span> 
-                                Bayar: <b>Rp ${vals.bayar.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b> | 
-                                Fasilitas: <b>Rp ${vals.fasilitas.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b>
-                            </div>`;
-                        }
+                        box.innerHTML = `
+                            <div style="text-align:center; padding:18px 10px; color:var(--text-muted);">
+                                <div style="font-size:24px; margin-bottom:6px;">📊</div>
+                                <div style="font-weight:700; color:var(--text-main); margin-bottom:4px;">Belum Ada Data Tarif & Pungutan</div>
+                                <div style="font-size:10px; max-width:320px; margin:0 auto; line-height:1.4;">Klik tombol <b>⚡ Auto-Generate Tarif & Pungutan</b> pada tab Barang untuk menghitung otomatis.</div>
+                            </div>
+                        `;
+                        const pillBayar = document.getElementById('pillTotalBayar');
+                        if (pillBayar) pillBayar.innerText = 'Rp 0';
+                        return;
                     }
-                    html += '</div>';
+
+                    let totalBayar = 0;
+                    let totalFasilitas = 0;
+                    const grouped = {};
+                    allItems.forEach(item => {
+                        const k = item.kode_pungutan || 'LAINNYA';
+                        if (!grouped[k]) grouped[k] = { bayar: 0, fasilitas: 0, lunas: 0 };
+                        const b = Number(item.nilai_bayar || 0);
+                        const f = Number(item.nilai_fasilitas || 0);
+                        grouped[k].bayar += b;
+                        grouped[k].fasilitas += f;
+                        grouped[k].lunas += Number(item.nilai_sudah_dilunasi || 0);
+                        totalBayar += b;
+                        totalFasilitas += f;
+                    });
+
+                    // Update total bayar di launcher pill
+                    const pillBayar = document.getElementById('pillTotalBayar');
+                    if (pillBayar) {
+                        pillBayar.innerText = `Rp ${totalBayar.toLocaleString('id-ID', {maximumFractionDigits: 0})}`;
+                    }
+
+                    // Render Grand Total card & Breakdown list
+                    let html = `
+                        <div class="summary-grand-total">
+                            <div>
+                                <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Total Bayar</div>
+                                <div style="font-size:13px; font-weight:800; color:#52c41a;">Rp ${totalBayar.toLocaleString('id-ID', {minimumFractionDigits: 2})}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                <div style="font-size:9.5px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Total Fasilitas</div>
+                                <div style="font-size:13px; font-weight:800; color:var(--primary);">Rp ${totalFasilitas.toLocaleString('id-ID', {minimumFractionDigits: 2})}</div>
+                            </div>
+                        </div>
+                        <div class="summary-pungutan-grid">
+                    `;
+
+                    for (const [pungutan, vals] of Object.entries(grouped)) {
+                        html += `
+                            <div class="summary-pungutan-row">
+                                <div class="summary-code-badge">${escapeHtml(pungutan)}</div>
+                                <div class="summary-val-wrap">
+                                    <span>Bayar: <b style="color:var(--text-main);">Rp ${vals.bayar.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b></span>
+                                    <span style="color:var(--text-muted);">|</span>
+                                    <span>Fasilitas: <b style="color:var(--primary);">Rp ${vals.fasilitas.toLocaleString('id-ID', {minimumFractionDigits: 2})}</b></span>
+                                </div>
+                            </div>
+                        `;
+                    }
+                    html += `</div>`;
                     box.innerHTML = html;
                 }
             } catch(e) {
                 console.error('Gagal load recap tarif:', e);
+                box.innerHTML = '<div style="color:var(--danger); padding:10px; text-align:center;">Gagal memuat rekap tarif.</div>';
             }
         }
 
@@ -11340,6 +12732,424 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             } catch(e) {
                 Swal.fire('Error', e.message || 'Gagal memanggil API Trace FIFO.', 'error');
+            }
+        }
+
+        // =============================================================
+        // MASTER-DETAIL REACTIVE LINKING: BARANG ➔ BOM ➔ TRACE EKS-BC
+        // 1:1 PowerBuilder w_bc_ceisa40_interface2.srw
+        // =============================================================
+        let activeBarangSeri = null;
+        let activeBarangKode = '';
+        let activeBarangUraian = '';
+        let activeBarangTr = null;
+
+        let activeBomId = null;
+        let activeBomKode = '';
+        let activeBomUraian = '';
+        let activeBomTr = null;
+
+        function selectBarangRow(tr, data, idx) {
+            if (!tr) return;
+            if (activeBarangTr) activeBarangTr.classList.remove('selected-row');
+            tr.classList.add('selected-row');
+            activeBarangTr = tr;
+
+            const seriInp = tr.querySelector('input[data-col="seri_barang"]');
+            const kbInp = tr.querySelector('input[data-col="kode_barang"]');
+            const urTa = tr.querySelector('textarea[data-col="uraian"]');
+
+            activeBarangSeri = seriInp ? parseInt(seriInp.value, 10) : (data?.seri_barang || 1);
+            activeBarangKode = kbInp ? kbInp.value.trim() : (data?.kode_barang || '');
+            activeBarangUraian = urTa ? urTa.value.trim() : (data?.uraian || '');
+
+            // Update badge info di header BOM
+            const badge = document.getElementById('badgeActiveBarangBom');
+            if (badge) {
+                badge.innerText = `Barang Seri #${activeBarangSeri}: ${activeBarangKode} - ${activeBarangUraian.substring(0, 30)}`;
+                badge.title = `${activeBarangKode} - ${activeBarangUraian}`;
+                badge.style.display = 'inline-block';
+            }
+
+            renderBomForActiveBarang();
+        }
+
+        function renderBomForActiveBarang() {
+            const tbody = document.querySelector('#table-barangbom tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (activeBarangSeri === null) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted); font-style:italic;">Pilih salah satu baris di Tabel Rincian Barang di atas untuk melihat komponen BOM.</td></tr>';
+                clearTraceTable('Pilih baris barang dan komponen BOM di atas untuk melihat tracking dokumen asal.');
+                return;
+            }
+
+            const allBoms = currentData.barangbom || [];
+            const filtered = allBoms.filter(b => {
+                const bSeri = parseInt(b.seri, 10);
+                if (bSeri === activeBarangSeri) return true;
+                if (activeBarangKode && b.kode_barang_parent === activeBarangKode) return true;
+                return false;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:18px; color:var(--text-muted); font-style:italic;">
+                    Belum ada data komponen BOM untuk <b>Barang Seri #${activeBarangSeri} (${escapeHtml(activeBarangKode)})</b>.<br>
+                    <span style="font-size:10px;">Gunakan tombol <b>"📦 Tambah dari Master Barang"</b>, <b>"📥 Load BOM Barang Ini"</b>, atau <b>"➕ Tambah BOM Manual"</b> di atas.</span>
+                </td></tr>`;
+                clearTraceTable('Belum ada komponen BOM terpilih.');
+                return;
+            }
+
+            const frag = document.createDocumentFragment();
+            filtered.forEach((r, idx) => {
+                const tr = createGridRow('barangbom', r, idx);
+                tr.dataset.id = r.id || '';
+                tr.dataset.seri = r.seri || activeBarangSeri;
+                tr.dataset.kode = r.kode_barang || '';
+                tr.dataset.kodeParent = r.kode_barang_parent || activeBarangKode;
+                frag.appendChild(tr);
+            });
+            tbody.appendChild(frag);
+
+            // Auto-select row pertama BOM (1:1 sesuai PB w_bc_ceisa40_interface2: if rowcount() > 0 then trace3.retrieve)
+            const firstTr = tbody.querySelector('tr');
+            if (firstTr) {
+                selectBomRow(firstTr, filtered[0], 0);
+            }
+        }
+
+        function selectBomRow(tr, data, idx) {
+            if (!tr) return;
+            if (activeBomTr) activeBomTr.classList.remove('selected-row');
+            tr.classList.add('selected-row');
+            activeBomTr = tr;
+
+            const kbInp = tr.querySelector('input[data-col="kode_barang"]');
+            const urTa = tr.querySelector('textarea[data-col="uraian"]');
+
+            activeBomId = tr.dataset.id || data?.id || '';
+            activeBomKode = kbInp ? kbInp.value.trim() : (data?.kode_barang || '');
+            activeBomUraian = urTa ? urTa.value.trim() : (data?.uraian || '');
+
+            // Update badge info di header Trace Dokumen Asal
+            const badge = document.getElementById('badgeActiveBomTrace');
+            if (badge) {
+                badge.innerText = `Komponen: ${activeBomKode} - ${activeBomUraian.substring(0, 30)}`;
+                badge.title = `${activeBomKode} - ${activeBomUraian}`;
+                badge.style.display = 'inline-block';
+            }
+
+            renderTraceForActiveBom();
+        }
+
+        function renderTraceForActiveBom() {
+            const tbody = document.querySelector('#table-tracebb tbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+
+            if (!activeBomId && !activeBomKode) {
+                clearTraceTable('Pilih komponen BOM di atas untuk melihat rekaman dokumen asal eks-BC.');
+                return;
+            }
+
+            const allTraces = currentData.tracebb || [];
+            const filtered = allTraces.filter(t => {
+                if (activeBomId && t.id_bom && t.id_bom === activeBomId) return true;
+                const tSeri = parseInt(t.seri_barang || t.seri, 10);
+                const tKode = t.kode_barang || t.kode_brg;
+                if (tSeri === activeBarangSeri && tKode === activeBomKode) return true;
+                return false;
+            });
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:18px; color:var(--text-muted); font-style:italic;">
+                    Belum ada rekaman tracking dokumen asal (eks-BC) untuk <b>Komponen ${escapeHtml(activeBomKode)}</b>.<br>
+                    <span style="font-size:10px;">Gunakan tombol <b>"⚡ Mulai Trace FIFO (Auto)"</b> atau <b>"📥 Tambah Dokumen Asal"</b> di atas.</span>
+                </td></tr>`;
+                return;
+            }
+
+            const frag = document.createDocumentFragment();
+            filtered.forEach((r, idx) => {
+                const tr = createGridRow('tracebb', r, idx);
+                tr.dataset.id = r.id || '';
+                tr.dataset.idBom = r.id_bom || activeBomId || '';
+                tr.dataset.seriBarang = r.seri_barang || r.seri || activeBarangSeri;
+                tr.dataset.kodeBarang = r.kode_barang || r.kode_brg || activeBomKode;
+                frag.appendChild(tr);
+            });
+            tbody.appendChild(frag);
+        }
+
+        function clearTraceTable(message) {
+            const tbody = document.querySelector('#table-tracebb tbody');
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:18px; color:var(--text-muted); font-style:italic;">${message}</td></tr>`;
+            }
+            const badge = document.getElementById('badgeActiveBomTrace');
+            if (badge) badge.style.display = 'none';
+        }
+
+        function syncDomToBomData() {
+            if (activeBarangSeri === null) return;
+            const tbody = document.querySelector('#table-barangbom tbody');
+            if (!tbody) return;
+            const domRows = [];
+            tbody.querySelectorAll('tr').forEach(tr => {
+                if (tr.querySelector('.btn-danger')) {
+                    const rowObj = {
+                        id: tr.dataset.id || ('bom_' + Math.random().toString(36).substr(2, 9)),
+                        seri: activeBarangSeri,
+                        kode_barang_parent: tr.dataset.kodeParent || activeBarangKode
+                    };
+                    tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                        if (el.dataset.col) {
+                            let v = el.value !== undefined ? el.value.trim() : '';
+                            if (el.classList.contains('cell-number') || el.type === 'number') {
+                                v = stripNumberCommas(v);
+                            }
+                            rowObj[el.dataset.col] = v;
+                        }
+                    });
+                    domRows.push(rowObj);
+                }
+            });
+
+            // Hapus yang seri aktif lalu gabungkan domRows
+            const otherBoms = (currentData.barangbom || []).filter(b => parseInt(b.seri, 10) !== activeBarangSeri);
+            currentData.barangbom = otherBoms.concat(domRows);
+        }
+
+        function syncDomToTraceData() {
+            if (!activeBomId) return;
+            const tbody = document.querySelector('#table-tracebb tbody');
+            if (!tbody) return;
+            const domRows = [];
+            tbody.querySelectorAll('tr').forEach(tr => {
+                if (tr.querySelector('.btn-danger')) {
+                    const rowObj = {
+                        id: tr.dataset.id || ('tr_' + Math.random().toString(36).substr(2, 9)),
+                        id_bom: activeBomId,
+                        seri_barang: activeBarangSeri,
+                        seri: activeBarangSeri
+                    };
+                    tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                        if (el.dataset.col) {
+                            let v = el.value !== undefined ? el.value.trim() : '';
+                            if (el.classList.contains('cell-number') || el.type === 'number') {
+                                v = stripNumberCommas(v);
+                            }
+                            rowObj[el.dataset.col] = v;
+                        }
+                    });
+                    domRows.push(rowObj);
+                }
+            });
+
+            const otherTraces = (currentData.tracebb || []).filter(t => t.id_bom !== activeBomId);
+            currentData.tracebb = otherTraces.concat(domRows);
+        }
+
+        async function loadSelectedBarangBom() {
+            if (!currentAju) return;
+            if (activeBarangSeri === null) {
+                Swal.fire('Perhatian', 'Pilih baris barang pada tabel Rincian Barang terlebih dahulu.', 'warning');
+                return;
+            }
+
+            Swal.fire({
+                title: `Memuat BOM Barang Seri #${activeBarangSeri}...`,
+                text: `Mengambil struktur BOM untuk ${activeBarangKode}...`,
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const resp = await fetch(`editor.php?action=load_bom_barang&nomor_aju=${encodeURIComponent(currentAju)}&seri=${activeBarangSeri}`);
+                const data = await resp.json();
+                if (data.status === 'OK') {
+                    // Muat ulang data AJU
+                    const tRes = await fetch(`editor.php?action=load_all&nomor_aju=${encodeURIComponent(currentAju)}`);
+                    const tJson = await tRes.json();
+                    if (tJson.status === 'OK' && tJson.tables) {
+                        currentData.barangbom = tJson.tables.barangbom || [];
+                        currentData.tracebb = tJson.tables.tracebb || [];
+                    }
+                    renderBomForActiveBarang();
+                    Swal.fire('Sukses', data.message, 'success');
+                } else {
+                    Swal.fire(data.status === 'WARNING' ? 'Perhatian' : 'Gagal', data.message, data.status === 'WARNING' ? 'warning' : 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // =============================================================
+        // QUICK PICKER: KOMPONEN BOM DARI MASTER BARANG (bc_material)
+        // =============================================================
+        let bomMaterialPickerCache = [];
+        let searchBomMaterialTimer = null;
+
+        function openBomMaterialPickerModal() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Pilih atau buka dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            if (activeBarangSeri === null) {
+                const firstTr = document.querySelector('#table-barang tbody tr');
+                if (firstTr) {
+                    firstTr.click();
+                } else {
+                    Swal.fire('Perhatian', 'Belum ada data barang. Silakan isi Rincian Barang terlebih dahulu.', 'warning');
+                    return;
+                }
+            }
+
+            const infoEl = document.getElementById('bomPickerTargetInfo');
+            if (infoEl) {
+                infoEl.innerHTML = `Target Barang Jadi: <b>Seri #${activeBarangSeri}</b> - <code>${escapeHtml(activeBarangKode)}</code> (${escapeHtml(activeBarangUraian)})`;
+            }
+
+            document.getElementById('modalBomMaterialPicker').style.display = 'flex';
+            document.getElementById('searchBomMaterialPicker').value = '';
+            document.getElementById('filterKlasBomMaterialPicker').value = 'RAW';
+            loadBomMaterialPickerList();
+        }
+
+        function debounceSearchBomMaterial() {
+            if (searchBomMaterialTimer) clearTimeout(searchBomMaterialTimer);
+            searchBomMaterialTimer = setTimeout(loadBomMaterialPickerList, 300);
+        }
+
+        async function loadBomMaterialPickerList() {
+            const tbody = document.getElementById('tbodyBomMaterialPicker');
+            if (!tbody) return;
+            const search = encodeURIComponent((document.getElementById('searchBomMaterialPicker')?.value || '').trim());
+            const klas = encodeURIComponent(document.getElementById('filterKlasBomMaterialPicker')?.value || '');
+
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat master barang...</td></tr>';
+
+            try {
+                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}`);
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    bomMaterialPickerCache = res.data || [];
+                    renderBomMaterialPickerTable(bomMaterialPickerCache);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:red; padding:15px;">Gagal: ${res.message}</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:red; padding:15px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderBomMaterialPickerTable(list) {
+            const tbody = document.getElementById('tbodyBomMaterialPicker');
+            const chkAll = document.getElementById('chkSelectAllBomMaterial');
+            if (chkAll) chkAll.checked = false;
+            updateSelectedBomMaterialBadge();
+
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">Tidak ada barang yang cocok.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            list.forEach((m, idx) => {
+                const kb = escapeHtml(m.kode_barang || '');
+                const uraian = escapeHtml(m.uraian || '');
+                const hs = escapeHtml(m.pos_tarif || '');
+                const sat = escapeHtml(m.kode_satuan || 'PCE');
+                const klas = escapeHtml(m.klas || '-');
+
+                html += `<tr>
+                    <td style="text-align:center;">
+                        <input type="checkbox" class="chk-bom-material-row" data-idx="${idx}" onchange="updateSelectedBomMaterialBadge()">
+                    </td>
+                    <td style="font-family:monospace; font-weight:700;">${kb}</td>
+                    <td>${uraian}</td>
+                    <td style="font-family:monospace;">${hs}</td>
+                    <td>${sat}</td>
+                    <td><span class="badge" style="background:var(--bg-card); font-size:9.5px;">${klas}</span></td>
+                    <td style="text-align:right;">
+                        <input type="number" step="0.0001" min="0.0001" value="1.0000" class="input-sm inp-bom-material-qty" data-idx="${idx}" style="width:85px; text-align:right;">
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function toggleSelectAllBomMaterial(checked) {
+            document.querySelectorAll('.chk-bom-material-row').forEach(c => c.checked = checked);
+            updateSelectedBomMaterialBadge();
+        }
+
+        function updateSelectedBomMaterialBadge() {
+            const checkedCount = document.querySelectorAll('.chk-bom-material-row:checked').length;
+            const badge = document.getElementById('badgeSelectedBomMaterialCount');
+            if (badge) badge.innerText = `${checkedCount} komponen dipilih`;
+        }
+
+        async function insertSelectedBomMaterials() {
+            if (!currentAju || activeBarangSeri === null) return;
+            const checkedBoxes = document.querySelectorAll('.chk-bom-material-row:checked');
+            if (checkedBoxes.length === 0) {
+                Swal.fire('Perhatian', 'Pilih minimal satu komponen untuk dimasukkan ke BOM.', 'warning');
+                return;
+            }
+
+            const itemsToInsert = [];
+            checkedBoxes.forEach(chk => {
+                const idx = parseInt(chk.dataset.idx, 10);
+                const mat = bomMaterialPickerCache[idx];
+                if (mat) {
+                    const qtyInp = document.querySelector(`.inp-bom-material-qty[data-idx="${idx}"]`);
+                    const qtyVal = qtyInp ? parseFloat(qtyInp.value) || 1 : 1;
+                    itemsToInsert.push({
+                        kode_barang: mat.kode_barang,
+                        uraian: mat.uraian,
+                        kode_satuan: mat.kode_satuan || 'PCE',
+                        qty: qtyVal
+                    });
+                }
+            });
+
+            Swal.fire({
+                title: 'Memasukkan Komponen BOM...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const fd = new FormData();
+                fd.append('nomor_aju', currentAju);
+                fd.append('seri', activeBarangSeri);
+                fd.append('kode_barang_parent', activeBarangKode);
+                fd.append('items', JSON.stringify(itemsToInsert));
+
+                const resp = await fetch('editor.php?action=insert_bom_from_material', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    closeModal('modalBomMaterialPicker');
+
+                    // Refresh data AJU & render BOM
+                    const tRes = await fetch(`editor.php?action=load_all&nomor_aju=${encodeURIComponent(currentAju)}`);
+                    const tJson = await tRes.json();
+                    if (tJson.status === 'OK' && tJson.tables) {
+                        currentData.barangbom = tJson.tables.barangbom || [];
+                    }
+                    renderBomForActiveBarang();
+
+                    Swal.fire('Sukses', res.message, 'success');
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
             }
         }
 
@@ -11523,9 +13333,12 @@ $isEditMode = !empty($selectedAjuParam);
                     opt.innerText = 'Seri 1 (Default)';
                     selectTarget.appendChild(opt);
                 }
+                if (sourceContext === 'trace' && activeBarangSeri !== null) {
+                    selectTarget.value = String(activeBarangSeri);
+                }
             }
 
-            document.getElementById('searchIncomingPicker').value = '';
+            document.getElementById('searchIncomingPicker').value = (sourceContext === 'trace' && activeBomKode) ? activeBomKode : '';
             document.getElementById('filterBcIncomingPicker').value = '';
             loadIncomingPickerList();
         }
@@ -11640,6 +13453,46 @@ $isEditMode = !empty($selectedAjuParam);
                     });
                 }
             });
+
+            if (incomingSourceContext === 'trace') {
+                if (!activeBomId && !activeBomKode) {
+                    Swal.fire('Perhatian', 'Pilih salah satu komponen BOM terlebih dahulu.', 'warning');
+                    return;
+                }
+                Swal.fire({
+                    title: 'Memasukkan Dokumen Asal...',
+                    text: 'Memasukkan data ke Tracking Dokumen Asal (Trace Eks-BC)...',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+
+                try {
+                    const fd = new FormData();
+                    fd.append('nomor_aju', currentAju);
+                    fd.append('seri_barang', targetSeri || activeBarangSeri || 1);
+                    fd.append('id_bom', activeBomId || '');
+                    fd.append('items', JSON.stringify(itemsToInsert));
+
+                    const resp = await fetch('editor.php?action=insert_trace_from_incoming', { method: 'POST', body: fd });
+                    const res = await resp.json();
+                    if (res.status === 'OK') {
+                        closeModal('modalIncomingPicker');
+                        // Muat ulang data AJU
+                        const tRes = await fetch(`editor.php?action=load_all&nomor_aju=${encodeURIComponent(currentAju)}`);
+                        const tJson = await tRes.json();
+                        if (tJson.status === 'OK' && tJson.tables) {
+                            currentData.tracebb = tJson.tables.tracebb || [];
+                        }
+                        renderTraceForActiveBom();
+                        await Swal.fire('Sukses', res.message, 'success');
+                    } else {
+                        Swal.fire('Gagal', res.message, 'error');
+                    }
+                } catch(e) {
+                    Swal.fire('Error', e.message, 'error');
+                }
+                return;
+            }
 
             Swal.fire({
                 title: 'Memasukkan Dokumen Asal...',

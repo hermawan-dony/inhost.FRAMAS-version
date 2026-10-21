@@ -33,6 +33,7 @@ if (!function_exists('getDefaultAppSettings')) {
             // 4. UI / UX Portal & Tampilan
             'default_theme'      => 'light', // 'light' | 'dark'
             'default_sidebar'    => 'pinned', // 'pinned' | 'unpinned'
+            'sidebar_icon_style' => 'colored', // 'colored' (Default Berwarna/Emoji) | 'monochrome' (Ant Design SVG)
             'default_page_size'  => '25', // '10' | '25' | '50' | '100'
             'toast_duration'     => '2600' // milidetik
         ];

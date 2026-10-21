@@ -1,14 +1,11 @@
 <?php
 /**
  * DOKUMENTASI LENGKAP REST API CEISA 4.0
- * Halaman panduan teknis integrasi untuk Tim Developer & Administrator.
+ * Halaman panduan teknis integrasi untuk Tim Developer, Pengguna & Publik.
+ * Dapat diakses secara terbuka / publik langsung melalui URL root/subdomain.
  */
-session_start();
-$isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] == 1);
-if (!$isAdmin) {
-    http_response_code(403);
-    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>403 Forbidden</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0f2f5;color:#262626;} .box{text-align:center;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);max-width:400px;} h2{color:#ff4d4f;margin-bottom:12px;} p{color:#8c8c8c;font-size:12px;line-height:1.6;}</style></head><body><div class="box"><h2>403 - Akses Ditolak</h2><p>Dokumentasi REST API hanya dapat diakses oleh Administrator Sistem.</p></div></body></html>';
-    exit;
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
 }
 ?>
 <!DOCTYPE html>
@@ -433,8 +430,15 @@ if (!$isAdmin) {
         <a href="#ep-transfer" class="menu-item"><span class="method-badge badge-get" style="background:#8b5cf6;">UI</span> transfer.php</a>
         <a href="#ep-editor" class="menu-item"><span class="method-badge badge-get" style="background:#0ea5e9;">UI</span> editor.php</a>
         <a href="#ep-reff" class="menu-item"><span class="method-badge badge-get" style="background:#10b981; color:#fff;">MASTER</span> reff.php</a>
-        <a href="#ep-manifest" class="menu-item"><span class="method-badge badge-get" style="background:#06b6d4; color:#fff;">UI</span> manifest.php</a>
-        <a href="#ep-manifest-api" class="menu-item"><span class="method-badge badge-post">API</span> manifest_api.php</a>
+        <div class="menu-category">Modul Manifes (BC 1.1)</div>
+        <a href="#ep-manifest" class="menu-item"><span class="method-badge badge-get" style="background:#06b6d4; color:#fff;">UI</span> manifest.php &middot; UI Manifes</a>
+        <a href="#ep-manifest-api" class="menu-item"><span class="method-badge badge-post">API</span> manifest_api.php (Daftar Endpoint)</a>
+        <a href="#ep-manifest-restore" class="menu-item"><span class="method-badge badge-post" style="background:#10b981; color:#fff;">⭐ RESTORE</span> upload_portal_restore (Auto Excel)</a>
+        <a href="#ep-manifest-export" class="menu-item"><span class="method-badge badge-get" style="background:#10b981; color:#fff;">XLSX</span> export_excel (7 Sheet)</a>
+        <a href="#ep-manifest-sync" class="menu-item"><span class="method-badge badge-post" style="background:#0ea5e9; color:#fff;">SYNC</span> sync_ceisa_portal</a>
+        <a href="#ep-manifest-pdf" class="menu-item"><span class="method-badge badge-get" style="background:#ef4444; color:#fff;">PDF</span> pdf_manifest.php (Cetak PDF)</a>
+        <a href="#ep-manifest-h2h" class="menu-item"><span class="method-badge badge-post" style="background:#8b5cf6; color:#fff;">H2H</span> api_draft &amp; api_kirim</a>
+        <a href="#ep-getbl" class="menu-item"><span class="method-badge badge-get" style="background:#7c3aed; color:#fff;">PB</span> getbl.php (Inkuiri BC 1.1)</a>
 
         <div class="menu-category">Posting & Respon Dokumen</div>
         <a href="#ep-genjson" class="menu-item"><span class="method-badge badge-get">GET</span> genjson.php</a>
@@ -1029,7 +1033,7 @@ MessageBox("Daftar AJU", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</p
         </div>
     </div>
 
-    <!-- MANIFEST.PHP & MANIFEST_API.PHP -->
+    <!-- MANIFEST.PHP & MANIFEST_API.PHP OVERVIEW -->
     <div class="doc-section" id="ep-manifest">
         <div class="api-card">
             <div class="api-header">
@@ -1037,85 +1041,312 @@ MessageBox("Daftar AJU", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</p
                 <span class="endpoint-url">/manifest.php &middot; /manifest_api.php</span>
             </div>
             <p style="font-size:13px; color: var(--text-muted); margin-bottom:14px;">
-                Modul Manifes Kedatangan Sarana Pengangkut (BC 1.1) / NVOCC terintegrasi langsung dengan Host-to-Host OpenAPI Portal Bea Cukai (Versi 1.0). Melayani siklus lengkap: <strong>Drafting NVOCC</strong>, <strong>Cek Kelengkapan</strong>, <strong>Kirim / Pindah Data</strong>, <strong>Rekonsiliasi (Pecah Pos)</strong>, <strong>Inquiry No/Tgl BC 1.1</strong>, hingga <strong>Pencarian Pos Inward / Outward</strong>.
+                Modul Manifes Kedatangan Sarana Pengangkut (BC 1.1) / NVOCC terintegrasi langsung dengan Host-to-Host OpenAPI Portal Bea Cukai (Versi 1.0). Melayani siklus lengkap: <strong>Drafting NVOCC</strong>, <strong>Cek Kelengkapan</strong>, <strong>Kirim / Pindah Data</strong>, <strong>Rekonsiliasi (Pecah Pos)</strong>, <strong>Inquiry No/Tgl BC 1.1</strong>, hingga <strong>Otomasi Pembuatan Excel 7-Sheet &amp; Restore ke Portal CEISA 4.0</strong>.
             </p>
 
             <div class="note-box" style="margin-bottom:14px;">
                 <strong>Arsitektur OpenAPI Manifes Bea Cukai:</strong><br>
-                1. <strong>Payload Standar <code>JsonNvocc</code>:</strong> Disusun oleh builder engine <code>CeisaManifestBuilder.php</code> dengan relasi data Header &rarr; Kelompok Pos &rarr; Master BL &rarr; House BL (HBL) &rarr; BL HS &amp; Petikemas Terangkut.<br>
-                2. <strong>Multi-Company Isolated (<code>cmp_id</code>):</strong> Data tersimpan secara aman di 9 tabel database terdedikasi (<code>bc_ceisa_manifes_*</code>).<br>
-                3. <strong>Live Pos BC 1.1 Lookup:</strong> Fitur penarikan pos manifes inward/outward secara instan untuk melengkapi data dokumen pabean impor (BC 2.0 / BC 1.6 / BC 2.3).
+                1. <strong>Payload Standar <code>JsonNvocc</code> &amp; Excel Generator:</strong> Disusun oleh builder engine <code>CeisaManifestBuilder.php</code> dan <code>CeisaManifestXlsxExporter.php</code> mencakup relasi Header &rarr; Kelompok Pos &rarr; Master BL &rarr; House BL (HBL) &rarr; BL HS, Kontainer Terangkut/Tertinggal, &amp; Dokumen Pendukung.<br>
+                2. <strong>Multi-Company Isolated (<code>cmp_id</code>):</strong> Data tersimpan aman di 9 tabel database terdedikasi (<code>bc_ceisa_manifes_*</code>).<br>
+                3. <strong>Otomasi One-Click Restore:</strong> Mengeliminasi input manual dengan membuat Excel dan mengirimkannya secara otomatis via cURL multipart form-data dengan autentikasi MFA Token.
             </div>
 
-            <h4 style="font-size:13px; margin: 12px 0 6px; color:var(--text-main);">Endpoint OpenAPI Bea Cukai yang Diimplementasikan:</h4>
+            <h4 style="font-size:13px; margin: 12px 0 6px; color:var(--text-main);" id="ep-manifest-api">Daftar Endpoint API Manifes yang Tersedia:</h4>
             <table class="param-table">
                 <thead>
                     <tr><th>Aksi Internal (<code>action</code>)</th><th>Metode HTTP</th><th>Endpoint OpenAPI Bea Cukai</th><th>Keterangan</th></tr>
                 </thead>
                 <tbody>
-                    <tr><td><code>get_list</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=get_list&amp;source={h2h|portal}</code></td><td>Mengambil daftar dokumen manifes dengan pemisahan tegas antara dokumen lokal Host to Host (<code>source=h2h</code>) dan dokumen monitoring Portal CEISA 4.0 (<code>source=portal</code>).</td></tr>
-                    <tr><td><code>sync_ceisa_portal</code></td><td><code>POST</code></td><td><code>/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{npwp}</code></td><td>Menarik dan menyinkronkan seluruh dokumen NVOCC yang terdaftar di Portal CEISA 4.0 Bea Cukai secara live dengan autentikasi MFA Token.</td></tr>
-                    <tr><td><code>get_detail_nvocc</code></td><td><code>GET</code></td><td><code>/v3/ManifesSchema/v1/TdNvoccHeader/GetOneNVOCCHeader/{idNvocc}</code></td><td>Mengambil rincian dokumen header, status kelompok pos, dan daftar Master B/L resmi dari server CEISA 4.0.</td></tr>
+                    <tr><td><a href="#ep-manifest-restore" style="color:#10b981; font-weight:700;"><code>upload_portal_restore</code></a></td><td><code>POST</code></td><td><code>/manifes-restore-dokumen/v1/tempNVOCC/UploadRestoreExcel</code></td><td>⭐ <strong>Otomasi 2-Step:</strong> Merakit file Excel format baru 7 sheet di memori dan langsung me-restore dokumen ke Portal CEISA 4.0 via cURL multipart.</td></tr>
+                    <tr><td><a href="#ep-manifest-export" style="color:#10b981; font-weight:600;"><code>export_excel</code></a></td><td><code>GET</code></td><td>Internal Generator (<code>CeisaManifestXlsxExporter</code>)</td><td>Mengekspor data manifes lokal menjadi file Excel resmi (.xlsx 7 Sheet) berstandar CEISA 4.0 siap pakai.</td></tr>
+                    <tr><td><a href="#ep-manifest-sync" style="color:#0ea5e9; font-weight:600;"><code>sync_ceisa_portal</code></a></td><td><code>POST</code></td><td><code>/v3/ManifesSchema/v1/DataProses/prosesNPWP-NVOCC/{npwp}</code></td><td>Menarik dan menyinkronkan seluruh dokumen NVOCC aktif di Portal CEISA 4.0 Bea Cukai secara live dengan autentikasi MFA Token.</td></tr>
+                    <tr><td><code>get_detail_nvocc</code></td><td><code>GET</code></td><td><code>/v3/ManifesSchema/v1/TdNvoccHeader/GetOneNVOCCHeader/{idNvocc}</code></td><td>Mengambil rincian dokumen header, status pos, dan daftar Master B/L resmi dari server CEISA 4.0.</td></tr>
                     <tr><td><code>cek_rekon</code></td><td><code>GET / POST</code></td><td><code>/manifest_api.php?action=cek_rekon</code></td><td>Memeriksa status respon rekonsiliasi (rekon) NVOCC langsung dari Gateway Bea Cukai dan memperbarui database lokal.</td></tr>
-                    <tr><td><code>pdf_manifest.php</code></td><td><code>GET</code></td><td><code>/report-manifes-v2/v1/jasper/get-file-nvocc/{idNvocc}</code></td><td>Mengunduh dan menampilkan dokumen PDF resmi dari Jasper Report Service Bea Cukai dengan fitur smart local caching (0ms).</td></tr>
-                    <tr><td><code>api_draft</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/draft</code></td><td>Mengirim payload <code>JsonNvocc</code> draft baru ke CEISA 4.0 dan mendapatkan <code>idNvoccHeader</code>.</td></tr>
+                    <tr><td><a href="#ep-manifest-pdf" style="color:#ef4444; font-weight:600;"><code>pdf_manifest.php</code></a></td><td><code>GET</code></td><td><code>/report-manifes-v2/v1/jasper/get-file-nvocc/{idNvocc}</code></td><td>Mengunduh dan menampilkan dokumen PDF resmi dari Jasper Report Service Bea Cukai dengan fitur smart local caching.</td></tr>
+                    <tr><td><code>get_list</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=get_list&amp;source={h2h|portal}</code></td><td>Mengambil daftar dokumen manifes lokal Host to Host (<code>source=h2h</code>) atau hasil sinkronisasi Portal (<code>source=portal</code>).</td></tr>
+                    <tr><td><a href="#ep-manifest-h2h" style="color:#8b5cf6; font-weight:600;"><code>api_draft</code></a></td><td><code>POST</code></td><td><code>/manifes/nvocc/draft</code></td><td>Mengirim payload <code>JsonNvocc</code> draft baru ke CEISA 4.0 dan mendapatkan <code>idNvoccHeader</code>.</td></tr>
                     <tr><td><code>api_cek_lengkap</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/cek-lengkap?nomorAju={nomorAju}</code></td><td>Mengecek kelengkapan dokumen manifes. Status otomatis berubah menjadi <strong>Ready</strong> jika valid.</td></tr>
                     <tr><td><code>api_kirim</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/kirim</code></td><td>Mengirim data manifes yang sudah berstatus <em>Ready</em> ke Bea Cukai. Status berubah menjadi <strong>Terkirim</strong>.</td></tr>
                     <tr><td><code>api_rekon</code></td><td><code>POST</code></td><td><code>/manifes/nvocc/rekon</code></td><td>Melakukan rekonsiliasi / pecah pos antara manifes operator kapal dan NVOCC. Status berubah menjadi <strong>Rekon</strong>.</td></tr>
                     <tr><td><code>api_status</code></td><td><code>GET</code></td><td><code>/manifes/nvocc/status/{nomorAju}</code></td><td>Menarik riwayat dan status respon terakhir dari Bea Cukai.</td></tr>
                     <tr><td><code>api_bc11</code></td><td><code>GET</code></td><td><code>/manifes/nvocc/bc11?nomorAju={nomorAju}</code></td><td>Mendapatkan Nomor BC 1.1, Tanggal BC 1.1, dan Pos Manifes setelah proses rekon berhasil.</td></tr>
-                    <tr><td><code>export_excel</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=export_excel&amp;nomor_aju={nomorAju}</code></td><td>Mengekspor dokumen Manifes H2H menjadi file Excel Format Baru (.xlsx 7 Sheet) resmi CEISA 4.0 (NVOCC, MASTER, BL HS, BL, BL DOKUMEN, BL PETIKEMAS TERANGKUT, BL PETIKEMAS TERTINGGAL).</td></tr>
-                    <tr><td><code>upload_portal_restore</code></td><td><code>POST</code></td><td><code>/manifest_api.php?action=upload_portal_restore</code></td><td>Mengirim &amp; me-restore dokumen langsung ke Portal CEISA 4.0 via microservice <code>/manifes-restore-dokumen/v1/tempNVOCC/UploadRestoreExcel</code>.</td></tr>
-                    <tr><td><code>backup_portal_excel</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=backup_portal_excel&amp;nomor_aju={nomorAju}</code></td><td>Mengunduh file backup Excel resmi langsung dari server CEISA 4.0 via endpoint <code>/v3/ManifesSchema/v1/tempNVOCC/ExcelNvocc</code>.</td></tr>
-                    <tr><td><code>get_portal_history</code></td><td><code>GET</code></td><td><code>/manifest_api.php?action=get_portal_history&amp;nomor_aju={nomorAju}</code></td><td>Menarik rekam jejak riwayat resmi dokumen (Penerimaan, Perbaikan, Rekon, Respon Outward/Inward) dari <code>HistoryManifes</code> dan <code>DataManifesResponse</code>.</td></tr>
+                    <tr><td><code>backup_portal_excel</code></td><td><code>GET</code></td><td><code>/v3/ManifesSchema/v1/tempNVOCC/ExcelNvocc</code></td><td>Mengunduh file backup Excel resmi langsung dari server CEISA 4.0.</td></tr>
+                    <tr><td><code>get_portal_history</code></td><td><code>GET</code></td><td><code>/v3/ManifesSchema/v1/DataProses/HistoryManifes</code></td><td>Menarik rekam jejak riwayat resmi dokumen (Penerimaan, Perbaikan, Rekon, Respon Outward/Inward).</td></tr>
                     <tr><td><code>delete_manifes</code></td><td><code>DELETE</code></td><td><code>/manifes/nvocc/draft/{nomorAju}</code></td><td>Menghapus draft manifes dari gateway Bea Cukai dan database lokal.</td></tr>
                     <tr><td><code>api_inward</code></td><td><code>GET</code></td><td><code>/manifes/inward</code></td><td>Pencarian pos manifes kedatangan sarana pengangkut berdasarkan No BL, Tgl BL, dan Kode Kantor.</td></tr>
                     <tr><td><code>api_outward</code></td><td><code>GET</code></td><td><code>/manifes/outward</code></td><td>Pencarian pos manifes keberangkatan ekspor berdasarkan No BL, Tgl BL, dan Kode Kantor.</td></tr>
                 </tbody>
             </table>
+        </div>
+    </div>
 
-            <h4 style="font-size:13px; margin: 16px 0 6px; color:var(--text-main);">Contoh Pemanggilan API Manifes:</h4>
+    <!-- 1. FEATURE SPECIAL: UPLOAD PORTAL RESTORE (AUTO EXCEL + RESTORE) -->
+    <div class="doc-section" id="ep-manifest-restore">
+        <div class="api-card" style="border-left: 4px solid #10b981;">
+            <div class="api-header">
+                <span class="method-badge badge-post" style="background:#10b981; color:#fff;">POST</span>
+                <span class="endpoint-url" style="color:#059669;">/manifest_api.php?action=upload_portal_restore</span>
+            </div>
+            <p style="font-size:13px; color: var(--text-main); font-weight:600; margin-bottom:4px;">
+                ⭐ Otomasi Terpadu: Bentuk Excel 7-Sheet &amp; Restore ke Portal CEISA 4.0
+            </p>
+            <p style="font-size:11.5px; color: var(--text-muted); margin-bottom:12px; line-height:1.5;">
+                API ini merupakan solusi <strong>All-in-One One-Click</strong> yang mengeksekusi dua tahapan secara atomik di sisi server tanpa intervensi manual:
+            </p>
+
+            <div style="background:rgba(16, 185, 129, 0.06); border:1px solid rgba(16, 185, 129, 0.25); border-radius:6px; padding:12px 14px; margin-bottom:14px; font-size:11px; line-height:1.6;">
+                <strong>Mekanisme Otomatis 2-Step yang Dijalankan Server:</strong><br>
+                1. <strong>Step 1 (Generate Excel 7-Sheet):</strong> Server membaca data manifes dari tabel database (<code>bc_ceisa_manifes_*</code>), lalu merakit berkas spreadsheet format baru resmi CEISA 4.0 (<code>NVOCC</code>, <code>MASTER</code>, <code>BL</code>, <code>BL HS</code>, <code>BL PETIKEMAS TERANGKUT</code>, <code>BL PETIKEMAS TERTINGGAL</code>, <code>BL DOKUMEN</code>) di memori/temporary server.<br>
+                2. <strong>Step 2 (Auto-Restore ke Bea Cukai):</strong> Server mengambil token <em>Portal MFA CEISA 4.0</em> aktif milik perusahaan, lalu mengirimkan (cURL multipart form-data) berkas Excel tersebut ke microservice resmi Bea Cukai <code>/v3/ManifesSchema/v1/tempNVOCC/UploadRestoreExcel</code>. Setelah sukses, server langsung mengambil <code>idNvoccHeader</code> resmi yang terbit dan menyimpannya ke database lokal.
+            </div>
+
+            <h5 style="font-size:12px; font-weight:700; margin:10px 0 6px; color:var(--text-main);">Parameter Request (POST / x-www-form-urlencoded):</h5>
+            <table class="param-table">
+                <thead>
+                    <tr><th>Parameter</th><th>Tipe Data</th><th>Wajib?</th><th>Keterangan</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td><code>action</code></td><td>String</td><td>Ya</td><td>Harus bernilai <code>upload_portal_restore</code></td></tr>
+                    <tr><td><code>nomor_aju</code></td><td>String (26 digit)</td><td>Ya</td><td>Nomor Aju Manifes yang akan di-restore (contoh: <code>07010047031520261019872416</code>)</td></tr>
+                    <tr><td><code>cmp_id</code></td><td>String</td><td>Opsional</td><td>Kode/NPWP perusahaan (contoh: <code>TVL</code> atau <code>080167772504400</code>). Jika diabaikan, sistem otomatis mendeteksi dari Nomor AJU atau sesi aktif.</td></tr>
+                </tbody>
+            </table>
+
+            <h5 style="font-size:12px; font-weight:700; margin:14px 0 6px; color:var(--text-main);">Struktur Respon JSON:</h5>
+            <div class="code-block">
+                <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// 1. Contoh Respon Sukses (HTTP 200):
+{
+  "status": "OK",
+  "message": "Dokumen berhasil di-restore ke Portal CEISA 4.0!",
+  "nomor_aju": "07010047031520261019872416",
+  "id_nvocc_header": "219582",
+  "cmp_id": "TVL",
+  "http_code": 200
+}
+
+// 2. Contoh Respon Jika Dokumen Sudah Pernah Ada di Portal (Duplikat):
+{
+  "status": "OK",
+  "message": "Dokumen sudah terdaftar di portal. idNvoccHeader berhasil disinkronkan.",
+  "nomor_aju": "07010047031520261019872416",
+  "id_nvocc_header": "219582",
+  "is_duplicate": true
+}
+
+// 3. Contoh Respon Gagal (HTTP 200 / 400 / 500):
+{
+  "status": "ERROR",
+  "message": "Gagal menghasilkan token Portal MFA CEISA 4.0 untuk perusahaan TVL. Pastikan kredensial login CEISA & Secret MFA tersimpan pada profil perusahaan."
+}</pre>
+            </div>
+
+            <h4 style="font-size:13px; margin: 16px 0 6px; color:var(--text-main);">Contoh Pemanggilan upload_portal_restore:</h4>
             <div class="snippet-wrapper">
                 <div class="snippet-tabs">
-                    <button class="snippet-tab-btn active" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
-                    <button class="snippet-tab-btn pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn active pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / Universal HTTP</button>
                 </div>
-                <div class="snippet-pane pane-curl active">
+                <div class="snippet-pane pane-pb active">
                     <div class="code-block with-tabs">
                         <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-<pre># 1. Unduh / Cetak Dokumen PDF Resmi dari Bea Cukai (Jasper Report Service):
-curl -X GET "http://[server-ip]/pdf_manifest.php?nomor_aju=07010047031520261019276745&amp;cmp_id=TVL" -o "manifes.pdf"
+<pre>// =========================================================================
+// PowerScript (PowerBuilder): Otomasi Pembuatan Excel &amp; Restore ke Portal CEISA 4.0
+// Nama Fungsi : gf_manifest_upload_portal_restore(as_nomor_aju, as_cmp_id)
+// Parameter   : String as_nomor_aju (Nomor Aju 26 Digit, misal: "07010047031520261019872416")
+//               String as_cmp_id    (Kode Perusahaan, misal: "TVL" atau "080167772504400")
+// Return      : Boolean (TRUE = Berhasil Restore, FALSE = Gagal)
+// =========================================================================
+OLEObject lole_http
+String ls_url, ls_post_data, ls_response
+Long ll_status
+Boolean lb_success = False
 
-# 2. Ambil Daftar Dokumen Manifes Host to Host (Terisolasi dari Data Portal):
-curl -X GET "http://[server-ip]/manifest_api.php?action=get_list&amp;source=h2h&amp;cmp_id=TVL"
+// 1. Validasi Parameter Awal
+IF IsNull(as_nomor_aju) OR Trim(as_nomor_aju) = "" THEN
+    MessageBox("Peringatan", "Nomor Aju Manifes tidak boleh kosong!", Exclamation!)
+    RETURN False
+END IF
 
-# 3. Sinkronisasi Data NVOCC Langsung dari Portal CEISA 4.0:
-curl -X POST "http://[server-ip]/manifest_api.php?action=sync_ceisa_portal&amp;cmp_id=TVL"
+IF IsNull(as_cmp_id) OR Trim(as_cmp_id) = "" THEN
+    as_cmp_id = "TVL" // Default perusahaan jika kosong
+END IF
 
-# 4. Kirim Draft NVOCC ke Gateway Manifes:
-curl -X POST "http://[server-ip]/manifest_api.php" \
-  -d "action=api_draft&amp;nomor_aju=00001103006520261015000001&amp;cmp_id=010000000000000"
+// 2. Susun URL Endpoint &amp; Payload POST
+ls_url = gs_url + "/manifest_api.php"
+ls_post_data = "action=upload_portal_restore&amp;nomor_aju=" + Trim(as_nomor_aju) + "&amp;cmp_id=" + Trim(as_cmp_id)
 
-# 5. Cek Pos Manifes Inward Berdasarkan No &amp; Tgl B/L:
-curl -X GET "http://[server-ip]/manifest_api.php?action=api_inward&amp;no_bl=MSK123456&amp;tgl_bl=2026-10-15&amp;kode_kantor=040300&amp;cmp_id=010000000000000"</pre>
+// 3. Buat Object HTTP Client Windows (MSXML2 ServerXMLHTTP)
+lole_http = CREATE OLEObject
+IF lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0") &lt;&gt; 0 THEN
+    IF lole_http.ConnectToNewObject("MSXML2.XMLHTTP") &lt;&gt; 0 THEN
+        MessageBox("Error Sistem", "Komponen MSXML2.ServerXMLHTTP tidak ditemukan pada Windows ini.", StopSign!)
+        DESTROY lole_http
+        RETURN False
+    END IF
+END IF
+
+// 4. Buka Koneksi POST dan Kirim Request
+lole_http.Open("POST", ls_url, False)
+lole_http.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
+lole_http.setRequestHeader("Accept", "application/json")
+lole_http.Send(ls_post_data)
+
+// 5. Baca Status HTTP dan Respon Body
+ll_status = Long(lole_http.Status)
+ls_response = String(lole_http.ResponseText)
+
+// 6. Bebaskan OLE Object dari Memori
+lole_http.DisconnectObject()
+DESTROY lole_http
+
+// 7. Evaluasi Hasil Pengiriman
+IF ll_status = 200 THEN
+    IF Pos(ls_response, '"status":"OK"') &gt; 0 OR Pos(ls_response, '"status":true') &gt; 0 THEN
+        MessageBox("Sukses Restore Portal", &amp;
+            "Dokumen Manifes berhasil dibentuk menjadi Excel dan di-restore ke Portal CEISA 4.0!~r~n~r~n" + &amp;
+            "Nomor AJU: " + as_nomor_aju + "~r~n" + &amp;
+            "Respon Server:~r~n" + ls_response, Information!)
+        lb_success = True
+    ELSEIF Pos(ls_response, "sudah terdaftar") &gt; 0 OR Pos(ls_response, "duplikat") &gt; 0 THEN
+        MessageBox("Informasi Duplikat", &amp;
+            "Dokumen Manifes ini sudah pernah terdaftar di Portal CEISA 4.0.~r~n~r~n" + &amp;
+            "Respon Server:~r~n" + ls_response, Exclamation!)
+        lb_success = True
+    ELSE
+        MessageBox("Gagal Restore", &amp;
+            "Server mengembalikan pesan kegagalan:~r~n~r~n" + ls_response, StopSign!)
+        lb_success = False
+    END IF
+ELSE
+    MessageBox("HTTP Error", &amp;
+        "Koneksi gagal dengan HTTP Status: " + String(ll_status) + "~r~n~r~n" + ls_response, StopSign!)
+    lb_success = False
+END IF
+
+RETURN lb_success</pre>
                     </div>
                 </div>
-                <div class="snippet-pane pane-pb" style="display:none;">
+                <div class="snippet-pane pane-curl" style="display:none;">
                     <div class="code-block with-tabs">
                         <button class="copy-btn" onclick="copyCode(this)">Copy</button>
-<pre>// PowerBuilder (PowerScript) - Kirim Draft Manifes NVOCC (BC 1.1)
+<pre># Eksekusi Otomasi Excel &amp; Restore Portal CEISA 4.0:
+curl -X POST "http://[server-ip]/manifest_api.php" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "action=upload_portal_restore&amp;nomor_aju=07010047031520261019872416&amp;cmp_id=TVL"</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. EXPORT EXCEL 7-SHEET -->
+    <div class="doc-section" id="ep-manifest-export">
+        <div class="api-card" style="border-left: 4px solid #10b981;">
+            <div class="api-header">
+                <span class="method-badge badge-get">GET</span>
+                <span class="endpoint-url">/manifest_api.php?action=export_excel&amp;nomor_aju={aju}&amp;cmp_id={cmp}</span>
+            </div>
+            <p style="font-size:12px; color: var(--text-main); font-weight:600; margin-bottom:4px;">
+                Mengekspor &amp; Mengunduh Berkas Excel Resmi (.xlsx 7-Sheet)
+            </p>
+            <p style="font-size:11px; color: var(--text-muted); margin-bottom:12px;">
+                Mengenerate dan mengalirkan langsung file Excel format baru resmi CEISA 4.0 yang terdiri dari 7 Sheet (<code>NVOCC</code>, <code>MASTER</code>, <code>BL</code>, <code>BL HS</code>, <code>BL PETIKEMAS TERANGKUT</code>, <code>BL PETIKEMAS TERTINGGAL</code>, <code>BL DOKUMEN</code>). Berkas ini identik dengan template yang diterima oleh portal CEISA 4.0.
+            </p>
+
+            <h4 style="font-size:12px; margin: 12px 0 6px; color:var(--text-main);">Contoh PowerBuilder (Download &amp; Simpan Berkas Biner .xlsx):</h4>
+            <div class="snippet-wrapper">
+                <div class="snippet-tabs">
+                    <button class="snippet-tab-btn active pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
+                </div>
+                <div class="snippet-pane pane-pb active">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// =========================================================================
+// PowerScript: Download Berkas Excel Manifes CEISA 4.0 (.xlsx) ke Disk Lokal
+// Function: gf_manifest_download_excel(as_nomor_aju, as_cmp_id, as_target_path)
+// =========================================================================
+OLEObject lole_http, lole_stream
+String ls_url
+Long ll_status
+
+ls_url = gs_url + "/manifest_api.php?action=export_excel&amp;nomor_aju=" + Trim(as_nomor_aju) + "&amp;cmp_id=" + Trim(as_cmp_id)
+
+lole_http = CREATE OLEObject
+lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0")
+lole_http.Open("GET", ls_url, False)
+lole_http.Send()
+
+ll_status = Long(lole_http.Status)
+IF ll_status = 200 THEN
+    // Tulis data biner ke file menggunakan ADODB.Stream
+    lole_stream = CREATE OLEObject
+    lole_stream.ConnectToNewObject("ADODB.Stream")
+    lole_stream.Type = 1 // 1 = adTypeBinary
+    lole_stream.Open()
+    lole_stream.Write(lole_http.ResponseBody)
+    lole_stream.SaveToFile(as_target_path, 2) // 2 = adSaveCreateOverWrite
+    lole_stream.Close()
+    DESTROY lole_stream
+
+    MessageBox("Sukses", "Berkas Excel CEISA 4.0 berhasil diunduh ke:~r~n" + as_target_path, Information!)
+ELSE
+    MessageBox("Error", "Gagal mengunduh Excel. HTTP Status: " + String(ll_status), StopSign!)
+END IF
+
+lole_http.DisconnectObject()
+DESTROY lole_http</pre>
+                    </div>
+                </div>
+                <div class="snippet-pane pane-curl" style="display:none;">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre># Unduh file Excel resmi CEISA 4.0:
+curl -X GET "http://[server-ip]/manifest_api.php?action=export_excel&amp;nomor_aju=07010047031520261019872416&amp;cmp_id=TVL" \
+  -o "Manifest_CEISA4_NVOCC.xlsx"</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. SINKRONISASI PORTAL CEISA 4.0 -->
+    <div class="doc-section" id="ep-manifest-sync">
+        <div class="api-card" style="border-left: 4px solid #0ea5e9;">
+            <div class="api-header">
+                <span class="method-badge badge-post" style="background:#0ea5e9; color:#fff;">POST</span>
+                <span class="endpoint-url">/manifest_api.php?action=sync_ceisa_portal</span>
+            </div>
+            <p style="font-size:12px; color: var(--text-main); font-weight:600; margin-bottom:4px;">
+                Sinkronisasi Seluruh Dokumen NVOCC dari Portal CEISA 4.0 Bea Cukai
+            </p>
+            <p style="font-size:11px; color: var(--text-muted); margin-bottom:12px;">
+                Menarik seluruh daftar dokumen NVOCC yang terdaftar di Portal CEISA 4.0 milik NPWP perusahaan, mencakup nomor aju, status proses, kelompok pos, no/tgl master BL, serta status rekon secara live menggunakan token MFA.
+            </p>
+
+            <h4 style="font-size:12px; margin: 12px 0 6px; color:var(--text-main);">Contoh PowerBuilder (Sinkronisasi Data):</h4>
+            <div class="snippet-wrapper">
+                <div class="snippet-tabs">
+                    <button class="snippet-tab-btn active pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
+                </div>
+                <div class="snippet-pane pane-pb active">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// =========================================================================
+// PowerScript: Sinkronisasi Data Dokumen Portal CEISA 4.0
+// Function: gf_manifest_sync_portal(as_cmp_id)
+// =========================================================================
 OLEObject lole_http
 String ls_url, ls_payload, ls_response
 Long ll_status
 
 ls_url = gs_url + "/manifest_api.php"
-ls_payload = "action=api_draft&nomor_aju=00001103006520261015000001&cmp_id=" + gs_cmp_id
+ls_payload = "action=sync_ceisa_portal&amp;cmp_id=" + Trim(as_cmp_id)
 
 lole_http = CREATE OLEObject
-IF lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0") <> 0 THEN
-    lole_http.ConnectToNewObject("MSXML2.XMLHTTP")
-END IF
-
+lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0")
 lole_http.Open("POST", ls_url, False)
 lole_http.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
 lole_http.Send(ls_payload)
@@ -1126,7 +1357,157 @@ ls_response = String(lole_http.ResponseText)
 lole_http.DisconnectObject()
 DESTROY lole_http
 
-MessageBox("Draft Manifes", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</pre>
+MessageBox("Sinkronisasi Portal CEISA 4.0", "HTTP " + String(ll_status) + ":~r~n" + ls_response)</pre>
+                    </div>
+                </div>
+                <div class="snippet-pane pane-curl" style="display:none;">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre># Sinkronisasi Dokumen Portal:
+curl -X POST "http://[server-ip]/manifest_api.php" \
+  -d "action=sync_ceisa_portal&amp;cmp_id=TVL"</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. CETAK PDF RESMI JASPER REPORT -->
+    <div class="doc-section" id="ep-manifest-pdf">
+        <div class="api-card" style="border-left: 4px solid #ef4444;">
+            <div class="api-header">
+                <span class="method-badge badge-get" style="background:#ef4444; color:#fff;">GET</span>
+                <span class="endpoint-url">/pdf_manifest.php?nomor_aju={aju}&amp;cmp_id={cmp}</span>
+            </div>
+            <p style="font-size:12px; color: var(--text-main); font-weight:600; margin-bottom:4px;">
+                Mengunduh &amp; Menampilkan Dokumen PDF Resmi dari Jasper Report Bea Cukai
+            </p>
+            <p style="font-size:11px; color: var(--text-muted); margin-bottom:12px;">
+                Mengunduh dokumen PDF resmi BC 1.1 yang diterbitkan oleh Jasper Report Service Bea Cukai (<code>/report-manifes-v2/v1/jasper/get-file-nvocc/{idNvocc}</code>) dengan fitur <em>smart local caching</em> (respon instan jika sudah pernah diunduh).
+            </p>
+
+            <h4 style="font-size:12px; margin: 12px 0 6px; color:var(--text-main);">Contoh PowerBuilder (Download &amp; Buka PDF Otomatis):</h4>
+            <div class="snippet-wrapper">
+                <div class="snippet-tabs">
+                    <button class="snippet-tab-btn active pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
+                </div>
+                <div class="snippet-pane pane-pb active">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// =========================================================================
+// PowerScript: Download &amp; Buka File PDF Resmi Manifes
+// Function: gf_manifest_view_pdf(as_nomor_aju, as_cmp_id, as_target_pdf)
+// =========================================================================
+OLEObject lole_http, lole_stream
+String ls_url
+Long ll_status
+
+ls_url = gs_url + "/pdf_manifest.php?nomor_aju=" + Trim(as_nomor_aju) + "&amp;cmp_id=" + Trim(as_cmp_id)
+
+lole_http = CREATE OLEObject
+lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0")
+lole_http.Open("GET", ls_url, False)
+lole_http.Send()
+
+ll_status = Long(lole_http.Status)
+IF ll_status = 200 THEN
+    lole_stream = CREATE OLEObject
+    lole_stream.ConnectToNewObject("ADODB.Stream")
+    lole_stream.Type = 1 // Binary
+    lole_stream.Open()
+    lole_stream.Write(lole_http.ResponseBody)
+    lole_stream.SaveToFile(as_target_pdf, 2)
+    lole_stream.Close()
+    DESTROY lole_stream
+
+    // Buka otomatis dengan viewer PDF default Windows
+    Run("cmd /c start dummy " + as_target_pdf)
+ELSE
+    MessageBox("Error", "Gagal mengunduh dokumen PDF. HTTP " + String(ll_status), StopSign!)
+END IF
+
+lole_http.DisconnectObject()
+DESTROY lole_http</pre>
+                    </div>
+                </div>
+                <div class="snippet-pane pane-curl" style="display:none;">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre># Unduh PDF resmi:
+curl -X GET "http://[server-ip]/pdf_manifest.php?nomor_aju=07010047031520261019872416&amp;cmp_id=TVL" \
+  -o "manifes_bc11.pdf"</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. H2H LIFECYCLE: DRAFT, KIRIM, REKON -->
+    <div class="doc-section" id="ep-manifest-h2h">
+        <div class="api-card" style="border-left: 4px solid #8b5cf6;">
+            <div class="api-header">
+                <span class="method-badge badge-post" style="background:#8b5cf6; color:#fff;">POST</span>
+                <span class="endpoint-url">/manifest_api.php?action=api_draft | api_kirim | api_rekon</span>
+            </div>
+            <p style="font-size:12px; color: var(--text-main); font-weight:600; margin-bottom:4px;">
+                Transmisi Host to Host (H2H) Manifes via OpenAPI Gateway Bea Cukai
+            </p>
+            <p style="font-size:11px; color: var(--text-muted); margin-bottom:12px;">
+                Digunakan untuk alur integrasi JSON standar: membuat draft (<code>api_draft</code>), validasi kelengkapan (<code>api_cek_lengkap</code>), kirim ke pabean (<code>api_kirim</code>), melakukan rekonsiliasi pecah pos (<code>api_rekon</code>), serta penarikan nomor &amp; tanggal BC 1.1 (<code>api_bc11</code>).
+            </p>
+
+            <h4 style="font-size:12px; margin: 12px 0 6px; color:var(--text-main);">Contoh PowerBuilder (Kirim / Eksekusi Transaksi H2H):</h4>
+            <div class="snippet-wrapper">
+                <div class="snippet-tabs">
+                    <button class="snippet-tab-btn active pb-tab" data-mode="pb" onclick="setSnippetTab(this, 'pb')">⚡ PowerBuilder (PowerScript)</button>
+                    <button class="snippet-tab-btn" data-mode="curl" onclick="setSnippetTab(this, 'curl')">🌐 cURL / HTTP</button>
+                </div>
+                <div class="snippet-pane pane-pb active">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre>// =========================================================================
+// PowerScript: Eksekusi Transaksi Manifes H2H (Draft / Kirim / Rekon / BC11)
+// Function: gf_manifest_execute_h2h(as_action, as_nomor_aju, as_cmp_id)
+// Parameter as_action: "api_draft", "api_cek_lengkap", "api_kirim", "api_rekon", "api_bc11"
+// =========================================================================
+OLEObject lole_http
+String ls_url, ls_payload, ls_response
+Long ll_status
+
+ls_url = gs_url + "/manifest_api.php"
+ls_payload = "action=" + Trim(as_action) + "&amp;nomor_aju=" + Trim(as_nomor_aju) + "&amp;cmp_id=" + Trim(as_cmp_id)
+
+lole_http = CREATE OLEObject
+lole_http.ConnectToNewObject("MSXML2.ServerXMLHTTP.6.0")
+lole_http.Open("POST", ls_url, False)
+lole_http.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
+lole_http.Send(ls_payload)
+
+ll_status = Long(lole_http.Status)
+ls_response = String(lole_http.ResponseText)
+
+lole_http.DisconnectObject()
+DESTROY lole_http
+
+MessageBox("Respon Manifes H2H (" + as_action + ")", &amp;
+    "HTTP " + String(ll_status) + ":~r~n" + ls_response)</pre>
+                    </div>
+                </div>
+                <div class="snippet-pane pane-curl" style="display:none;">
+                    <div class="code-block with-tabs">
+                        <button class="copy-btn" onclick="copyCode(this)">Copy</button>
+<pre># 1. Kirim Draft Manifes:
+curl -X POST "http://[server-ip]/manifest_api.php" \
+  -d "action=api_draft&amp;nomor_aju=07010047031520261019872416&amp;cmp_id=TVL"
+
+# 2. Kirim Final ke Bea Cukai:
+curl -X POST "http://[server-ip]/manifest_api.php" \
+  -d "action=api_kirim&amp;nomor_aju=07010047031520261019872416&amp;cmp_id=TVL"
+
+# 3. Rekonsiliasi (Pecah Pos):
+curl -X POST "http://[server-ip]/manifest_api.php" \
+  -d "action=api_rekon&amp;nomor_aju=07010047031520261019872416&amp;cmp_id=TVL"</pre>
                     </div>
                 </div>
             </div>

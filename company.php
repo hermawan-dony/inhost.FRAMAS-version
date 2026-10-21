@@ -61,6 +61,9 @@ if ($isAdmin && empty($_SESSION['is_admin'])) {
     $_SESSION['is_admin'] = true;
 }
 
+// Auto-heal: pastikan seluruh NPWP di bc_ceisa_company wajib 15 digit jika terdapat 16 digit yang berawalan 0
+@$koneksi->query("UPDATE bc_ceisa_company SET npwp = SUBSTRING(npwp, 2) WHERE LENGTH(npwp) = 16 AND npwp LIKE '0%'");
+
 $action = $_REQUEST['action'] ?? '';
 
 // -------------------------------------------------------------
@@ -215,6 +218,24 @@ if ($action === 'save') {
         exit;
     }
 
+    // Normalisasi & Validasi Wajib NPWP Perusahaan (Wajib 15 Digit Angka)
+    $clean_npwp = preg_replace('/[^0-9]/', '', $npwp);
+    if (strlen($clean_npwp) === 16 && substr($clean_npwp, 0, 1) === '0') {
+        $clean_npwp = substr($clean_npwp, 1);
+    }
+    if (strlen($clean_npwp) > 15) {
+        $clean_npwp = substr($clean_npwp, 0, 15);
+    }
+    $npwp = $clean_npwp;
+
+    if (empty($npwp) || strlen($npwp) !== 15) {
+        echo json_encode([
+            'status' => 'ERROR',
+            'message' => 'NPWP Perusahaan wajib diisi 15 digit angka (saat ini: ' . strlen($npwp) . ' digit).'
+        ]);
+        exit;
+    }
+
     // Validasi Keunikan Subdomain
     if (!empty($subdomain)) {
         $subStmt = $koneksi->prepare("SELECT cmp_id, cmp_name FROM bc_ceisa_company WHERE LOWER(subdomain) = ? AND cmp_id != ? LIMIT 1");
@@ -265,6 +286,28 @@ if ($action === 'save') {
     }
     $company_roles = implode(',', $cleanRoles);
 
+    // Ambil input allowed_docs (daftar dokumen BC aktif untuk perusahaan)
+    $docsInput = $_POST['allowed_docs'] ?? [];
+    if (!is_array($docsInput)) {
+        $docsInput = explode(',', (string)$docsInput);
+    }
+    $catalogKeys = array_keys(ceisa_doc_catalog());
+    $cleanDocs = [];
+    foreach ($docsInput as $d) {
+        $d = trim((string)$d);
+        if (in_array($d, $catalogKeys) && !in_array($d, $cleanDocs)) {
+            $cleanDocs[] = $d;
+        }
+    }
+    if (!empty($cleanDocs)) {
+        $allowed_docs = implode(',', $cleanDocs);
+    } elseif (isset($_POST['allowed_docs_submitted'])) {
+        $allowed_docs = 'NONE';
+    } else {
+        $preset = ceisa_resolve_allowed_docs($company_roles, null);
+        $allowed_docs = !empty($preset) ? implode(',', $preset) : 'NONE';
+    }
+
     if ($mode === 'add') {
         // Cek duplikasi cmp_id
         $checkStmt = $koneksi->prepare("SELECT cmp_id FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
@@ -284,8 +327,8 @@ if ($action === 'save') {
             username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, is_final,
             token_ceisa, api_key_ceisa, insw_client_id, insw_client_secret, insw_token, insw_api_url,
             ERP_Name, ERP_User, ERP_Password, ERP_Constring,
-            AI_Name, AI_API_Key, is_active, IS_INV, company_roles, allow_lowercase_code, alert_it_inv_unposted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            AI_Name, AI_API_Key, is_active, IS_INV, company_roles, allowed_docs, allow_lowercase_code, alert_it_inv_unposted
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $koneksi->prepare($sql);
         if (!$stmt) {
@@ -294,13 +337,13 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssssssssssssssssiisii",
+            "sssssssssssssssssssssssssssssssiisii",
             $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allow_lowercase_code, $alert_it_inv_unposted
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted
         );
         
         if ($stmt->execute()) {
@@ -318,7 +361,7 @@ if ($action === 'save') {
             username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, id_user_ceisa = ?, is_final = ?,
             token_ceisa = ?, api_key_ceisa = ?, insw_client_id = ?, insw_client_secret = ?, insw_token = ?, insw_api_url = ?,
             ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
-            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, company_roles = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
+            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, company_roles = ?, allowed_docs = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
             WHERE cmp_id = ?";
             
         $stmt = $koneksi->prepare($sql);
@@ -328,13 +371,13 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssssssssssssssiisiis",
+            "ssssssssssssssssssssssssssssssiisiis",
             $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
         );
         
         if ($stmt->execute()) {
@@ -344,6 +387,7 @@ if ($action === 'save') {
                 $_SESSION['company_npwp']            = $npwp;
                 $_SESSION['is_inv']                  = $is_inv;
                 $_SESSION['company_roles']           = $company_roles;
+                $_SESSION['allowed_docs']            = ceisa_resolve_allowed_docs($company_roles, $allowed_docs);
                 $_SESSION['company_erp_name']        = $erp_name;
                 $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
                 $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
@@ -1147,7 +1191,7 @@ $theme = $_GET['theme'] ?? 'light';
         body {
             font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             font-size: 10.5px;
-            line-height: 1.45;
+            line-height: 1.4;
             background: var(--bg-body);
             color: var(--text-main);
             padding: 6px 10px;
@@ -1167,7 +1211,7 @@ $theme = $_GET['theme'] ?? 'light';
         .header-box {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 3px;
+            border-radius: 4px;
             padding: 6px 12px;
             display: flex;
             justify-content: space-between;
@@ -1182,7 +1226,7 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .header-icon {
-            font-size: 18px;
+            font-size: 16px;
             line-height: 1;
         }
 
@@ -1212,7 +1256,7 @@ $theme = $_GET['theme'] ?? 'light';
         .stat-card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 3px;
+            border-radius: 4px;
             padding: 4px 10px;
             display: flex;
             align-items: center;
@@ -1225,16 +1269,16 @@ $theme = $_GET['theme'] ?? 'light';
             transform: translateY(-1px);
         }
         .stat-info { display: flex; flex-direction: column; }
-        .stat-label { font-size: 9px; color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.3px; }
-        .stat-value { font-size: 13px; font-weight: 700; color: var(--text-heading); line-height: 1.2; margin-top: 1px; }
+        .stat-label { font-size: 9px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; }
+        .stat-value { font-size: 13px; font-weight: 700; color: var(--text-heading); line-height: 1.2; margin-top: 2px; }
         .stat-icon { font-size: 16px; opacity: 0.85; }
 
         /* TOOLBAR */
         .toolbar {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 3px;
-            padding: 4px 8px;
+            border-radius: 4px;
+            padding: 5px 8px;
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
@@ -1257,11 +1301,11 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .search-input {
-            height: 22px;
-            padding: 1px 6px;
-            font-size: 9.5px;
+            height: 24px;
+            padding: 2px 7px;
+            font-size: 10px;
             border: 1px solid var(--border-input);
-            border-radius: 2px;
+            border-radius: 3px;
             background: var(--bg-input);
             color: var(--text-main);
             outline: none;
@@ -1274,11 +1318,11 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .filter-select {
-            height: 22px;
-            padding: 1px 6px;
-            font-size: 9.5px;
+            height: 24px;
+            padding: 2px 6px;
+            font-size: 10px;
             border: 1px solid var(--border-input);
-            border-radius: 2px;
+            border-radius: 3px;
             background: var(--bg-input);
             color: var(--text-main);
             outline: none;
@@ -1299,11 +1343,11 @@ $theme = $_GET['theme'] ?? 'light';
             align-items: center;
             justify-content: center;
             gap: 4px;
-            height: 22px;
-            padding: 0 8px;
+            height: 24px;
+            padding: 0 9px;
             font-size: 10px;
             font-weight: 500;
-            border-radius: 2px;
+            border-radius: 3px;
             border: 1px solid transparent;
             cursor: pointer;
             text-decoration: none;
@@ -1364,10 +1408,11 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .ant-btn-sm {
-            height: 20px;
-            padding: 0 5px;
-            font-size: 9px;
-            border-radius: 2px;
+            height: 21px;
+            padding: 0 6px;
+            font-size: 9.5px;
+            border-radius: 3px;
+            gap: 3px;
         }
 
         /* TABLE GRID */
@@ -1377,7 +1422,7 @@ $theme = $_GET['theme'] ?? 'light';
             border-radius: 3px;
             overflow: auto;
             box-shadow: 0 1px 2px rgba(0,0,0,0.02);
-            max-height: calc(100vh - 160px);
+            max-height: calc(100vh - 145px);
         }
 
         table.grid-table {
@@ -1398,18 +1443,21 @@ $theme = $_GET['theme'] ?? 'light';
             color: var(--text-heading);
             font-weight: 600;
             text-align: left;
-            padding: 4px 6px;
+            padding: 5px 8px;
             border: 1px solid var(--border-table);
             font-size: 9.5px;
-            letter-spacing: 0.2px;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
             user-select: none;
         }
 
         table.grid-table td {
-            padding: 3px 6px;
+            padding: 4px 8px;
             border: 1px solid var(--border-table);
             color: var(--text-main);
             vertical-align: middle;
+            font-size: 10px;
+            line-height: 1.35;
         }
 
         table.grid-table tbody tr {
@@ -1430,12 +1478,12 @@ $theme = $_GET['theme'] ?? 'light';
         .ant-badge {
             display: inline-flex;
             align-items: center;
-            gap: 4px;
-            padding: 2px 7px;
+            gap: 3px;
+            padding: 1.5px 5px;
             border-radius: 3px;
-            font-size: 10px;
+            font-size: 8.5px;
             font-weight: 600;
-            line-height: 1.3;
+            line-height: 1.25;
         }
         .ant-badge-blue { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
         .ant-badge-green { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
@@ -1467,13 +1515,13 @@ $theme = $_GET['theme'] ?? 'light';
         .ceisa-autofill-banner {
             background: linear-gradient(135deg, rgba(24,144,255,0.08) 0%, rgba(114,46,209,0.06) 100%);
             border: 1px dashed #91d5ff;
-            border-radius: 6px;
-            padding: 10px 14px;
-            margin-bottom: 14px;
+            border-radius: 4px;
+            padding: 6px 10px;
+            margin-bottom: 8px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
+            gap: 8px;
         }
         html[data-theme="dark"] .ceisa-autofill-banner {
             background: linear-gradient(135deg, rgba(24,144,255,0.12) 0%, rgba(114,46,209,0.1) 100%);
@@ -1513,15 +1561,15 @@ $theme = $_GET['theme'] ?? 'light';
         .modal-card {
             background: var(--bg-card);
             border: 1px solid var(--border-card);
-            border-radius: 8px;
+            border-radius: 6px;
             width: 100%;
-            max-width: 880px;
-            height: 94vh;
-            max-height: 94vh;
+            max-width: 820px;
+            height: 92vh;
+            max-height: 92vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            box-shadow: 0 12px 36px rgba(0,0,0,0.3);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.25);
             animation: modalFadeIn 0.2s ease-out;
         }
 
@@ -1539,7 +1587,7 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .modal-header {
-            padding: 12px 18px;
+            padding: 8px 14px;
             border-bottom: 1px solid var(--border-card);
             display: flex;
             align-items: center;
@@ -1549,24 +1597,24 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .modal-header h3 {
-            font-size: 13.5px;
+            font-size: 11.5px;
             font-weight: 600;
             color: var(--text-heading);
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             margin: 0;
         }
 
         .modal-close-btn {
             background: transparent;
             border: none;
-            font-size: 16px;
+            font-size: 14px;
             color: var(--text-muted);
             cursor: pointer;
             line-height: 1;
-            padding: 4px;
-            border-radius: 4px;
+            padding: 2px 6px;
+            border-radius: 3px;
         }
         .modal-close-btn:hover {
             color: #ff4d4f;
@@ -1577,10 +1625,10 @@ $theme = $_GET['theme'] ?? 'light';
         .modal-tabs {
             display: flex;
             align-items: flex-end;
-            gap: 6px;
+            gap: 4px;
             background: #f7f9fa;
             border-bottom: 2px solid #e1e4e8;
-            padding: 8px 16px 0 16px;
+            padding: 5px 12px 0 12px;
             flex-shrink: 0;
             overflow-x: auto;
             z-index: 10;
@@ -1591,18 +1639,18 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .modal-tab-btn {
-            padding: 8px 14px;
-            font-size: 11.5px;
+            padding: 5px 10px;
+            font-size: 10px;
             font-weight: 600;
             color: var(--text-muted);
             background: rgba(0, 0, 0, 0.03);
             border: 1px solid var(--border-card);
             border-bottom: none;
-            border-radius: 6px 6px 0 0;
+            border-radius: 4px 4px 0 0;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             white-space: nowrap;
             transition: all 0.2s ease;
         }
@@ -1620,17 +1668,17 @@ $theme = $_GET['theme'] ?? 'light';
             background: #1890ff !important;
             border-color: #1890ff !important;
             font-weight: 700;
-            box-shadow: 0 -2px 8px rgba(24, 144, 255, 0.35);
+            box-shadow: 0 -2px 6px rgba(24, 144, 255, 0.3);
         }
 
         .tab-section-header {
-            margin: 0 0 14px 0;
-            padding: 8px 14px;
+            margin: 0 0 8px 0;
+            padding: 5px 10px;
             background: var(--table-head-bg);
             border: 1px solid var(--border-card);
-            border-left: 4px solid var(--primary);
-            border-radius: 4px;
-            font-size: 11.5px;
+            border-left: 3px solid var(--primary);
+            border-radius: 3px;
+            font-size: 10px;
             font-weight: 700;
             color: var(--text-heading);
             display: flex;
@@ -1638,13 +1686,13 @@ $theme = $_GET['theme'] ?? 'light';
             justify-content: space-between;
         }
         .tab-section-desc {
-            font-size: 10px;
+            font-size: 8.5px;
             font-weight: normal;
             color: var(--text-muted);
         }
 
         .modal-body {
-            padding: 16px 20px;
+            padding: 10px 14px;
             overflow-y: auto;
             flex: 1;
             min-height: 0;
@@ -1658,7 +1706,7 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         .modal-footer {
-            padding: 10px 18px;
+            padding: 6px 14px;
             border-top: 1px solid var(--border-card);
             display: flex;
             align-items: center;
@@ -1671,7 +1719,7 @@ $theme = $_GET['theme'] ?? 'light';
         .form-grid {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 12px 16px;
+            gap: 8px 12px;
         }
         .form-grid.single-col {
             grid-template-columns: 1fr;
@@ -1680,14 +1728,14 @@ $theme = $_GET['theme'] ?? 'light';
         .form-group {
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: 3px;
         }
         .form-group.full-width {
             grid-column: span 2;
         }
 
         .form-label {
-            font-size: 10.5px;
+            font-size: 9.5px;
             font-weight: 600;
             color: var(--text-heading);
             display: flex;
@@ -1699,17 +1747,17 @@ $theme = $_GET['theme'] ?? 'light';
             margin-left: 3px;
         }
         .form-hint {
-            font-size: 9.5px;
+            font-size: 8.5px;
             color: var(--text-muted);
             font-weight: normal;
         }
 
         .form-control {
-            height: 28px;
-            padding: 0 10px;
-            font-size: 11px;
+            height: 24px;
+            padding: 0 8px;
+            font-size: 10px;
             border: 1px solid var(--border-input);
-            border-radius: 4px;
+            border-radius: 3px;
             background: var(--bg-input);
             color: var(--text-main);
             outline: none;
@@ -1722,8 +1770,8 @@ $theme = $_GET['theme'] ?? 'light';
         }
         textarea.form-control {
             height: auto;
-            min-height: 50px;
-            padding: 6px 10px;
+            min-height: 42px;
+            padding: 4px 8px;
             resize: vertical;
         }
 
@@ -1733,42 +1781,42 @@ $theme = $_GET['theme'] ?? 'light';
             position: relative;
         }
         .input-group .form-control {
-            padding-right: 32px;
+            padding-right: 28px;
         }
         .input-group-btn {
             position: absolute;
-            right: 6px;
+            right: 4px;
             background: transparent;
             border: none;
             cursor: pointer;
             color: var(--text-muted);
-            font-size: 12px;
-            padding: 2px 4px;
+            font-size: 11px;
+            padding: 1px 3px;
         }
         .input-group-btn:hover {
             color: var(--primary);
         }
 
         .modal-footer {
-            padding: 10px 18px;
+            padding: 6px 14px;
             border-top: 1px solid var(--border-card);
             background: var(--bg-card);
             display: flex;
             align-items: center;
             justify-content: flex-end;
-            gap: 8px;
+            gap: 6px;
         }
 
         /* TOTP LIVE BADGE BOX */
         .totp-preview-box {
             background: var(--tag-bg);
             border: 1px dashed var(--border-card);
-            border-radius: 6px;
-            padding: 8px 12px;
+            border-radius: 4px;
+            padding: 4px 8px;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            margin-top: 6px;
+            margin-top: 4px;
         }
 
         /* LOADING SPINNER */
@@ -1794,11 +1842,11 @@ $theme = $_GET['theme'] ?? 'light';
             background: transparent;
             border: 1px solid var(--border-card);
             border-radius: 3px;
-            font-size: 9.5px;
+            font-size: 9px;
             color: var(--primary);
-            padding: 1px 6px;
+            padding: 1px 5px;
             cursor: pointer;
-            margin-top: 3px;
+            margin-top: 2px;
             transition: all 0.2s;
             font-weight: 500;
             display: inline-block;
@@ -1901,15 +1949,15 @@ $theme = $_GET['theme'] ?? 'light';
             <div class="stat-card">
                 <div class="stat-info">
                     <span class="stat-label">Sesi Aktif Saat Ini</span>
-                    <span class="stat-value" style="font-size:13px; font-weight:600; color:#fa8c16;" id="statSession">-</span>
+                    <span class="stat-value" style="color:#fa8c16;" id="statSession">-</span>
                 </div>
                 <span class="stat-icon">👑</span>
             </div>
             <div class="stat-card" id="cardStorageStat">
                 <div class="stat-info">
                     <span class="stat-label">Total Pemakaian Data</span>
-                    <span class="stat-value" style="color:#722ed1; font-size:16px;" id="statStorageTotal">- MB</span>
-                    <span style="font-size:9.5px; color:var(--text-muted); margin-top:2px;" id="statStorageSub">Klik tombol "Hitung Storage"</span>
+                    <span class="stat-value" style="color:#722ed1;" id="statStorageTotal">- MB</span>
+                    <span style="font-size:8.5px; color:var(--text-muted); margin-top:1px;" id="statStorageSub">Klik tombol "Hitung Storage"</span>
                 </div>
                 <span class="stat-icon">💾</span>
             </div>
@@ -1938,11 +1986,11 @@ $theme = $_GET['theme'] ?? 'light';
             </div>
 
             <div class="toolbar-right">
-                <span id="filteredCountLabel" style="font-size:10.5px; color:var(--text-muted);">Memuat data...</span>
-                <button type="button" class="ant-btn ant-btn-default" onclick="loadCompanyList()">
+                <span id="filteredCountLabel" style="font-size:10px; color:var(--text-muted);">Memuat data...</span>
+                <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="loadCompanyList()">
                     <span>🔄</span> Refresh
                 </button>
-                <button type="button" class="ant-btn ant-btn-primary" id="btnCalcStorage" onclick="calculateStorage()" title="Kalkulasi pemakaian data dan ukuran storage (MB) per perusahaan secara on-demand">
+                <button type="button" class="ant-btn ant-btn-primary ant-btn-sm" id="btnCalcStorage" onclick="calculateStorage()" title="Kalkulasi pemakaian data dan ukuran storage (MB) per perusahaan secara on-demand">
                     <span>💾</span> Hitung Storage
                 </button>
             </div>
@@ -1953,18 +2001,18 @@ $theme = $_GET['theme'] ?? 'light';
             <table class="grid-table" id="companyTable">
                 <thead>
                     <tr>
-                        <th style="width: 35px; text-align: center;">#</th>
-                        <th style="width: 140px;">ID Perusahaan</th>
+                        <th style="width: 32px; text-align: center;">#</th>
+                        <th style="width: 130px;">ID Perusahaan</th>
                         <th>Nama Perusahaan</th>
-                        <th style="width: 135px;">NPWP & NIB</th>
-                        <th style="width: 110px;">Kantor & TPB</th>
-                        <th style="width: 140px;">Nomor & Tgl SKEP</th>
+                        <th style="width: 140px;">NPWP & NIB</th>
+                        <th style="width: 105px;">Kantor & TPB</th>
+                        <th style="width: 130px;">Nomor & Tgl SKEP</th>
                         <th style="width: 130px;">Kredensial CEISA 4.0</th>
-                        <th style="width: 145px; text-align: center;">Pemakaian Data</th>
-                        <th style="width: 110px; text-align: center;">IT Inventory</th>
+                        <th style="width: 125px; text-align: center;">Pemakaian Data</th>
+                        <th style="width: 105px; text-align: center;">IT Inventory</th>
                         <th style="width: 95px;">ERP & AI</th>
-                        <th style="width: 80px; text-align: center;">Status</th>
-                        <th style="width: 220px; text-align: center;">Aksi</th>
+                        <th style="width: 75px; text-align: center;">Status</th>
+                        <th style="width: 195px; text-align: center;">Aksi</th>
                     </tr>
                 </thead>
                 <tbody id="companyTbody">
@@ -2041,18 +2089,18 @@ $theme = $_GET['theme'] ?? 'light';
 
                         <div class="form-grid">
                             <!-- Avatar / Logo Perusahaan -->
-                            <div class="form-group full-width" style="margin-bottom:4px; padding:12px 14px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:6px;">
-                                <label class="form-label" style="margin-bottom:8px;">
+                            <div class="form-group full-width" style="margin-bottom:3px; padding:6px 10px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:4px;">
+                                <label class="form-label" style="margin-bottom:4px;">
                                     <span>🖼️ Avatar / Logo Resmi Perusahaan</span>
                                     <span class="form-hint">Tampil di Halaman Login Subdomain, Header & Sidebar</span>
                                 </label>
-                                <div style="display:flex; align-items:center; gap:16px;">
-                                    <div style="position:relative; width:58px; height:58px; border-radius:6px; border:2px dashed var(--border-input); background:var(--bg-card); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
+                                <div style="display:flex; align-items:center; gap:12px;">
+                                    <div style="position:relative; width:44px; height:44px; border-radius:4px; border:1px dashed var(--border-input); background:var(--bg-card); display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
                                         <img id="logoPreviewImg" src="" style="width:100%; height:100%; object-fit:contain; display:none;">
-                                        <div id="logoPreviewPlaceholder" style="font-size:24px; color:var(--text-muted);">🏢</div>
+                                        <div id="logoPreviewPlaceholder" style="font-size:18px; color:var(--text-muted);">🏢</div>
                                     </div>
                                     <div style="flex:1;">
-                                        <div style="display:flex; gap:8px; align-items:center;">
+                                        <div style="display:flex; gap:6px; align-items:center;">
                                             <input type="file" id="f_logo_file" name="logo_file" accept="image/png,image/jpeg,image/webp,image/svg+xml" style="display:none;" onchange="previewLogoFile(this)">
                                             <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="document.getElementById('f_logo_file').click()">
                                                 <span>📁</span> Pilih File Logo
@@ -2062,8 +2110,8 @@ $theme = $_GET['theme'] ?? 'light';
                                             </button>
                                         </div>
                                         <input type="hidden" id="f_logo" name="logo" value="">
-                                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
-                                            Format: PNG, JPG, JPEG, WEBP, SVG (Maks. 5 MB). Direkomendasikan logo berlatar transparan (PNG).
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:3px;">
+                                            Format: PNG, JPG, JPEG, WEBP, SVG (Maks. 5 MB). Direkomendasikan logo transparan (PNG).
                                         </div>
                                     </div>
                                 </div>
@@ -2076,31 +2124,31 @@ $theme = $_GET['theme'] ?? 'light';
                                     <span class="form-hint">Membuka portal langsung tanpa perlu memilih perusahaan</span>
                                 </label>
                                 <div style="display:flex; align-items:center;">
-                                    <span style="padding:0 8px; font-size:11px; font-weight:600; background:var(--table-head-bg); border:1px solid var(--border-input); border-right:none; border-radius:4px 0 0 4px; height:28px; display:inline-flex; align-items:center; color:var(--text-muted); font-family:monospace;">https://</span>
+                                    <span style="padding:0 6px; font-size:10px; font-weight:600; background:var(--table-head-bg); border:1px solid var(--border-input); border-right:none; border-radius:3px 0 0 3px; height:24px; display:inline-flex; align-items:center; color:var(--text-muted); font-family:monospace;">https://</span>
                                     <input type="text" id="f_subdomain" name="subdomain" class="form-control" style="border-radius:0; font-family:monospace; font-weight:700; color:var(--primary);" placeholder="framas" pattern="[a-zA-Z0-9_-]+" oninput="this.value = this.value.toLowerCase().replace(/[^a-z0-9_-]/g, '')">
-                                    <span style="padding:0 8px; font-size:11px; font-weight:600; background:var(--table-head-bg); border:1px solid var(--border-input); border-left:none; border-radius:0 4px 4px 0; height:28px; display:inline-flex; align-items:center; color:var(--text-muted); font-family:monospace;">.inhost.web.id</span>
+                                    <span style="padding:0 6px; font-size:10px; font-weight:600; background:var(--table-head-bg); border:1px solid var(--border-input); border-left:none; border-radius:0 3px 3px 0; height:24px; display:inline-flex; align-items:center; color:var(--text-muted); font-family:monospace;">.inhost.web.id</span>
                                 </div>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">
-                                    Contoh: jika diisi <code>framas</code>, akses via <code>https://framas.inhost.web.id</code> akan otomatis menampilkan login untuk perusahaan ini.
+                                <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
+                                    Contoh: jika diisi <code>framas</code>, akses via <code>https://framas.inhost.web.id</code> akan otomatis membuka sesi perusahaan ini.
                                 </div>
                             </div>
 
                             <!-- Konfigurasi Warna Card Sidebar (Brand Theme) -->
-                            <div class="form-group full-width" style="margin-bottom:6px; padding:12px 14px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:6px;">
-                                <label class="form-label" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <div class="form-group full-width" style="margin-bottom:4px; padding:6px 10px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:4px;">
+                                <label class="form-label" style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                                     <div>
                                         <span>🎨 Warna Card Sidebar (Brand Theme)</span>
                                         <span class="form-hint">Kustomisasi latar kartu identitas perusahaan di sidebar portal</span>
                                     </div>
-                                    <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="resetCardColor()" style="font-size:10px; padding:2px 8px; height:24px;">
+                                    <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="resetCardColor()" style="font-size:9px; padding:1px 6px; height:21px;">
                                         <span>↺</span> Reset Default
                                     </button>
                                 </label>
 
-                                <div style="display:grid; grid-template-columns: 1fr 270px; gap:16px; align-items:start;">
+                                <div style="display:grid; grid-template-columns: 1fr 240px; gap:12px; align-items:start;">
                                     <!-- Left: Palet Warna & Input -->
                                     <div>
-                                        <div style="font-size:10.5px; font-weight:600; color:var(--text-heading); margin-bottom:6px;">
+                                        <div style="font-size:9.5px; font-weight:600; color:var(--text-heading); margin-bottom:4px;">
                                             Pilih dari Palet Populer:
                                         </div>
                                         <div class="color-palette-presets" id="colorPaletteContainer">
@@ -2128,42 +2176,42 @@ $theme = $_GET['theme'] ?? 'light';
                                             <button type="button" class="color-palette-item" onclick="selectPresetColor('#f6ffed')" data-color="#f6ffed" style="background:#f6ffed; border:1px solid #b7eb8f;" title="Soft Pastel Mint"></button>
                                         </div>
 
-                                        <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
-                                            <div style="position:relative; width:34px; height:28px; border-radius:4px; overflow:hidden; border:1px solid var(--border-input); cursor:pointer; flex-shrink:0;">
-                                                <input type="color" id="f_card_color_picker" style="position:absolute; top:-10px; left:-10px; width:60px; height:60px; cursor:pointer; border:none; padding:0;" onchange="onCardColorPickerChange(this.value)">
+                                        <div style="display:flex; align-items:center; gap:6px; margin-top:8px;">
+                                            <div style="position:relative; width:28px; height:24px; border-radius:3px; overflow:hidden; border:1px solid var(--border-input); cursor:pointer; flex-shrink:0;">
+                                                <input type="color" id="f_card_color_picker" style="position:absolute; top:-10px; left:-10px; width:50px; height:50px; cursor:pointer; border:none; padding:0;" onchange="onCardColorPickerChange(this.value)">
                                             </div>
                                             <div style="flex:1;">
-                                                <input type="text" id="f_card_color" name="card_color" class="form-control" style="font-family:monospace; font-size:11px;" placeholder="Kode HEX (misal: #002c6a) atau CSS Gradient" oninput="updateCardColorPreview(this.value)">
+                                                <input type="text" id="f_card_color" name="card_color" class="form-control" style="font-family:monospace; font-size:10px;" placeholder="Kode HEX (misal: #002c6a) atau CSS Gradient" oninput="updateCardColorPreview(this.value)">
                                             </div>
                                         </div>
-                                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:3px;">
                                             Dukungan: Kode HEX (<code>#002c6a</code>), RGB, atau CSS Gradient (<code>linear-gradient(...)</code>).
                                         </div>
                                     </div>
 
                                     <!-- Right: Live Preview Box mirroring index.php sidebar card -->
                                     <div>
-                                        <div style="font-size:10.5px; font-weight:600; color:var(--text-heading); margin-bottom:6px;">
+                                        <div style="font-size:9.5px; font-weight:600; color:var(--text-heading); margin-bottom:4px;">
                                             Live Preview di Sidebar:
                                         </div>
-                                        <div id="cardColorPreviewBox" style="padding:6px 10px; border-radius:6px; border:1px solid var(--border-color); background:var(--bg-base); display:flex; align-items:center; gap:8px; transition:all 0.2s ease; box-shadow:0 1px 3px rgba(0,0,0,0.05); user-select:none;">
-                                            <div id="previewCardLogo" style="font-size:14px; line-height:1; flex-shrink:0;">🏢</div>
+                                        <div id="cardColorPreviewBox" style="padding:4px 8px; border-radius:4px; border:1px solid var(--border-color); background:var(--bg-base); display:flex; align-items:center; gap:6px; transition:all 0.2s ease; box-shadow:0 1px 2px rgba(0,0,0,0.05); user-select:none;">
+                                            <div id="previewCardLogo" style="font-size:13px; line-height:1; flex-shrink:0;">🏢</div>
                                             <div style="flex:1 1 auto; min-width:0; overflow:hidden; display:flex; flex-direction:column; justify-content:center;">
-                                                <div id="previewCardName" style="font-size:11px; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.25;">
+                                                <div id="previewCardName" style="font-size:10px; font-weight:700; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.25;">
                                                     PT. CONTOH PERUSAHAAN
                                                 </div>
-                                                <div id="previewCardSub" style="font-size:9px; font-family:monospace; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; margin-top:1px;">
+                                                <div id="previewCardSub" style="font-size:8.5px; font-family:monospace; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.2; margin-top:1px;">
                                                     [010816064431000]
                                                 </div>
                                             </div>
                                             <div style="flex-shrink:0; display:flex; align-items:center;">
-                                                <span id="previewCardBtn" style="display:inline-flex; align-items:center; justify-content:center; padding:2px 6px; border-radius:4px; background:var(--primary-light); color:var(--primary); font-size:9px; font-weight:600; gap:2px; border:1px solid transparent;">
+                                                <span id="previewCardBtn" style="display:inline-flex; align-items:center; justify-content:center; padding:1px 5px; border-radius:3px; background:var(--primary-light); color:var(--primary); font-size:8.5px; font-weight:600; gap:2px; border:1px solid transparent;">
                                                     <span>↪</span>
                                                     <span>Ganti</span>
                                                 </span>
                                             </div>
                                         </div>
-                                        <div id="previewCardContrastHint" style="font-size:9px; color:var(--text-muted); margin-top:4px; text-align:right;">
+                                        <div id="previewCardContrastHint" style="font-size:8.5px; color:var(--text-muted); margin-top:3px; text-align:right;">
                                             Standar tema sistem
                                         </div>
                                     </div>
@@ -2187,10 +2235,10 @@ $theme = $_GET['theme'] ?? 'light';
 
                             <div class="form-group">
                                 <label class="form-label">
-                                    <span>NPWP Perusahaan</span>
-                                    <span class="form-hint">Format 15/16 digit</span>
+                                    <span>NPWP Perusahaan<span class="req">*</span></span>
+                                    <span class="form-hint" style="color:var(--primary); font-weight:600;">Wajib 15 digit angka</span>
                                 </label>
-                                <input type="text" id="f_npwp" name="npwp" class="form-control" placeholder="Contoh: 010816064431000">
+                                <input type="text" id="f_npwp" name="npwp" class="form-control" placeholder="Contoh: 010816064431000" maxlength="15" oninput="this.value = cleanTo15DigitNpwp(this.value);" required style="font-family:monospace; font-weight:600;">
                             </div>
 
                             <div class="form-group">
@@ -2222,70 +2270,104 @@ $theme = $_GET['theme'] ?? 'light';
                             </div>
 
                             <!-- ROLE & RUANG LINGKUP DOKUMEN PERUSAHAAN -->
-                            <div class="form-group full-width" style="margin:4px 0 6px; padding:12px 14px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:8px;">
-                                <label class="form-label" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                            <div class="form-group full-width" style="margin:2px 0 4px; padding:6px 10px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:4px;">
+                                <label class="form-label" style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
                                     <span><strong>🎭 Role & Ruang Lingkup Dokumen Perusahaan</strong> <span class="req">*</span></span>
-                                    <span class="form-hint" style="font-size:10px;">Bisa dicentang lebih dari satu</span>
+                                    <span class="form-hint" style="font-size:9px;">Bisa dicentang lebih dari satu</span>
                                 </label>
-                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px; margin-top:6px;">
-                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="manifest" id="role_manifest" style="margin-top:3px; cursor:pointer;">
+                                <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:8px; margin-top:4px;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="manifest" id="role_manifest" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
                                         <div>
-                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
-                                                <span>🚢</span> Manifest
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🚢</span> Manifes
                                             </div>
-                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
                                                 Manifes Online (BC 1.1). Jika hanya ini, menu dokumen pabean & inventory di-hide.
                                             </div>
                                         </div>
                                     </label>
-                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="pib" id="role_pib" style="margin-top:3px; cursor:pointer;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="pib" id="role_pib" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
                                         <div>
-                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
                                                 <span>📥</span> PIB
                                             </div>
-                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
                                                 Pemberitahuan Impor Barang untuk Dipakai (BC 2.0).
                                             </div>
                                         </div>
                                     </label>
-                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="peb" id="role_peb" style="margin-top:3px; cursor:pointer;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="peb" id="role_peb" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
                                         <div>
-                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
                                                 <span>📤</span> PEB
                                             </div>
-                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
                                                 Pemberitahuan Ekspor Barang (BC 3.0).
                                             </div>
                                         </div>
                                     </label>
-                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="tpb" id="role_tpb" style="margin-top:3px; cursor:pointer;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="tpb" id="role_tpb" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
                                         <div>
-                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
                                                 <span>🏭</span> TPB
                                             </div>
-                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
                                                 Semua BC TPB (BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1, dll kecuali PPKEK). Menampilkan Modul Inventory.
                                             </div>
                                         </div>
                                     </label>
-                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:8px; padding:8px 12px; border:1px solid var(--border-card); border-radius:6px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="ppkek" id="role_ppkek" style="margin-top:3px; cursor:pointer;">
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="ppkek" id="role_ppkek" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
                                         <div>
-                                            <div style="font-weight:700; font-size:11.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
-                                                <span>⚡</span> PPKEK
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>⚡</span> KEK / PPKEK
                                             </div>
-                                            <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
-                                                Dokumen Kawasan Ekonomi Khusus (PPKEK saja). Menampilkan Modul Inventory.
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
+                                                Dokumen Kawasan Ekonomi Khusus (611, 613, 631, BC 2.5, BC 4.1). Menampilkan Modul Inventory.
                                             </div>
                                         </div>
                                     </label>
                                 </div>
-                                <div style="font-size:9.5px; color:var(--text-muted); margin-top:8px;">
+                                <div style="font-size:8.5px; color:var(--text-muted); margin-top:6px;">
                                     💡 <em>Aturan Sistem:</em> Modul Inventory <strong>HANYA</strong> tampil untuk role <strong>TPB & PPKEK</strong>. Menu <strong>Load ERP (Odoo)</strong> hanya tampil jika ERP diset ke <strong>ODOO</strong>.
+                                </div>
+                            </div>
+
+                            <!-- DOKUMEN PABEAN AKTIF (ALLOWED BC DOCUMENTS) -->
+                            <div class="form-group full-width" style="margin-top:10px; background:var(--bg-body); border:1px solid var(--border-card); border-radius:6px; padding:10px 12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                    <div>
+                                        <div style="font-weight:700; font-size:11px; color:var(--text-heading); display:flex; align-items:center; gap:6px;">
+                                            <span>📑</span> Dokumen Pabean Aktif (Allowed BC Documents)
+                                        </div>
+                                        <div style="font-size:9px; color:var(--text-muted); margin-top:1px;">
+                                            Daftar dokumen BC yang dapat diakses perusahaan ini di menu Transaksi & Filter. Otomatis mengikuti Preset Role di atas atau centang/uncentang manual.
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; gap:4px;">
+                                        <button type="button" class="btn btn-secondary btn-xs" onclick="applyPresetDocsFromRoles(true)" title="Reset pilihan dokumen sesuai preset role yang dicentang di atas">
+                                            ⚡ Reset ke Preset Role
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-xs" onclick="setAllDocsChecked(true)">
+                                            Pilih Semua
+                                        </button>
+                                        <button type="button" class="btn btn-secondary btn-xs" onclick="setAllDocsChecked(false)">
+                                            Kosongkan
+                                        </button>
+                                    </div>
+                                </div>
+                                <input type="hidden" name="allowed_docs_submitted" value="1">
+                                <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:6px;" id="docCheckboxesContainer">
+                                    <?php foreach (ceisa_doc_catalog() as $code => $docInfo): ?>
+                                    <label class="doc-checkbox-card" style="display:flex; align-items:center; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; font-size:10px;">
+                                        <input type="checkbox" name="allowed_docs[]" value="<?= $code ?>" class="chk-doc-allowed" id="doc_<?= $code ?>" style="cursor:pointer;">
+                                        <span style="font-weight:600; color:<?= $docInfo['color'] ?? 'var(--text-heading)' ?>;"><?= htmlspecialchars($docInfo['label']) ?></span>
+                                    </label>
+                                    <?php endforeach; ?>
                                 </div>
                             </div>
 
@@ -2343,7 +2425,7 @@ $theme = $_GET['theme'] ?? 'light';
                                 <div style="display:flex; gap:6px; align-items:center;">
                                     <input type="text" id="f_tanggal_skep" name="tanggal_skep" class="form-control" placeholder="YYYY-MM-DD" maxlength="10" pattern="\d{4}-\d{2}-\d{2}" title="Format: YYYY-MM-DD (Contoh: 2023-10-15)" style="font-family:monospace; font-weight:500;">
                                     <input type="date" id="f_tanggal_skep_picker" style="position:absolute; opacity:0; pointer-events:none; width:0; height:0;" tabindex="-1" onchange="if(this.value) document.getElementById('f_tanggal_skep').value = this.value">
-                                    <button type="button" class="ant-btn ant-btn-default" style="padding:0 10px; height:32px; flex-shrink:0;" title="Pilih Tanggal dari Kalender" onclick="const p = document.getElementById('f_tanggal_skep_picker'); if(p.showPicker){ p.showPicker(); } else { p.focus(); p.click(); }">📅</button>
+                                    <button type="button" class="ant-btn ant-btn-default" style="padding:0 7px; height:24px; font-size:10px; flex-shrink:0;" title="Pilih Tanggal dari Kalender" onclick="const p = document.getElementById('f_tanggal_skep_picker'); if(p.showPicker){ p.showPicker(); } else { p.focus(); p.click(); }">📅</button>
                                 </div>
                             </div>
 
@@ -2426,11 +2508,11 @@ $theme = $_GET['theme'] ?? 'light';
                                 <input type="text" id="f_token_ceisa" name="token_ceisa" class="form-control" placeholder="Token auth CEISA (opsional/auto)">
                             </div>
 
-                            <div class="form-group full-width" style="margin-top:10px; padding-top:10px; border-top:1px dashed var(--border-card);">
-                                <div style="font-weight:700; color:#722ed1; font-size:11.5px; display:flex; align-items:center; gap:6px;">
+                            <div class="form-group full-width" style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border-card);">
+                                <div style="font-weight:700; color:#722ed1; font-size:10px; display:flex; align-items:center; gap:5px;">
                                     <span>🌐</span> Kredensial Host-to-Host (H2H) INSW / PPKEK (LNSW)
                                 </div>
-                                <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                                <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
                                     Diperlukan untuk pengiriman otomatis Dokumen KEK (PPKEK 613, 611, 612) ke Gateway LNSW (kek.insw.go.id)
                                 </div>
                             </div>
@@ -2480,16 +2562,16 @@ $theme = $_GET['theme'] ?? 'light';
                         </div>
                         <div class="form-grid">
                             <div class="form-group full-width">
-                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:6px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between;">
                                     <div>
-                                        <div style="font-weight:600; color:var(--text-heading); font-size:11.5px;">
+                                        <div style="font-weight:600; color:var(--text-heading); font-size:10px;">
                                             📦 Pengaturan IT Inventory
                                         </div>
-                                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
                                             • Latar Biru saat Submit CEISA, Kuning pada AJU & No saat Masuk IT Inv, Merah jika ber-Nomor Daftar tapi belum masuk IT Inv.
                                         </div>
                                     </div>
-                                    <select id="f_IS_INV" name="IS_INV" class="form-control" style="width:140px; font-weight:600;">
+                                    <select id="f_IS_INV" name="IS_INV" class="form-control" style="width:130px; font-weight:600;">
                                         <option value="1" style="color:#52c41a;">Aktif</option>
                                         <option value="0" style="color:#8c8c8c;">Non-Aktif</option>
                                     </select>
@@ -2497,17 +2579,17 @@ $theme = $_GET['theme'] ?? 'light';
                             </div>
 
                             <div class="form-group full-width">
-                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:6px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between;">
                                     <div>
-                                        <div style="font-weight:600; color:var(--text-heading); font-size:11.5px;">
+                                        <div style="font-weight:600; color:var(--text-heading); font-size:10px;">
                                             🔤 Format Kode Barang (Allow Huruf Kecil)
                                         </div>
-                                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
                                             • Jika <b>Kapital Saja</b> (Default), semua Kode Barang otomatis dikonversi ke HURUF BESAR (UPPERCASE).<br>
                                             • Jika <b>Izinkan Huruf Kecil</b>, kode barang diperbolehkan mengandung huruf kecil saat input & import.
                                         </div>
                                     </div>
-                                    <select id="f_allow_lowercase_code" name="allow_lowercase_code" class="form-control" style="width:170px; font-weight:600;">
+                                    <select id="f_allow_lowercase_code" name="allow_lowercase_code" class="form-control" style="width:150px; font-weight:600;">
                                         <option value="0" style="color:#1890ff;">Kapital Saja (Default)</option>
                                         <option value="1" style="color:#52c41a;">Izinkan Huruf Kecil</option>
                                     </select>
@@ -2515,17 +2597,17 @@ $theme = $_GET['theme'] ?? 'light';
                             </div>
 
                             <div class="form-group full-width">
-                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:6px; padding:10px 14px; display:flex; align-items:center; justify-content:space-between;">
+                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between;">
                                     <div>
-                                        <div style="font-weight:600; color:var(--text-heading); font-size:11.5px;">
+                                        <div style="font-weight:600; color:var(--text-heading); font-size:10px;">
                                             ⚠️ Peringatan Dokumen Belum Masuk IT Inventory
                                         </div>
-                                        <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">
-                                            • Jika <b>Nonaktif (Default)</b>, popup peringatan tidak muncul otomatis saat membuka H2H (direkomendasikan untuk alur impor BC 2.3/1.6 yang menunggu barang masuk warehouse).<br>
-                                            • Jika <b>Aktifkan Peringatan</b>, sistem akan memunculkan popup peringatan jika terdapat dokumen ber-Nomor Daftar yang belum masuk IT Inventory.
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
+                                            • Jika <b>Nonaktif (Default)</b>, popup peringatan tidak muncul otomatis saat membuka H2H.<br>
+                                            • Jika <b>Aktifkan Peringatan</b>, sistem memunculkan peringatan jika ada dokumen ber-Nomor Daftar belum masuk IT Inventory.
                                         </div>
                                     </div>
-                                    <select id="f_alert_it_inv_unposted" name="alert_it_inv_unposted" class="form-control" style="width:190px; font-weight:600;">
+                                    <select id="f_alert_it_inv_unposted" name="alert_it_inv_unposted" class="form-control" style="width:160px; font-weight:600;">
                                         <option value="0" style="color:#8c8c8c;">Nonaktif (Default)</option>
                                         <option value="1" style="color:#ff4d4f;">Aktifkan Peringatan</option>
                                     </select>
@@ -2852,13 +2934,13 @@ $theme = $_GET['theme'] ?? 'light';
                 return `
                     <div style="text-align:center;">
                         <div style="display:inline-flex; align-items:center; gap:4px;">
-                            <span class="ant-badge ant-badge-purple" style="font-weight:700; font-size:10.5px;">${st.mb}</span>
+                            <span class="ant-badge ant-badge-purple" style="font-weight:700; font-size:9.5px; padding:1px 5px;">${st.mb}</span>
                             ${st.percent !== '0%' && st.percent !== '0.0%' ? `<span style="font-size:9px; color:var(--text-muted);">(${st.percent})</span>` : ''}
                         </div>
-                        <div style="font-size:10px; font-weight:600; color:var(--text-main); margin-top:2px;">
+                        <div style="font-size:9px; font-weight:600; color:var(--text-main); margin-top:2px;">
                             ${Number(st.rows).toLocaleString('id-ID')} baris
                         </div>
-                        <div style="font-size:9px; color:var(--text-muted);">
+                        <div style="font-size:8.5px; color:var(--text-muted);">
                             ${Number(st.docs).toLocaleString('id-ID')} Dokumen AJU
                         </div>
                         ${st.rows > 0 ? `
@@ -2870,9 +2952,9 @@ $theme = $_GET['theme'] ?? 'light';
                 `;
             } else {
                 return `
-                    <div style="text-align:center; color:var(--text-muted); font-size:10px;">
+                    <div style="text-align:center; color:var(--text-muted); font-size:9.5px;">
                         <span style="font-weight:600; opacity:0.6;">- MB</span>
-                        <div style="font-size:9px; opacity:0.75; margin-top:1px;">(Klik Hitung)</div>
+                        <div style="font-size:8.5px; opacity:0.75; margin-top:1px;">(Klik Hitung)</div>
                     </div>
                 `;
             }
@@ -2886,7 +2968,7 @@ $theme = $_GET['theme'] ?? 'light';
             document.getElementById('filteredCountLabel').innerText = `Menampilkan ${list.length} dari ${allCompanies.length} perusahaan`;
 
             if (list.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:30px; color:var(--text-muted);">Tidak ada data perusahaan yang sesuai kriteria pencarian.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:18px; color:var(--text-muted); font-size:10.5px;">Tidak ada data perusahaan yang sesuai kriteria pencarian.</td></tr>`;
                 return;
             }
 
@@ -2906,39 +2988,39 @@ $theme = $_GET['theme'] ?? 'light';
                 const isFinal = (row.is_final === 'true');
 
                 tr.innerHTML = `
-                    <td style="text-align:center; font-weight:600; color:var(--text-muted);">${idx + 1}</td>
+                    <td style="text-align:center; font-weight:600; color:var(--text-muted); font-size:10px;">${idx + 1}</td>
                     <td>
-                        <div style="font-family:monospace; font-weight:600; color:var(--primary); font-size:11.5px;">
+                        <div style="font-family:monospace; font-weight:600; color:var(--primary); font-size:10.5px;">
                             ${escapeHtml(row.cmp_id)}
                         </div>
-                        ${isCurrentSession ? '<span class="ant-badge ant-badge-green" style="margin-top:2px;">👑 Sesi Aktif</span>' : ''}
+                        ${isCurrentSession ? '<span class="ant-badge ant-badge-green" style="font-size:8.5px; padding:1px 4px; margin-top:2px;">👑 Sesi Aktif</span>' : ''}
                     </td>
                     <td>
-                        <div style="display:flex; align-items:center; gap:8px;">
+                        <div style="display:flex; align-items:center; gap:6px;">
                             ${row.logo ? `
-                                <img src="${escapeHtml(row.logo)}" alt="Logo" style="width:30px; height:30px; object-fit:contain; border-radius:4px; background:#fff; border:1px solid var(--border-card); padding:1px; flex-shrink:0;">
+                                <img src="${escapeHtml(row.logo)}" alt="Logo" style="width:24px; height:24px; object-fit:contain; border-radius:3px; background:#fff; border:1px solid var(--border-card); padding:1px; flex-shrink:0;">
                             ` : `
-                                <div style="width:30px; height:30px; border-radius:4px; background:#e6f7ff; color:#1890ff; font-weight:700; font-size:11.5px; display:flex; align-items:center; justify-content:center; border:1px solid #91d5ff; flex-shrink:0;">
+                                <div style="width:24px; height:24px; border-radius:3px; background:#e6f7ff; color:#1890ff; font-weight:700; font-size:9.5px; display:flex; align-items:center; justify-content:center; border:1px solid #91d5ff; flex-shrink:0;">
                                     ${escapeHtml((row.cmp_name || 'CO').substring(0, 2).toUpperCase())}
                                 </div>
                             `}
                             <div>
-                                <div style="font-weight:600; font-size:12px; color:var(--text-heading); display:flex; align-items:center; gap:5px;">
+                                <div style="font-weight:600; font-size:11px; color:var(--text-heading); display:flex; align-items:center; gap:5px;">
                                     <span>${escapeHtml(row.cmp_name)}</span>
                                     ${row.card_color ? `
-                                        <span style="display:inline-block; width:11px; height:11px; border-radius:3px; background:${escapeHtml(row.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(row.card_color)}"></span>
+                                        <span style="display:inline-block; width:10px; height:10px; border-radius:2px; background:${escapeHtml(row.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(row.card_color)}"></span>
                                     ` : ''}
                                 </div>
                                 ${row.subdomain ? `
                                     <div style="margin-top:2px;">
-                                        <a href="https://${escapeHtml(row.subdomain)}.inhost.web.id" target="_blank" style="color:#1890ff; text-decoration:none; font-size:10px; font-family:monospace; display:inline-flex; align-items:center; gap:3px; background:rgba(24,144,255,0.08); padding:1px 6px; border-radius:3px; border:1px solid rgba(24,144,255,0.2);">
+                                        <a href="https://${escapeHtml(row.subdomain)}.inhost.web.id" target="_blank" style="color:#1890ff; text-decoration:none; font-size:9px; font-family:monospace; display:inline-flex; align-items:center; gap:3px; background:rgba(24,144,255,0.08); padding:1px 5px; border-radius:3px; border:1px solid rgba(24,144,255,0.2);">
                                             🌐 ${escapeHtml(row.subdomain)}.inhost.web.id ↗
                                         </a>
                                     </div>
                                 ` : `
-                                    <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px; font-style:italic;">Subdomain: -</div>
+                                    <div style="font-size:9px; color:var(--text-muted); margin-top:2px; font-style:italic;">Subdomain: -</div>
                                 `}
-                                <div style="margin-top:4px; display:flex; flex-wrap:wrap; gap:3px;">
+                                <div style="margin-top:3px; display:flex; flex-wrap:wrap; gap:3px;">
                                     ${(() => {
                                         const roles = (row.company_roles || 'tpb').toLowerCase().split(',').map(s => s.trim());
                                         let html = '';
@@ -2950,29 +3032,52 @@ $theme = $_GET['theme'] ?? 'light';
                                         return html;
                                     })()}
                                 </div>
+                                <div style="margin-top:3px;">
+                                    ${(() => {
+                                        const rawDocs = row.allowed_docs;
+                                        let docArr = [];
+                                        if (rawDocs !== null && rawDocs !== undefined && String(rawDocs).trim() !== '' && String(rawDocs).trim() !== '*') {
+                                            if (String(rawDocs).toUpperCase() !== 'NONE') {
+                                                docArr = String(rawDocs).split(',').map(s => s.trim()).filter(Boolean);
+                                            }
+                                        } else {
+                                            const roles = (row.company_roles || 'tpb').toLowerCase().split(',').map(s => s.trim());
+                                            if (roles.includes('ppkek') || roles.includes('kek')) ['611', '613', '631', '25', '41'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
+                                            if (roles.includes('tpb')) ['23', '25', '261', '262', '27', '40', '41', '16', '28', '33', '331'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
+                                            if (roles.includes('pib')) { if (!docArr.includes('20')) docArr.push('20'); }
+                                            if (roles.includes('peb')) { if (!docArr.includes('30')) docArr.push('30'); }
+                                        }
+                                        if (docArr.length === 0) {
+                                            return '<span style="font-size:8.5px; color:var(--text-muted); font-style:italic;">Dokumen: -</span>';
+                                        }
+                                        const previews = docArr.slice(0, 4).map(d => `<span class="ant-badge" style="font-size:8px; padding:0 3px; font-weight:600; background:rgba(0,0,0,0.03);">${d.startsWith('6') ? 'PPKEK ' + d : 'BC ' + d}</span>`).join(' ');
+                                        const more = docArr.length > 4 ? `<span class="ant-badge" style="font-size:8px; padding:0 3px;">+${docArr.length - 4}</span>` : '';
+                                        return `<div style="font-size:8.5px; color:var(--text-muted); display:flex; flex-wrap:wrap; gap:2px; align-items:center;" title="Dokumen Diizinkan: ${docArr.join(', ')}">📄 ${previews} ${more}</div>`;
+                                    })()}
+                                </div>
                             </div>
                         </div>
-                        <div style="font-size:9.5px; color:var(--text-muted); max-width:260px; overflow:hidden; text-overflow:ellipsis; margin-top:3px;" title="${escapeHtml(row.alamat || '-')}">
+                        <div style="font-size:9px; color:var(--text-muted); max-width:280px; overflow:hidden; text-overflow:ellipsis; margin-top:3px; line-height:1.3;" title="${escapeHtml(row.alamat || '-')}">
                             📍 ${escapeHtml(row.alamat || '-')}
                         </div>
                     </td>
                     <td>
-                        <div style="font-family:monospace; font-size:10.5px;">NPWP: <strong>${escapeHtml(row.npwp || '-')}</strong></div>
-                        <div style="font-size:10px; color:var(--text-muted);">NIB: ${escapeHtml(row.nib || '-')}</div>
+                        <div style="font-family:monospace; font-size:10px;">NPWP: <strong>${escapeHtml(row.npwp || '-')}</strong></div>
+                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:1px;">NIB: ${escapeHtml(row.nib || '-')}</div>
                     </td>
                     <td>
                         <div>Kantor: <strong>${escapeHtml(row.kode_kantor || '-')}</strong></div>
-                        <div style="font-size:10px; color:var(--text-muted);">TPB: ${escapeHtml(row.kode_jenis_tpb || '-')}</div>
+                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:1px;">TPB: ${escapeHtml(row.kode_jenis_tpb || '-')}</div>
                     </td>
                     <td>
                         <div style="font-weight:500;">${escapeHtml(row.nomor_skep || '-')}</div>
-                        <div style="font-size:10px; color:var(--text-muted);">${escapeHtml(row.tanggal_skep || '-')}</div>
+                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:1px;">${escapeHtml(row.tanggal_skep || '-')}</div>
                     </td>
                     <td>
                         <div style="font-weight:500;">👤 ${escapeHtml(row.username_ceisa || '-')}</div>
-                        <div style="display:flex; gap:4px; margin-top:2px;">
-                            ${hasMfa ? '<span class="ant-badge ant-badge-blue">MFA Ready</span>' : '<span class="ant-badge ant-badge-gray">No MFA</span>'}
-                            ${isFinal ? '<span class="ant-badge ant-badge-gold">FINAL</span>' : '<span class="ant-badge ant-badge-blue">DRAFT</span>'}
+                        <div style="display:flex; gap:3px; margin-top:3px;">
+                            ${hasMfa ? '<span class="ant-badge ant-badge-blue" style="font-size:8.5px; padding:1px 4px;">MFA Ready</span>' : '<span class="ant-badge ant-badge-gray" style="font-size:8.5px; padding:1px 4px;">No MFA</span>'}
+                            ${isFinal ? '<span class="ant-badge ant-badge-gold" style="font-size:8.5px; padding:1px 4px;">FINAL</span>' : '<span class="ant-badge ant-badge-blue" style="font-size:8.5px; padding:1px 4px;">DRAFT</span>'}
                         </div>
                     </td>
                     <td style="text-align:center;">
@@ -2981,32 +3086,32 @@ $theme = $_GET['theme'] ?? 'light';
                     <td style="text-align:center;">
                         <span class="ant-badge ${isInv ? 'ant-badge-green' : 'ant-badge-gray'} clickable-badge" 
                               onclick="toggleIsInv('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" 
-                              title="Klik untuk mengubah status IT Inventory">
+                              title="Klik untuk mengubah status IT Inventory" style="font-size:8.5px; padding:1px 5px;">
                             ${isInv ? '● Aktif' : '○ Non-Aktif'}
                         </span>
-                        <div style="margin-top:4px;">
+                        <div style="margin-top:3px;">
                             <span class="ant-badge ${(parseInt(row.alert_it_inv_unposted) || 0) === 1 ? 'ant-badge-red' : 'ant-badge-gray'} clickable-badge" 
                                   onclick="toggleAlertItInv('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" 
-                                  title="Klik untuk mengubah pengaturan Peringatan Dokumen Belum Masuk IT Inventory">
+                                  title="Klik untuk mengubah pengaturan Peringatan Dokumen Belum Masuk IT Inventory" style="font-size:8px; padding:1px 4px;">
                                 ${(parseInt(row.alert_it_inv_unposted) || 0) === 1 ? '⚠️ Alert: ON' : '⚠️ Alert: OFF'}
                             </span>
                         </div>
                     </td>
                     <td>
                         <div>ERP: <strong>${escapeHtml(row.ERP_Name || '-')}</strong></div>
-                        <div style="font-size:9.5px; margin-top:2px;">
-                            ${(parseInt(row.allow_lowercase_code) || 0) === 1 ? '<span class="ant-badge ant-badge-green" title="Boleh Huruf Kecil">🔤 Allow a-z</span>' : '<span class="ant-badge ant-badge-blue" title="Wajib Huruf Besar">🔠 UPPERCASE</span>'}
+                        <div style="font-size:9px; margin-top:2px;">
+                            ${(parseInt(row.allow_lowercase_code) || 0) === 1 ? '<span class="ant-badge ant-badge-green" style="font-size:8px; padding:1px 4px;" title="Boleh Huruf Kecil">🔤 Allow a-z</span>' : '<span class="ant-badge ant-badge-blue" style="font-size:8px; padding:1px 4px;" title="Wajib Huruf Besar">🔠 UPPERCASE</span>'}
                         </div>
                     </td>
                     <td style="text-align:center;">
                         <span class="ant-badge ${isActive ? 'ant-badge-green' : 'ant-badge-red'} clickable-badge" 
                               onclick="toggleStatus('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')"
-                              title="Klik untuk mengaktifkan/menonaktifkan akun">
+                              title="Klik untuk mengaktifkan/menonaktifkan akun" style="font-size:8.5px; padding:1px 5px;">
                             ${isActive ? '● Aktif' : '○ Non-Aktif'}
                         </span>
                     </td>
                     <td style="text-align:center;">
-                        <div style="display:inline-flex; gap:4px; align-items:center;">
+                        <div style="display:inline-flex; gap:3px; align-items:center;">
                             <button type="button" class="ant-btn ant-btn-primary ant-btn-sm" onclick="openEditModal('${escapeJs(row.cmp_id)}')" title="Edit Lengkap">
                                 ✏️ Edit
                             </button>
@@ -3016,7 +3121,7 @@ $theme = $_GET['theme'] ?? 'light';
                             </button>
                             ` : ''}
                             <button type="button" class="ant-btn ant-btn-warning ant-btn-sm" onclick="clearCompanyData('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" title="Hapus Semua Data Transaksi Perusahaan Ini">
-                                🧹 Clear Data
+                                🧹 Clear
                             </button>
                             <button type="button" class="ant-btn ant-btn-danger ant-btn-sm" onclick="deleteCompany('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}', '${escapeJs(row.npwp || '')}')" title="Hapus Perusahaan">
                                 🗑️
@@ -3387,6 +3492,9 @@ $theme = $_GET['theme'] ?? 'light';
             if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = true;
             if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = false;
 
+            // Dokumen Pabean Aktif default (Preset TPB)
+            applyPresetDocsFromRoles(true);
+
             setLogoPreview('');
             document.getElementById('f_subdomain').value = '';
             document.getElementById('f_logo_file').value = '';
@@ -3395,6 +3503,44 @@ $theme = $_GET['theme'] ?? 'light';
 
             switchModalTab('tab-profil');
             document.getElementById('companyModal').classList.add('active');
+        }
+
+        // Helper: Terapkan Dokumen Sesuai Preset Role
+        function applyPresetDocsFromRoles(force = false) {
+            const isPpkek    = document.getElementById('role_ppkek')?.checked;
+            const isTpb      = document.getElementById('role_tpb')?.checked;
+            const isPib      = document.getElementById('role_pib')?.checked;
+            const isPeb      = document.getElementById('role_peb')?.checked;
+            const isManifest = document.getElementById('role_manifest')?.checked;
+
+            const presetDocs = new Set();
+            // 1. PPKEK/KEK: dokumen PPKEK (611, 613, 631) serta BC 2.5 dan BC 4.1
+            if (isPpkek) {
+                ['611', '613', '631', '25', '41'].forEach(d => presetDocs.add(d));
+            }
+            // 2. TPB: dokumen khusus TPB (BC 1.6, 2.8, 3.3, 3.3.1 dikecualikan karena dokumen PLB / PDPLB)
+            if (isTpb) {
+                ['23', '25', '261', '262', '27', '40', '41'].forEach(d => presetDocs.add(d));
+            }
+            // 3. PIB: hanya BC 2.0
+            if (isPib) {
+                presetDocs.add('20');
+            }
+            // 4. PEB: hanya BC 3.0
+            if (isPeb) {
+                presetDocs.add('30');
+            }
+            // 5. Manifest: tidak ada dokumen pabean default
+
+            document.querySelectorAll('.chk-doc-allowed').forEach(cb => {
+                cb.checked = presetDocs.has(cb.value);
+            });
+        }
+
+        function setAllDocsChecked(val) {
+            document.querySelectorAll('.chk-doc-allowed').forEach(cb => {
+                cb.checked = !!val;
+            });
         }
 
         function openEditModal(cmpId) {
@@ -3428,7 +3574,7 @@ $theme = $_GET['theme'] ?? 'light';
                         updateCardColorPreview(d.card_color || '');
 
                         document.getElementById('f_cmp_name').value = d.cmp_name || '';
-                        document.getElementById('f_npwp').value = d.npwp || '';
+                        document.getElementById('f_npwp').value = cleanTo15DigitNpwp(d.npwp || '');
                         document.getElementById('f_nib').value = d.nib || '';
                         document.getElementById('f_alamat').value = d.alamat || '';
                         document.getElementById('f_app_password').value = d.app_password || '1234';
@@ -3441,6 +3587,20 @@ $theme = $_GET['theme'] ?? 'light';
                         if (document.getElementById('role_peb')) document.getElementById('role_peb').checked = roles.includes('peb');
                         if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = roles.includes('tpb');
                         if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = roles.includes('ppkek');
+
+                        // Dokumen Pabean Aktif (Allowed Docs)
+                        const rawAllowedDocs = d.allowed_docs;
+                        if (rawAllowedDocs !== null && rawAllowedDocs !== undefined && String(rawAllowedDocs).trim() !== '' && String(rawAllowedDocs).trim() !== '*') {
+                            const docList = String(rawAllowedDocs).toUpperCase() === 'NONE' 
+                                ? [] 
+                                : String(rawAllowedDocs).split(',').map(s => s.trim());
+                            document.querySelectorAll('.chk-doc-allowed').forEach(cb => {
+                                cb.checked = docList.includes(cb.value);
+                            });
+                        } else {
+                            // Belum ada konfigurasi kustom -> terapkan preset otomatis berdasarkan role
+                            applyPresetDocsFromRoles(false);
+                        }
 
                         document.getElementById('f_kode_kantor').value = d.kode_kantor || '';
                         document.getElementById('f_kode_jenis_tpb').value = d.kode_jenis_tpb || '';
@@ -3567,7 +3727,24 @@ $theme = $_GET['theme'] ?? 'light';
         function saveCompany(e) {
             e.preventDefault();
             const form = document.getElementById('companyForm');
+
+            // Validasi wajib 15 digit NPWP
+            const npwpInput = document.getElementById('f_npwp');
+            const cleanNpwp = cleanTo15DigitNpwp(npwpInput.value);
+            npwpInput.value = cleanNpwp;
+            if (!cleanNpwp || cleanNpwp.length !== 15) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'NPWP Wajib 15 Digit',
+                    text: 'NPWP Perusahaan wajib diisi 15 digit angka (saat ini: ' + cleanNpwp.length + ' digit).'
+                });
+                switchModalTab('tab-profil');
+                npwpInput.focus();
+                return;
+            }
+
             const formData = new FormData(form);
+            formData.set('npwp', cleanNpwp);
 
             const btnSave = document.getElementById('btnSaveSubmit');
             btnSave.disabled = true;
@@ -4511,24 +4688,27 @@ $theme = $_GET['theme'] ?? 'light';
             return '';
         }
 
-        function formatCeisaNpwp(raw) {
+        function cleanTo15DigitNpwp(raw) {
             if (!raw) return '';
-            const digits = String(raw).replace(/\D/g, '');
-            // Identitas 22 digit CEISA dengan akhiran 000000 (contoh: 0010816064431000000000)
+            let digits = String(raw).replace(/\D/g, '');
+            // Identitas 22 digit CEISA dengan akhiran 000000 (contoh: 0010816064431000000000 atau 0033093287048000000000)
             if (digits.length === 22 && digits.endsWith('000000')) {
                 const withoutTrailing = digits.slice(0, 16);
-                if (withoutTrailing.startsWith('00')) {
-                    return withoutTrailing.slice(1); // Standar 15 digit Indonesia: 010816064431000
-                }
-                return withoutTrailing;
+                digits = withoutTrailing.startsWith('0') ? withoutTrailing.slice(1) : withoutTrailing.slice(0, 15);
             }
-            if (digits.length === 16 && digits.startsWith('00')) {
-                return digits.slice(1);
+            // Jika 16 digit dan berawalan '0', buang leading zero agar menjadi 15 digit (contoh: 0033093287048000 -> 033093287048000)
+            if (digits.length === 16 && digits.startsWith('0')) {
+                digits = digits.slice(1);
             }
-            if (digits.length === 15 || digits.length === 16) {
-                return digits;
+            // Batasi maksimum 15 digit
+            if (digits.length > 15) {
+                digits = digits.slice(0, 15);
             }
-            return String(raw).trim();
+            return digits;
+        }
+
+        function formatCeisaNpwp(raw) {
+            return cleanTo15DigitNpwp(raw);
         }
 
         function suggestCleanSubdomain(name) {

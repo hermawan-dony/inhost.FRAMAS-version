@@ -86,6 +86,7 @@ class CeisaJsonBuilder
             '41'  => 'bc41',
             '611' => 'bc611',
             '613' => 'bc613',
+            '631' => 'bc631',
         ];
 
         if (!isset($bcMap[$kode_dokumen])) {

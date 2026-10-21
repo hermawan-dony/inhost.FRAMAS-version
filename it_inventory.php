@@ -32,18 +32,44 @@ $cmpFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : ""
 $cmpHdrFilter = (!empty($escCmp)) ? " AND (h.cmp_id = '$escCmp' OR h.cmp_id = '')" : "";
 
 $is_inv = 1;
+$targetCompanyRoles = 'tpb';
+$targetCompanyAllowedDocs = null;
 if (!empty($cmp_id) && $cmp_id !== 'ALL' && isset($koneksi) && $koneksi) {
-    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as is_inv, cmp_name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($cmp_id) . "' LIMIT 1");
+    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as is_inv, cmp_name, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($cmp_id) . "' LIMIT 1");
     if ($qInv && $row = $qInv->fetch_assoc()) {
         $is_inv = (int)$row['is_inv'];
         if (empty($cmp_name) && !empty($row['cmp_name'])) {
             $cmp_name = $row['cmp_name'];
         }
+        $targetCompanyRoles = $row['company_roles'];
+        $targetCompanyAllowedDocs = $row['allowed_docs'];
+    }
+} else {
+    if (!empty($_SESSION['company_roles'])) {
+        $targetCompanyRoles = $_SESSION['company_roles'];
+    }
+    if (isset($_SESSION['allowed_docs_raw'])) {
+        $targetCompanyAllowedDocs = $_SESSION['allowed_docs_raw'];
     }
 }
 if (empty($cmp_name)) {
     $cmp_name = 'PT. FRAMAS INDONESIA';
 }
+
+$companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+
+if (!function_exists('isItDocPermitted')) {
+    function isItDocPermitted($d) {
+        global $is_admin, $cmp_id, $companyAllowedDocs;
+        if (!empty($is_admin) && (empty($cmp_id) || $cmp_id === 'ALL')) {
+            return true;
+        }
+        return in_array((string)$d, $companyAllowedDocs);
+    }
+}
+
+$allowedInbound = array_values(array_filter(['20', '23', '40', '16', '261', '28', '611'], 'isItDocPermitted'));
+$allowedOutbound = array_values(array_filter(['30', '25', '41', '262', '33', '331', '613', '631'], 'isItDocPermitted'));
 
 // AJAX Endpoint: Detail Arsip Revisi (bc_1ab2_revisi)
 if (isset($_GET['action']) && $_GET['action'] === 'get_revisi') {
@@ -96,6 +122,9 @@ $tgl_akhir_default = date('Y-m-d');
 $tgl1 = $_GET['tgl1'] ?? $tgl_awal_default;
 $tgl2 = $_GET['tgl2'] ?? $tgl_akhir_default;
 $bc_filter = $_GET['bc'] ?? '%';
+if ($bc_filter !== '%' && !empty($bc_filter) && !isItDocPermitted($bc_filter)) {
+    $bc_filter = '%';
+}
 $search_field = $_GET['search_field'] ?? 'all';
 $search_kw = trim($_GET['search_kw'] ?? '');
 $klas_filter = trim($_GET['klas'] ?? '');
@@ -170,6 +199,9 @@ if ($activeTab === 'home') {
             $sql .= " AND BC = ? ";
             $params[] = $bc_filter;
             $types .= "s";
+        } elseif (!($is_admin && (empty($cmp_id) || $cmp_id === 'ALL'))) {
+            $inList = !empty($allowedInbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedInbound)) . "'" : "'__NONE__'";
+            $sql .= " AND BC IN ($inList) ";
         }
 
         if (!empty($search_kw)) {
@@ -218,6 +250,10 @@ if ($activeTab === 'home') {
     } else {
         // Fallback / Live CEISA Headers for Inbound
         // Inbound BC Codes: 20, 23, 40, 16, 261, 28, 611
+        $inListFallback = !empty($allowedInbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedInbound)) . "'" : "'__NONE__'";
+        if ($is_admin && (empty($cmp_id) || $cmp_id === 'ALL')) {
+            $inListFallback = "'20', '23', '40', '16', '261', '28', '611'";
+        }
         $sql = "SELECT h.nomor_aju AS ID, b.seri_barang AS ID_BRG, CONCAT('BC ', h.kode_dokumen) AS JENIS_DOC,
                 h.nomor_daftar AS NO_DOC, h.tanggal_daftar AS TGL_DOC,
                 (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS NO_BUKTI,
@@ -234,7 +270,7 @@ if ($activeTab === 'home') {
                 h.tanggal_daftar AS TANGGAL_PROSES, b.netto AS NETTO, b.cif AS CIF
                 FROM bc_ceisa_header h
                 JOIN bc_ceisa_barang b ON h.nomor_aju = b.nomor_aju
-                WHERE h.kode_dokumen IN ('20', '23', '40', '16', '261', '28', '611')$cmpHdrFilter ";
+                WHERE h.kode_dokumen IN ($inListFallback)$cmpHdrFilter ";
 
         $params = [];
         $types = "";
@@ -319,6 +355,9 @@ if ($activeTab === 'home') {
             $sql .= " AND BC = ? ";
             $params[] = $bc_filter;
             $types .= "s";
+        } elseif (!($is_admin && (empty($cmp_id) || $cmp_id === 'ALL'))) {
+            $inList = !empty($allowedOutbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedOutbound)) . "'" : "'__NONE__'";
+            $sql .= " AND BC IN ($inList) ";
         }
 
         if (!empty($search_kw)) {
@@ -362,7 +401,11 @@ if ($activeTab === 'home') {
         }
     } else {
         // Fallback / Live CEISA Headers for Outbound
-        // Outbound BC Codes: 30, 25, 41, 262, 33, 331, 613
+        // Outbound BC Codes: 30, 25, 41, 262, 33, 331, 613, 631
+        $outListFallback = !empty($allowedOutbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedOutbound)) . "'" : "'__NONE__'";
+        if ($is_admin && (empty($cmp_id) || $cmp_id === 'ALL')) {
+            $outListFallback = "'30', '25', '41', '262', '33', '331', '613', '631'";
+        }
         $sql = "SELECT h.nomor_aju AS ID, b.seri_barang AS ID_BRG, CONCAT('BC ', h.kode_dokumen) AS JENIS_DOC,
                 h.nomor_daftar AS NO_DOC, h.tanggal_daftar AS TGL_DOC,
                 (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS NO_BUKTI,
@@ -379,7 +422,7 @@ if ($activeTab === 'home') {
                 h.tanggal_daftar AS TANGGAL_PROSES, b.netto AS NETTO, b.cif AS CIF
                 FROM bc_ceisa_header h
                 JOIN bc_ceisa_barang b ON h.nomor_aju = b.nomor_aju
-                WHERE h.kode_dokumen IN ('30', '25', '41', '262', '33', '331', '613')$cmpHdrFilter ";
+                WHERE h.kode_dokumen IN ($outListFallback)$cmpHdrFilter ";
 
         $params = [];
         $types = "";
@@ -1377,21 +1420,22 @@ $stats['total_rows'] = count($dataRows);
                 <select name="bc" class="filter-control" style="width: 140px;">
                     <option value="%" <?= $bc_filter === '%' ? 'selected' : '' ?>>Semua Dokumen (%)</option>
                     <?php if ($activeTab === '1a'): ?>
-                        <option value="20" <?= $bc_filter === '20' ? 'selected' : '' ?>>BC 2.0 (Impor)</option>
-                        <option value="23" <?= $bc_filter === '23' ? 'selected' : '' ?>>BC 2.3 (TPB Masuk)</option>
-                        <option value="40" <?= $bc_filter === '40' ? 'selected' : '' ?>>BC 4.0 (TLDDP Masuk)</option>
-                        <option value="16" <?= $bc_filter === '16' ? 'selected' : '' ?>>BC 1.6 (LDP Masuk)</option>
-                        <option value="261" <?= $bc_filter === '261' ? 'selected' : '' ?>>BC 2.6.1 (Subkon Masuk)</option>
-                        <option value="28" <?= $bc_filter === '28' ? 'selected' : '' ?>>BC 2.8 (Impor Sementara)</option>
-                        <option value="611" <?= $bc_filter === '611' ? 'selected' : '' ?>>PPKEK 6.1.1 (KEK Masuk)</option>
+                        <?php if (isItDocPermitted('611')): ?><option value="611" <?= $bc_filter === '611' ? 'selected' : '' ?>>PPKEK 6.1.1 (KEK Masuk)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('20')): ?><option value="20" <?= $bc_filter === '20' ? 'selected' : '' ?>>BC 2.0 (Impor)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('23')): ?><option value="23" <?= $bc_filter === '23' ? 'selected' : '' ?>>BC 2.3 (TPB Masuk)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('40')): ?><option value="40" <?= $bc_filter === '40' ? 'selected' : '' ?>>BC 4.0 (TLDDP Masuk)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('16')): ?><option value="16" <?= $bc_filter === '16' ? 'selected' : '' ?>>BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('261')): ?><option value="261" <?= $bc_filter === '261' ? 'selected' : '' ?>>BC 2.6.1 (Subkon Masuk)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('28')): ?><option value="28" <?= $bc_filter === '28' ? 'selected' : '' ?>>BC 2.8 (Impor PLB)</option><?php endif; ?>
                     <?php else: ?>
-                        <option value="30" <?= $bc_filter === '30' ? 'selected' : '' ?>>BC 3.0 (Ekspor)</option>
-                        <option value="25" <?= $bc_filter === '25' ? 'selected' : '' ?>>BC 2.5 (TLDDP Keluar)</option>
-                        <option value="41" <?= $bc_filter === '41' ? 'selected' : '' ?>>BC 4.1 (TLDDP Keluar)</option>
-                        <option value="262" <?= $bc_filter === '262' ? 'selected' : '' ?>>BC 2.6.2 (Subkon Keluar)</option>
-                        <option value="33" <?= $bc_filter === '33' ? 'selected' : '' ?>>BC 3.3 (Antar TPB Keluar)</option>
-                        <option value="331" <?= $bc_filter === '331' ? 'selected' : '' ?>>BC 3.3.1 (Keluar)</option>
-                        <option value="613" <?= $bc_filter === '613' ? 'selected' : '' ?>>PPKEK 6.1.3 (KEK Keluar)</option>
+                        <?php if (isItDocPermitted('613')): ?><option value="613" <?= $bc_filter === '613' ? 'selected' : '' ?>>PPKEK 6.1.3 (KEK Keluar)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('631')): ?><option value="631" <?= $bc_filter === '631' ? 'selected' : '' ?>>PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('25')): ?><option value="25" <?= $bc_filter === '25' ? 'selected' : '' ?>>BC 2.5 (TLDDP Keluar)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('30')): ?><option value="30" <?= $bc_filter === '30' ? 'selected' : '' ?>>BC 3.0 (Ekspor)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('41')): ?><option value="41" <?= $bc_filter === '41' ? 'selected' : '' ?>>BC 4.1 (TLDDP Keluar)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('262')): ?><option value="262" <?= $bc_filter === '262' ? 'selected' : '' ?>>BC 2.6.2 (Subkon Keluar)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('33')): ?><option value="33" <?= $bc_filter === '33' ? 'selected' : '' ?>>BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                        <?php if (isItDocPermitted('331')): ?><option value="331" <?= $bc_filter === '331' ? 'selected' : '' ?>>BC 3.3.1 (P3BET PLB)</option><?php endif; ?>
                     <?php endif; ?>
                 </select>
             </div>

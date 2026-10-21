@@ -44,13 +44,14 @@ if ($action === 'login') {
             $_SESSION['allowed_menus'] = ['*'];
             $_SESSION['allowed_docs']  = ['*'];
 
-            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
             if ($cRes && $cr = $cRes->fetch_assoc()) {
                 $_SESSION['company_cmp_id']     = $cr['cmp_id'];
                 $_SESSION['company_name']       = $cr['cmp_name'];
                 $_SESSION['company_npwp']       = $cr['npwp'];
                 $_SESSION['is_inv']             = (int)$cr['IS_INV'];
                 $_SESSION['company_roles']      = $cr['company_roles'] ?: 'tpb';
+                $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs($cr['company_roles'], $cr['allowed_docs'] ?? null);
                 $_SESSION['company_erp_name']   = $cr['ERP_Name'] ?: '-';
                 $_SESSION['company_logo']       = $cr['logo'] ?? '';
                 $_SESSION['company_subdomain']  = $cr['subdomain'] ?? '';
@@ -61,6 +62,7 @@ if ($action === 'login') {
                 $_SESSION['company_npwp']       = '010816064431000';
                 $_SESSION['is_inv']             = 1;
                 $_SESSION['company_roles']      = 'tpb';
+                $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs('tpb', null);
                 $_SESSION['company_erp_name']   = '-';
                 $_SESSION['company_logo']       = '';
                 $_SESSION['company_subdomain']  = 'framas';
@@ -179,7 +181,7 @@ if ($action === 'switch_company') {
         exit;
     }
 
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $targetCmp, $targetCmp);
         $stmt->execute();
@@ -191,6 +193,7 @@ if ($action === 'switch_company') {
             $_SESSION['company_npwp']       = $comp['npwp'];
             $_SESSION['is_inv']             = (int)$comp['IS_INV'];
             $_SESSION['company_roles']      = $comp['company_roles'] ?: 'tpb';
+            $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
             $_SESSION['company_erp_name']   = $comp['ERP_Name'] ?: '-';
             $_SESSION['company_logo']       = $comp['logo'] ?? '';
             $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
@@ -553,7 +556,7 @@ $sessionIsInv = 1;
 $sessionCompanyRoles = 'tpb';
 $sessionErpName = '-';
 if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
-    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
+    $qInv = $koneksi->query("SELECT IFNULL(IS_INV, 1) as IS_INV, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($sessionCmpId) . "' LIMIT 1");
     if ($qInv && $rInv = $qInv->fetch_assoc()) {
         $sessionIsInv = (int)$rInv['IS_INV'];
         $_SESSION['is_inv'] = $sessionIsInv;
@@ -566,6 +569,7 @@ if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
         $_SESSION['company_subdomain'] = $sessionSubdomain;
         $_SESSION['company_card_color'] = $sessionCardColor;
         $_SESSION['company_roles'] = $sessionCompanyRoles;
+        $_SESSION['allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, $rInv['allowed_docs'] ?? null);
         $_SESSION['company_erp_name'] = $sessionErpName;
     } elseif (isset($_SESSION['is_inv'])) {
         $sessionIsInv = (int)$_SESSION['is_inv'];
@@ -708,8 +712,8 @@ $breadcrumbTitlesPhp = [
     'transfer'        => 'Data Host to Host',
     'editor'          => 'Form Editor Dokumen',
     'import'          => 'Import Excel Dokumen',
-    'manifest_ceisa'  => 'Manifest Ceisa 4.0',
-    'manifest'        => 'Manifest Host to Host',
+    'manifest_ceisa'  => 'Manifes Ceisa 4.0',
+    'manifest'        => 'Manifes Host to Host',
     'bc11_monitoring' => 'BC 1.1 Monitoring',
     'dokap'           => 'Upload Dokumen Pelengkap',
     'load_erp_odoo'   => 'Load ERP Data - Odoo to CEISA 4.0',
@@ -789,7 +793,7 @@ if ($initialTab === 'editor') {
     }
 } elseif ($initialTab === 'reff') {
     $initSrc = "/reff.php?embedded=1{$adminParam}";
-} elseif ($initialTab === 'docs' && $isAdmin) {
+} elseif ($initialTab === 'docs') {
     $initSrc = "/docs.php?embedded=1{$adminParam}";
 } elseif ($initialTab === 'db' && $isAdmin) {
     $initSrc = "/db.php?embedded=1{$adminParam}";
@@ -835,8 +839,10 @@ if ($initialTab === 'editor') {
     <title><?= htmlspecialchars($appSettings['app_name']) ?> - <?= htmlspecialchars($appSettings['app_subtitle']) ?></title>
     <script>
         (function() {
-            var theme = localStorage.getItem('ceisa_theme') || '<?= htmlspecialchars($appSettings['default_theme']) ?>';
+            var theme = localStorage.getItem('ceisa_theme') || '<?= htmlspecialchars($appSettings['default_theme'] ?? 'light') ?>';
             document.documentElement.setAttribute('data-theme', theme);
+            var iconStyle = localStorage.getItem('ceisa_icon_style') || '<?= htmlspecialchars($appSettings['sidebar_icon_style'] ?? 'colored') ?>';
+            document.documentElement.setAttribute('data-icon-style', iconStyle);
         })();
     </script>
     <link rel="icon" type="image/png" href="<?= htmlspecialchars($appSettings['app_favicon']) ?>">
@@ -1203,6 +1209,10 @@ if ($initialTab === 'editor') {
         body[data-theme="dark"] .kt-menu__link-icon {
             color: rgba(255, 255, 255, 0.55);
         }
+        html[data-theme="dark"] .kt-menu__link:hover .kt-menu__link-icon,
+        body[data-theme="dark"] .kt-menu__link:hover .kt-menu__link-icon {
+            color: #177ddc !important;
+        }
         html[data-theme="dark"] .kt-menu__item.active .kt-menu__link-icon,
         body[data-theme="dark"] .kt-menu__item.active .kt-menu__link-icon {
             color: #177ddc !important;
@@ -1217,6 +1227,52 @@ if ($initialTab === 'editor') {
             margin-right: 8px;
             flex-shrink: 0;
             color: #595959;
+            transition: color 0.2s;
+        }
+        .kt-menu__link-icon svg {
+            width: 16px;
+            height: 16px;
+            display: block;
+            flex-shrink: 0;
+        }
+        .kt-menu__link-icon .icon-colored {
+            font-size: 13.5px;
+            line-height: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .kt-menu__link-icon .icon-monochrome {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Gaya Ikon Default: Berwarna (Emoji / Color Icons) */
+        html:not([data-icon-style="monochrome"]) .kt-menu__link-icon .icon-monochrome,
+        body:not([data-icon-style="monochrome"]) .kt-menu__link-icon .icon-monochrome,
+        html[data-icon-style="colored"] .kt-menu__link-icon .icon-monochrome,
+        body[data-icon-style="colored"] .kt-menu__link-icon .icon-monochrome {
+            display: none !important;
+        }
+        html:not([data-icon-style="monochrome"]) .kt-menu__link-icon .icon-colored,
+        body:not([data-icon-style="monochrome"]) .kt-menu__link-icon .icon-colored,
+        html[data-icon-style="colored"] .kt-menu__link-icon .icon-colored,
+        body[data-icon-style="colored"] .kt-menu__link-icon .icon-colored {
+            display: inline-flex !important;
+        }
+
+        /* Gaya Ikon Opsi: Monokrom (Ant Design Vector Minimalis) */
+        html[data-icon-style="monochrome"] .kt-menu__link-icon .icon-colored,
+        body[data-icon-style="monochrome"] .kt-menu__link-icon .icon-colored {
+            display: none !important;
+        }
+        html[data-icon-style="monochrome"] .kt-menu__link-icon .icon-monochrome,
+        body[data-icon-style="monochrome"] .kt-menu__link-icon .icon-monochrome {
+            display: inline-flex !important;
+        }
+        .kt-menu__link:hover .kt-menu__link-icon {
+            color: #1890ff;
         }
         .kt-menu__item.active .kt-menu__link-icon {
             color: #1890ff;
@@ -1533,6 +1589,38 @@ if ($initialTab === 'editor') {
             color: #1890ff;
             font-weight: 600;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+
+        /* Icon Style Selector */
+        .icon-style-select {
+            display: inline-flex;
+            gap: 2px;
+            background: var(--bg-base);
+            padding: 1px;
+            border-radius: 3px;
+            border: 1px solid var(--border-color);
+        }
+        .icon-style-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 9.5px;
+            line-height: 1.2;
+            color: var(--text-muted);
+            transition: all 0.2s;
+        }
+        .icon-style-btn.active {
+            background: #ffffff;
+            color: #1890ff;
+            font-weight: 600;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        html[data-theme="dark"] .icon-style-btn.active,
+        body[data-theme="dark"] .icon-style-btn.active {
+            background: #177ddc;
+            color: #ffffff;
         }
 
         /* MFA Topbar Button & Modal Styles */
@@ -2530,7 +2618,10 @@ if ($initialTab === 'editor') {
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_home') ? 'active' : '' ?>" id="nav-item-it_inventory_home" onclick="switchMainTab('it_inventory_home')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🏠</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🏠</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M946.5 505L534.6 93.4a31.93 31.93 0 0 0-45.2 0L77.5 505c-12 12-18.8 28.3-18.8 45.3 0 35.3 28.7 64 64 64h43.4V908c0 17.7 14.3 32 32 32H348c17.7 0 32-14.3 32-32V644h264v264c0 17.7 14.3 32 32 32h149.9c17.7 0 32-14.3 32-32V614.3h43.4c17 0 33.3-6.7 45.3-18.8 24.9-25 24.9-65.5-.1-90.5z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Home Dashboard</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2544,56 +2635,80 @@ if ($initialTab === 'editor') {
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1a') ? 'active' : '' ?>" id="nav-item-it_inventory_1a" onclick="switchMainTab('it_inventory_1a')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📥</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📥</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M862 736l-44.4-44.4c-3.1-3.1-8.2-3.1-11.3 0L544 953.5V104c0-4.4-3.6-8-8-8h-64c-4.4 0-8 3.6-8 8v849.5L201.7 691.6c-3.1-3.1-8.2-3.1-11.3 0L146 736c-3.1 3.1-3.1 8.2 0 11.3l360.3 360.3c3.1 3.1 8.2 3.1 11.3 0L862 747.3c3.1-3.1 3.1-8.2 0-11.3z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1A - Pemasukan Barang</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1b') ? 'active' : '' ?>" id="nav-item-it_inventory_1b" onclick="switchMainTab('it_inventory_1b')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📤</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📤</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M862 288L501.7 72.3c-3.1-3.1-8.2-3.1-11.3 0L130.1 288c-3.1 3.1-3.1 8.2 0 11.3l44.4 44.4c3.1 3.1 8.2 3.1 11.3 0L464 74.5V920c0 4.4 3.6 8 8 8h64c4.4 0 8-3.6 8-8V74.5l278.2 269.2c3.1 3.1 8.2 3.1 11.3 0l44.4-44.4c3.1-3.1 3.1-8.2 0-11.3z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1B - Pengeluaran Barang</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1c') ? 'active' : '' ?>" id="nav-item-it_inventory_1c" onclick="switchMainTab('it_inventory_1c')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🔄</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">⏳</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M742 224h-44v-80c0-4.4-3.6-8-8-8H334c-4.4 0-8 3.6-8 8v80h-44c-17.7 0-32 14.3-32 32v120c0 102.2 68.2 189.7 162.7 218.4C318.2 622.7 250 710.2 250 812.4V932c0 17.7 14.3 32 32 32h444c17.7 0 32-14.3 32-32V812.4c0-102.2-68.2-189.7-162.7-218.4C673.8 565.3 742 477.8 742 376V256c0-17.7-14.3-32-32-32zm-76 152c0 86-70 156-156 156s-156-70-156-156V280h312v96zm0 436.4c0 86-70 156-156 156s-156-70-156-156V716c0-86 70-156 156-156s156 70 156 156v96.4z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1C - Posisi WIP</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1d' || $initialTab === 'it_inventory_1d_rm') ? 'active' : '' ?>" id="nav-item-it_inventory_1d_rm" onclick="switchMainTab('it_inventory_1d_rm')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📦</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🧱</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M885.2 446.3l-57.8-313.2C823 108.4 801.4 90 776 90H248c-25.4 0-47 18.4-51.4 43.1L138.8 446.3c-2.4 13.1 1.7 26.5 11 35.8 9.4 9.4 22.2 14.7 35.6 14.7h136.2c13.3 0 24 10.7 24 24v24c0 39.8 32.2 72 72 72h188.8c39.8 0 72-32.2 72-72v-24c0-13.3 10.7-24 24-24h136.2c13.4 0 26.2-5.3 35.6-14.7 9.3-9.3 13.4-22.7 11-35.8zM245.5 162h533l44.3 240H695.4c-22.1 0-41.6 12.3-51.7 31.4-12.7 24.1-37.7 39.4-65.7 39.4H446c-28 0-53-15.3-65.7-39.4-10.1-19.1-29.6-31.4-51.7-31.4H199.2l46.3-240z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1D - Mutasi Bahan Baku</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1d_fg') ? 'active' : '' ?>" id="nav-item-it_inventory_1d_fg" onclick="switchMainTab('it_inventory_1d_fg')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🏷️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📦</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M483.2 790.3L861.4 412c1.7-1.7 2.5-4 2.3-6.4l-14.4-142c-.4-4.1-3.7-7.4-7.8-7.8l-142-14.4c-2.4-.2-4.7.6-6.4 2.3L314.9 621.9c-3.1 3.1-3.1 8.2 0 11.3l157 157.1c3.1 3.1 8.2 3.1 11.3 0zm207-483.5a32 32 0 1 0 64 0 32 32 0 0 0-64 0zM375.4 797.7L184.2 606.5c-3.1-3.1-3.1-8.2 0-11.3L482.4 297c1.7-1.7 4-2.5 6.4-2.3l108.6 11-44.5 44.5-84.3-8.6c-4.1-.4-7.4 2.9-7.8 7l-8.6 84.3-242 242 145.4 145.4 20-20.6c3.1-3.1 8.2-3.1 11.3 0l21.2 21.2c3.1 3.1 3.1 8.2 0 11.3l-32.9 33.9c-3.1 3.1-8.2 3.1-11.3 0z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1D - Mutasi Barang Jadi</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1d_cg') ? 'active' : '' ?>" id="nav-item-it_inventory_1d_cg" onclick="switchMainTab('it_inventory_1d_cg')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">⚙️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">⚙️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 500H688V208c0-17.7-14.3-32-32-32H368c-17.7 0-32 14.3-32 32v292H144c-17.7 0-32 14.3-32 32v280c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V532c0-17.7-14.3-32-32-32zM408 248h208v252H408V248zm400 528H184V572h624v204z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1D - Mutasi Mesin & Alat</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1d_w') ? 'active' : '' ?>" id="nav-item-it_inventory_1d_w" onclick="switchMainTab('it_inventory_1d_w')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">♻️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🗑️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M720 184h-80v-40c0-4.4-3.6-8-8-8H392c-4.4 0-8 3.6-8 8v40h-80c-17.7 0-32 14.3-32 32v48c0 4.4 3.6 8 8 8h568c4.4 0 8-3.6 8-8v-48c0-17.7-14.3-32-32-32zM280 848c0 17.7 14.3 32 32 32h392c17.7 0 32-14.3 32-32V320H280v528z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">1D - Mutasi Reject & Scrap</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'it_inventory_log') ? 'active' : '' ?>" id="nav-item-it_inventory_log" onclick="switchMainTab('it_inventory_log')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📜</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📜</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M854.6 288.6L657.4 91.4c-9-9-21.2-14.1-33.9-14.1H224c-26.5 0-48 21.5-48 48v768c0 26.5 21.5 48 48 48h576c26.5 0 48-21.5 48-48V322.5c0-12.7-5.1-24.9-14.1-33.9zM648 160.8l119.2 119.2H648V160.8zm136 695.2H240V144h344v168c0 17.7 14.3 32 32 32h168v512zm-464-168h352c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H320c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0-136h352c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H320c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Log Perubahan Data</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2607,13 +2722,19 @@ if ($initialTab === 'editor') {
                     </div>
                     <div class="kt-menu__item" onclick="openModalPass()">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🔑</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🔑</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M632 144c-145.8 0-264 118.2-264 264 0 54.1 16.3 104.4 44.3 146.4l-275.6 275.5a8.03 8.03 0 0 0-2.3 5.7V880c0 4.4 3.6 8 8 8h128c4.4 0 8-3.6 8-8v-64h64c4.4 0 8-3.6 8-8v-64h64c4.4 0 8-3.6 8-8v-64h64c2.1 0 4.2-.8 5.7-2.3l49.9-49.9C579.6 657.7 605.9 672 632 672c145.8 0 264-118.2 264-264S777.8 144 632 144zm0 456c-106 0-192-86-192-192s86-192 192-192 192 86 192 192-86 192-192 192zm56-256a48 48 0 1 0 96 0 48 48 0 1 0-96 0z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Ganti Password</span>
                         </a>
                     </div>
                     <div class="kt-menu__item">
                         <a href="index.php?action=logout" class="kt-menu__link" style="color:#fd3995;">
-                            <span class="kt-menu__link-icon">🚪</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🚪</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M868 732h-70.3c-4.8 0-9.3 2.1-12.3 5.8-7 8.5-14.5 16.7-22.4 24.5a353.84 353.84 0 0 1-112.7 75.9A352.8 352.8 0 0 1 512.4 866c-47.9 0-94.3-9.4-137.9-27.8a353.84 353.84 0 0 1-112.7-75.9 353.28 353.28 0 0 1-76-112.5C167.3 606.2 158 559.9 158 512s9.4-94.2 27.8-137.8c17.8-42.1 43.4-80 76-112.5s70.5-58.2 112.7-75.9C418.1 167.4 464.5 158 512.4 158c47.9 0 94.3 9.4 137.9 27.8A353.84 353.84 0 0 1 763 261.7c7.9 7.8 15.4 16 22.4 24.5 3 3.7 7.6 5.8 12.3 5.8H868c6.3 0 10.2-7 6.7-12.3C798 160.8 663.8 80 512 80 273.4 80 80 273.4 80 512s193.4 432 432 432c151.8 0 286-80.8 362.7-199.7 3.5-5.3-.4-12.3-6.7-12.3zm82.4-230.7L826.8 377.7a8 8 0 0 0-11.3 0l-33.9 33.9a8 8 0 0 0 0 11.3l60.5 60.5H412c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8h440.1l-60.5 60.5a8 8 0 0 0 0 11.3l33.9 33.9a8 8 0 0 0 11.3 0l123.6-123.6a8 8 0 0 0 0-11.3z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Log Out</span>
                         </a>
                     </div>
@@ -2628,9 +2749,8 @@ if ($initialTab === 'editor') {
                     <div class="kt-menu__item <?= ($initialTab === 'daftar_dokumen') ? 'active' : '' ?>" id="nav-item-daftar_dokumen" onclick="switchMainTab('daftar_dokumen')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
-                                    <path d="M928 140H96c-17.7 0-32 14.3-32 32v496c0 17.7 14.3 32 32 32h380v112H304c-8.8 0-16 7.2-16 16v48c0 4.4 3.6 8 8 8h432c4.4 0 8-3.6 8-8v-48c0-8.8-7.2-16-16-16H548V700h380c17.7 0 32-14.3 32-32V172c0-17.7-14.3-32-32-32zm-40 488H136V212h752v416z"></path>
-                                </svg>
+                                <span class="icon-colored">🖥️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M928 140H96c-17.7 0-32 14.3-32 32v496c0 17.7 14.3 32 32 32h380v112H304c-8.8 0-16 7.2-16 16v48c0 4.4 3.6 8 8 8h432c4.4 0 8-3.6 8-8v-48c0-8.8-7.2-16-16-16H548V700h380c17.7 0 32-14.3 32-32V172c0-17.7-14.3-32-32-32zm-40 488H136V212h752v416z"></path></svg></span>
                             </span>
                             <span class="kt-menu__link-text">Dashboard Ceisa 4.0</span>
                             <i class="kt-menu__ver-arrow">›</i>
@@ -2642,9 +2762,8 @@ if ($initialTab === 'editor') {
                     <div class="kt-menu__item <?= ($initialTab === 'transfer') ? 'active' : '' ?>" id="nav-item-transfer" onclick="switchMainTab('transfer')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
-                                    <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 376H520V184h320v304zm-360-304v304H184V184h320zm-320 376h320v304H184V488zm360 304V488h320v304H544z"></path>
-                                </svg>
+                                <span class="icon-colored">⊞</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 376H520V184h320v304zm-360-304v304H184V184h320zm-320 376h320v304H184V488zm360 304V488h320v304H544z"></path></svg></span>
                             </span>
                             <span class="kt-menu__link-text">Data Host to Host</span>
                             <i class="kt-menu__ver-arrow">›</i>
@@ -2655,7 +2774,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('editor')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'editor') ? 'active' : '' ?>" id="nav-item-editor" onclick="switchMainTab('editor')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">✏️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">✏️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M257.7 752c2 0 4-.2 6-.5L431.9 722c2-.4 3.9-1.3 5.3-2.8l423.9-423.9a9.96 9.96 0 0 0 0-14.1L694.9 114.9c-1.9-1.9-4.4-2.9-7.1-2.9s-5.2 1-7.1 2.9L256.8 538.8c-1.5 1.5-2.4 3.3-2.8 5.3l-29.5 168.2a33.5 33.5 0 0 0 9.4 29.8c6.6 6.4 14.9 9.9 23.8 9.9zm67.4-148.6L687.8 240.7l65.5 65.5L390.6 669l-75.1 13.1 9.6-78.7zM880 836H144c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h736c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Form Editor Dokumen</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2665,7 +2787,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('import')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'import') ? 'active' : '' ?>" id="nav-item-import" onclick="switchMainTab('import')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📥</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📊</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M854.6 288.6L657.4 91.4c-9-9-21.2-14.1-33.9-14.1H224c-26.5 0-48 21.5-48 48v768c0 26.5 21.5 48 48 48h576c26.5 0 48-21.5 48-48V322.5c0-12.7-5.1-24.9-14.1-33.9zM648 160.8l119.2 119.2H648V160.8zm136 695.2H240V144h344v168c0 17.7 14.3 32 32 32h168v512zM362.4 448l67.2 108.9L497 448h65.8L477 588.6l90.2 147.4h-67.4L428.8 625l-71 111H292l90.2-147.4L296.6 448h65.8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Import Excel Dokumen</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2675,7 +2800,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('load_erp_odoo')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'load_erp_odoo') ? 'active' : '' ?>" id="nav-item-load_erp_odoo" onclick="switchMainTab('load_erp_odoo')" style="display: <?= ($hasStandardCustomsDocs && $isOdooErpCompany) ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🔌</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🔌</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M917.7 508.4L793.5 384.2a8.03 8.03 0 0 0-11.3 0L670.8 495.6c-4.4 4.4-1.2 12 5 12.7 28.5 3.3 53.6 17.5 70.9 38.6 15.7 19.2 24.8 43.1 25.9 68.6.6 13.9 6.2 26.9 15.8 36.5l119.3 119.3c3.1 3.1 8.2 3.1 11.3 0l70.1-70.1c3.1-3.2 3.1-8.2 0-11.3l-59.4-59.4 69.4-69.4c3.2-3.1 3.2-8.2 0-11.4l-.2-.3zM348 513.3c6.2-.7 9.4-8.3 5-12.7L241.6 389.2a8.03 8.03 0 0 0-11.3 0l-70.1 70.1c-3.1 3.1-3.1 8.2 0 11.3l69.4 69.4-59.4 59.4c-3.1 3.1-3.1 8.2 0 11.3l119.3 119.3c9.6 9.6 22.6 15.2 36.5 15.8 25.5 1.1 49.4-8 68.6-23.7 21.1-17.3 35.3-42.4 38.6-70.9.7-6.2-6.9-9.4-11.3-5L348 513.3zM678.4 207.6c-3.1-3.1-8.2-3.1-11.3 0L547.8 326.9c-9.6 9.6-15.2 22.6-15.8 36.5-1.1 25.5 8 49.4 23.7 68.6 17.3 21.1 42.4 35.3 70.9 38.6 6.2.7 9.4-6.9 5-11.3L520.2 347.9a8.03 8.03 0 0 1 0-11.3L639.5 217.3a8.03 8.03 0 0 1 11.3 0l27.6 27.6c3.1 3.1 8.2 3.1 11.3 0l58.8-58.8c3.1-3.1 3.1-8.2 0-11.3l-70.1-27.2zM476.2 686.1c-17.3-21.1-42.4-35.3-70.9-38.6-6.2-.7-9.4 6.9-5 11.3l111.4 111.4c3.1 3.1 3.1 8.2 0 11.3L392.4 900.5a8.03 8.03 0 0 1-11.3 0l-27.6-27.6c-3.1-3.1-8.2-3.1-11.3 0l-58.8 58.8c-3.1 3.1-3.1 8.2 0 11.3l70.1 70.1c3.1 3.1 8.2 3.1 11.3 0l119.3-119.3c9.6-9.6 15.2-22.6 15.8-36.5 1.1-25.5-8-49.4-23.7-68.6z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Load ERP (Odoo)</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2685,7 +2813,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('dokap')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'dokap') ? 'active' : '' ?>" id="nav-item-dokap" onclick="switchMainTab('dokap')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📎</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📎</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M779.3 196.6c-61.6-61.6-161.4-61.6-223 0l-374 374c-42.8 42.8-42.8 112.2 0 155 42.8 42.8 112.2 42.8 155 0l359.8-359.8c23.9-23.9 23.9-62.6 0-86.5s-62.6-23.9-86.5 0L275.5 614.4c-3.1 3.1-3.1 8.2 0 11.3l42.4 42.4c3.1 3.1 8.2 3.1 11.3 0l335.1-335.1c4.7-4.7 12.3-4.7 17 0 4.7 4.7 4.7 12.3 0 17L321.5 709.8c-24 24-62.9 24-86.9 0s-24-62.9 0-86.9l374-374c42.8-42.8 112.2-42.8 155 0 42.8 42.8 42.8 112.2 0 155l-330 330c-3.1 3.1-3.1 8.2 0 11.3l42.4 42.4c3.1 3.1 8.2 3.1 11.3 0l330-330c61.6-61.6 61.6-161.4 0-223z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Upload Dokap Pabean</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2695,7 +2826,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('tracking')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'tracking') ? 'active' : '' ?>" id="nav-item-tracking" onclick="switchMainTab('tracking')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🔍</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🔍</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M909.6 854.5L649.9 594.8C690.2 542.7 712 479 712 412c0-80.2-31.3-155.4-87.9-212.1-56.6-56.7-132-87.9-212.1-87.9s-155.5 31.3-212.1 87.9C143.2 256.5 112 331.8 112 412c0 80.1 31.3 155.5 87.9 212.1C256.5 680.8 331.8 712 412 712c67 0 130.6-21.8 182.7-62l259.7 259.6a8.2 8.2 0 0 0 11.6 0l43.6-43.5a8.2 8.2 0 0 0 0-11.6zM570.4 570.4C528 612.7 471.8 636 412 636s-116-23.3-158.4-65.6C211.3 528 188 471.8 188 412s23.3-116.1 65.6-158.4C296 211.3 352.2 188 412 188s116.1 23.2 158.4 65.6S636 352.2 636 412s-23.3 116.1-65.6 158.4z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Tracking Respon Pabean</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2712,31 +2846,28 @@ if ($initialTab === 'editor') {
                     <div class="kt-menu__item <?= ($initialTab === 'manifest_ceisa') ? 'active' : '' ?>" id="nav-item-manifest_ceisa" onclick="switchMainTab('manifest_ceisa')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
-                                    <path d="M928 140H96c-17.7 0-32 14.3-32 32v496c0 17.7 14.3 32 32 32h380v112H304c-8.8 0-16 7.2-16 16v48c0 4.4 3.6 8 8 8h432c4.4 0 8-3.6 8-8v-48c0-8.8-7.2-16-16-16H548V700h380c17.7 0 32-14.3 32-32V172c0-17.7-14.3-32-32-32zm-40 488H136V212h752v416z"></path>
-                                </svg>
+                                <span class="icon-colored">🚢</span>
+                                <span class="icon-monochrome"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M20.2 15.6l-1.4 5.1c-.2.7-.8 1.3-1.6 1.3H6.8c-.8 0-1.4-.6-1.6-1.3L3.8 15.6c-.2-.8.4-1.6 1.2-1.6H19c.8 0 1.4.8 1.2 1.6zM4.5 13h15l-.8-3.2c-.1-.5-.6-.8-1.1-.8H6.4c-.5 0-1 .3-1.1.8L4.5 13zM11 2h2v4h-2V2zm-4 4h10v2H7V6z"/></svg></span>
                             </span>
-                            <span class="kt-menu__link-text">Manifest Ceisa 4.0</span>
+                            <span class="kt-menu__link-text">Manifes Ceisa 4.0</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'manifest') ? 'active' : '' ?>" id="nav-item-manifest" onclick="switchMainTab('manifest')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
-                                    <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 376H520V184h320v304zm-360-304v304H184V184h320zm-320 376h320v304H184V488zm360 304V488h320v304H544z"></path>
-                                </svg>
+                                <span class="icon-colored">📦</span>
+                                <span class="icon-monochrome"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M2 6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6zm3 1v10h2V7H5zm4 0v10h2V7H9zm4 0v10h2V7h-2zm4 0v10h2V7h-2z"/></svg></span>
                             </span>
-                            <span class="kt-menu__link-text">Manifest Host to Host</span>
+                            <span class="kt-menu__link-text">Manifes Host to Host</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'bc11_monitoring') ? 'active' : '' ?>" id="nav-item-bc11_monitoring" onclick="switchMainTab('bc11_monitoring')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor">
-                                    <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.6-9.4-22.7zM790.2 320H608V137.8L790.2 320zm-598.2 64h416v64H192v-64zm0 160h416v64H192v-64zm528 288H192v-64h528v64z"></path>
-                                </svg>
+                                <span class="icon-colored">📋</span>
+                                <span class="icon-monochrome"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm1 2.06A8 8 0 0 1 19.94 11H13V4.06zM4.06 13A8 8 0 0 1 11 4.06V11H4.06zm0 2H11v6.94A8 8 0 0 1 4.06 15zm8.94 6.94V13h6.94A8 8 0 0 1 13 21.94z"/></svg></span>
                             </span>
                             <span class="kt-menu__link-text">BC 1.1 Monitoring</span>
                             <i class="kt-menu__ver-arrow">›</i>
@@ -2760,7 +2891,10 @@ if ($initialTab === 'editor') {
                     <?php if ($isMasterAllowed): ?>
                     <div class="kt-menu__item kt-menu__item--submenu <?= $isMasterActive ? 'kt-menu__item--open' : '' ?>" id="nav-item-master_parent">
                         <a class="kt-menu__link" onclick="toggleSubmenu('nav-item-master_parent')" title="Klik untuk membuka/menutup Data Master">
-                            <span class="kt-menu__link-icon">📁</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📁</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 298.4H521L403.7 186.2a8.15 8.15 0 0 0-5.5-2.2H144c-17.7 0-32 14.3-32 32v592c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V330.4c0-17.7-14.3-32-32-32zM840 768H184V256h188.5l119.6 114.1 4.7 4.5 6.4.7L840 376.7V768z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text" style="font-weight: 600;">Data Master</span>
                             <span class="kt-menu__arrow">▶</span>
                         </a>
@@ -2769,7 +2903,10 @@ if ($initialTab === 'editor') {
                             <div class="kt-menu__item <?= ($initialTab === 'inv_material') ? 'active' : '' ?>" id="nav-item-inv_material" onclick="switchMainTab('inv_material')">
                                 <a class="kt-menu__link" style="display:flex; justify-content:space-between; align-items:center;">
                                     <span style="display:inline-flex; align-items:center;">
-                                        <span class="kt-menu__link-icon">🏷️</span>
+                                        <span class="kt-menu__link-icon">
+                                            <span class="icon-colored">🏷️</span>
+                                            <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M483.2 790.3L861.4 412c1.7-1.7 2.5-4 2.3-6.4l-14.4-142c-.4-4.1-3.7-7.4-7.8-7.8l-142-14.4c-2.4-.2-4.7.6-6.4 2.3L314.9 621.9c-3.1 3.1-3.1 8.2 0 11.3l157 157.1c3.1 3.1 8.2 3.1 11.3 0zm207-483.5a32 32 0 1 0 64 0 32 32 0 0 0-64 0zM375.4 797.7L184.2 606.5c-3.1-3.1-3.1-8.2 0-11.3L482.4 297c1.7-1.7 4-2.5 6.4-2.3l108.6 11-44.5 44.5-84.3-8.6c-4.1-.4-7.4 2.9-7.8 7l-8.6 84.3-242 242 145.4 145.4 20-20.6c3.1-3.1 8.2-3.1 11.3 0l21.2 21.2c3.1 3.1 3.1 8.2 0 11.3l-32.9 33.9c-3.1 3.1-8.2 3.1-11.3 0z"/></svg></span>
+                                        </span>
                                         <span class="kt-menu__link-text">Master Data Barang</span>
                                     </span>
                                     <?php if ($cntPendingApproval > 0): ?>
@@ -2782,7 +2919,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_koreksi_klas') || isMenuAllowed('inv_material')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_koreksi_klas') ? 'active' : '' ?>" id="nav-item-inv_koreksi_klas" onclick="switchMainTab('inv_koreksi_klas')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">⚠️</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">⚠️</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M464 720a48 48 0 1 0 96 0 48 48 0 1 0-96 0zm16-480c-17.7 0-32 14.3-32 32v240c0 17.7 14.3 32 32 32s32-14.3 32-32V272c0-17.7-14.3-32-32-32zm472 496L566 160c-24-41.6-84-41.6-108 0L72 736c-24 41.6 6 96 54 96h768c48 0 78-54.4 54-96zM814 768H210L512 244l302 524z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Koreksi Klasifikasi IT Inv<?= $isAdmin ? ' (KLAS)' : '' ?></span>
                                 </a>
                             </div>
@@ -2791,7 +2931,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_bom')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_bom') ? 'active' : '' ?>" id="nav-item-inv_bom" onclick="switchMainTab('inv_bom')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🧩</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🧩</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M888 792H200V168c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v688c0 4.4 3.6 8 8 8h752c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm-620-80h104c4.4 0 8-3.6 8-8V464c0-4.4-3.6-8-8-8H268c-4.4 0-8 3.6-8 8v240c0 4.4 3.6 8 8 8zm184 0h104c4.4 0 8-3.6 8-8V280c0-4.4-3.6-8-8-8H452c-4.4 0-8 3.6-8 8v424c0 4.4 3.6 8 8 8zm184 0h104c4.4 0 8-3.6 8-8V360c0-4.4-3.6-8-8-8H636c-4.4 0-8 3.6-8 8v344c0 4.4 3.6 8 8 8z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Master BOM</span>
                                 </a>
                             </div>
@@ -2800,7 +2943,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_jaminan')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_jaminan') ? 'active' : '' ?>" id="nav-item-inv_jaminan" onclick="switchMainTab('inv_jaminan')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🛡️</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🛡️</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372zm-48-268l240-240c6.2-6.2 6.2-16.4 0-22.6l-45.3-45.3c-6.2-6.2-16.4-6.2-22.6 0L452.7 542.8l-85.4-85.4c-6.2-6.2-16.4-6.2-22.6 0l-45.3 45.3c-6.2 6.2-6.2 16.4 0 22.6l141.4 141.4c6.2 6.3 16.4 6.3 22.6 0z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Master Jaminan</span>
                                 </a>
                             </div>
@@ -2812,7 +2958,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('inv_stock_transfer')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'inv_stock_transfer') ? 'active' : '' ?>" id="nav-item-inv_stock_transfer" onclick="switchMainTab('inv_stock_transfer')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🏭</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🏭</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 500H688V208c0-17.7-14.3-32-32-32H368c-17.7 0-32 14.3-32 32v292H144c-17.7 0-32 14.3-32 32v280c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V532c0-17.7-14.3-32-32-32zM408 248h208v252H408V248zm400 528H184V572h624v204z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Mutasi Produksi</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2827,7 +2976,10 @@ if ($initialTab === 'editor') {
                     <?php if ($isWarehouseAllowed): ?>
                     <div class="kt-menu__item kt-menu__item--submenu <?= $isWarehouseActive ? 'kt-menu__item--open' : '' ?>" id="nav-item-warehouse_parent">
                         <a class="kt-menu__link" onclick="toggleSubmenu('nav-item-warehouse_parent')" title="Klik untuk membuka/menutup Transaksi Warehouse">
-                            <span class="kt-menu__link-icon">🏬</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🏬</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 312H144c-17.7 0-32 14.3-32 32v496c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V344c0-17.7-14.3-32-32-32zm-40 488H184V384h656v416zM512 120a176 176 0 0 0-176 176c0 4.4 3.6 8 8 8h336c4.4 0 8-3.6 8-8a176 176 0 0 0-176-176z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text" style="font-weight: 600;">Transaksi Warehouse</span>
                             <span class="kt-menu__arrow">▶</span>
                         </a>
@@ -2835,7 +2987,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_warehouse_in')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_warehouse_in') ? 'active' : '' ?>" id="nav-item-inv_warehouse_in" onclick="switchMainTab('inv_warehouse_in')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">📥</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📥</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M885.2 446.3l-57.8-313.2C823 108.4 801.4 90 776 90H248c-25.4 0-47 18.4-51.4 43.1L138.8 446.3c-2.4 13.1 1.7 26.5 11 35.8 9.4 9.4 22.2 14.7 35.6 14.7h136.2c13.3 0 24 10.7 24 24v24c0 39.8 32.2 72 72 72h188.8c39.8 0 72-32.2 72-72v-24c0-13.3 10.7-24 24-24h136.2c13.4 0 26.2-5.3 35.6-14.7 9.3-9.3 13.4-22.7 11-35.8zM245.5 162h533l44.3 240H695.4c-22.1 0-41.6 12.3-51.7 31.4-12.7 24.1-37.7 39.4-65.7 39.4H446c-28 0-53-15.3-65.7-39.4-10.1-19.1-29.6-31.4-51.7-31.4H199.2l46.3-240z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Warehouse - Incoming</span>
                                 </a>
                             </div>
@@ -2844,7 +2999,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_warehouse_delivery')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_warehouse_delivery') ? 'active' : '' ?>" id="nav-item-inv_warehouse_delivery" onclick="switchMainTab('inv_warehouse_delivery')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🚚</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🚚</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 600h-48V376c0-4.4-3.6-8-8-8h-96c-4.4 0-8 3.6-8 8v224H504V280c0-4.4-3.6-8-8-8H152c-4.4 0-8 3.6-8 8v320h-48c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8h48.8c7.4 40.6 42.9 72 85.2 72s77.8-31.4 85.2-72h309.6c7.4 40.6 42.9 72 85.2 72s77.8-31.4 85.2-72H880c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8zM236 704a40 40 0 1 1 0-80 40 40 0 0 1 0 80zm528 0a40 40 0 1 1 0-80 40 40 0 0 1 0 80zm4-168h-48V440h48v96z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Warehouse - Delivery</span>
                                 </a>
                             </div>
@@ -2853,7 +3011,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_transfer_bc27')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_transfer_bc27') ? 'active' : '' ?>" id="nav-item-inv_transfer_bc27" onclick="switchMainTab('inv_transfer_bc27')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🔄</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🔄</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M847.9 592H152c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h605.2L612 813.1c-3.1 3.1-3.1 8.2 0 11.3l42.4 42.4c3.1 3.1 8.2 3.1 11.3 0l229.4-229.4c3.1-3.1 3.1-8.2 0-11.3L665.7 396.7c-3.1-3.1-8.2-3.1-11.3 0l-42.4 42.4c-3.1 3.1-3.1 8.2 0 11.3L757.2 592zM176.1 432H872c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8H266.8l145.2-145.1c3.1-3.1 3.1-8.2 0-11.3l-42.4-42.4c-3.1-3.1-8.2-3.1-11.3 0L128.9 384.6c-3.1 3.1-3.1 8.2 0 11.3L358.3 625.3c3.1 3.1 8.2 3.1 11.3 0l42.4-42.4c3.1-3.1 3.1-8.2 0-11.3L266.8 432z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Warehouse - Transfer BC27 OUT-->IN</span>
                                 </a>
                             </div>
@@ -2865,7 +3026,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('inv_stok_opname')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'inv_stok_opname') ? 'active' : '' ?>" id="nav-item-inv_stok_opname" onclick="switchMainTab('inv_stok_opname')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📋</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📋</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M688 264c0-4.4-3.6-8-8-8H344c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h336c4.4 0 8-3.6 8-8v-56zm-176 408c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h176c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8H512zm176-208c0-4.4-3.6-8-8-8H344c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h336c4.4 0 8-3.6 8-8v-56zM880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Stok Opname</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2878,7 +3042,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('inv_scan27')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'inv_scan27') ? 'active' : '' ?>" id="nav-item-inv_scan27" onclick="switchMainTab('inv_scan27')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📲</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📲</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M144 288h72c4.4 0 8-3.6 8-8V176c0-4.4-3.6-8-8-8h-72c-4.4 0-8 3.6-8 8v104c0 4.4 3.6 8 8 8zm680-120h-72c-4.4 0-8 3.6-8 8v104c0 4.4 3.6 8 8 8h72c4.4 0 8-3.6 8-8V176c0-4.4-3.6-8-8-8zM224 848c4.4 0 8-3.6 8-8v-72c0-4.4-3.6-8-8-8h-72c-4.4 0-8 3.6-8 8v72c0 4.4 3.6 8 8 8h72zm600-88c0-4.4-3.6-8-8-8h-72c-4.4 0-8 3.6-8 8v72c0 4.4 3.6 8 8 8h72c4.4 0 8-3.6 8-8v-72zm56-616H144c-44.2 0-80 35.8-80 80v640c0 44.2 35.8 80 80 80h736c44.2 0 80-35.8 80-80V224c0-44.2-35.8-80-80-80zm8 720c0 4.4-3.6 8-8 8H144c-4.4 0-8-3.6-8-8V224c0-4.4 3.6-8 8-8h736c4.4 0 8 3.6 8 8v640z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Import BC 2.7 IN dan Post ke IT Inv</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -2894,7 +3061,10 @@ if ($initialTab === 'editor') {
                     <?php if ($isAdminInvAllowed): ?>
                     <div class="kt-menu__item kt-menu__item--submenu <?= $isAdminInvActive ? 'kt-menu__item--open' : '' ?>" id="nav-item-admin_inv_parent">
                         <a class="kt-menu__link" onclick="toggleSubmenu('nav-item-admin_inv_parent')" title="Klik untuk membuka/menutup Admin Inventory">
-                            <span class="kt-menu__link-icon">⚙️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🛠️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M924.8 625.7l-65.5-56c3.1-19 4.7-38.4 4.7-57.7s-1.6-38.7-4.7-57.7l65.5-56a32.03 32.03 0 0 0 7.7-35.2l-78-188.2a32.05 32.05 0 0 0-26-19.7l-85.7-10.7c-28.3-24.8-60.6-43.7-96-56.1l-18.7-84.3A32.05 32.05 0 0 0 595 16h-174a32.05 32.05 0 0 0-31.3 25.1l-18.7 84.3c-35.4 12.4-67.7 31.3-96 56.1l-85.7 10.7a32.05 32.05 0 0 0-26 19.7l-78 188.2a32.03 32.03 0 0 0 7.7 35.2l65.5 56c-3.1 19-4.7 38.4-4.7 57.7s1.6 38.7 4.7 57.7l-65.5 56a32.03 32.03 0 0 0-7.7 35.2l78 188.2c6.4 15.5 20.4 25.6 36.3 25.6.8 0 1.6 0 2.4-.1l85.7-10.7c28.3 24.8 60.6 43.7 96 56.1l18.7 84.3c3.5 15.7 17.5 27.1 33.6 27.1h174c16.1 0 30.1-11.4 33.6-27.1l18.7-84.3c35.4-12.4 67.7-31.3 96-56.1l85.7 10.7c.8.1 1.6.1 2.4.1 15.9 0 29.9-10.1 36.3-25.6l78-188.2c4.1-11.2 1.4-23.9-7.7-35.2zM512 660c-81.7 0-148-66.3-148-148s66.3-148 148-148 148 66.3 148 148-66.3 148-148 148z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text" style="font-weight: 600;">Admin Inventory</span>
                             <span class="kt-menu__arrow">▶</span>
                         </a>
@@ -2902,7 +3072,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_unposting_appv')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_unposting_appv') ? 'active' : '' ?>" id="nav-item-inv_unposting_appv" onclick="switchMainTab('inv_unposting_appv')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">✔️</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">✔️</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm193.5 301.7l-210.6 292a31.8 31.8 0 0 1-51.7 0L318.5 484.9c-3.8-5.3-1.1-12.7 5.4-14.3l44.3-11.1c4.1-1 8.3 1.2 10.3 4.9l80.3 144.3c1.7 3.1 6.1 3.1 7.8 0l165.7-229.8c2.4-3.3 6.9-4.7 10.8-3.4l43.2 14.4c6.3 2.1 8.4 9.8 4.2 14.8z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Approval Revisi / UnPosting</span>
                                 </a>
                             </div>
@@ -2911,7 +3084,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_stok_awal')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_stok_awal') ? 'active' : '' ?>" id="nav-item-inv_stok_awal" onclick="switchMainTab('inv_stok_awal')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">📖</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📖</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 184H712v-40c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v40H384v-40c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v40H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V216c0-17.7-14.3-32-32-32zm-40 704H184V384h656v504z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Set Stok Awal Tahun</span>
                                 </a>
                             </div>
@@ -2920,7 +3096,10 @@ if ($initialTab === 'editor') {
                             <?php if (isMenuAllowed('inv_adjust_spp')): ?>
                             <div class="kt-menu__item <?= ($initialTab === 'inv_adjust_spp') ? 'active' : '' ?>" id="nav-item-inv_adjust_spp" onclick="switchMainTab('inv_adjust_spp')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">⚡</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">⚡</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M848 356H584l72-264c2-7.5-3.6-15-11.4-15H368c-5.2 0-9.8 3.3-11.4 8.2L209 527.2c-2.8 8.4 3.5 16.8 12.3 16.8h234.3L376 932c-2 7.5 3.6 15 11.4 15h184.2c6.3 0 11.5-4.8 12.2-11.1l80.5-388.9h183.7c8.8 0 15.1-8.4 12.3-16.8L848 356z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Adjust SPP</span>
                                 </a>
                             </div>
@@ -2942,42 +3121,60 @@ if ($initialTab === 'editor') {
                     ?>
                     <div class="kt-menu__item kt-menu__item--submenu <?= $isItInvActive ? 'kt-menu__item--open' : '' ?>" id="nav-item-it_inventory_parent">
                         <a class="kt-menu__link" onclick="toggleSubmenu('nav-item-it_inventory_parent')" title="Klik untuk membuka/menutup sub modul IT Inventory">
-                            <span class="kt-menu__link-icon">📊</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📊</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M888 792H200V168c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v688c0 4.4 3.6 8 8 8h752c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8zm-616-80h80c4.4 0 8-3.6 8-8V472c0-4.4-3.6-8-8-8h-80c-4.4 0-8 3.6-8 8v232c0 4.4 3.6 8 8 8zm160 0h80c4.4 0 8-3.6 8-8V328c0-4.4-3.6-8-8-8h-80c-4.4 0-8 3.6-8 8v376c0 4.4 3.6 8 8 8zm160 0h80c4.4 0 8-3.6 8-8V200c0-4.4-3.6-8-8-8h-80c-4.4 0-8 3.6-8 8v504c0 4.4 3.6 8 8 8zm160 0h80c4.4 0 8-3.6 8-8V528c0-4.4-3.6-8-8-8h-80c-4.4 0-8 3.6-8 8v176c0 4.4 3.6 8 8 8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text" style="font-weight: 600;">IT Inventory</span>
                             <span class="kt-menu__arrow">▶</span>
                         </a>
                         <div class="kt-menu__sub" id="it_inventory_submenu">
                             <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1a') ? 'active' : '' ?>" id="nav-item-it_inventory_1a" onclick="switchMainTab('it_inventory_1a')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">📥</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📥</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M862 736l-44.4-44.4c-3.1-3.1-8.2-3.1-11.3 0L544 953.5V104c0-4.4-3.6-8-8-8h-64c-4.4 0-8 3.6-8 8v849.5L201.7 691.6c-3.1-3.1-8.2-3.1-11.3 0L146 736c-3.1 3.1-3.1 8.2 0 11.3l360.3 360.3c3.1 3.1 8.2 3.1 11.3 0L862 747.3c3.1-3.1 3.1-8.2 0-11.3z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Laporan Pemasukan</span>
                                     <span class="kt-menu__badge-sub">1A</span>
                                 </a>
                             </div>
                             <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1b') ? 'active' : '' ?>" id="nav-item-it_inventory_1b" onclick="switchMainTab('it_inventory_1b')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">📤</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📤</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M862 288L501.7 72.3c-3.1-3.1-8.2-3.1-11.3 0L130.1 288c-3.1 3.1-3.1 8.2 0 11.3l44.4 44.4c3.1 3.1 8.2 3.1 11.3 0L464 74.5V920c0 4.4 3.6 8 8 8h64c4.4 0 8-3.6 8-8V74.5l278.2 269.2c3.1 3.1 8.2 3.1 11.3 0l44.4-44.4c3.1-3.1 3.1-8.2 0-11.3z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Laporan Pengeluaran</span>
                                     <span class="kt-menu__badge-sub">1B</span>
                                 </a>
                             </div>
                             <div class="kt-menu__item <?= ($initialTab === 'it_inventory_1c') ? 'active' : '' ?>" id="nav-item-it_inventory_1c" onclick="switchMainTab('it_inventory_1c')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">⚙️</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">⏳</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M742 224h-44v-80c0-4.4-3.6-8-8-8H334c-4.4 0-8 3.6-8 8v80h-44c-17.7 0-32 14.3-32 32v120c0 102.2 68.2 189.7 162.7 218.4C318.2 622.7 250 710.2 250 812.4V932c0 17.7 14.3 32 32 32h444c17.7 0 32-14.3 32-32V812.4c0-102.2-68.2-189.7-162.7-218.4C673.8 565.3 742 477.8 742 376V256c0-17.7-14.3-32-32-32zm-76 152c0 86-70 156-156 156s-156-70-156-156V280h312v96zm0 436.4c0 86-70 156-156 156s-156-70-156-156V716c0-86 70-156 156-156s156 70 156 156v96.4z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Posisi WIP</span>
                                     <span class="kt-menu__badge-sub">1C</span>
                                 </a>
                             </div>
                             <div class="kt-menu__item <?= (in_array($initialTab, ['it_inventory_1d', 'it_inventory_1d_rm', 'it_inventory_1d_fg', 'it_inventory_1d_cg', 'it_inventory_1d_w'])) ? 'active' : '' ?>" id="nav-item-it_inventory_1d" onclick="switchMainTab('it_inventory_1d')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">🔄</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🏭</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M536.1 273H488c-4.4 0-8 3.6-8 8v294.9c0 2.6 1.2 5 3.3 6.5l170.8 122.8c3.6 2.6 8.6 1.8 11.2-1.8l28.6-39.7c2.6-3.6 1.8-8.6-1.8-11.2L544.1 537.4V281c0-4.4-3.6-8-8-8zm219.8-75.9A399.4 399.4 0 0 0 512 80C273.4 80 80 273.4 80 512s193.4 432 432 432c208.6 0 382.4-147.8 422.3-343.8 1.1-5.3-2.6-10.2-8-10.2h-62.8c-4 0-7.5 2.9-8.2 6.9-34.1 161.4-177.3 283.1-343.3 283.1-194.4 0-352-157.6-352-352S297.6 176 492 176c98.6 0 187.7 40.8 251.4 106.6l-89.9 89.9c-3.1 3.1-3.1 8.2 0 11.3l42.4 42.4c3.1 3.1 8.2 3.1 11.3 0l169.7-169.7c3.1-3.1 3.1-8.2 0-11.3L755.9 197.1z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Mutasi Barang</span>
                                     <span class="kt-menu__badge-sub">1D</span>
                                 </a>
                             </div>
                             <div class="kt-menu__item <?= ($initialTab === 'it_inventory_log') ? 'active' : '' ?>" id="nav-item-it_inventory_log" onclick="switchMainTab('it_inventory_log')">
                                 <a class="kt-menu__link">
-                                    <span class="kt-menu__link-icon">📜</span>
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📜</span>
+                                        <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M854.6 288.6L657.4 91.4c-9-9-21.2-14.1-33.9-14.1H224c-26.5 0-48 21.5-48 48v768c0 26.5 21.5 48 48 48h576c26.5 0 48-21.5 48-48V322.5c0-12.7-5.1-24.9-14.1-33.9zM648 160.8l119.2 119.2H648V160.8zm136 695.2H240V144h344v168c0 17.7 14.3 32 32 32h168v512zm-464-168h352c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H320c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0-136h352c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H320c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8z"/></svg></span>
+                                    </span>
                                     <span class="kt-menu__link-text">Log Perubahan Data</span>
                                 </a>
                             </div>
@@ -2996,7 +3193,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('referensi')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'reff') ? 'active' : '' ?>" id="nav-item-reff" onclick="switchMainTab('reff')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📚</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📚</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M832 64H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32zm-40 824H232V136h560v752zm-440-520h320c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H352c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0 128h320c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H352c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Master Data Referensi</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -3005,7 +3205,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('inv_tarif')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'inv_tarif') ? 'active' : '' ?>" id="nav-item-inv_tarif" onclick="switchMainTab('inv_tarif')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📑</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📑</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M304 384h416c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H304c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm-8 440h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H296c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm304 0h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H600c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm-152 0h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H448c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm-152-192h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H296c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm152 0h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H448c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm152 0h128c4.4 0 8-3.6 8-8v-96c0-4.4-3.6-8-8-8H600c-4.4 0-8 3.6-8 8v96c0 4.4 3.6 8 8 8zm280-488H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V176c0-17.7-14.3-32-32-32zm-40 728H184V216h656v688z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Master Tarif BM dari Kode HS</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -3022,28 +3225,40 @@ if ($initialTab === 'editor') {
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'company') ? 'active' : '' ?>" id="nav-item-company" onclick="switchMainTab('company')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🏢</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🏢</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M899.2 226.3L518.3 46.1a16.2 16.2 0 0 0-12.6 0L124.8 226.3c-4.9 2.3-8 7.3-8 12.7v49c0 7.7 6.3 14 14 14h762.4c7.7 0 14-6.3 14-14v-49c0-5.4-3.1-10.4-8-12.7zM240 760h80V372h-80v388zm192 0h80V372h-80v388zm192 0h80V372h-80v388zm264 48H136c-4.4 0-8 3.6-8 8v56c0 4.4 3.6 8 8 8h752c4.4 0 8-3.6 8-8v-56c0-4.4-3.6-8-8-8z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Kelola Perusahaan</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'app_settings') ? 'active' : '' ?>" id="nav-item-app_settings" onclick="switchMainTab('app_settings')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">⚙️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">⚙️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M924.8 625.7l-65.5-56c3.1-19 4.7-38.4 4.7-57.7s-1.6-38.7-4.7-57.7l65.5-56a32.03 32.03 0 0 0 7.7-35.2l-78-188.2a32.05 32.05 0 0 0-26-19.7l-85.7-10.7c-28.3-24.8-60.6-43.7-96-56.1l-18.7-84.3A32.05 32.05 0 0 0 595 16h-174a32.05 32.05 0 0 0-31.3 25.1l-18.7 84.3c-35.4 12.4-67.7 31.3-96 56.1l-85.7 10.7a32.05 32.05 0 0 0-26 19.7l-78 188.2a32.03 32.03 0 0 0 7.7 35.2l65.5 56c-3.1 19-4.7 38.4-4.7 57.7s1.6 38.7 4.7 57.7l-65.5 56a32.03 32.03 0 0 0-7.7 35.2l78 188.2c6.4 15.5 20.4 25.6 36.3 25.6.8 0 1.6 0 2.4-.1l85.7-10.7c28.3 24.8 60.6 43.7 96 56.1l18.7 84.3c3.5 15.7 17.5 27.1 33.6 27.1h174c16.1 0 30.1-11.4 33.6-27.1l18.7-84.3c35.4-12.4 67.7-31.3 96-56.1l85.7 10.7c.8.1 1.6.1 2.4.1 15.9 0 29.9-10.1 36.3-25.6l78-188.2c4.1-11.2 1.4-23.9-7.7-35.2zM512 660c-81.7 0-148-66.3-148-148s66.3-148 148-148 148 66.3 148 148-66.3 148-148 148z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Setting Aplikasi</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'docs') ? 'active' : '' ?>" id="nav-item-docs" onclick="switchMainTab('docs')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">📖</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📖</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M928 160H96c-17.7 0-32 14.3-32 32v640c0 17.7 14.3 32 32 32h832c17.7 0 32-14.3 32-32V192c0-17.7-14.3-32-32-32zm-40 632H136V232h752v560zM421.2 444.9L326.6 512l94.6 67.1c3.6 2.6 4.4 7.6 1.8 11.2l-27.7 39.1c-2.6 3.6-7.6 4.4-11.2 1.8l-135.5-96c-4.8-3.4-7.6-9-7.6-14.9s2.8-11.5 7.6-14.9l135.5-96c3.6-2.6 8.6-1.8 11.2 1.8l27.7 39.1c2.6 3.6 1.8 8.6-1.8 11.2zm181.6 0c-3.6-2.6-4.4-7.6-1.8-11.2l27.7-39.1c2.6-3.6 7.6-4.4 11.2-1.8l135.5 96c4.8 3.4 7.6 9 7.6 14.9s-2.8 11.5-7.6 14.9l-135.5 96c-3.6 2.6-8.6 1.8-11.2-1.8l-27.7-39.1c-2.6-3.6-1.8-8.6 1.8-11.2L700.4 512l-97.6-67.1z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Dokumentasi REST API</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'db') ? 'active' : '' ?>" id="nav-item-db" onclick="switchMainTab('db')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🗄️</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🗄️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M832 64H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V96c0-17.7-14.3-32-32-32zm-40 824H232V744h560v144zm0-216H232V528h560v144zm0-216H232V312h560v144zm0-216H232V136h560v72z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Database Browser</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -3059,7 +3274,10 @@ if ($initialTab === 'editor') {
                     <?php if (isMenuAllowed('user_management')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'user_management') ? 'active' : '' ?>" id="nav-item-user_management" onclick="switchMainTab('user_management')">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">👥</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">👥</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M824.2 699.9a301.55 301.55 0 0 0-86.4-60.4C783.1 602.8 812 546.8 812 484c0-110.5-89.5-200-200-200s-200 89.5-200 200c0 62.8 28.9 118.8 74.2 155.5-31.9 17.5-60.8 37.9-86.4 60.4C349.5 744.1 320 801.3 320 864h64c0-123.7 100.3-224 228-224s228 100.3 228 224h64c0-62.7-29.5-119.9-79.8-164.1zM612 620c-75 0-136-61-136-136s61-136 136-136 136 61 136 136-61 136-136 136zm-364-16c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8 0 79.5 41.5 150.3 105.7 192.1 3.7 2.4 8.7 1.4 11.1-2.3l33.1-50.6c2.4-3.7 1.4-8.7-2.3-11.1C281.3 700.3 248 654.5 248 604zm-8-364c-70.7 0-128 57.3-128 128s57.3 128 128 128 128-57.3 128-128-57.3-128-128-128zm0 192c-35.3 0-64-28.7-64-64s28.7-64 64-64 64 28.7 64 64-28.7 64-64 64z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Kelola User Perusahaan</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
@@ -3067,13 +3285,19 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
                     <div class="kt-menu__item" onclick="openModalPass()">
                         <a class="kt-menu__link">
-                            <span class="kt-menu__link-icon">🔑</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🔑</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M632 144c-145.8 0-264 118.2-264 264 0 54.1 16.3 104.4 44.3 146.4l-275.6 275.5a8.03 8.03 0 0 0-2.3 5.7V880c0 4.4 3.6 8 8 8h128c4.4 0 8-3.6 8-8v-64h64c4.4 0 8-3.6 8-8v-64h64c4.4 0 8-3.6 8-8v-64h64c2.1 0 4.2-.8 5.7-2.3l49.9-49.9C579.6 657.7 605.9 672 632 672c145.8 0 264-118.2 264-264S777.8 144 632 144zm0 456c-106 0-192-86-192-192s86-192 192-192 192 86 192 192-86 192-192 192zm56-256a48 48 0 1 0 96 0 48 48 0 1 0-96 0z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Ganti Password</span>
                         </a>
                     </div>
                     <div class="kt-menu__item">
                         <a href="index.php?action=logout" class="kt-menu__link" style="color:#fd3995;">
-                            <span class="kt-menu__link-icon">🚪</span>
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🚪</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M868 732h-70.3c-4.8 0-9.3 2.1-12.3 5.8-7 8.5-14.5 16.7-22.4 24.5a353.84 353.84 0 0 1-112.7 75.9A352.8 352.8 0 0 1 512.4 866c-47.9 0-94.3-9.4-137.9-27.8a353.84 353.84 0 0 1-112.7-75.9 353.28 353.28 0 0 1-76-112.5C167.3 606.2 158 559.9 158 512s9.4-94.2 27.8-137.8c17.8-42.1 43.4-80 76-112.5s70.5-58.2 112.7-75.9C418.1 167.4 464.5 158 512.4 158c47.9 0 94.3 9.4 137.9 27.8A353.84 353.84 0 0 1 763 261.7c7.9 7.8 15.4 16 22.4 24.5 3 3.7 7.6 5.8 12.3 5.8H868c6.3 0 10.2-7 6.7-12.3C798 160.8 663.8 80 512 80 273.4 80 80 273.4 80 512s193.4 432 432 432c151.8 0 286-80.8 362.7-199.7 3.5-5.3-.4-12.3-6.7-12.3zm82.4-230.7L826.8 377.7a8 8 0 0 0-11.3 0l-33.9 33.9a8 8 0 0 0 0 11.3l60.5 60.5H412c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8h440.1l-60.5 60.5a8 8 0 0 0 0 11.3l33.9 33.9a8 8 0 0 0 11.3 0l123.6-123.6a8 8 0 0 0 0-11.3z"/></svg></span>
+                            </span>
                             <span class="kt-menu__link-text">Log Out</span>
                         </a>
                     </div>
@@ -3146,6 +3370,12 @@ if ($initialTab === 'editor') {
                                 <?= htmlspecialchars($userInitials) ?>
                             <?php endif; ?>
                         </span>
+                    </div>
+
+                    <!-- Icon Style Selector (Berwarna vs Monokrom) -->
+                    <div class="icon-style-select" title="Gaya Ikon Sidebar: Berwarna (🎨) / Monokrom (🏛️)">
+                        <button type="button" class="icon-style-btn" data-icon-style="colored" onclick="setIconStyle('colored')" title="Ikon Berwarna / Emoji (Vibrant & Ceria)">🎨</button>
+                        <button type="button" class="icon-style-btn" data-icon-style="monochrome" onclick="setIconStyle('monochrome')" title="Ikon Monokrom (Ant Design Vector)">🏛️</button>
                     </div>
 
                     <!-- Theme Selector -->
@@ -3460,8 +3690,8 @@ if ($initialTab === 'editor') {
             'transfer': 'Data Host to Host',
             'editor': 'Form Editor Dokumen',
             'import': 'Import Excel Dokumen',
-            'manifest_ceisa': 'Manifest Ceisa 4.0',
-            'manifest': 'Manifest Host to Host',
+            'manifest_ceisa': 'Manifes Ceisa 4.0',
+            'manifest': 'Manifes Host to Host',
             'bc11_monitoring': 'BC 1.1 Monitoring',
             'dokap': 'Upload Dokumen Pelengkap',
             'load_erp_odoo': 'Load ERP Data - Odoo to CEISA 4.0',
@@ -3554,7 +3784,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'reff') return `/reff.php?embedded=1${adminParam}${themeParam}`;
             if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'app_settings') return isAdmin ? `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'docs') return isAdmin ? `/docs.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'docs') return `/docs.php?embedded=1${adminParam}${themeParam}`;
             if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             
             // Inventory Modul URLs
@@ -3898,6 +4128,21 @@ if ($initialTab === 'editor') {
         function toggleTheme() {
             const cur = document.body.getAttribute('data-theme') || 'light';
             setTheme(cur === 'light' ? 'dark' : 'light');
+        }
+
+        function setIconStyle(style) {
+            const valid = (style === 'monochrome') ? 'monochrome' : 'colored';
+            document.documentElement.setAttribute('data-icon-style', valid);
+            if (document.body) document.body.setAttribute('data-icon-style', valid);
+            localStorage.setItem('ceisa_icon_style', valid);
+            document.querySelectorAll('.icon-style-btn').forEach(b => {
+                b.classList.toggle('active', b.getAttribute('data-icon-style') === valid);
+            });
+        }
+
+        function loadSavedIconStyle() {
+            let saved = localStorage.getItem('ceisa_icon_style') || '<?= htmlspecialchars($appSettings['sidebar_icon_style'] ?? 'colored') ?>';
+            setIconStyle(saved);
         }
 
         function loadSavedTheme() {
@@ -4464,9 +4709,16 @@ if ($initialTab === 'editor') {
                 if (e.data.card_color !== undefined) {
                     applySidebarCompanyCardColor(e.data.card_color);
                 }
+            } else if (e.data.type === 'CEISA_CHANGE_ICON_STYLE' || e.data.type === 'CHANGE_ICON_STYLE') {
+                if (e.data.style) {
+                    setIconStyle(e.data.style);
+                }
             } else if (e.data.type === 'APP_SETTINGS_UPDATED') {
                 const s = e.data.settings;
                 if (s) {
+                    if (s.sidebar_icon_style) {
+                        setIconStyle(s.sidebar_icon_style);
+                    }
                     const nameEl = document.getElementById('sidebarBrandName');
                     if (nameEl && s.app_name) nameEl.innerText = s.app_name;
                     const subEl = document.getElementById('sidebarBrandSub');
@@ -4669,6 +4921,7 @@ if ($initialTab === 'editor') {
 
         window.onload = function() {
             loadSavedTheme();
+            loadSavedIconStyle();
             loadSidebarPinState();
             applyRoleMenuVisibility();
 
