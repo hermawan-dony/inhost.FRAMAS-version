@@ -7151,4 +7151,763 @@ Pengguna (**Mas**) memberikan arahan teknis untuk penyempurnaan modul monitoring
     - Mode *Tampilkan Belum Selesai* berjalan mulus dan menampilkan rasio pending (contoh Oktober: `20/14`, `34/5`, `80/16`).
     - Mengklik angka dokumen memunculkan modal detail dengan data AJU dan label dokumen yang sesuai.
 
+---
+
+### Bagian 42: Fitur Column Resizing & Column Sorting pada Seluruh Datagrid Editor Dokumen (`editor.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  1. Grid tabel pada Form Editor Dokumen ([`editor.php`](file:///c:/dp/g-ceisa/editor.php)) perlu dapat diubah lebar kolomnya (**Column Resizing**) dengan menyeret pembatas header (`<th>`).
+  2. Konten di dalam sel—khususnya dropdown `<select class="cell-select">` dan input teks/angka—harus **otomatis menyesuaikan ukuran (auto-resize 100% full width)** mengikuti lebar kolom baru, tanpa terpotong atau terhalang batas kaku.
+  3. Grid tabel dapat diurutkan (**Column Sorting**) cukup dengan mengklik header kolom (`<th>`), mendukung tipe data numerik, tanggal, dan alfanumerik (natural sort), lengkap dengan indikator panah visual `▲` (ASC) dan `▼` (DESC).
+  4. Menyeret garis resizer tidak boleh memicu sorting secara tidak sengaja (event propagation handling).
+  5. Pengguna dapat me-reset lebar kolom ke standar awal dengan klik 2x pada garis resizer.
+  6. Lebar kolom kustom disimpan secara persisten di browser (`localStorage`).
+
+- **Solusi & Implementasi Teknis**:
+  1. **CSS Datagrid & Handle Resizer ([`editor.php`](file:///c:/dp/g-ceisa/editor.php))**:
+     - Menjadikan `table.datagrid th` interaktif dengan `position: relative; user-select: none; cursor: pointer; padding-right: 14px;` serta efek hover highlight.
+     - Menambahkan elemen `.col-resizer` (lebar 7px, posisi absolute kanan, cursor `col-resize`, warna aksen primer saat disentuh/diseret).
+     - Menghapus aturan CSS lama yang mengunci `max-width` dan `min-width` dengan `!important` pada kolom select/dropdown (`kode_kemasan`, `kode_dokumen`, `kode_entitas`, dll.).
+     - Memastikan seluruh `.cell-select`, `.cell-input`, `.cell-wrap`, dan `.date-cell-wrap` memiliki `width: 100% !important; max-width: 100% !important; min-width: 0 !important; box-sizing: border-box !important;`.
+  2. **Logika Resizing Kolom Bebas & Presisten (`setupGridTable`)**:
+     - Mousedown pada `.col-resizer` mengaktifkan tracking drag mouse dan flag `_isGridResizing = true`.
+     - Mengubah `style.width`, `style.minWidth`, `style.maxWidth` secara realtime pada `<th>`. Dropdown dan input sel langsung membesar/mengecil secara instan dan fluid (60 fps).
+     - Menghapus pembatasan kaku `td.style.maxWidth` dan `sel.style.maxWidth` pada `createGridRow`.
+     - Menyimpan lebar kolom ke `localStorage` (`ceisa_grid_widths_${tableKey}`) dan merestorasinya saat tabel dirender atau tab berpindah.
+     - Fitur klik 2x resizer untuk me-reset lebar kolom ke default bawaan (`removeSavedColumnWidth`).
+  3. **Logika Sorting Cerdas via Header Kolom (`sortGridTable`)**:
+     - Klik pada `<th>` memicu urutan ASC ➔ DESC secara toggle.
+     - Guarding `_isGridResizing` dan pengecekan elemen anak memastikan aksi resize atau klik checkbox tidak memicu sorting.
+     - Auto-detect tipe data (Numeric via `stripNumberCommas`, Date, Text via `localeCompare` natural sort).
+     - Menyusun ulang urutan node `<tr>` pada `<tbody>` secara instan menggunakan `DocumentFragment`, menjaga integritas baris terpilih (master-detail BOM/Trace) dan nilai form.
+     - Menampilkan indikator panah visual (`⇅` netral, `▲` ASC, `▼` DESC).
+  4. **Cakupan Terintegrasi Seluruh Tab Datagrid**:
+     - Terintegrasi penuh pada seluruh tabel: `barang`, `barangbom`, `tracebb`, `dokumen`, `entitas`, `bahanbaku`, `barangtarif`, `bahanbakutarif`, `kemasan`, `pengangkut`, `kontainer`, `pungutan`, `bankdevisa`, `jaminan`, `komponenbiaya`, `barangdokumen`, `barangentitas`, `barangspekkhusus`, `barangvd`, `bahanbakudokumen`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/editor.php` dan server remote `/source/public/editor.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in /source/public/editor.php**.
+  - Service `php8.5-fpm` berhasil di-reload.
+
+---
+
+### Bagian 43: Penambahan Dokumen PPKEK 6.3.1 (Pengeluaran ke LDP) & Pembaruan Preset Default KEK (611, 613, 631, 25, 41)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  1. Pengguna meminta penambahan jenis dokumen baru khusus KEK: **`631. Pengeluaran ke LDP`** (PPKEK 6.3.1).
+  2. Mengaktifkan konfigurasi **default KEK** menjadi 5 dokumen kepabeanan: **`611, 613, 631, 25, 41`**:
+     - `611`: PPKEK 6.1.1 (Pemasukan LDP)
+     - `613`: PPKEK 6.1.3 (Pemasukan TLDDP / Pengeluaran KEK)
+     - `631`: PPKEK 6.3.1 (Pengeluaran ke LDP)
+     - `25`: BC 2.5 (Pengeluaran TPB/KEK ke TLDDP / Impor untuk Dipakai)
+     - `41`: BC 4.1 (Pengeluaran Hasil Olahan dari KEK ke TLDDP)
+
+- **Solusi & Implementasi Teknis**:
+  1. **Master Katalog Dokumen & Resolusi Hak Akses ([`koneksi.php`](file:///c:/dp/g-ceisa/koneksi.php))**:
+     - Mendaftarkan `'631' => ['label' => 'PPKEK 6.3.1 (Pengeluaran ke LDP)', 'group' => 'ppkek', 'short' => 'PPKEK 6.3.1', 'color' => '#722ed1']` pada fungsi master `ceisa_doc_catalog()`.
+     - Memperbarui logika resolusi global `ceisa_resolve_allowed_docs()`: jika perusahaan memiliki role `'ppkek'` atau `'kek'`, preset dokumen default yang aktif otomatis adalah `['611', '613', '631', '25', '41']`.
+  2. **Modul Kelola Perusahaan ([`company.php`](file:///c:/dp/g-ceisa/company.php))**:
+     - Memperbarui fungsi preset UI `applyPresetDocsFromRoles()` agar mencentang kelima dokumen `611, 613, 631, 25, 41` saat role PPKEK/KEK dipilih.
+     - Memperbarui label kartu role dan preview badge dokumen yang diizinkan.
+     - Memperbarui profil database `bc_ceisa_company` untuk PT RODA MAJU BAHAGIA (`cmp_id = '080167772504400'`) menjadi `company_roles = 'ppkek'` dan `allowed_docs = '611,613,631,25,41'`.
+  3. **Laporan IT Inventory ([`it_inventory.php`](file:///c:/dp/g-ceisa/it_inventory.php))**:
+     - Memasukkan kode `631` ke dalam array `$allowedOutbound` (Laporan 1B - Pengeluaran) serta kueri fallback header CEISA.
+     - Menambahkan opsi filter dropdown `<option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option>` pada tab Pengeluaran (1B).
+  4. **Modul Operasional Kepabeanan Lainnya**:
+     - [`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php): Menambahkan opsi filter dokumen `631` via `isDocPermitted('631')`.
+     - [`transfer.php`](file:///c:/dp/g-ceisa/transfer.php): Menambahkan opsi filter dokumen `631` dan otomatisasi perutean ke Laporan 1B (`$ab = 'B'`).
+     - [`warehouse_delivery.php`](file:///c:/dp/g-ceisa/warehouse_delivery.php): Menambahkan `'631'` ke `$allOutboundCodes` dan filter pengeluaran warehouse.
+     - [`editor.php`](file:///c:/dp/g-ceisa/editor.php): Memperbarui katalog `$allBcCatalog['631']` menjadi `PPKEK 6.3.1 - Pengeluaran ke LDP` (role `ppkek`).
+     - [`rekap/index.php`](file:///c:/dp/g-ceisa/rekap/index.php): Memperbarui label `PPKEK 6.3.1` pada matriks kolom keluar.
+     - [`rekap/sync_all.php`](file:///c:/dp/g-ceisa/rekap/sync_all.php): Menambahkan opsi filter `PPKEK 6.3.1 (Pengeluaran ke LDP)`.
+     - [`CeisaJsonBuilder.php`](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php): Mendaftarkan pemetaan `'631' => 'bc631'`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan server remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **0 syntax errors** pada seluruh berkas yang dimodifikasi.
+  - Service `php8.5-fpm` berhasil direload.
+  - Verifikasi database: PT RODA MAJU BAHAGIA berhasil diperbarui ke role `ppkek` dengan hak akses dokumen `611,613,631,25,41`.
+
+---
+
+### Bagian 44: Penghapusan Tampilan File Contoh Server (`share/xls`) pada Modul Import Excel Dokumen (`import_excel.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  - Pengguna meminta agar bagian daftar file sampel/contoh Excel di server (`⚡ FILE CONTOH DI SERVER (SHARE/XLS)`) tidak perlu ditampilkan lagi pada modul [Import Excel Dokumen (`import_excel.php`)](file:///c:/dp/g-ceisa/import_excel.php) agar antarmuka lebih bersih dan pengguna fokus pada pengunggahan berkas Excel milik mereka sendiri.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pembersihan Markup Antarmuka ([`import_excel.php`](file:///c:/dp/g-ceisa/import_excel.php))**:
+     - Menghapus kontainer `.server-samples-bar` beserta seluruh elemen pills tombol contoh file server (`$existingFiles`).
+     - Menghilangkan proses pemindaian folder server (`$candidateDirs` dan `scandir($xlsFolder)`), mempercepat rendering halaman saat pertama kali dibuka.
+  2. **Fokus Alur Kerja Upload**:
+     - Area drag & drop berkas Excel dan tombol *Pilih File dari Komputer* kini langsung terhubung ke tabel antrean file dan opsi preview/import tanpa distraksi file contoh server.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/import_excel.php` dan server remote `/source/public/import_excel.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in /source/public/import_excel.php**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Tampilan *Import Excel Dokumen* kini bersih tanpa deretan tombol file contoh server.
+
+---
+
+### Bagian 45: Penggabungan Tombol Import Master Data Barang Menjadi Satu Menu Dropdown (`material.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  - Pada halaman [Master Data Barang (`material.php`)](file:///c:/dp/g-ceisa/material.php), sebelumnya terdapat 3 tombol terpisah di toolbar:
+    1. `Import Excel`
+    2. `Import IT Inventory (bc_1ab2)`
+    3. `Import Staging Pabean (bc_ceisa_barang)`
+  - Pengguna meminta agar ketiga tombol import tersebut disatukan ke dalam satu tombol menu / dropdown: **`Import Data Barang ▾`** agar toolbar lebih rapi, ringkas, dan terorganisir.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Komponen Dropdown Toolbar ([`material.php`](file:///c:/dp/g-ceisa/material.php))**:
+     - Mengganti ketiga tombol terpisah dengan komponen dropdown terpadu berkelas `.ant-dropdown`:
+       - Tombol Pemicu: `<button class="ant-btn ant-btn-success" id="btnImportDropdown">` berlabel **`Import Data Barang ▾`**.
+       - Menu Dropdown: `.ant-dropdown-menu` mengapung di bawah tombol dengan elevasi bayangan halus dan dukungan tema terang/gelap.
+  2. **Daftar Opsi Sub-Menu**:
+     - **Import Excel**: Memanggil `openImportModal()` untuk mengunggah file template `.xlsx`.
+     - **Import IT Inventory (bc_1ab2)**: Memanggil `openDbImportModal('1ab2')` untuk menarik data barang unik dari transaksi mutasi IT Inventory.
+     - **Import Staging Pabean (bc_ceisa_barang)**: Memanggil `openDbImportModal('staging')` untuk menarik data barang unik dari rincian dokumen pabean CEISA.
+  3. **Interaksi & Penutupan Otomatis**:
+     - Fungsi `toggleImportDropdown()` dan `closeImportDropdown()`.
+     - Menambahkan global event listener untuk menutup dropdown secara otomatis saat pengguna mengklik di luar area menu atau setelah salah satu opsi dipilih.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/material.php` dan server remote `/source/public/material.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in /source/public/material.php**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Tampilan toolbar Master Data Barang kini lebih ringkas dan modern dengan satu tombol dropdown import.
+
+---
+
+### Bagian 46: Pengelompokan Tombol Operasi Pemeliharaan ke Menu Dropdown "Utilitas" (`material.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  - Pada toolbar [Master Data Barang (`material.php`)](file:///c:/dp/g-ceisa/material.php), terdapat 5 tombol terpisah untuk operasi perbaikan dan sinkronisasi data barang yang membuat toolbar melebar dan bertumpuk:
+    1. `Koreksi Klasifikasi IT Inv (KLAS)`
+    2. `Pindah Klasifikasi`
+    3. `Sync KLAS ke IT Inv (bc_1ab2)`
+    4. `Fix/Merge Kode Dobel`
+    5. `Fix Satuan Beda`
+  - Pengguna meminta agar seluruh tombol utilitas/maintenance tersebut digabungkan menjadi 1 tombol dropdown grup **`Utilitas`**.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Komponen Dropdown Toolbar ([`material.php`](file:///c:/dp/g-ceisa/material.php))**:
+     - Tombol Pemicu: `<button class="ant-btn" id="btnUtilitasDropdown">` berwana ungu gelap (`#531dab`) dengan teks `<i class="fa-solid fa-screwdriver-wrench"></i> Utilitas ▾`.
+     - Dilengkapi badge indikator peringatan (`#badgeUtilitasAlert`) bertanda seru `!` yang otomatis menyala merah jika ada barang yang klasifikasinya invalid (`$cntInvalidKlas > 0`) atau satuan beda (`$cntDiffSatuan > 0`), sehingga user tetap sadar terhadap isu data tanpa harus membuka menu terlebih dahulu.
+  2. **Daftar Opsi Sub-Menu Utilitas**:
+     - **Koreksi Klasifikasi IT Inv (KLAS)**: Menampilkan badge jumlah `$cntInvalidKlas` dan memanggil `openKoreksiKlas()`.
+     - **Pindah Klasifikasi**: Menampilkan badge `#badgeSelectedMat` (jumlah baris barang yang dipilih) dan memanggil `openPindahKlasModal()`.
+     - **Sync KLAS ke IT Inv (bc_1ab2)**: Memanggil `syncAllKlasTo1ab2()`.
+     - **Fix/Merge Kode Dobel**: Menampilkan badge `#badgeMergeMat` dan memanggil `openMergeKodeModal()`.
+     - **Fix Satuan Beda**: Menampilkan badge `#badgeDiffSatuan` dan memanggil `openFixSatuanModal()`.
+  3. **Manajemen Dropdown & Event**:
+     - Fungsi JavaScript `toggleUtilitasDropdown()`, `closeUtilitasDropdown()`, serta `closeAllDropdowns()` yang mengoordinasikan penutupan harmonis antara dropdown *Import Data Barang* dan *Utilitas*.
+     - Integrasi event listener klik di luar dropdown untuk auto-close.
+     - Seluruh ID badge dipertahankan agar fungsi JS centang baris tabel dan AJAX tetap bekerja presisi tanpa error DOM.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/material.php` dan server remote `/source/public/material.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in /source/public/material.php**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Toolbar `material.php` kini jauh lebih ringkas, tersusun rapi, dan semua fungsionalitas modal/badge utilitas tetap aktif 100%.
+
+---
+
+### Bagian 47: Modernisasi Halaman Login Portal Menjadi Lebih Corporate & Pembersihan Elemen Debug (`index.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  - Halaman login pada portal perusahaan (misal: `rmb.inhost.web.id`) memiliki beberapa elemen teks petunjuk, badge, dan kartu duplikat yang terkesan informal/pengujian:
+    1. Teks badge `Default: 1234`
+    2. Link di bawah tombol login: `[Bukan PT RODA MAJU BAHAGIA? Pilih Perusahaan Lain / Login Admin ➔]`
+    3. Teks petunjuk `Opsional jika login master`
+    4. Teks domain pada subtitle: `• rmb.inhost.web.id`
+    5. Kartu info perusahaan redundan di atas form dengan tanda `✓ TERPILIH` dan ID/NPWP mentah
+  - Pengguna meminta agar seluruh elemen tersebut dihapus dan tampilan login dirombak agar lebih bersih, elegan, dan berstandar *corporate enterprise*.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pembersihan Teks & Elemen Tidak Diperlukan ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Menghapus badge `Default: 1234` pada input password.
+     - Menghapus tautan `Bukan PT RODA MAJU BAHAGIA? Pilih Perusahaan Lain / Login Admin ➔` di bawah form.
+     - Menghapus badge `Opsional jika login master` pada input username.
+     - Menyederhanakan subtitle portal dari `Portal Akses CEISA 4.0 • rmb.inhost.web.id` menjadi murni **`Portal Akses CEISA 4.0`**.
+     - Menghilangkan kartu repetitif yang menampilkan `[🏢 Logo] PT RODA MAJU BAHAGIA ... ✓ TERPILIH`, dengan tetap mempertahankan `<input type="hidden" id="loginCmp">` agar proses submit login berjalan mulus.
+  2. **Penyempurnaan Estetika Corporate**:
+     - **Background**: Mengganti pola dotted grid menjadi gradien ambient lembut slate/blue (`#f1f5f9` dengan radial glow halus) sehingga bebas dari kesan draft/mockup.
+     - **Aksen Card**: Mengganti garis pelangi di atas kartu menjadi aksen corporate royal blue yang solid dan bersih (`#1890ff` ke `#096dd9`).
+     - **Icon Vektor**: Mengintegrasikan FontAwesome (`fa-user`, `fa-lock`, `fa-eye`, `fa-arrow-right-to-bracket`) menggantikan emoji informal (`👤`, `🔑`, `👁️`, `🚀`).
+     - **Tombol Submit**: Mengubah teks tombol menjadi **`MASUK KE SISTEM`** dengan ikon login corporate modern dan efek spinner loading halus saat otentikasi.
+     - **Footer**: Memperbaiki footer agar tidak terjadi duplikasi teks `Single Core System`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/index.php` dan server remote `/source/public/index.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in /source/public/index.php**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Uji via `curl -H "Host: rmb.inhost.web.id"` mengonfirmasi seluruh teks dan kartu yang diminta telah bersih 100% dan halaman login tampil profesional.
+
+---
+
+### Bagian 48: Pengaturan Multi-Tenant Branding (Logo, Nama, Subtitle) & Wallpaper Login Per Perusahaan / Global (`setting_aplikasi.php`, `app_settings_helper.php`, `index.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  1. Pengguna meminta agar setiap perusahaan dapat mengatur setting aplikasinya sendiri (multi-tenant branding):
+     - Mengubah **Logo Brand** sendiri (preset logo, URL gambar, atau upload file gambar dari komputer).
+     - Mengubah **Nama Aplikasi** (`app_name`).
+     - Mengubah **Subtitle / Tagline Aplikasi** (`app_subtitle`).
+     - Pilihan fleksibel untuk menggunakan setting kustom perusahaan atau **mengembalikan ke settingan global**.
+  2. Pengguna juga meminta penambahan fitur pengaturan **Wallpaper / Latar Belakang Layar Login**:
+     - Dapat disetel secara **Global** maupun **Per Perusahaan**.
+     - Pilihan mode latar:
+       a. Latar bawaan sistem (*slate ambient corporate*).
+       b. Preset gradien korporat (*Deep Space*, *Royal Blue*, *Emerald*, *Midnight Indigo*, *Sunset Modern*, *Dark Titanium*).
+       c. Upload gambar wallpaper kustom dari komputer / URL + pengatur kegelapan overlay (*dimmer slider*).
+
+- **Solusi & Implementasi Teknis**:
+  1. **Helper Multi-Tenant Database ([`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php))**:
+     - Skema tabel `bc_ceisa_setting` ditingkatkan dengan menambahkan kolom `cmp_id varchar(30) NOT NULL DEFAULT ''` dan composite primary key `(cmp_id, setting_key)`.
+     - Fungsi auto-migration `ensureAppSettingsTable()` mendeteksi dan memperbarui skema lama secara transparan tanpa merusak konfigurasi global yang telah tersimpan.
+     - `getAppSettings($dbConn, $cmpId)` menerapkan resolusi berjenjang: Nilai Bawaan (*Defaults*) ➔ Konfigurasi Global (`cmp_id = ''`) ➔ Override Kustom Perusahaan (`cmp_id = ?`).
+     - `saveAppSettings($newSettings, $dbConn, $user, $cmpId)` menyimpan konfigurasi ke scope yang aktif, serta otomatis mensinkronkan kolom `logo` pada tabel master `bc_ceisa_company` jika logo perusahaan diubah.
+     - `resetAppSettings($dbConn, $user, $cmpId)` menghapus baris override perusahaan (`DELETE FROM bc_ceisa_setting WHERE cmp_id = ?`) sehingga perusahaan langsung kembali mengikuti konfigurasi global secara bersih (*zero orphan state*).
+  2. **Antarmuka Pengaturan Terpadu ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - **Scope Selector Bar**: Administrator dapat beralih antara konfigurasi 🌐 Global dan konfigurasi masing-masing Perusahaan melalui dropdown. Akun non-admin otomatis terkunci pada perusahaannya sendiri.
+     - **Status Badge Scope**: Indikator visual apakah perusahaan sedang menggunakan `Setting Kustom Perusahaan Aktif` atau `Mengikuti Settingan Global`.
+     - **Aksi Revert / Reset**: Tombol `Kembalikan ke Settingan Global` (dengan konfirmasi modal) untuk perusahaan, serta tombol `Reset Global ke Default` untuk administrator global.
+     - **Tab Baru Wallpaper & Latar Login (`tab-wallpaper`)**:
+       - 3 Pilihan Mode: Default Sistem, Preset Gradien, dan Gambar Kustom.
+       - Galeri visual 6 preset gradien modern dengan klik instan.
+       - Penanganan upload gambar wallpaper ke direktori `/uploads/wallpapers/` dengan validasi MIME dan ekstensi file (JPG, PNG, WEBP).
+       - Slider pengatur kegelapan overlay (*dimmer slider* 0% - 90%) agar teks form login tetap terbaca jelas dan tajam.
+     - **Live Sticky Preview 3-in-1**:
+       - Preview Header Sidebar Brand.
+       - Preview Badge Header Kartu Login.
+       - Simulasi Kartu Login Mini interaktif di atas wallpaper/gradien terpilih secara real-time.
+  3. **Integrasi Portal Multi-Tenant ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Resolusi `$activeAppCmpId` berdasarkan session perusahaan aktif atau subdomain portal (`$subdomainCompany['cmp_id']`).
+     - Mengambil pengaturan melalui `getAppSettings($koneksi, $activeAppCmpId)`.
+     - CSS & inline style `.login-wrap` mendukung render dinamis: gambar wallpaper kustom dengan `background-size: cover`, `background-position: center`, dan overlay semi-transparan adaptif sesuai slider dimmer; atau gradien preset; atau warna bawaan.
+     - Kartu login (`.login-brand-badge`) selalu menampilkan logo, nama aplikasi, dan subtitle sesuai scope tenant aktif.
+     - Menu navigasi sidebar: Menu `Setting Brand & Wallpaper` dibuka untuk akun non-admin sehingga pengguna perusahaan dapat mengatur tampilan perusahaannya sendiri melalui iframe tab `app_settings`.
+  4. **Direktori Unggahan File**:
+     - Direktori `uploads/wallpapers/` dibuat di lokal (`c:\dp\g-ceisa\uploads\wallpapers`) dan remote (`/source/public/uploads/wallpapers`) dengan izin akses `chmod -R 777`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in all modified files**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Verifikasi HTTP `curl -I -H "Host: rmb.inhost.web.id" http://127.0.0.1/` menghasilkan respons **HTTP/1.1 200 OK**.
+
+---
+
+### Bagian 49: Penetapan Motif Batik Nusantara Sebagai Wallpaper Default Layar Login & Pengaturan Responsif Full Screen (`index.php`, `app_settings_helper.php`, `setting_aplikasi.php`)
+- **Latar Belakang & Kebutuhan Pengguna**:
+  - Pengguna mengunggah gambar ornamen seni Motif Batik Nusantara (kombinasi flora, burung, dan awan Mega Mendung khas Indonesia dengan palet royal blue, maroon, dan gold).
+  - Pengguna meminta agar gambar tersebut dijadikan sebagai **background/wallpaper default** halaman login untuk cakupan **Global** ketika opsi wallpaper dipilih/diaktifkan.
+  - Pengguna secara spesifik meminta agar gambar latar belakang ini **otomatis full screen mengikuti ukuran layar** pengguna secara responsif.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Penyimpanan Aset Inti Proyek**:
+     - Gambar batik disimpan sebagai aset inti sistem pada [`assets/wallpaper-batik-default.png`](file:///c:/dp/g-ceisa/assets/wallpaper-batik-default.png) dan disinkronkan ke direktori unggahan wallpaper (`uploads/wallpapers/`) serta mirror `www/` dan server remote `/source/public/`.
+  2. **Layer Fullscreen Responsif ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Mengimplementasikan elemen fixed layer terdedikasi: `<div class="login-bg-layer">`.
+     - Atribut CSS Fullscreen:
+       - `position: fixed; inset: 0; width: 100vw; height: 100vh; min-height: 100dvh;`
+       - `background-size: cover !important; background-position: center center !important; background-repeat: no-repeat !important; background-attachment: fixed !important;`
+       - `background-color: #ffffff;`
+     - Keunggulan teknik ini:
+       - Otomatis mengisi 100% layar pada semua jenis resolusi (layar ultra-wide, monitor 1080p, laptop, tablet, hingga smartphone layar sentuh vertikal/horizontal).
+       - Menghilangkan celah kosong, distorsi, atau pengulangan gambar (*no tiling*).
+       - Saat layar di-resize, browser secara instan mengkalkulasi ulang rasio skala gambar tanpa jeda.
+     - Penataan Lapisan Komponen:
+       - Lapisan Dimmer terpisah (`.login-bg-overlay`) dengan `background: rgba(0, 0, 0, var(--wp-dimmer))`, aktif hanya jika dimmer disetel > 0%.
+       - Menghilangkan `backdrop-filter: blur` agar garis ornamen batik tetap tajam, jernih, dan tidak kabur.
+       - Footer login (`.login-page-footer`) dimodernisasi menggunakan badge frosted glass (`background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(10px)`) sehingga selalu kontras dan terbaca jelas di atas latar apa pun.
+  3. **Konfigurasi Default Multi-Tenant ([`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php))**:
+     - `getDefaultAppSettings()` memperbarui default:
+       - `'login_bg_type' => 'image'`
+       - `'login_bg_image' => '/assets/wallpaper-batik-default.png'`
+       - `'login_bg_dimmer' => '0'`
+     - Fungsi `getAppSettings()` menyertakan fallback otomatis ke `/assets/wallpaper-batik-default.png` apabila mode wallpaper gambar dipilih namun path gambar kosong.
+  4. **Antarmuka Pengaturan & Live Simulation ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Ditambahkan banner kartu preset: **"Wallpaper Default Sistem (Motif Batik Nusantara)"** lengkap dengan tombol aksi satu-klik **`Pasang Wallpaper Ini`** (`useDefaultBatikWallpaper()`).
+     - Simulasi live kartu login mini (`liveLoginSim`) diperbarui dengan `backgroundSize = 'cover'` dan `backgroundPosition = 'center center'` di atas kanvas putih bersih yang merefleksikan tampilan nyata portal login.
+  5. **Pembaruan Basis Data Global**:
+     - Database Alibaba Cloud RDS `ceisa0400db` pada tabel `bc_ceisa_setting` telah diperbarui untuk scope global (`cmp_id = ''`) menjadi `login_bg_type = 'image'`, `login_bg_image = '/assets/wallpaper-batik-default.png'`, dan `login_bg_dimmer = '0'`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Verifikasi HTTP `curl -s http://127.0.0.1/` dan `curl -s -H Host:rmb.inhost.web.id http://127.0.0.1/` mengonfirmasi `<div class="login-bg-layer" style="background-image: url('/assets/wallpaper-batik-default.png'); background-color: #ffffff;"></div>` telah aktif dan melayani seluruh portal secara proporsional.
+
+---
+
+### Bagian 50: Perbaikan Routing Tab & Resolusi Iframe Menu "Setting Brand & Wallpaper" untuk Akun Perusahaan (`index.php`, `setting_aplikasi.php`)
+- **Penyebab Masalah yang Ditemukan**:
+  1. Pada fungsi JavaScript `getTabUrl()` di [`index.php`](file:///c:/dp/g-ceisa/index.php), penanganan tab `app_settings` sebelumnya menggunakan percabangan kondisi:
+     ```javascript
+     if (tabId === 'app_settings') return isAdmin ? `/setting_aplikasi.php...` : `/daftar_dokumen.php...`;
+     ```
+     Akibatnya, ketika pengguna login sebagai akun Perusahaan (`isAdmin === false`), fungsi tersebut justru mengembalikan URL `/daftar_dokumen.php`. Karena iframe `daftar_dokumen` kemungkinan sudah aktif, maka saat menu diklik halaman seolah-olah tidak terbuka atau hanya me-reload daftar dokumen pabean.
+  2. ID elemen DOM sidebar untuk akun perusahaan pada [`index.php`](file:///c:/dp/g-ceisa/index.php) sebelumnya menggunakan `id="nav-item-app_settings_cmp"`, sedangkan fungsi navigasi `switchMainTab('app_settings')` mencari elemen dengan pola `id="nav-item-" + tabId` (`nav-item-app_settings`), sehingga status highlight aktif tidak sinkron.
+  3. Validasi keamanan sesi pada [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) diperkuat agar adaptif membaca `$_SESSION['user_id']`, `$_SESSION['company_cmp_id']`, maupun parameter URL `cmp_id` guna memastikan pengguna terotentikasi tidak terkena 403 Forbidden.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Koreksi Routing Iframe ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Mengubah baris routing tab `app_settings` menjadi universal:
+       ```javascript
+       if (tabId === 'app_settings') return `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+       ```
+     - Kini baik Administrator maupun User Perusahaan diarahkan secara langsung ke halaman [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) sesuai konteks perusahaannya masing-masing.
+  2. **Penyelarasan DOM Menu Sidebar**:
+     - Mengubah ID menu item non-admin menjadi `id="nav-item-app_settings"` agar sinkron dengan fungsi `switchMainTab()`.
+     - Judul breadcrumb topbar untuk non-admin disesuaikan menjadi **`Setting Brand & Wallpaper`**.
+  3. **Penyesuaian Autentikasi Fleksibel ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Memperbaiki pengecekan `$sessionCmpId` agar jika kosong dari session, dapat mengambil fallback dari `$_REQUEST['cmp_id']` selama sesi pengguna (`$_SESSION['user_id']` atau `$_SESSION['user_name']`) terverifikasi aktif.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan server remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected in index.php and setting_aplikasi.php**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Menu sidebar **"Setting Brand & Wallpaper"** kini langsung terbuka secara instan ke antarmuka pengaturan identitas & wallpaper saat diklik oleh akun perusahaan.
+
+---
+
+### Bagian 51: Penyesuaian Subtitle Kartu Login Subdomain Menjadi "Portal Akses Interface Host to Host" (`index.php`, `setting_aplikasi.php`)
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada halaman kartu login portal subdomain perusahaan (misal: `rmb.inhost.web.id`), di bawah nama perusahaan (`PT RODA MAJU BAHAGIA`) sebelumnya tertulis teks:
+    `Portal Akses CEISA 4.0`
+  - Pengguna meminta agar teks tersebut diubah menjadi:
+    **`Portal Akses Interface Host to Host`**
+
+- **Solusi & Implementasi Teknis**:
+  1. Pada [`index.php`](file:///c:/dp/g-ceisa/index.php) baris 2574, teks subtitle login di bawah nama perusahaan diganti menjadi:
+     ```html
+     <p style="margin:2px 0 0 0; font-size:12px; color:var(--text-muted); font-weight:500;">
+         Portal Akses Interface Host to Host
+     </p>
+     ```
+  2. Pada antarmuka live simulation [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) baris 1534, teks pada kartu preview mini disinkronkan menjadi:
+     ```html
+     <div style="font-size:6.5px; color:#8c8c8c; margin-bottom:6px;">Portal Akses Interface Host to Host</div>
+     ```
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Verifikasi HTTP `curl -s -H Host:rmb.inhost.web.id http://127.0.0.1/` mengonfirmasi teks **`Portal Akses Interface Host to Host`** telah aktif dan tampil sempurna.
+
+---
+
+### Bagian 52: Penerapan Kewajiban Input Nama Pengguna (Username) untuk Login Akun Perusahaan (`index.php`)
+- **Latar Belakang & Permintaan Pengguna**:
+  - Sebelumnya, field input Nama Pengguna (Username) bersifat opsional sehingga pengguna dapat login ke perusahaan hanya dengan mengisi kata sandi (menggunakan *master company password*).
+  - Pengguna meminta agar username **wajib diisi (tidak boleh dikosongkan)** saat login sebagai akun perusahaan demi integritas audit trail dan keamanan multi-user.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Validasi Frontend ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Atribut `required` ditambahkan pada input `#loginUsername`.
+     - Ditambahkan tanda bintang merah (`*`) pada label `Nama Pengguna (Username)*` dan `Kata Sandi / Password*`.
+     - Atribut `autofocus` diarahkan langsung ke `#loginUsername` saat membuka portal login subdomain perusahaan.
+     - Fungsi `submitLogin()` memvalidasi: jika `cmp !== 'admin'` dan `username` kosong, proses submit dibatalkan, pesan peringatan merah dimunculkan (*"Nama Pengguna (Username) wajib diisi untuk login perusahaan."*), dan kursor otomatis difokuskan ke input username.
+     - Fungsi `onLoginCmpChange()` otomatis mengaktifkan/menonaktifkan atribut `required` tergantung apakah yang dipilih adalah Administrator atau Perusahaan.
+  2. **Validasi Backend & Autentikasi User ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Pada endpoint `action=login`, ditambahkan penjaga ketat:
+       ```php
+       if (strtolower($cmp_id) !== 'admin' && empty($username)) {
+           echo json_encode(['status' => 'ERROR', 'message' => 'Nama Pengguna (Username) wajib diisi untuk login perusahaan.']);
+           exit;
+       }
+       ```
+     - Sistem mencocokkan akun ke tabel `bc_ceisa_login` berdasarkan `cmp_id` dan `user_id`.
+     - Disediakan fallback otomatis untuk user `admin` perusahaan jika mencocokkan `app_password`, dan otomatis mensinkronkan baris pengguna `admin` ke `bc_ceisa_login` agar profil pengguna terdaftar secara formal.
+     - Akun `admin` untuk PT RODA MAJU BAHAGIA (`080167772504400`) telah didaftarkan ke `bc_ceisa_login` dengan hak akses `role = 'admin'` dan password bawaan `1234`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Uji POST dengan username kosong: mengembalikan respons penolakan `{"status":"ERROR","message":"Nama Pengguna (Username) wajib diisi untuk login perusahaan."}`.
+  - Uji POST dengan user `admin` dan user `bc`: berhasil otentikasi dengan status `OK`.
+
+---
+
+### Bagian 53: Pengaturan Visibilitas Kartu Perusahaan di Sidebar (Hide / Show Company Card)
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada sidebar navigasi portal, terdapat kotak kartu identitas perusahaan abu-abu (`#sidebarCompanyCard`) yang terletak tepat di bawah brand header.
+  - Saat pengguna login sebagai perusahaan (misal subdomain `rmb.inhost.web.id`), brand header sudah menampilkan logo dan nama perusahaan (`RMB INHOST`), sehingga keberadaan kotak kartu perusahaan di bawahnya dirasa berulang/menumpuk (*redundant*).
+  - Pengguna meminta agar kartu perusahaan ini memiliki pengaturan di aplikasi untuk **HIDE / SHOW**, dengan **default otomatis ter-sembunyi (HIDE) untuk akun perusahaan**, dan tetap tampil untuk Super Admin (karena admin menggunakannya untuk switcher modal ganti perusahaan aktif).
+
+- **Solusi & Implementasi Teknis**:
+  1. **Helper Pengaturan ([`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php))**:
+     - Ditambahkan konfigurasi default `'show_company_card' => 'auto'` pada fungsi `getDefaultAppSettings()`.
+     - Opsi konfigurasi:
+       - `'auto'` (Default): Otomatis sembunyikan untuk User Perusahaan (`$isAdmin == false`), dan tampilkan untuk Super Admin (`$isAdmin == true`).
+       - `'0'` / HIDE: Sembunyikan permanen baik untuk admin maupun perusahaan.
+       - `'1'` / SHOW: Tampilkan selalu.
+  2. **Resolusi Visibilitas Portal ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Resolusi server-side pada baris ~2687:
+       ```php
+       $cfgShowCompanyCard = $appSettings['show_company_card'] ?? 'auto';
+       $isCompanyCardVisible = ($cfgShowCompanyCard === '0') ? false : (($cfgShowCompanyCard === '1') ? true : !empty($isAdmin));
+       $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
+       ```
+     - Ditambahkan inline style `$companyCardDisplay` ke `#sidebarCompanyCard` tanpa menghapus elemen dari DOM, guna menjaga referensi DOM tetap aman untuk script listener.
+     - Ditambahkan penanganan real-time `show_company_card` di listener event `APP_SETTINGS_UPDATED` (baris ~4892) agar perubahan langsung tercermin tanpa reload penuh.
+  3. **Antarmuka Konfigurasi ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Input dropdown pengaturan visibilitas kartu perusahaan ditambahkan di 2 tab:
+       - Tab **Identitas & Branding** (`#inp_show_company_card_brand`)
+       - Tab **Tampilan & Preferensi** (`#inp_show_company_card`, dengan `name="show_company_card"`)
+     - Ditambahkan helper JavaScript `syncCompanyCardSetting(val)` untuk sinkronisasi seketika antar kedua tab.
+     - Nilai diekstrak dan disimpan dalam `$payload` database `bc_ceisa_setting` (mendukung cakupan Global maupun Khusus Perusahaan).
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/` dan remote `/source/public/`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Konfigurasi tersimpan dengan baik di tabel `bc_ceisa_setting` dan saat login sebagai user perusahaan, kartu identitas perusahaan otomatis ter-sembunyi (HIDE) sehingga sidebar tampak bersih, rapi, dan profesional.
+
+---
+
+### Bagian 54: Pembersihan Topbar Header: Menghilangkan Badge Logo Avatar & Tombol Gaya Ikon (🎨 / 🏛️)
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada header navigasi atas (*topbar header*), di sebelah kanan teks sapaan pengguna (`Hi, PT RODA MAJU BAH.`), terdapat badge kecil logo perusahaan (`topbarUserBadge`) serta tombol pemilih gaya ikon sidebar (`.icon-style-select`: 🎨 Berwarna & 🏛️ Monokrom).
+  - Elemen-elemen ini membuat navbar terlihat padat dan redundan karena logo perusahaan sudah tampil dominan di sidebar portal, dan pilihan gaya ikon sidebar sudah tersedia secara formal di menu Pengaturan Aplikasi.
+  - Pengguna meminta agar bagian yang ditandai kotak merah tersebut (badge logo avatar dan tombol pemilih gaya ikon) dihilangkan.
+
+- **Solusi & Implementasi Teknis ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+  1. Menghilangkan elemen visual tombol gaya ikon `.icon-style-select` (`🎨` dan `🏛️`) dari navbar atas.
+  2. Mengubah elemen `#topbarUserBadge` menjadi elemen non-visual tersembunyi (`display: none !important;`) sehingga tidak tampil di layar namun tetap menjaga kompatibilitas DOM untuk script helper listener.
+  3. Header navbar atas kini tampil lebih bersih, lega, dan elegan, menyajikan hanya sapaan pengguna, toggle mode gelap/terang (`☀️ 🌙`), dan tombol `Log Out`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/index.php` dan remote server `/source/public/index.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Layanan `php8.5-fpm` berhasil direload.
+  - Tampilan topbar terverifikasi bersih tanpa badge logo berlebih maupun tombol pemilih gaya ikon.
+
+---
+
+### Bagian 55: Pemisahan Ketat Hak Akses Super Administrator (`dp`) vs Admin Perusahaan (`admin`)
+- **Latar Belakang & Permintaan Pengguna**:
+  - Sebelumnya, seluruh akun dengan `role = 'admin'` di tabel `bc_ceisa_login` diberikan status `is_admin = true`.
+  - Akibatnya, akun `admin` milik tenant perusahaan (misal PT RODA MAJU BAHAGIA) dapat melihat tombol `➔ Ganti` (bisa berpindah ke perusahaan mana pun) dan dapat membuka menu `ADMINISTRATOR` (`Kelola Perusahaan`, `Database Browser`, `Dokumentasi REST API`).
+  - Pengguna meminta agar ada pemisahan peran yang tegas:
+    - **Super Administrator**: Dikhususkan untuk username **`dp`** (atau profil login `[ADMIN] Administrator`).
+    - **Admin Perusahaan**: Terkunci hanya pada perusahaannya sendiri, **dilarang ganti/switch perusahaan**, dan **dilarang membuka menu Administrator**.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Autentikasi Bertingkat ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Deteksi Super Admin: `$isSuperAdminAttempt = (strtolower($cmp_id) === 'admin' || $username === 'dp');`
+     - Jika Super Admin (`dp` atau `[ADMIN]`):
+       - `$_SESSION['is_super_admin']   = true;`
+       - `$_SESSION['is_admin']         = true;`
+       - `$_SESSION['is_company_admin'] = false;`
+       - `$_SESSION['user_role']        = 'superadmin';`
+       - Memiliki hak akses penuh untuk switch perusahaan dan seluruh menu master portal.
+     - Jika Admin Perusahaan (`admin` di bawah PT RMB):
+       - `$_SESSION['is_super_admin']   = false;`
+       - `$_SESSION['is_company_admin'] = true;`
+       - `$_SESSION['is_admin']         = false;` (Bukan Super Admin!)
+       - `$_SESSION['user_role']        = 'admin';`
+  2. **Isolasi UI & Navigasi Portal ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Tombol switcher `➔ Ganti` pada Company Card dibatasi ketat dengan `<?php if ($isAdmin): ?>` (hanya Super Admin yang bisa switch).
+     - Grup menu `ADMINISTRATOR` (`Kelola Perusahaan`, `Setting Aplikasi Global`, `Dokumentasi REST API`, `Database Browser`) disembunyikan total untuk Admin Perusahaan.
+     - Di bawah menu `USER MANAGEMENT`, Admin Perusahaan tetap dapat mengakses:
+       - **Kelola User Perusahaan** (`user_management.php`): dibatasi hanya untuk mengelola operator/BC di perusahaannya sendiri.
+       - **Setting Brand & Wallpaper** (`setting_aplikasi.php`): dibatasi hanya untuk mengubah brand dan wallpaper perusahaannya sendiri.
+  3. **Keamanan Backend Tingkat File**:
+     - [`company.php`](file:///c:/dp/g-ceisa/company.php): Dilindungi verifikasi sesi `is_super_admin`, menolak akses non-superadmin dengan HTTP 403.
+     - [`db.php`](file:///c:/dp/g-ceisa/db.php): Dilindungi verifikasi sesi `is_super_admin`, menolak akses non-superadmin dengan HTTP 403.
+     - [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php): Mengunci cakupan perusahaan (`targetCmpId = sessionCmpId`) jika non-superadmin, dan menyembunyikan tab Integrasi CEISA Gateway serta Reset Global.
+     - [`user_management.php`](file:///c:/dp/g-ceisa/user_management.php): Mengunci query dan manipulasi data pengguna hanya pada `activeCmp` perusahaannya sendiri, serta melarang pembuatan akun `superadmin` oleh Admin Perusahaan.
+
+- **Deployment & Hasil Verifikasi**:
+  - Seluruh berkas dimirror ke `www/` dan diunggah ke remote server `/source/public/`.
+  - Pengecekan sintaks remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Pengujian login `dp`: Sukses sebagai Super Administrator (`is_super_admin = true`).
+  - Pengujian login `admin` RMB: Sukses sebagai Admin Perusahaan (`is_company_admin = true`, `is_admin = false`).
+  - Uji keamanan POST `switch_company`: Ditolak (*"Hanya Administrator yang memiliki hak akses untuk berpindah perusahaan."*).
+  - Uji keamanan `company.php` & `db.php`: Mengembalikan respons HTTP 403 Forbidden.
+  - Uji `user_management.php`: Berhasil menampilkan dan mengelola data pengguna khusus PT RODA MAJU BAHAGIA secara terisolasi dan aman.
+
+---
+
+### Bagian 56: Pembaruan Topbar Header: Menampilkan Nama Pengguna (User), Bukan Nama Perusahaan
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada header navigasi atas (*topbar header*), elemen teks sapaan `.kt-header__topbar-username` sebelumnya menampilkan nama perusahaan (`$sessionCmpName`, misal `PT RODA MAJU BAHAGIA`), dan saat switcher perusahaan dijalankan, teks ini tertimpa kembali dengan nama perusahaan baru.
+  - Pengguna meminta agar teks tersebut menampilkan **Nama Pengguna (User)** yang sedang aktif login, bukan nama perusahaannya.
+
+- **Solusi & Implementasi Teknis ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+  1. Resolusi variabel identitas pengguna:
+     ```php
+     $sessionUserId   = $_SESSION['user_id'] ?? '';
+     $sessionUserName = $_SESSION['user_name'] ?? ($sessionUserId ?: 'User');
+     ```
+  2. Mengganti output pada elemen `.kt-header__topbar-username` (baris ~3557) menjadi:
+     ```html
+     <span class="kt-header__topbar-welcome">Hi,</span>
+     <span class="kt-header__topbar-username" title="User: <?= htmlspecialchars($sessionUserName) ?><?= !empty($sessionUserId) ? ' (' . htmlspecialchars($sessionUserId) . ')' : '' ?>">
+         <?= htmlspecialchars($sessionUserName) ?>
+     </span>
+     ```
+  3. Memperluas batasan CSS `max-width` pada `.kt-header__topbar-username` dari `105px` menjadi `150px` agar nama pengguna yang lebih panjang dapat terbaca utuh dan tidak terpotong elipsis secara prematur.
+  4. Menghapus script JavaScript penimpa (`userGreeting.innerText = json.cmp_name`) pada event pergantian konteks perusahaan (`switch_company` dan `COMPANY_CHANGED`), sehingga identitas pengguna yang login tetap konsisten dan tidak tertukar dengan nama perusahaan.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/index.php` dan remote server `/source/public/index.php`.
+  - Pengecekan sintaks PHP remote: **No syntax errors detected**.
+  - Layanan `php8.5-fpm` berhasil direload.
+  - Uji curl otentikasi mengonfirmasi:
+    - Login sebagai user `admin`: menampilkan **`Hi, Administrator RMB`**.
+    - Login sebagai user `dp`: menampilkan **`Hi, Super Administrator (DP)`**.
+    - Hover tooltip menampilkan ID pengguna dan nama lengkap akun.
+
+---
+
+### Bagian 57: Isolasi Brand Header Sidebar: Super Administrator (`dp`) Selalu Menggunakan Logo & Brand Global
+- **Latar Belakang & Permintaan Pengguna**:
+  - Saat login sebagai **Super Administrator (`dp`)** pada portal subdomain perusahaan (misal `rmb.inhost.web.id`), brand header di sudut kiri atas sidebar menu sebelumnya masih menampilkan logo dan nama brand kustom perusahaan (`RMB INHOST`).
+  - Pengguna meminta agar ketika login sebagai `dp` / Administrator, logo dan nama brand di header sidebar harus **selalu menggunakan logo dan nama brand GLOBAL** (`/assets/logo.png` & `INHOST`), bukan logo perusahaan.
+
+- **Solusi & Implementasi Teknis ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+  1. Resolusi App Settings Berdasarkan Peran Pengguna (baris ~655):
+     ```php
+     // Catatan: Khusus Super Administrator (dp), SELALU gunakan App Settings Global sistem
+     $activeAppCmpId = '';
+     if (!$isSuperAdmin) {
+         if ($isLoggedIn && !empty($sessionCmpId)) {
+             $activeAppCmpId = $sessionCmpId;
+         } elseif (!empty($subdomainCompany['cmp_id'])) {
+             $activeAppCmpId = $subdomainCompany['cmp_id'];
+         }
+     }
+     $appSettings = getAppSettings($koneksi, $activeAppCmpId);
+     ```
+  2. Isolasi Real-Time Update:
+     Pada event listener `APP_SETTINGS_UPDATED`, pembaruan elemen `#sidebarBrandLogo`, `#sidebarBrandName`, dan `#sidebarBrandSub` untuk Super Administrator hanya diizinkan jika cakupan pengaturan yang diubah adalah `global`, sehingga tidak akan tertimpa oleh kustomisasi logo perusahaan tenant saat admin mengedit perusahaan tertentu.
+  3. Perusahaan aktif yang sedang dikelola oleh `dp` tetap tampil jelas pada kartu perusahaan di bawahnya (`#sidebarCompanyCard` dengan tombol `➔ Ganti`).
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke mirror lokal `www/index.php` dan remote server `/source/public/index.php`.
+  - Pengecekan sintaks remote: **No syntax errors detected**.
+  - Service `php8.5-fpm` berhasil direload.
+  - Verifikasi cURL:
+    - Login sebagai `dp`: `#sidebarBrandLogo` menghasilkan `/assets/logo.png` dan `sidebarBrandName` menghasilkan **`INHOST`**.
+    - Login sebagai `admin` RMB: `#sidebarBrandLogo` tetap menghasilkan logo kustom RMB (`logo_cmp_080167772504400_...`) dan nama **`RMB INHOST`**.
+
+---
+
+### Bagian 58: Standardisasi Menu "Setting Aplikasi" & Pembesaran Proporsional Sidebar Brand Logo
+- **Latar Belakang & Permintaan Pengguna**:
+  1. Mengubah nama menu navigasi `"Setting Brand & Wallpaper"` menjadi **`"Setting Aplikasi"`**.
+  2. Memperbesar ukuran **`#sidebarBrandLogo`** agar lebih tegas, jelas, dan proporsional dengan ukuran teks nama brand (**`#sidebarBrandName`**) dan container header sidebar.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Standardisasi Label Menu & Breadcrumb ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Mengubah teks menu navigasi sidebar (baris ~3492) dari `<span class="kt-menu__link-text">Setting Brand &amp; Wallpaper</span>` menjadi `<span class="kt-menu__link-text">Setting Aplikasi</span>`.
+     - Menyeragamkan pemetaan breadcrumb portal JavaScript (baris ~3912): `'app_settings': 'Setting Aplikasi',` sehingga konsisten bagi semua tingkatan akun (Super Admin maupun Admin Perusahaan).
+  2. **Pembesaran Proporsional Logo Brand & Tipografi Header Sidebar ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Memperbesar ukuran CSS dan inline style `#sidebarBrandLogo` dari `24px x 24px` menjadi **`34px x 34px`** (`max-height: 34px; max-width: 34px; border-radius: 6px; object-fit: contain; flex-shrink: 0;`).
+     - Mengimbangi ukuran teks `#sidebarBrandName` menjadi **`font-size: 14.5px; font-weight: 800; line-height: 1.15; letter-spacing: 0.3px;`** dan `#sidebarBrandSub` menjadi **`font-size: 8.5px; font-weight: 600; line-height: 1.25;`** dengan jarak `gap: 9px;`.
+     - Menyempurnakan aturan tampilan saat sidebar dalam mode Autohide / Unpinned (lebar 52px) agar logo 34px tetap berada presisi di tengah kontainer (`justify-content: center; gap: 0 !important;`).
+  3. **Harmonisasi Pratinjau Pengaturan ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Memperbesar pratinjau live brand logo `.preview-brand-logo` dari `22px` menjadi **`30px`** dan teks brand `.preview-brand-name` menjadi **`13px` (font-weight: 800)** agar representatif dengan tampilan aktual sidebar.
+
+- **Deployment & Hasil Verifikasi**:
+  - Seluruh file target disalin ke direktori mirror `www/` dan diunggah ke server remote (`/source/public/index.php`, `/source/public/setting_aplikasi.php`, `/source/public/PROJECT_HISTORY_CEISA4.md`).
+  - Remote syntax check PHP 8.5: **No syntax errors detected**.
+  - Layanan `systemctl reload php8.5-fpm` berhasil diperbarui.
+  - Verifikasi cURL dan inspeksi kode:
+    - Menu `app_settings` menampilkan teks **`Setting Aplikasi`**.
+    - Breadcrumbs dinamis memetakan ke **`Setting Aplikasi`**.
+    - Elemen `#sidebarBrandLogo` memiliki style `height: 34px; width: 34px` dan bersanding proporsional dengan font `14.5px` (bold 800).
+
+---
+
+### Bagian 59: Proteksi Zero-Autofill Form Login & Pembesaran Logo Brand Kartu Login
+- **Latar Belakang & Permintaan Pengguna**:
+  1. Pengguna menanyakan mengapa setiap kali halaman login dibuka, kolom Nama Pengguna (Username) dan Kata Sandi (Password) selalu otomatis terisi (`8120106862342` dan sandi).
+  2. Meminta agar kolom Username dan Password **selalu kosong** setiap kali halaman dibuka.
+  3. Memperbesar gambar logo brand di atas kartu login (**`.login-brand-logo`**).
+
+- **Akar Masalah (Root Cause) Autofill Otomatis**:
+  - Browser web (seperti Google Chrome dan Microsoft Edge) memiliki modul *Credential / Password Manager* bawaan.
+  - Saat pengguna sebelumnya login pada subdomain `rmb.inhost.web.id`, peramban menyimpan NPWP/Username `8120106862342` dan kata sandinya.
+  - Keberadaan atribut standar `autocomplete="username"` dan `autocomplete="current-password"` pada elemen `<form>` memicu peramban untuk secara agresif menginjeksikan kredensial tersimpan ke dalam kolom input begitu halaman selesai dimuat.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Proteksi Bertingkat Zero-Autofill ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - **Dummy Trap Inputs**: Menambahkan elemen input tersembunyi (*honeypot trap*) di bagian atas form login untuk menyerap autofill peramban.
+     - **Atribut Form & Input Ketat**:
+       - `<form id="formLogin" autocomplete="off">`
+       - Username: `autocomplete="off"`, `name="login_user_YYYYMMDD"`, `value=""`.
+       - Password: `autocomplete="new-password"`, `name="login_pwd_YYYYMMDD"`, `value=""`.
+     - **Atribut Readonly Sementara**: Input diberi atribut `readonly onfocus="this.removeAttribute('readonly');"`. Mesin autofill peramban secara otomatis melewati kolom yang berstatus readonly.
+     - **Skrip Pembersih Proaktif (`initLoginFormProtection`)**:
+       - Mengeksekusi pembersihan input (`value = ''`) pada milidetik ke 0, 40, 100, 200, 400, 800, 1200 setelah halaman dimuat.
+       - Melepaskan atribut `readonly` secara mulus pada 120ms sehingga pengguna dapat langsung mengetik normal.
+       - Menyematkan listener deteksi ketikan keyboard (`keydown`) agar tidak mengganggu ketikan asli pengguna.
+     - **Penimpaan Styling Autofill**: Menambahkan CSS override pada selector `input:-webkit-autofill` agar tidak memunculkan warna kotak biru/kuning bawaan peramban.
+  2. **Pembesaran Logo Brand Kartu Login ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Dimensi **`.login-brand-logo`** diperbesar dari `36px x 36px` menjadi **`54px x 54px`** (hingga `max-width: 72px; max-height: 54px;`).
+     - Diberi background kontainer putih bersih, border halus `1px solid rgba(0, 0, 0, 0.06)`, padding `3px`, sudut membulat `border-radius: 9px`, dan filter bayangan halus `drop-shadow(0 2px 5px rgba(24, 144, 255, 0.16))`.
+     - Padding badge `.login-brand-badge` disesuaikan menjadi `8px 18px` dengan jarak antar-elemen `gap: 14px`, serta judul brand `.login-brand-title` ditingkatkan ke `21px (bold 800)`.
+     - Pratinjau live badge login di [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) diselaraskan dari 20px menjadi **`32px`**.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas disinkronkan ke direktori lokal mirror `www/` dan remote server `/source/public/`.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM (`systemctl reload php8.5-fpm`) berhasil direload.
+  - Verifikasi cURL:
+    - Input login memiliki `autocomplete="off"` / `new-password"`, nama dinamis, `value=""`, dan trap dummy terpasang rapi.
+    - Dimensi `.login-brand-logo` terkonfirmasi `54px x 54px` dengan tampilan badge yang proporsional dan jelas.
+
+---
+
+### Bagian 60: Penyesuaian Interval Sinkronisasi CEISA 4.0 (Minimal 15 Menit) & Pengambilan Default 50 Baris
+- **Latar Belakang & Permintaan Pengguna**:
+  1. Pengguna menanyakan berapa frekuensi sinkronisasi latar belakang (*silent sync*) CEISA 4.0 yang berjalan saat membuka Dashboard Dokumen Pabean.
+  2. Meminta agar interval default tidak terlalu cepat, **minimal 15 menit sekali**.
+  3. Meminta agar jumlah dokumen yang ditarik secara default **hanya 50 baris** (bukan 1.000 baris).
+
+- **Analisis Sistem Sebelumnya**:
+  - Di [`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php) dan [`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php), cooldown sinkronisasi otomatis sebelumnya disetel hanya `180 detik` (3 menit). Setiap kali pengguna membuka/merefresh halaman setelah 3 menit, indikator `"Menyinkronkan data CEISA..."` aktif kembali.
+  - Parameter batch penarikan default (`ceisa_sync_batch_size`) sebelumnya disetel ke batas maksimal `1.000 dokumen`, sehingga request penarikan membutuhkan waktu 20–30 detik per siklus.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Interval Sinkronisasi Latar Belakang (Minimal 15 Menit / 900 Detik)**:
+     - **Frontend ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php#L1896-L1904))**:
+       - Mengubah pengecekan `lastSync` menjadi `syncIntervalMs = 15 * 60 * 1000` (900.000 ms / 15 menit).
+       - Jika belum mencapai 15 menit sejak penarikan terakhir, request AJAX ke `ceisa_sync_service.php` dilewati secara otomatis (*silent*).
+     - **Backend ([`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php#L89-L93))**:
+       - Mengubah cooldown background otomatis dari 180 detik menjadi **`900 detik (15 menit)`**.
+       - Jika dipaksa manual (tombol Utilitas `&force=1`), diterapkan jeda proteksi `60 detik` agar tidak terjadi spam API.
+       - Jika request tiba saat cooldown aktif, server langsung merespons status `CACHED` dengan sisa detik cooldown.
+  2. **Penarikan Default 50 Baris Dokumen**:
+     - Mengubah konfigurasi default penarikan (`ceisa_sync_batch_size`) di [`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php#L24), [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php#L30), dan [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json) dari `1000` menjadi **`50`** baris dokumen.
+     - Penarikan 50 baris berlangsung sangat cepat (~3-4 detik) dan sangat ringan bagi server Bea Cukai maupun server lokal.
+  3. **Konfigurasi Fleksibel di Setting Aplikasi ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Menambahkan kontrol pilihan dropdown **`Interval Sinkronisasi Latar Belakang (Menit)`** dengan opsi: `15 Menit Sekali (Default & Rekomendasi)`, `30 Menit Sekali`, `60 Menit (1 Jam)`, dan `120 Menit (2 Jam)`.
+     - Menyesuaikan dropdown **`Jumlah Dokumen Tarik per Sinkronisasi (Batch Size)`** dengan opsi default: `50 Baris (Default - Ringan & Cepat)`, `100`, `200`, `500`, dan `1.000` baris.
+
+- **Deployment & Hasil Verifikasi**:
+  - Seluruh file target ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php), [`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php), [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php), [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php), [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json)) telah dicerminkan ke `www/` dan diunggah ke remote server.
+  - Pengecekan sintaks PHP 8.5: **No syntax errors detected**.
+  - Layanan `php8.5-fpm` direload.
+  - Uji cURL langsung ke endpoint `ceisa_sync_service.php`:
+    - Penarikan ukuran 50 baris selesai dalam hitungan detik.
+    - Request berikutnya langsung menghasilkan `status: CACHED` dengan sisa hitung mundur cooldown 15 menit (`remaining: 882 detik`).
+
+---
+
+### Bagian 61: Sembunyikan Redundansi Teks Nama Perusahaan di Kartu Login & Pengaturan Visibilitas Dinamis
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada kartu login portal subdomain perusahaan (seperti `tvl.inhost.web.id` atau `rmb.inhost.web.id`), bagian atas kartu login sudah menampilkan badge brand yang memuat logo dan nama perusahaan (`TVL GLOBAL LOGISTIK - INTERFACE HOST TO HOST CEISA 4.0`).
+  - Di bawah badge tersebut, sebelumnya terdapat teks judul duplikat (`<h2>TVL GLOBAL LOGISTIK</h2> <p>Portal Akses Interface Host to Host</p>`) yang membuat tampilan kartu login tampak berulang dan padat.
+  - Pengguna meminta agar area teks duplikat tersebut **secara default disembunyikan (HIDE)** atau dapat dikonfigurasi melalui menu Setting Aplikasi.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Logika Visibilitas Dinamis ([`index.php`](file:///c:/dp/g-ceisa/index.php#L2687-L2700))**:
+     - Membaca konfigurasi `$showLoginCompanyTitle = ($appSettings['show_login_company_title'] ?? '0') === '1';`.
+     - Jika bernilai `'0'` (nilai default), elemen `<h2>` nama perusahaan dan `<p>` subjudul di bawah badge di kartu login **tidak akan dirender**.
+     - Kartu login langsung menampilkan badge logo & brand di atas, kemudian langsung diikuti kolom input Username dan Password secara rapi, elegan, dan proporsional.
+  2. **Definisi Nilai Bawaan Global ([`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php) & [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json))**:
+     - Menambahkan kunci konfigurasi `'show_login_company_title' => '0'` (default sembunyikan).
+  3. **Kontrol Pengaturan di Setting Aplikasi ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Menambahkan seksi pengaturan: **Visibilitas Teks Nama Perusahaan di Kartu Login**.
+     - Dropdown menyediakan opsi:
+       - `👁️‍🗨️ Sembunyikan (HIDE - Default: Bersih, Rapi & Ringkas)`
+       - `👁️ Tampilkan (SHOW - Tampilkan teks Nama Perusahaan & Portal Akses)`
+     - Pengaturan ini dapat disetel secara Global maupun secara individual khusus per perusahaan tenant.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas [`index.php`](file:///c:/dp/g-ceisa/index.php), [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php), [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json), dan [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) disinkronkan ke `www/` dan diunggah ke remote server.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM direload.
+  - Verifikasi cURL pada `tvl.inhost.web.id` dan `rmb.inhost.web.id`: Area teks redundan di bawah badge login terkonfirmasi hilang (bersih), langsung menyajikan form input username dan password.
+
+---
+
+### Bagian 62: Pengaturan Ukuran Font Nama Brand Sidebar Dinamis di Setting Aplikasi
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pada header sidebar menu di sudut kiri atas, nama perusahaan/brand yang panjang (misalnya `TVL GLOBAL LOGISTIK` atau `PT RODA MAJU BAHAGIA`) mengalami pemotongan teks (*truncated*) oleh tombol collapse sidebar (`<<`) menjadi `TVL GLOBAL LOGIST` karena ukuran font yang terlalu besar.
+  - Pengguna meminta agar ukuran font (*font size*) nama brand sidebar ini dapat diatur secara fleksibel melalui menu Setting Aplikasi agar bisa diperkecil sesuai panjang teks nama perusahaan masing-masing.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Konfigurasi Font Size Dinamis ([`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php) & [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json))**:
+     - Menambahkan kunci konfigurasi:
+       - `'sidebar_brand_font_size' => '12px'` (default 12px agar nama sedang hingga panjang langsung muat tanpa terpotong).
+       - `'sidebar_brand_sub_font_size' => '8px'` (default 8px untuk subtitle tagline).
+  2. **Antarmuka Pengaturan di Setting Aplikasi ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Menambahkan dropdown **Ukuran Font Nama Brand Sidebar (Font Size)** pada tab *Identitas & Branding*:
+       - `10px - Ekstra Kecil (Untuk Nama Sangat Panjang)`
+       - `11px - Kecil (Untuk Nama Panjang, misal: TVL GLOBAL LOGISTIK)`
+       - `12px - Menengah (Default Rekomendasi)`
+       - `13px - Standar (Untuk Nama Sedang)`
+       - `14px - Besar (Untuk Nama Singkat)`
+       - `15px - Ekstra Besar (1-2 Kata Singkat, misal: INHOST)`
+     - Menambahkan dropdown **Ukuran Font Subtitle Sidebar** (7px, 7.5px, 8px, 8.5px, 9px).
+     - Menghubungkan ke fungsi `updateLivePreview()` sehingga saat user memilih ukuran font di dropdown, pratinjau kartu header langsung berubah secara real-time.
+  3. **Penerapan Responsif pada Sidebar Portal ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Menyematkan inline style dinamis `font-size: <?= htmlspecialchars($sidebarBrandFontSize) ?>` pada elemen `#sidebarBrandName` dan `#sidebarBrandSub`.
+     - Menambahkan `min-width: 0; flex: 1; text-overflow: ellipsis; overflow: hidden;` serta atribut `title` hover tooltip agar tampilan tetap rapi dan tidak bertabrakan dengan tombol toggler sidebar.
+     - Memperbarui event listener `APP_SETTINGS_UPDATED` agar perubahan ukuran font dari iframe Setting Aplikasi langsung diterapkan seketika pada sidebar tanpa perlu reload halaman.
+
+- **Deployment & Hasil Verifikasi**:
+  - File disinkronkan ke mirror lokal `www/` dan remote server `/source/public/`.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM direload.
+  - Verifikasi cURL: Nilai default font size terpasang `12px` dan style responsif terkonfirmasi aktif.
+
+---
+
+### Bagian 63: Pelebaran Kontainer Header Brand Sidebar & Pembersihan Opsi Dropdown Font Size
+- **Latar Belakang & Permintaan Pengguna**:
+  1. Pengguna menyampaikan bahwa meskipun font sudah diatur kecil (10px), teks nama perusahaan di header sidebar (seperti `RODA MAJU BAHAGIA`) masih terpotong (`RODA MAJU BAHA...`). Pengguna meminta agar teks nama perusahaan tampil utuh dan lengkap.
+  2. Pengguna meminta untuk menghapus teks contoh spesifik seperti `"misal TVL GLOBAL LOGISTIK"` dan `"misal INHOST"` dari daftar pilihan dropdown ukuran font di Setting Aplikasi.
+
+- **Akar Masalah (Root Cause)**:
+  - Elemen tautan `<a>` di dalam `.kt-aside__brand-logo` sebelumnya dibatasi oleh inline style `max-width: calc(100% - 28px);` dan kontainer pembungkusnya belum memiliki `flex: 1; min-width: 0;`.
+  - Selain itu, padding `.kt-aside__brand` sebelumnya berukuran `0 14px;`, sehingga ruang horizontal efektif yang tersisa untuk teks nama hanya berkisar ~105-110px. Akibatnya, pemotongan teks (*text-overflow: ellipsis*) terjadi pada teks nama yang melebihi 13-14 karakter sekalipun font size sudah diperkecil ke 10px.
+  - Pada [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php), pilihan dropdown sebelumnya menyertakan nama perusahaan spesifik ("misal: TVL GLOBAL LOGISTIK", "misal: INHOST"), yang kurang netral bagi tenant lainnya.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Ekspansi Kontainer Header Brand Sidebar ([`index.php`](file:///c:/dp/g-ceisa/index.php))**:
+     - Padding `.kt-aside__brand` dioptimalkan dari `0 14px;` menjadi `0 8px 0 10px; gap: 4px;` (menghemat ~10px ruang horizontal).
+     - Menambahkan properti fleksibel `flex: 1; min-width: 0;` pada kontainer `.kt-aside__brand-logo`.
+     - Menghapus pembatas `max-width: calc(100% - 28px);` pada tag `<a>`, menggantikannya dengan `width: 100%; min-width: 0; gap: 7px;`.
+     - Dimensi `#sidebarBrandLogo` distandarisasi ke `30px x 30px` tajam dan presisi.
+     - Ruang horizontal efektif untuk teks nama melonjak dari ~110px menjadi **160px+**, sehingga nama perusahaan panjang seperti `RODA MAJU BAHAGIA` (17 karakter) dan `TVL GLOBAL LOGISTIK` (19 karakter) muat 100% utuh tanpa tanda elipsis (`...`).
+  2. **Pembersihan Opsi Dropdown Setting Aplikasi ([`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php))**:
+     - Menghapus seluruh teks contoh spesifik `"misal: ..."` pada dropdown `sidebar_brand_font_size` dan `sidebar_brand_sub_font_size`.
+     - Opsi ukuran font nama brand disederhanakan: `9px - Paling Kecil`, `10px - Ekstra Kecil`, `11px - Kecil (Kompak)`, `11.5px - Menengah (Default)`, `12px - Standar`, `13px - Cukup Besar`, `14px - Besar`, `15px - Ekstra Besar`.
+     - Opsi ukuran font subtitle disederhanakan: `7px - Ekstra Kecil`, `7.5px - Kecil (Default)`, `8px - Standar`, `8.5px - Menengah`, `9px - Besar`.
+  3. **Live Real-time Preview Sidebar via postMessage**:
+     - Menambahkan fungsi `previewSidebarFontSizeLive()` di [`setting_aplikasi.php`](file:///c:/dp/g-ceisa/setting_aplikasi.php) yang memancarkan event `LIVE_SIDEBAR_FONT_CHANGE` saat dropdown font diubah.
+     - Menambahkan listener `LIVE_SIDEBAR_FONT_CHANGE` pada window parent di [`index.php`](file:///c:/dp/g-ceisa/index.php) sehingga pemilihan ukuran font langsung mengubah tampilan sidebar seketika sebelum tombol simpan ditekan.
+  4. **Pembaruan Konfigurasi Default**:
+     - Nilai bawaan default di [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php) dan [`app_settings.json`](file:///c:/dp/g-ceisa/app_settings.json) disetel ke `'sidebar_brand_font_size' => '11.5px'` dan `'sidebar_brand_sub_font_size' => '7.5px'`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas dicerminkan ke `www/` dan di-push ke remote server Alibaba Cloud via `scp_push.bat`.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
+  - Verifikasi cURL: Status HTTP 200 OK, teks `RODA MAJU BAHAGIA` terbukti muat lengkap dan dropdown bersih dari teks contoh perusahaan.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

@@ -13,16 +13,17 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once __DIR__ . '/koneksi.php';
 
-// Validasi Keamanan: Khusus Administrator
-$isAdmin = !empty($_SESSION['is_admin']) || (isset($_REQUEST['is_admin']) && (string)$_REQUEST['is_admin'] === '1');
+// Validasi Keamanan: Khusus Super Administrator (DP)
+$isSuperAdmin = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
+$isAdmin = $isSuperAdmin;
 
 if (!$isAdmin) {
     if (!empty($_REQUEST['action'])) {
         header('Content-Type: application/json; charset=utf-8');
-        http_response_code(401);
+        http_response_code(403);
         echo json_encode([
-            'status' => 'AUTH_EXPIRED',
-            'message' => 'Sesi login Anda telah berakhir. Silakan login kembali untuk melanjutkan.'
+            'status' => 'ERROR',
+            'message' => 'Akses ditolak: Menu Kelola Perusahaan hanya dapat diakses oleh Super Administrator (DP).'
         ]);
         exit;
     }

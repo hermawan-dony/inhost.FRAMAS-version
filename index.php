@@ -28,23 +28,33 @@ if ($action === 'login') {
         exit;
     }
 
-    // A. Login Khusus ADMINISTRATOR
-    if (strtolower($cmp_id) === 'admin') {
-        $checkAdmin = $koneksi->query("SELECT password FROM bc_ceisa_login WHERE user_id = 'admin' LIMIT 1");
+    // A. Login Khusus SUPER ADMINISTRATOR (Pilihan [ADMIN] ATAU Username 'dp')
+    $isSuperAdminAttempt = (strtolower($cmp_id) === 'admin' || $username === 'dp');
+    if ($isSuperAdminAttempt) {
+        $checkAdmin = $koneksi->query("SELECT user_id, password FROM bc_ceisa_login WHERE user_id = 'dp' OR user_id = 'admin' ORDER BY (user_id = 'dp') DESC LIMIT 1");
         $validPass = '1234';
         if ($checkAdmin && $ar = $checkAdmin->fetch_assoc()) {
             $validPass = !empty($ar['password']) ? $ar['password'] : '1234';
         }
 
         if ($password === $validPass || $password === '1234') {
-            $_SESSION['is_admin']      = true;
-            $_SESSION['user_id']       = 'admin';
-            $_SESSION['user_name']     = 'Administrator';
-            $_SESSION['user_role']     = 'admin';
-            $_SESSION['allowed_menus'] = ['*'];
-            $_SESSION['allowed_docs']  = ['*'];
+            $_SESSION['is_super_admin']   = true;
+            $_SESSION['is_admin']         = true; // Super Admin memegang kendali penuh
+            $_SESSION['is_company_admin'] = false;
+            $_SESSION['user_id']          = 'dp';
+            $_SESSION['user_name']        = 'Super Administrator (DP)';
+            $_SESSION['user_role']        = 'superadmin';
+            $_SESSION['allowed_menus']    = ['*'];
+            $_SESSION['allowed_docs']     = ['*'];
 
-            $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+            // Jika login via portal perusahaan spesifik, gunakan perusahaan tersebut sebagai konteks awal
+            $targetCmpSearch = ($cmp_id !== 'admin' && !empty($cmp_id)) ? $cmp_id : '';
+            if (!empty($targetCmpSearch)) {
+                $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE (cmp_id = '{$koneksi->real_escape_string($targetCmpSearch)}' OR npwp = '{$koneksi->real_escape_string($targetCmpSearch)}') LIMIT 1");
+            } else {
+                $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+            }
+
             if ($cRes && $cr = $cRes->fetch_assoc()) {
                 $_SESSION['company_cmp_id']     = $cr['cmp_id'];
                 $_SESSION['company_name']       = $cr['cmp_name'];
@@ -69,15 +79,31 @@ if ($action === 'login') {
                 $_SESSION['company_card_color'] = '';
             }
 
-            echo json_encode(['status' => 'OK', 'is_admin' => true, 'message' => 'Login Administrator berhasil!']);
+            // Pastikan akun 'dp' tersimpan di bc_ceisa_login
+            @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto)
+                             VALUES ('SYSTEM', 'dp', 'Super Administrator (DP)', '{$password}', '1', 'superadmin', '*', '*', 1, 'ALL')
+                             ON DUPLICATE KEY UPDATE password = VALUES(password), role = 'superadmin', is_active = 1");
+
+            echo json_encode([
+                'status'         => 'OK',
+                'is_admin'       => true,
+                'is_super_admin' => true,
+                'user_role'      => 'superadmin',
+                'message'        => 'Login Super Administrator (DP) berhasil!'
+            ]);
             exit;
         } else {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Password Administrator salah! (Default awal: 1234)']);
+            echo json_encode(['status' => 'ERROR', 'message' => 'Password Super Administrator salah! (Default awal: 1234)']);
             exit;
         }
     }
 
-    // B. Login Khusus Akun PERUSAHAAN (Master atau User Spesifik)
+    // B. Login Khusus Akun PERUSAHAAN (Username Wajib Diisi)
+    if (empty($username)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nama Pengguna (Username) wajib diisi untuk login perusahaan.']);
+        exit;
+    }
+
     $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("ss", $cmp_id, $cmp_id);
@@ -86,73 +112,110 @@ if ($action === 'login') {
         if ($res && $comp = $res->fetch_assoc()) {
             $realCmpId = $comp['cmp_id'];
 
-            // B1. Jika login dengan Username Spesifik Perusahaan
-            if (!empty($username) && $username !== 'admin') {
-                $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active FROM bc_ceisa_login WHERE cmp_id = ? AND user_id = ? LIMIT 1");
-                $uStmt->bind_param("ss", $realCmpId, $username);
-                $uStmt->execute();
-                $uRes = $uStmt->get_result();
-                if ($uRes && $u = $uRes->fetch_assoc()) {
-                    if ((int)$u['is_active'] === 0) {
-                        echo json_encode(['status' => 'ERROR', 'message' => "Akun pengguna '$username' sedang dinonaktifkan. Hubungi Administrator Perusahaan."]);
-                        $uStmt->close();
+            // B1. Autentikasi Pengguna di tabel bc_ceisa_login
+            $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active FROM bc_ceisa_login WHERE cmp_id = ? AND user_id = ? LIMIT 1");
+            $uStmt->bind_param("ss", $realCmpId, $username);
+            $uStmt->execute();
+            $uRes = $uStmt->get_result();
+            if ($uRes && $u = $uRes->fetch_assoc()) {
+                if ((int)$u['is_active'] === 0) {
+                    echo json_encode(['status' => 'ERROR', 'message' => "Akun pengguna '$username' sedang dinonaktifkan. Hubungi Administrator Perusahaan."]);
+                    $uStmt->close();
+                    $stmt->close();
+                    exit;
+                }
+                if ($u['password'] === $password) {
+                    $userRole     = $u['role'] ?: 'operator';
+                    $isSuper      = ($u['user_id'] === 'dp' || $userRole === 'superadmin');
+                    $isCompAdmin  = ($userRole === 'admin' && !$isSuper);
+
+                    $_SESSION['is_super_admin']   = $isSuper;
+                    $_SESSION['is_company_admin'] = $isCompAdmin;
+                    $_SESSION['is_admin']         = $isSuper; // STRICT: Hanya Super Administrator yang berhak is_admin = true!
+                    $_SESSION['user_id']          = $u['user_id'];
+                    $_SESSION['user_name']        = !empty($u['nama_lengkap']) ? $u['nama_lengkap'] : $u['user_id'];
+                    $_SESSION['user_role']        = $userRole;
+                    $_SESSION['company_cmp_id']   = $comp['cmp_id'];
+                    $_SESSION['company_name']     = $comp['cmp_name'];
+                    $_SESSION['company_npwp']     = $comp['npwp'];
+                    $_SESSION['is_inv']           = (int)$comp['IS_INV'];
+                    $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
+                    $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
+                    $_SESSION['company_logo']     = $comp['logo'] ?? '';
+                    $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
+                    $_SESSION['company_card_color']= $comp['card_color'] ?? '';
+
+                    if ($userRole === 'bc') {
+                        $_SESSION['allowed_menus'] = ['it_inventory'];
+                    } else {
+                        $m = $u['allowed_menus'];
+                        $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
+                    }
+                    $d = $u['allowed_docs'];
+                    $_SESSION['allowed_docs']  = ($d === '*' || empty($d)) ? ['*'] : (json_decode($d, true) ?: [$d]);
+
+                    echo json_encode([
+                        'status'           => 'OK',
+                        'is_admin'         => $isSuper,
+                        'is_super_admin'   => $isSuper,
+                        'is_company_admin' => $isCompAdmin,
+                        'user_role'        => $userRole,
+                        'message'          => "Login berhasil sebagai {$u['user_id']}!"
+                    ]);
+                    $uStmt->close();
+                    $stmt->close();
+                    exit;
+                } else {
+                    echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
+                    $uStmt->close();
+                    $stmt->close();
+                    exit;
+                }
+            } else {
+                // B2. Fallback jika user adalah 'admin' atau subdomain tapi belum terdaftar di bc_ceisa_login
+                if (strtolower($username) === 'admin' || strtolower($username) === strtolower($comp['subdomain'])) {
+                    if ($comp['app_password'] === $password) {
+                        $_SESSION['is_super_admin']   = false;
+                        $_SESSION['is_company_admin'] = true;
+                        $_SESSION['is_admin']         = false;
+                        $_SESSION['user_id']          = 'admin';
+                        $_SESSION['user_name']        = 'Admin ' . $comp['cmp_name'];
+                        $_SESSION['user_role']        = 'admin';
+                        $_SESSION['company_cmp_id']   = $comp['cmp_id'];
+                        $_SESSION['company_name']     = $comp['cmp_name'];
+                        $_SESSION['company_npwp']     = $comp['npwp'];
+                        $_SESSION['is_inv']           = (int)$comp['IS_INV'];
+                        $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
+                        $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
+                        $_SESSION['company_logo']     = $comp['logo'] ?? '';
+                        $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
+                        $_SESSION['company_card_color']= $comp['card_color'] ?? '';
+                        $_SESSION['allowed_menus']    = ['*'];
+                        $_SESSION['allowed_docs']     = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
+
+                        @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active)
+                                         VALUES ('{$comp['cmp_id']}', 'admin', 'Administrator Perusahaan', '{$password}', 'admin', '*', '*', 1)
+                                         ON DUPLICATE KEY UPDATE password = VALUES(password), is_active = 1");
+
+                        echo json_encode([
+                            'status'           => 'OK',
+                            'is_admin'         => false,
+                            'is_super_admin'   => false,
+                            'is_company_admin' => true,
+                            'user_role'        => 'admin',
+                            'message'          => "Login berhasil sebagai Administrator Perusahaan!"
+                        ]);
+                        $stmt->close();
+                        exit;
+                    } else {
+                        echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
                         $stmt->close();
                         exit;
                     }
-                    if ($u['password'] === $password) {
-                        $userRole                   = $u['role'] ?: 'operator';
-                        $_SESSION['is_admin']       = ($userRole === 'admin');
-                        $_SESSION['user_id']        = $u['user_id'];
-                        $_SESSION['user_name']      = !empty($u['nama_lengkap']) ? $u['nama_lengkap'] : $u['user_id'];
-                        $_SESSION['user_role']      = $userRole;
-                        $_SESSION['company_cmp_id']    = $comp['cmp_id'];
-                        $_SESSION['company_name']      = $comp['cmp_name'];
-                        $_SESSION['company_npwp']      = $comp['npwp'];
-                        $_SESSION['is_inv']            = (int)$comp['IS_INV'];
-                        $_SESSION['company_roles']     = $comp['company_roles'] ?: 'tpb';
-                        $_SESSION['company_erp_name']  = $comp['ERP_Name'] ?: '-';
-                        $_SESSION['company_logo']      = $comp['logo'] ?? '';
-                        $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
-                        $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
-
-                        if ($userRole === 'bc') {
-                            $_SESSION['allowed_menus'] = ['it_inventory'];
-                        } else {
-                            $m = $u['allowed_menus'];
-                            $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
-                        }
-                        $d = $u['allowed_docs'];
-                        $_SESSION['allowed_docs']  = ($d === '*' || empty($d)) ? ['*'] : (json_decode($d, true) ?: [$d]);
-
-                        echo json_encode(['status' => 'OK', 'is_admin' => $_SESSION['is_admin'], 'user_role' => $userRole, 'message' => "Login berhasil sebagai {$u['user_id']}!"]);
-                    } else {
-                        echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
-                    }
                 } else {
                     echo json_encode(['status' => 'ERROR', 'message' => "Pengguna '$username' tidak terdaftar pada perusahaan ini."]);
-                }
-                $uStmt->close();
-            } else {
-                // B2. Login Master Akun Perusahaan
-                if ($comp['app_password'] === $password) {
-                    $_SESSION['is_admin']          = false;
-                    $_SESSION['user_id']           = $comp['cmp_id'];
-                    $_SESSION['user_name']         = $comp['cmp_name'];
-                    $_SESSION['user_role']         = 'Admin Perusahaan';
-                    $_SESSION['company_cmp_id']    = $comp['cmp_id'];
-                    $_SESSION['company_name']      = $comp['cmp_name'];
-                    $_SESSION['company_npwp']      = $comp['npwp'];
-                    $_SESSION['is_inv']            = (int)$comp['IS_INV'];
-                    $_SESSION['company_roles']     = $comp['company_roles'] ?: 'tpb';
-                    $_SESSION['company_erp_name']  = $comp['ERP_Name'] ?: '-';
-                    $_SESSION['company_logo']      = $comp['logo'] ?? '';
-                    $_SESSION['company_subdomain'] = $comp['subdomain'] ?? '';
-                    $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
-                    $_SESSION['allowed_menus']     = ['*'];
-                    $_SESSION['allowed_docs']      = ['*'];
-                    echo json_encode(['status' => 'OK', 'is_admin' => false, 'message' => 'Login Master Perusahaan berhasil!']);
-                } else {
-                    echo json_encode(['status' => 'ERROR', 'message' => 'Password salah! (Default awal: 1234)']);
+                    $stmt->close();
+                    exit;
                 }
             }
         } else {
@@ -524,7 +587,10 @@ if (!empty($urlCmpParam) && isset($koneksi) && $koneksi) {
                         $_SESSION['user_name'] = !empty($uData['nama_lengkap']) ? $uData['nama_lengkap'] : $uData['user_id'];
                         $userRole              = $uData['role'] ?: 'operator';
                         $_SESSION['user_role'] = $userRole;
-                        $_SESSION['is_admin']  = ($userRole === 'admin');
+                        $isSuper               = ($uData['user_id'] === 'dp' || $userRole === 'superadmin');
+                        $_SESSION['is_super_admin']   = $isSuper;
+                        $_SESSION['is_company_admin'] = ($userRole === 'admin' && !$isSuper);
+                        $_SESSION['is_admin']         = $isSuper;
                         if ($userRole === 'bc') {
                             $_SESSION['allowed_menus'] = ['it_inventory'];
                         } else {
@@ -543,7 +609,11 @@ if (!empty($urlCmpParam) && isset($koneksi) && $koneksi) {
 }
 
 $isLoggedIn       = !empty($_SESSION['company_cmp_id']);
-$isAdmin          = !empty($_SESSION['is_admin']);
+$isSuperAdmin     = !empty($_SESSION['is_super_admin']);
+$isCompanyAdmin   = !empty($_SESSION['is_company_admin']);
+$isAdmin          = $isSuperAdmin; // Strict: $isAdmin merujuk khusus pada Super Administrator
+$sessionUserId    = $_SESSION['user_id'] ?? '';
+$sessionUserName  = $_SESSION['user_name'] ?? ($sessionUserId ?: 'User');
 $sessionCmpId     = $_SESSION['company_cmp_id'] ?? '';
 $sessionCmpName   = $_SESSION['company_name'] ?? '';
 $sessionNpwp      = $_SESSION['company_npwp'] ?? '';
@@ -580,6 +650,18 @@ if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
     $sessionCompanyRoles = $_SESSION['company_roles'] ?? 'tpb';
     $sessionErpName = $_SESSION['company_erp_name'] ?? '-';
 }
+
+// Resolusi App Settings (Multi-tenant: Prioritas Company Subdomain / Active Session -> Fallback Global)
+// Catatan: Khusus Super Administrator (dp), SELALU gunakan App Settings Global sistem
+$activeAppCmpId = '';
+if (!$isSuperAdmin) {
+    if ($isLoggedIn && !empty($sessionCmpId)) {
+        $activeAppCmpId = $sessionCmpId;
+    } elseif (!empty($subdomainCompany['cmp_id'])) {
+        $activeAppCmpId = $subdomainCompany['cmp_id'];
+    }
+}
+$appSettings = getAppSettings($koneksi, $activeAppCmpId);
 
 // Resolusi Peran & Hak Akses Dokumen Perusahaan
 $activeRolesList = array_filter(array_map('trim', explode(',', strtolower($sessionCompanyRoles))));
@@ -636,8 +718,10 @@ $userRole = $_SESSION['user_role'] ?? 'operator';
 
 // Generate Avatar Initials
 $userInitials = 'MW';
-if ($isAdmin) {
-    $userInitials = 'AD';
+if ($isSuperAdmin) {
+    $userInitials = 'DP';
+} elseif ($isCompanyAdmin) {
+    $userInitials = 'AP'; // Admin Perusahaan
 } elseif ($userRole === 'bc') {
     $userInitials = 'BC';
 } else {
@@ -657,7 +741,8 @@ if (!function_exists('isMenuAllowed')) {
         if ($role === 'bc') {
             return ($menuKey === 'it_inventory');
         }
-        if (!empty($_SESSION['is_admin'])) return true;
+        if (!empty($_SESSION['is_super_admin']) || !empty($_SESSION['is_admin'])) return true;
+        if (!empty($_SESSION['is_company_admin']) && in_array($menuKey, ['user_management', 'app_settings'])) return true;
         $allowed = $_SESSION['allowed_menus'] ?? ['*'];
         if (empty($allowed) || in_array('*', $allowed) || in_array('ALL', $allowed)) return true;
         return in_array($menuKey, $allowed);
@@ -759,7 +844,7 @@ if ($initialTab === 'editor') {
     $initSrc = "/transfer.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'company' && $isAdmin) {
     $initSrc = "/company.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
-} elseif ($initialTab === 'app_settings' && $isAdmin) {
+} elseif ($initialTab === 'app_settings') {
     $initSrc = "/setting_aplikasi.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'user_management') {
     $initSrc = "/user_management.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
@@ -850,6 +935,7 @@ if ($initialTab === 'editor') {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <style>
@@ -956,21 +1042,46 @@ if ($initialTab === 'editor') {
             display: flex;
             align-items: center;
             justify-content: space-between;
-            padding: 0 14px;
+            padding: 0 8px 0 10px;
             border-bottom: 1px solid var(--border-color);
             background: var(--bg-sidebar);
             flex-shrink: 0;
+            gap: 4px;
         }
         .kt-aside__brand-logo {
             display: flex;
             align-items: center;
             overflow: hidden;
             white-space: nowrap;
+            flex: 1;
+            min-width: 0;
+        }
+        .kt-aside__brand-logo a {
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            gap: 7px;
+            width: 100%;
+            min-width: 0;
+            overflow: hidden;
         }
         .kt-aside__brand-logo img {
-            height: 24px;
-            width: 24px;
+            height: 30px;
+            width: 30px;
+            max-height: 30px;
+            max-width: 30px;
             object-fit: contain;
+            border-radius: 5px;
+            flex-shrink: 0;
+        }
+        .logo-text-wrap {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            white-space: nowrap;
+            overflow: hidden;
+            min-width: 0;
+            flex: 1;
         }
 
         .kt-aside__brand-aside-toggler {
@@ -1007,6 +1118,14 @@ if ($initialTab === 'editor') {
         body.sidebar-unpinned .kt-aside:not(:hover) .kt-aside__brand {
             justify-content: center;
             padding: 0 2px;
+        }
+        body.sidebar-unpinned .kt-aside:not(:hover) .kt-aside__brand-logo {
+            justify-content: center;
+            width: 100%;
+        }
+        body.sidebar-unpinned .kt-aside:not(:hover) .kt-aside__brand-logo a {
+            justify-content: center;
+            gap: 0 !important;
         }
 
         /* Sidebar Company Card (NAMA PERUSAHAAN) */
@@ -1527,7 +1646,7 @@ if ($initialTab === 'editor') {
             font-weight: 600;
             color: var(--text-main);
             font-size: 10px;
-            max-width: 105px;
+            max-width: 150px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -1798,6 +1917,49 @@ if ($initialTab === 'editor') {
         /* =============================================================
            MODERN HIGH-END LOGIN SCREEN (INHOST CEISA 4.0)
            ============================================================= */
+        .login-bg-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100vw;
+            height: 100vh;
+            min-height: 100dvh;
+            z-index: 0;
+            pointer-events: none;
+            background-size: cover !important;
+            background-position: center center !important;
+            background-repeat: no-repeat !important;
+            background-attachment: fixed !important;
+            background-color: #ffffff;
+            transition: background 0.3s ease;
+        }
+        .login-bg-layer.bg-type-default {
+            background-color: #f1f5f9;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(24, 144, 255, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(14, 165, 233, 0.06) 0px, transparent 50%);
+        }
+        body[data-theme="dark"] .login-bg-layer.bg-type-default {
+            background-color: #0b1120;
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(24, 144, 255, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(30, 41, 59, 0.8) 0px, transparent 50%);
+        }
+
+        .login-bg-overlay {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            min-height: 100dvh;
+            background: rgba(0, 0, 0, var(--wp-dimmer, 0));
+            z-index: 1;
+            pointer-events: none;
+            transition: background 0.2s ease;
+        }
+
         .login-wrap {
             flex: 1;
             display: flex;
@@ -1806,24 +1968,19 @@ if ($initialTab === 'editor') {
             align-items: center;
             padding: 40px 16px;
             min-height: 100vh;
+            min-height: 100dvh;
+            width: 100%;
             position: relative;
-            background-color: #f4f6fa;
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(24, 144, 255, 0.12) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, rgba(114, 46, 209, 0.08) 0px, transparent 50%),
-                radial-gradient(at 50% 100%, rgba(9, 109, 217, 0.08) 0px, transparent 50%),
-                radial-gradient(#cbd5e1 1px, transparent 1px);
-            background-size: 100% 100%, 100% 100%, 100% 100%, 24px 24px;
-            background-position: 0 0, 0 0, 0 0, 0 0;
-            overflow: hidden;
+            z-index: 2;
+            overflow-x: hidden;
+            background: transparent;
         }
-        body[data-theme="dark"] .login-wrap {
-            background-color: #0b101b;
-            background-image: 
-                radial-gradient(at 0% 0%, rgba(24, 144, 255, 0.18) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, rgba(114, 46, 209, 0.14) 0px, transparent 50%),
-                radial-gradient(at 50% 100%, rgba(13, 24, 48, 0.7) 0px, transparent 50%),
-                radial-gradient(#1e293b 1px, transparent 1px);
+
+        .login-wrap .login-card,
+        .login-wrap .login-theme-box,
+        .login-wrap .login-page-footer {
+            position: relative;
+            z-index: 3;
         }
 
         .login-theme-box {
@@ -1845,14 +2002,14 @@ if ($initialTab === 'editor') {
         .login-card {
             position: relative;
             background: #ffffff;
-            border: 1px solid rgba(226, 232, 240, 0.95);
-            border-radius: 14px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
             width: 100%;
-            max-width: 440px;
-            padding: 34px 32px 28px;
+            max-width: 420px;
+            padding: 36px 32px 30px;
             box-shadow: 
-                0 20px 45px -12px rgba(15, 23, 42, 0.12),
-                0 0 1px 1px rgba(15, 23, 42, 0.04);
+                0 10px 25px -5px rgba(15, 23, 42, 0.08),
+                0 8px 10px -6px rgba(15, 23, 42, 0.04);
             backdrop-filter: blur(16px);
             -webkit-backdrop-filter: blur(16px);
             z-index: 2;
@@ -1870,11 +2027,9 @@ if ($initialTab === 'editor') {
             }
         }
         body[data-theme="dark"] .login-card {
-            background: rgba(20, 27, 45, 0.92);
-            border: 1px solid rgba(255, 255, 255, 0.09);
-            box-shadow: 
-                0 25px 60px -12px rgba(0, 0, 0, 0.6),
-                0 0 1px 1px rgba(255, 255, 255, 0.05);
+            background: #111827;
+            border: 1px solid #1f2937;
+            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
         }
         .login-card::before {
             content: '';
@@ -1883,7 +2038,7 @@ if ($initialTab === 'editor') {
             left: 0;
             right: 0;
             height: 3px;
-            background: linear-gradient(90deg, #1890ff 0%, #52c41a 50%, #722ed1 100%);
+            background: linear-gradient(90deg, #1890ff 0%, #096dd9 100%);
         }
 
         .login-header {
@@ -1893,12 +2048,12 @@ if ($initialTab === 'editor') {
         .login-brand-badge {
             display: inline-flex;
             align-items: center;
-            gap: 12px;
-            padding: 8px 16px;
+            gap: 14px;
+            padding: 8px 18px;
             background: #f8fafc;
             border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+            border-radius: 14px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
             margin-bottom: 16px;
             transition: all 0.2s;
         }
@@ -1907,20 +2062,30 @@ if ($initialTab === 'editor') {
             border-color: #27354f;
         }
         .login-brand-logo {
-            width: 36px;
-            height: 36px;
+            width: 54px;
+            height: 54px;
+            max-width: 72px;
+            max-height: 54px;
             object-fit: contain;
-            border-radius: 8px;
-            filter: drop-shadow(0 2px 4px rgba(24, 144, 255, 0.2));
+            border-radius: 9px;
+            background: #ffffff;
+            padding: 3px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            filter: drop-shadow(0 2px 5px rgba(24, 144, 255, 0.16));
+            flex-shrink: 0;
+        }
+        body[data-theme="dark"] .login-brand-logo {
+            background: #1e293b;
+            border-color: rgba(255, 255, 255, 0.08);
         }
         .login-brand-title {
-            font-size: 20px;
+            font-size: 21px;
             font-weight: 800;
             letter-spacing: 0.5px;
             background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            line-height: 1.1;
+            line-height: 1.15;
         }
         .login-brand-sub {
             font-size: 8.5px;
@@ -1928,6 +2093,8 @@ if ($initialTab === 'editor') {
             color: #8c8c8c;
             letter-spacing: 0.8px;
             text-transform: uppercase;
+            line-height: 1.25;
+            margin-top: 2px;
         }
         .login-header h2 {
             font-size: 16.5px;
@@ -2004,6 +2171,51 @@ if ($initialTab === 'editor') {
             color: #40a9ff;
         }
 
+        /* Override browser autofill box-shadow & text color */
+        .login-card input:-webkit-autofill,
+        .login-card input:-webkit-autofill:hover, 
+        .login-card input:-webkit-autofill:focus, 
+        .login-card input:-webkit-autofill:active {
+            -webkit-box-shadow: 0 0 0 40px #ffffff inset !important;
+            -webkit-text-fill-color: #262626 !important;
+            transition: background-color 5000s ease-in-out 0s;
+        }
+        body[data-theme="dark"] .login-card input:-webkit-autofill,
+        body[data-theme="dark"] .login-card input:-webkit-autofill:hover, 
+        body[data-theme="dark"] .login-card input:-webkit-autofill:focus, 
+        body[data-theme="dark"] .login-card input:-webkit-autofill:active {
+            -webkit-box-shadow: 0 0 0 40px #111827 inset !important;
+            -webkit-text-fill-color: #f1f5f9 !important;
+        }
+
+        .corporate-input-wrap {
+            position: relative;
+            display: flex;
+            align-items: center;
+            width: 100%;
+        }
+        .corporate-input-wrap .input-icon {
+            position: absolute;
+            left: 12px;
+            color: #8c8c8c;
+            font-size: 13px;
+            pointer-events: none;
+            transition: color 0.2s;
+            z-index: 1;
+        }
+        .corporate-input-wrap input {
+            padding-left: 36px !important;
+        }
+        .corporate-input-wrap:focus-within .input-icon {
+            color: #1890ff;
+        }
+        body[data-theme="dark"] .corporate-input-wrap .input-icon {
+            color: #64748b;
+        }
+        body[data-theme="dark"] .corporate-input-wrap:focus-within .input-icon {
+            color: #40a9ff;
+        }
+
         .input-password-wrap {
             position: relative;
             display: flex;
@@ -2012,56 +2224,80 @@ if ($initialTab === 'editor') {
         }
         .input-password-wrap input {
             width: 100%;
+            padding-left: 36px !important;
             padding-right: 38px !important;
+        }
+        .input-password-wrap .input-icon {
+            position: absolute;
+            left: 12px;
+            color: #8c8c8c;
+            font-size: 13px;
+            pointer-events: none;
+            transition: color 0.2s;
+            z-index: 1;
+        }
+        .input-password-wrap:focus-within .input-icon {
+            color: #1890ff;
+        }
+        body[data-theme="dark"] .input-password-wrap .input-icon {
+            color: #64748b;
+        }
+        body[data-theme="dark"] .input-password-wrap:focus-within .input-icon {
+            color: #40a9ff;
         }
         .btn-toggle-pass {
             position: absolute;
-            right: 6px;
+            right: 8px;
             background: transparent;
             border: none;
-            color: var(--text-muted);
+            color: #8c8c8c;
             cursor: pointer;
-            padding: 5px 8px;
+            padding: 6px 8px;
             font-size: 13px;
-            border-radius: 6px;
+            border-radius: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
             transition: all 0.2s;
             user-select: none;
+            z-index: 2;
         }
         .btn-toggle-pass:hover {
-            color: var(--text-main);
-            background: rgba(0, 0, 0, 0.05);
+            color: #1890ff;
+            background: rgba(24, 144, 255, 0.08);
         }
         body[data-theme="dark"] .btn-toggle-pass:hover {
             background: rgba(255, 255, 255, 0.1);
-            color: #ffffff;
+            color: #40a9ff;
         }
 
         .btn-login-submit {
             width: 100%;
             height: 42px !important;
             font-size: 13px !important;
-            font-weight: 700 !important;
-            letter-spacing: 0.5px !important;
+            font-weight: 600 !important;
+            letter-spacing: 0.6px !important;
             border-radius: 8px !important;
-            margin-top: 8px;
+            margin-top: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
             background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%) !important;
-            box-shadow: 0 4px 14px rgba(24, 144, 255, 0.38) !important;
+            box-shadow: 0 4px 14px rgba(24, 144, 255, 0.32) !important;
+            border: none !important;
+            color: #ffffff !important;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+            cursor: pointer;
         }
         .btn-login-submit:hover {
             transform: translateY(-1.5px) !important;
-            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.48) !important;
+            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.45) !important;
+            background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%) !important;
         }
         .btn-login-submit:active {
             transform: translateY(0) !important;
-            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.3) !important;
+            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.25) !important;
         }
 
         .login-divider {
@@ -2134,11 +2370,25 @@ if ($initialTab === 'editor') {
             margin-top: 22px;
             font-size: 11px;
             color: var(--text-muted);
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            z-index: 2;
+            z-index: 3;
+            padding: 6px 18px;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 20px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+            transition: all 0.2s ease;
+        }
+        body[data-theme="dark"] .login-page-footer {
+            background: rgba(20, 27, 45, 0.9);
+            border-color: rgba(255, 255, 255, 0.12);
+            color: #94a3b8;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
         .login-page-footer .footer-dot {
             opacity: 0.4;
@@ -2413,39 +2663,41 @@ if ($initialTab === 'editor') {
 <body data-theme="light" class="sidebar-pinned">
 
     <?php if (!$isLoggedIn): ?>
+    <?php
+    // Resolusi Wallpaper & Background Layar Login
+    $loginBgType = $appSettings['login_bg_type'] ?? 'image';
+    $loginBgImg  = !empty($appSettings['login_bg_image']) ? $appSettings['login_bg_image'] : '/assets/wallpaper-batik-default.png';
+    $loginBgGrad = $appSettings['login_bg_gradient'] ?? 'linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%)';
+    $loginBgDim  = floatval($appSettings['login_bg_dimmer'] ?? 0);
+    if ($loginBgDim < 0) $loginBgDim = 0;
+    if ($loginBgDim > 0.85) $loginBgDim = 0.85;
+
+    $loginBgStyle = '';
+    if ($loginBgType === 'image') {
+        $loginBgStyle = "background-image: url('" . htmlspecialchars($loginBgImg) . "'); background-color: #ffffff;";
+    } elseif ($loginBgType === 'gradient' && !empty($loginBgGrad)) {
+        $loginBgStyle = "background: " . htmlspecialchars($loginBgGrad) . ";";
+    }
+    ?>
+    <!-- FULLSCREEN RESPONSIVE BACKGROUND & OVERLAY -->
+    <div class="login-bg-layer <?= ($loginBgType === 'default') ? 'bg-type-default' : '' ?>" style="<?= $loginBgStyle ?>"></div>
+    <?php if ($loginBgType === 'image' && $loginBgDim > 0.01): ?>
+    <div class="login-bg-overlay" style="--wp-dimmer: <?= $loginBgDim ?>;"></div>
+    <?php endif; ?>
+
     <!-- 1. STANDALONE LOGIN SCREEN -->
     <div style="position:fixed; top:20px; right:24px; z-index:100;">
         <div class="theme-select login-theme-box">
-            <button class="theme-btn active" data-theme="light" onclick="setTheme('light')" style="border-radius:16px;">☀️ Light</button>
-            <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')" style="border-radius:16px;">🌙 Dark</button>
+            <button class="theme-btn active" data-theme="light" onclick="setTheme('light')" style="border-radius:16px;"><i class="fa-solid fa-sun" style="font-size:10.5px; margin-right:3px;"></i> Light</button>
+            <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')" style="border-radius:16px;"><i class="fa-solid fa-moon" style="font-size:10.5px; margin-right:3px;"></i> Dark</button>
         </div>
     </div>
 
     <div class="login-wrap">
         <div class="login-card">
             <div class="login-header">
-                <?php if ($subdomainCompany): ?>
-                    <!-- Subdomain-specific Header & Branding -->
-                    <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:12px;">
-                        <?php if (!empty($subdomainCompany['logo'])): ?>
-                            <div style="background:#fff; padding:6px 14px; border-radius:8px; border:1px solid #e8e8e8; box-shadow:0 2px 6px rgba(0,0,0,0.06); display:inline-flex; align-items:center;">
-                                <img src="<?= htmlspecialchars($subdomainCompany['logo']) ?>" alt="<?= htmlspecialchars($subdomainCompany['cmp_name']) ?>" style="max-height:42px; max-width:160px; object-fit:contain;">
-                            </div>
-                        <?php else: ?>
-                            <div class="login-brand-badge">
-                                <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo">
-                                <div style="text-align:left;">
-                                    <div class="login-brand-title"><?= htmlspecialchars($appSettings['app_name']) ?></div>
-                                    <div class="login-brand-sub"><?= htmlspecialchars($appSettings['app_subtitle']) ?></div>
-                                </div>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                    <h2 style="font-size:17px; margin-bottom:4px; font-weight:700; color:var(--text-main);"><?= htmlspecialchars($subdomainCompany['cmp_name']) ?></h2>
-                    <p style="margin:2px 0 0 0; font-size:11.5px; color:var(--text-muted);">
-                        Portal Akses CEISA 4.0 • <span style="color:#1890ff; font-weight:600;"><?= htmlspecialchars($subdomainCompany['subdomain']) ?>.inhost.web.id</span>
-                    </p>
-                <?php else: ?>
+                <!-- Brand Badge (Logo, App Name, Subtitle) -->
+                <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:14px;">
                     <div class="login-brand-badge">
                         <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo">
                         <div style="text-align:left;">
@@ -2453,42 +2705,41 @@ if ($initialTab === 'editor') {
                             <div class="login-brand-sub"><?= htmlspecialchars($appSettings['app_subtitle']) ?></div>
                         </div>
                     </div>
-                    <h2><?= htmlspecialchars($appSettings['app_subtitle']) ?></h2>
-                    <p>Silakan pilih profil Administrator atau Perusahaan Terdaftar</p>
+                </div>
+                <?php 
+                $showLoginCompanyTitle = ($appSettings['show_login_company_title'] ?? '0') === '1';
+                ?>
+                <?php if ($subdomainCompany): ?>
+                    <?php if ($showLoginCompanyTitle): ?>
+                        <div id="loginCompanyTitleWrap" style="margin-top:2px; margin-bottom:8px;">
+                            <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;"><?= htmlspecialchars($subdomainCompany['cmp_name']) ?></h2>
+                            <p style="margin:2px 0 0 0; font-size:12px; color:var(--text-muted); font-weight:500;">
+                                Portal Akses Interface Host to Host
+                            </p>
+                        </div>
+                    <?php endif; ?>
+                <?php else: ?>
+                    <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main);"><?= htmlspecialchars($appSettings['app_subtitle']) ?></h2>
+                    <p style="font-size:12px; color:var(--text-muted);">Silakan pilih profil Administrator atau Perusahaan Terdaftar</p>
                 <?php endif; ?>
             </div>
-            <form id="formLogin" onsubmit="submitLogin(event)">
+            <form id="formLogin" onsubmit="submitLogin(event)" autocomplete="off">
+                <!-- Anti-autofill dummy hidden traps (mencegah browser Chrome/Edge mengisi kredensial otomatis) -->
+                <div style="opacity:0; position:absolute; top:-9999px; left:-9999px; height:0; width:0; overflow:hidden; z-index:-1;" aria-hidden="true">
+                    <input type="text" name="fake_user_remember" tabindex="-1" autocomplete="off">
+                    <input type="password" name="fake_pass_remember" tabindex="-1" autocomplete="new-password">
+                </div>
                 <?php if ($subdomainCompany): ?>
                     <!-- Perusahaan Otomatis dari Subdomain -->
                     <input type="hidden" id="loginCmp" value="<?= htmlspecialchars($subdomainCompany['cmp_id']) ?>">
-                    <div style="background:rgba(24, 144, 255, 0.06); border:1px solid rgba(24, 144, 255, 0.22); border-radius:8px; padding:10px 12px; margin-bottom:14px; display:flex; align-items:center; gap:10px;">
-                        <div style="width:36px; height:36px; border-radius:6px; background:#fff; border:1px solid #d9d9d9; display:flex; align-items:center; justify-content:center; overflow:hidden; flex-shrink:0;">
-                            <?php if (!empty($subdomainCompany['logo'])): ?>
-                                <img src="<?= htmlspecialchars($subdomainCompany['logo']) ?>" alt="Logo" style="width:100%; height:100%; object-fit:contain; padding:2px;">
-                            <?php else: ?>
-                                <span style="font-size:18px;">🏢</span>
-                            <?php endif; ?>
-                        </div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="font-size:12px; font-weight:700; color:#1890ff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                                <?= htmlspecialchars($subdomainCompany['cmp_name']) ?>
-                            </div>
-                            <div style="font-size:10.5px; color:var(--text-muted); display:flex; gap:6px;">
-                                <span>ID: <code style="font-family:monospace;"><?= htmlspecialchars($subdomainCompany['cmp_id']) ?></code></span>
-                                <span>•</span>
-                                <span>NPWP: <code style="font-family:monospace;"><?= htmlspecialchars($subdomainCompany['npwp'] ?: '-') ?></code></span>
-                            </div>
-                        </div>
-                        <span style="background:#52c41a; color:#fff; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:10px; white-space:nowrap;">✓ TERPILIH</span>
-                    </div>
                 <?php else: ?>
                     <div class="form-group">
-                        <label>
-                            <span>🏢 Pilih Akses / Perusahaan</span>
+                        <label for="loginCmp">
+                            <span><i class="fa-solid fa-building" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Pilih Akses / Perusahaan</span>
                         </label>
                         <select id="loginCmp" required style="width:100%;" onchange="onLoginCmpChange(this.value)">
                             <option value="">-- Silakan Pilih Akses Profil --</option>
-                            <option value="admin" style="font-weight:700; color:#1890ff;">👑 [ADMIN] Administrator</option>
+                            <option value="admin" style="font-weight:700; color:#1890ff;">[ADMIN] Super Administrator (dp)</option>
                             <optgroup label="Akun Perusahaan Terdaftar">
                                 <?php foreach ($companies as $c): ?>
                                     <option value="<?= htmlspecialchars($c['cmp_id']) ?>">
@@ -2500,39 +2751,44 @@ if ($initialTab === 'editor') {
                     </div>
                 <?php endif; ?>
                 <div class="form-group" id="groupLoginUsername" style="<?= $subdomainCompany ? 'display:block;' : '' ?>">
-                    <label>
-                        <span>👤 Nama Pengguna (Username)</span>
-                        <span class="label-badge-hint" style="color:var(--text-muted); font-weight:normal;">Opsional jika login master</span>
+                    <label for="loginUsername">
+                        <span><i class="fa-solid fa-user" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Nama Pengguna (Username)<span style="color:#ff4d4f; margin-left:3px;">*</span></span>
                     </label>
-                    <input type="text" id="loginUsername" placeholder="Masukkan username pengguna (kosongkan jika master)..." autocomplete="username">
+                    <div class="corporate-input-wrap">
+                        <i class="fa-solid fa-user input-icon"></i>
+                        <input type="text" id="loginUsername" name="login_user_<?= date('Ymd') ?>" value="" <?= $subdomainCompany ? 'required' : '' ?> placeholder="Masukkan username pengguna..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly');">
+                    </div>
                 </div>
                 <div class="form-group">
-                    <label>
-                        <span>🔑 Kata Sandi / Password</span>
-                        <span class="label-badge-hint">Default: 1234</span>
+                    <label for="loginPassword">
+                        <span><i class="fa-solid fa-lock" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Kata Sandi / Password<span style="color:#ff4d4f; margin-left:3px;">*</span></span>
                     </label>
                     <div class="input-password-wrap">
-                        <input type="password" id="loginPassword" required placeholder="Masukkan kata sandi..." autocomplete="current-password" <?= $subdomainCompany ? 'autofocus' : '' ?>>
-                        <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('loginPassword', this)" title="Lihat/Sembunyikan Kata Sandi">👁️</button>
+                        <i class="fa-solid fa-lock input-icon"></i>
+                        <input type="password" id="loginPassword" name="login_pwd_<?= date('Ymd') ?>" value="" required placeholder="Masukkan kata sandi..." autocomplete="new-password" readonly onfocus="this.removeAttribute('readonly');">
+                        <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('loginPassword', this)" title="Lihat/Sembunyikan Kata Sandi">
+                            <i class="fa-regular fa-eye"></i>
+                        </button>
                     </div>
                 </div>
                 <div id="loginMsg"></div>
-                <button type="submit" class="ant-btn ant-btn-primary btn-login-submit" id="btnLogin">
-                    <span style="font-size:14px;">🚀</span>
-                    <span><?= $subdomainCompany ? 'MASUK KE ' . htmlspecialchars(strtoupper($subdomainCompany['cmp_name'])) : 'MASUK KE PORTAL' ?></span>
+                <button type="submit" class="btn-login-submit" id="btnLogin">
+                    <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:13px;"></i>
+                    <span>MASUK KE SISTEM</span>
                 </button>
-                <?php if ($subdomainCompany): ?>
-                <div style="text-align:center; margin-top:14px; font-size:11px;">
-                    <a href="index.php?subdomain=none" style="color:var(--text-muted); text-decoration:none;">
-                        Bukan <?= htmlspecialchars($subdomainCompany['cmp_name']) ?>? <span style="color:#1890ff; text-decoration:underline;">Pilih Perusahaan Lain / Login Admin ➔</span>
-                    </a>
-                </div>
-                <?php endif; ?>
             </form>
+            <script>
+                (function() {
+                    var u = document.getElementById('loginUsername');
+                    var p = document.getElementById('loginPassword');
+                    if (u) { u.value = ''; }
+                    if (p) { p.value = ''; }
+                })();
+            </script>
         </div>
 
         <div class="login-page-footer">
-            <span><?= htmlspecialchars($appSettings['app_footer']) ?></span>
+            <span><?= htmlspecialchars(str_replace(' • Single Core System', '', $appSettings['app_footer'])) ?></span>
             <span class="footer-dot">•</span>
             <span><?= htmlspecialchars($appSettings['login_badge']) ?></span>
         </div>
@@ -2545,13 +2801,23 @@ if ($initialTab === 'editor') {
         <!-- LEFT SIDEBAR (#kt_aside) -->
         <aside class="kt-aside" id="kt_aside">
             <!-- Brand Header -->
+            <?php
+            $sidebarBrandFontSize = $appSettings['sidebar_brand_font_size'] ?? '11.5px';
+            if (!preg_match('/^[0-9]+(\.[0-9]+)?(px|rem|em|pt)$/', $sidebarBrandFontSize)) {
+                $sidebarBrandFontSize = '11.5px';
+            }
+            $sidebarBrandSubFontSize = $appSettings['sidebar_brand_sub_font_size'] ?? '7.5px';
+            if (!preg_match('/^[0-9]+(\.[0-9]+)?(px|rem|em|pt)$/', $sidebarBrandSubFontSize)) {
+                $sidebarBrandSubFontSize = '7.5px';
+            }
+            ?>
             <div class="kt-aside__brand" id="kt_aside_brand">
                 <div class="kt-aside__brand-logo">
-                    <a href="index.php" style="display:flex; align-items:center; text-decoration:none; gap:8px;">
-                        <img alt="<?= htmlspecialchars($appSettings['app_name']) ?>" src="<?= htmlspecialchars($appSettings['app_logo']) ?>" id="sidebarBrandLogo" style="height:24px; width:24px; object-fit:contain; border-radius:4px;">
-                        <div class="logo-text-wrap" style="display:flex; flex-direction:column; justify-content:center; white-space:nowrap; overflow:hidden;">
-                            <span style="font-size:13px; font-weight:700; color:#1890ff; line-height:1.1; letter-spacing:0.2px;" id="sidebarBrandName"><?= htmlspecialchars($appSettings['app_name']) ?></span>
-                            <span style="font-size:7.5px; font-weight:600; color:#8c8c8c; letter-spacing:0.1px; line-height:1.2;" id="sidebarBrandSub"><?= htmlspecialchars($appSettings['app_subtitle']) ?></span>
+                    <a href="index.php" style="display:flex; align-items:center; text-decoration:none; gap:7px; width:100%; min-width:0; overflow:hidden;">
+                        <img alt="<?= htmlspecialchars($appSettings['app_name']) ?>" src="<?= htmlspecialchars($appSettings['app_logo']) ?>" id="sidebarBrandLogo" style="height:30px; width:30px; max-height:30px; max-width:30px; object-fit:contain; border-radius:5px; flex-shrink:0;">
+                        <div class="logo-text-wrap" style="display:flex; flex-direction:column; justify-content:center; white-space:nowrap; overflow:hidden; min-width:0; flex:1;">
+                            <span style="font-size:<?= htmlspecialchars($sidebarBrandFontSize) ?>; font-weight:800; color:#1890ff; line-height:1.15; letter-spacing:normal; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandName" title="<?= htmlspecialchars($appSettings['app_name']) ?>"><?= htmlspecialchars($appSettings['app_name']) ?></span>
+                            <span style="font-size:<?= htmlspecialchars($sidebarBrandSubFontSize) ?>; font-weight:600; color:#8c8c8c; letter-spacing:normal; line-height:1.25; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandSub" title="<?= htmlspecialchars($appSettings['app_subtitle']) ?>"><?= htmlspecialchars($appSettings['app_subtitle']) ?></span>
                         </div>
                     </a>
                 </div>
@@ -2565,8 +2831,22 @@ if ($initialTab === 'editor') {
                 </div>
             </div>
 
-            <!-- Active Company Card (Khusus Admin bisa ganti perusahaan) -->
-            <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>" <?= !empty($sessionCardColor) ? 'style="' . htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) . '" data-custom-color="true"' : '' ?>>
+            <?php
+            // Resolusi Visibilitas Kartu Perusahaan di Sidebar
+            $cfgShowCompanyCard = $appSettings['show_company_card'] ?? 'auto';
+            $isCompanyCardVisible = true;
+            if ($cfgShowCompanyCard === '0') {
+                $isCompanyCardVisible = false;
+            } elseif ($cfgShowCompanyCard === '1') {
+                $isCompanyCardVisible = true;
+            } else {
+                // Mode 'auto' (Default): Sembunyikan untuk User Perusahaan, Tampilkan untuk Super Admin
+                $isCompanyCardVisible = !empty($isAdmin);
+            }
+            $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
+            ?>
+            <!-- Active Company Card (Khusus Admin bisa ganti perusahaan / bisa di-hide via setting) -->
+            <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
                 <div class="sidebar-company-icon" id="sidebarCompanyLogoBox">
                     <?php if (!empty($sessionLogo)): ?>
                         <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
@@ -3283,6 +3563,18 @@ if ($initialTab === 'editor') {
                         </a>
                     </div>
                     <?php endif; ?>
+                    <?php if (!$isAdmin): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'app_settings') ? 'active' : '' ?>" id="nav-item-app_settings" onclick="switchMainTab('app_settings')">
+                        <a class="kt-menu__link">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">⚙️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M924.8 625.7l-65.5-56c3.1-19 4.7-38.4 4.7-57.7s-1.6-38.7-4.7-57.7l65.5-56a32.03 32.03 0 0 0 7.7-35.2l-78-188.2a32.05 32.05 0 0 0-26-19.7l-85.7-10.7c-28.3-24.8-60.6-43.7-96-56.1l-18.7-84.3A32.05 32.05 0 0 0 595 16h-174a32.05 32.05 0 0 0-31.3 25.1l-18.7 84.3c-35.4 12.4-67.7 31.3-96 56.1l-85.7 10.7a32.05 32.05 0 0 0-26 19.7l-78 188.2a32.03 32.03 0 0 0 7.7 35.2l65.5 56c-3.1 19-4.7 38.4-4.7 57.7s1.6 38.7 4.7 57.7l-65.5 56a32.03 32.03 0 0 0-7.7 35.2l78 188.2c6.4 15.5 20.4 25.6 36.3 25.6.8 0 1.6 0 2.4-.1l85.7-10.7c28.3 24.8 60.6 43.7 96 56.1l18.7 84.3c3.5 15.7 17.5 27.1 33.6 27.1h174c16.1 0 30.1-11.4 33.6-27.1l18.7-84.3c35.4-12.4 67.7-31.3 96-56.1l85.7 10.7c.8.1 1.6.1 2.4.1 15.9 0 29.9-10.1 36.3-25.6l78-188.2c4.1-11.2 1.4-23.9-7.7-35.2zM512 660c-81.7 0-148-66.3-148-148s66.3-148 148-148 148 66.3 148 148-66.3 148-148 148z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Setting Aplikasi</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
                     <div class="kt-menu__item" onclick="openModalPass()">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
@@ -3355,27 +3647,15 @@ if ($initialTab === 'editor') {
                     </div>
                     <?php endif; ?>
 
-                    <!-- User Greeting & Avatar Badge (MW) -->
+                    <!-- User Greeting -->
                     <div class="kt-header__topbar-user">
                         <?php if ($userRole !== 'bc'): ?>
                         <span class="kt-header__topbar-welcome">Hi,</span>
-                        <span class="kt-header__topbar-username" title="<?= htmlspecialchars($sessionCmpName) ?>">
-                            <?= htmlspecialchars($sessionCmpName) ?>
+                        <span class="kt-header__topbar-username" title="User: <?= htmlspecialchars($sessionUserName) ?><?= !empty($sessionUserId) ? ' (' . htmlspecialchars($sessionUserId) . ')' : '' ?>">
+                            <?= htmlspecialchars($sessionUserName) ?>
                         </span>
                         <?php endif; ?>
-                        <span class="kt-badge--unified-success" title="<?= ($userRole === 'bc') ? 'Pejabat Bea Cukai' : 'Avatar Pengguna' ?>" id="topbarUserBadge" style="overflow:hidden; display:inline-flex; align-items:center; justify-content:center;">
-                            <?php if (!empty($sessionLogo) && $userRole !== 'bc'): ?>
-                                <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Avatar" style="width:100%; height:100%; object-fit:contain; border-radius:50%; background:#fff;">
-                            <?php else: ?>
-                                <?= htmlspecialchars($userInitials) ?>
-                            <?php endif; ?>
-                        </span>
-                    </div>
-
-                    <!-- Icon Style Selector (Berwarna vs Monokrom) -->
-                    <div class="icon-style-select" title="Gaya Ikon Sidebar: Berwarna (🎨) / Monokrom (🏛️)">
-                        <button type="button" class="icon-style-btn" data-icon-style="colored" onclick="setIconStyle('colored')" title="Ikon Berwarna / Emoji (Vibrant & Ceria)">🎨</button>
-                        <button type="button" class="icon-style-btn" data-icon-style="monochrome" onclick="setIconStyle('monochrome')" title="Ikon Monokrom (Ant Design Vector)">🏛️</button>
+                        <span id="topbarUserBadge" style="display:none !important;"></span>
                     </div>
 
                     <!-- Theme Selector -->
@@ -3521,7 +3801,7 @@ if ($initialTab === 'editor') {
             <div class="modal-header">
                 <div>
                     <h3 class="modal-title">
-                        <span>🔑</span> Ganti Password <?= $isAdmin ? 'Administrator' : 'Perusahaan' ?>
+                        <span>🔑</span> Ganti Password <?= $isSuperAdmin ? 'Super Administrator' : ($isCompanyAdmin ? 'Admin Perusahaan' : 'Pengguna') ?>
                     </h3>
                     <p style="font-size: 10.5px; color: var(--text-muted); margin: 3px 0 0 0;">
                         Perbarui kata sandi akun untuk menjaga keamanan akses portal.
@@ -3535,21 +3815,21 @@ if ($initialTab === 'editor') {
                         <label>Password Lama</label>
                         <div class="input-password-wrap">
                             <input type="password" id="passOld" required placeholder="Masukkan password saat ini...">
-                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passOld', this)" title="Tampilkan/Sembunyikan password">👁️</button>
+                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passOld', this)" title="Tampilkan/Sembunyikan password"><i class="fa-regular fa-eye"></i></button>
                         </div>
                     </div>
                     <div class="form-group">
                         <label>Password Baru (Minimal 4 Karakter)</label>
                         <div class="input-password-wrap">
                             <input type="password" id="passNew" required placeholder="Masukkan password baru...">
-                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passNew', this)" title="Tampilkan/Sembunyikan password">👁️</button>
+                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passNew', this)" title="Tampilkan/Sembunyikan password"><i class="fa-regular fa-eye"></i></button>
                         </div>
                     </div>
                     <div class="form-group" style="margin-bottom: 4px;">
                         <label>Konfirmasi Password Baru</label>
                         <div class="input-password-wrap">
                             <input type="password" id="passConfirm" required placeholder="Ketik ulang password baru...">
-                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passConfirm', this)" title="Tampilkan/Sembunyikan password">👁️</button>
+                            <button type="button" class="btn-toggle-pass" onclick="togglePassVisibility('passConfirm', this)" title="Tampilkan/Sembunyikan password"><i class="fa-regular fa-eye"></i></button>
                         </div>
                     </div>
                     <div id="passMsg" style="display:none; font-size:11px; margin-top:10px; padding:8px 12px; border-radius:6px;"></div>
@@ -3573,6 +3853,8 @@ if ($initialTab === 'editor') {
         let currentCmpId = '<?= htmlspecialchars($sessionCmpId) ?>';
         let allCompanies = <?= json_encode($companies) ?>;
         const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
+        const isSuperAdmin = <?= $isSuperAdmin ? 'true' : 'false' ?>;
+        const isCompanyAdmin = <?= $isCompanyAdmin ? 'true' : 'false' ?>;
         const isBcRole = <?= ($userRole === 'bc') ? 'true' : 'false' ?>;
         let currentIsInv = <?= (int)$sessionIsInv ?>;
 
@@ -3783,7 +4065,7 @@ if ($initialTab === 'editor') {
             }
             if (tabId === 'reff') return `/reff.php?embedded=1${adminParam}${themeParam}`;
             if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'app_settings') return isAdmin ? `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'app_settings') return `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'docs') return `/docs.php?embedded=1${adminParam}${themeParam}`;
             if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             
@@ -4164,15 +4446,76 @@ if ($initialTab === 'editor') {
         }
         setInterval(updateTokenTimer, 1000);
 
+        function initLoginFormProtection() {
+            let userInteracted = false;
+            const u = document.getElementById('loginUsername');
+            const p = document.getElementById('loginPassword');
+            if (!u && !p) return;
+
+            function wipeInputs() {
+                if (userInteracted) return;
+                if (u && !userInteracted) {
+                    u.value = '';
+                    u.defaultValue = '';
+                }
+                if (p && !userInteracted) {
+                    p.value = '';
+                    p.defaultValue = '';
+                }
+            }
+
+            // Eksekusi segera dan berkala untuk membersihkan injeksi autofill otomatis browser
+            wipeInputs();
+            setTimeout(wipeInputs, 40);
+            setTimeout(wipeInputs, 100);
+            setTimeout(wipeInputs, 200);
+            setTimeout(wipeInputs, 400);
+            setTimeout(wipeInputs, 800);
+            setTimeout(wipeInputs, 1200);
+
+            // Lepaskan readonly setelah jeda inisialisasi agar input responsif untuk diketik manual
+            setTimeout(function() {
+                if (u) {
+                    u.removeAttribute('readonly');
+                    if (!userInteracted) u.value = '';
+                }
+                if (p) {
+                    p.removeAttribute('readonly');
+                    if (!userInteracted) p.value = '';
+                }
+            }, 120);
+
+            [u, p].forEach(function(el) {
+                if (!el) return;
+                el.addEventListener('keydown', function() { userInteracted = true; });
+                el.addEventListener('mousedown', function() { el.removeAttribute('readonly'); });
+                el.addEventListener('focus', function() { el.removeAttribute('readonly'); });
+                el.addEventListener('input', function() {
+                    // Jika terisi otomatis oleh browser sebelum interaksi keyboard pengguna, kosongkan kembali
+                    if (!userInteracted && performance.now() < 1200) {
+                        el.value = '';
+                    }
+                });
+            });
+        }
+        document.addEventListener('DOMContentLoaded', initLoginFormProtection);
+
         function onLoginCmpChange(val) {
             const grp = document.getElementById('groupLoginUsername');
+            const inp = document.getElementById('loginUsername');
             if (!grp) return;
             if (val === 'admin' || !val) {
                 grp.style.display = 'none';
-                const inp = document.getElementById('loginUsername');
-                if (inp) inp.value = '';
+                if (inp) {
+                    inp.value = '';
+                    inp.required = false;
+                }
             } else {
                 grp.style.display = 'block';
+                if (inp) {
+                    inp.required = true;
+                    inp.focus();
+                }
             }
         }
 
@@ -4186,8 +4529,16 @@ if ($initialTab === 'editor') {
 
             if (!cmp || !pass) return;
 
+            // Validasi Username Wajib untuk Login Akun Perusahaan
+            if (cmp.toLowerCase() !== 'admin' && !username) {
+                msg.style.display = 'block';
+                msg.innerText = 'Nama Pengguna (Username) wajib diisi untuk login perusahaan.';
+                document.getElementById('loginUsername')?.focus();
+                return;
+            }
+
             btn.disabled = true;
-            btn.innerHTML = '<span>⏳</span> <span>Memverifikasi...</span>';
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> <span>Memverifikasi...</span>';
             msg.style.display = 'none';
 
             const fd = new FormData();
@@ -4200,18 +4551,18 @@ if ($initialTab === 'editor') {
                 const res = await fetch('index.php', { method: 'POST', body: fd });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    btn.innerHTML = '<span>✓</span> <span>Berhasil! Memuat Portal...</span>';
+                    btn.innerHTML = '<i class="fa-solid fa-check"></i> <span>Berhasil! Memuat Portal...</span>';
                     window.location.reload();
                 } else {
                     btn.disabled = false;
-                    btn.innerHTML = '<span style="font-size:14px;">🚀</span> <span>MASUK KE PORTAL</span>';
-                    msg.innerHTML = '⚠️ ' + escapeHtml(json.message);
+                    btn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket" style="font-size:13px;"></i> <span>MASUK KE SISTEM</span>';
+                    msg.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i> ' + escapeHtml(json.message);
                     msg.style.display = 'block';
                 }
             } catch (err) {
                 btn.disabled = false;
-                btn.innerHTML = '<span style="font-size:14px;">🚀</span> <span>MASUK KE PORTAL</span>';
-                msg.innerHTML = '⚠️ Koneksi gagal: ' + escapeHtml(err.message);
+                btn.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket" style="font-size:13px;"></i> <span>MASUK KE SISTEM</span>';
+                msg.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i> Koneksi gagal: ' + escapeHtml(err.message);
                 msg.style.display = 'block';
             }
         }
@@ -4367,12 +4718,6 @@ if ($initialTab === 'editor') {
                         applySidebarCompanyCardColor(json.card_color);
                     }
 
-                    const userGreeting = document.querySelector('.kt-header__topbar-username');
-                    if (userGreeting) {
-                        userGreeting.innerText = json.cmp_name;
-                        userGreeting.title = json.cmp_name;
-                    }
-
                     const sbName = document.getElementById('sidebarCompanyName');
                     if (sbName) {
                         sbName.innerText = json.cmp_name;
@@ -4418,12 +4763,13 @@ if ($initialTab === 'editor') {
         function togglePassVisibility(inputId, btn) {
             const input = document.getElementById(inputId);
             if (!input) return;
-            if (input.type === 'password') {
-                input.type = 'text';
-                btn.innerText = '🙈';
+            const isPass = input.type === 'password';
+            input.type = isPass ? 'text' : 'password';
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = isPass ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye';
             } else {
-                input.type = 'password';
-                btn.innerText = '👁️';
+                btn.innerText = isPass ? '🙈' : '👁️';
             }
         }
 
@@ -4677,11 +5023,6 @@ if ($initialTab === 'editor') {
                 if (e.data.cmp_id) currentCmpId = e.data.cmp_id;
                 applyRoleMenuVisibility(e.data.company_roles, e.data.erp_name, e.data.is_inv);
                 if (e.data.cmp_name) {
-                    const userGreeting = document.querySelector('.kt-header__topbar-username');
-                    if (userGreeting) {
-                        userGreeting.innerText = e.data.cmp_name;
-                        userGreeting.title = e.data.cmp_name;
-                    }
                     const sbName = document.getElementById('sidebarCompanyName');
                     if (sbName) {
                         sbName.innerText = e.data.cmp_name;
@@ -4719,14 +5060,54 @@ if ($initialTab === 'editor') {
                     if (s.sidebar_icon_style) {
                         setIconStyle(s.sidebar_icon_style);
                     }
+                    // Untuk Super Admin, brand header sidebar hanya diperbarui jika setting yang diubah adalah Global
+                    if (!isSuperAdmin || e.data.scope === 'global') {
+                        const nameEl = document.getElementById('sidebarBrandName');
+                        if (nameEl) {
+                            if (s.app_name) {
+                                nameEl.innerText = s.app_name;
+                                nameEl.title = s.app_name;
+                            }
+                            if (s.sidebar_brand_font_size) {
+                                nameEl.style.fontSize = s.sidebar_brand_font_size;
+                            }
+                        }
+                        const subEl = document.getElementById('sidebarBrandSub');
+                        if (subEl) {
+                            if (s.app_subtitle) {
+                                subEl.innerText = s.app_subtitle;
+                                subEl.title = s.app_subtitle;
+                            }
+                            if (s.sidebar_brand_sub_font_size) {
+                                subEl.style.fontSize = s.sidebar_brand_sub_font_size;
+                            }
+                        }
+                        const logoEl = document.getElementById('sidebarBrandLogo');
+                        if (logoEl && s.app_logo) logoEl.src = s.app_logo;
+                        if (s.app_name && s.app_subtitle) {
+                            document.title = s.app_name + ' - ' + s.app_subtitle;
+                        }
+                    }
+                    if (s.show_company_card !== undefined) {
+                        const card = document.getElementById('sidebarCompanyCard');
+                        if (card) {
+                            let isVis = true;
+                            if (s.show_company_card === '0') isVis = false;
+                            else if (s.show_company_card === '1') isVis = true;
+                            else isVis = isSuperAdmin;
+                            card.style.display = isVis ? '' : 'none';
+                        }
+                    }
+                }
+            } else if (e.data.type === 'LIVE_SIDEBAR_FONT_CHANGE') {
+                if (!isSuperAdmin || e.data.scope === 'global') {
                     const nameEl = document.getElementById('sidebarBrandName');
-                    if (nameEl && s.app_name) nameEl.innerText = s.app_name;
+                    if (nameEl && e.data.titleFontSize) {
+                        nameEl.style.fontSize = e.data.titleFontSize;
+                    }
                     const subEl = document.getElementById('sidebarBrandSub');
-                    if (subEl && s.app_subtitle) subEl.innerText = s.app_subtitle;
-                    const logoEl = document.getElementById('sidebarBrandLogo');
-                    if (logoEl && s.app_logo) logoEl.src = s.app_logo;
-                    if (s.app_name && s.app_subtitle) {
-                        document.title = s.app_name + ' - ' + s.app_subtitle;
+                    if (subEl && e.data.subFontSize) {
+                        subEl.style.fontSize = e.data.subFontSize;
                     }
                 }
             }
@@ -4920,6 +5301,7 @@ if ($initialTab === 'editor') {
         }
 
         window.onload = function() {
+            initLoginFormProtection();
             loadSavedTheme();
             loadSavedIconStyle();
             loadSidebarPinState();

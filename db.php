@@ -7,11 +7,12 @@
 session_start();
 require_once __DIR__ . '/koneksi.php';
 
-// Validasi Akses: Khusus Administrator
-$isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] == 1);
+// Validasi Akses: Khusus Super Administrator (DP)
+$isSuperAdmin = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
+$isAdmin = $isSuperAdmin;
 if (!$isAdmin) {
     http_response_code(403);
-    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>403 Forbidden</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0f2f5;color:#262626;} .box{text-align:center;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);max-width:400px;} h2{color:#ff4d4f;margin-bottom:12px;} p{color:#8c8c8c;font-size:12px;line-height:1.6;}</style></head><body><div class="box"><h2>403 - Akses Ditolak</h2><p>Halaman Database Browser hanya dapat diakses oleh Administrator Sistem.</p></div></body></html>';
+    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>403 Forbidden</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0f2f5;color:#262626;} .box{text-align:center;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);max-width:400px;} h2{color:#ff4d4f;margin-bottom:12px;} p{color:#8c8c8c;font-size:12px;line-height:1.6;}</style></head><body><div class="box"><h2>403 - Akses Ditolak</h2><p>Halaman Database Browser hanya dapat diakses oleh Super Administrator (DP).</p></div></body></html>';
     exit;
 }
 

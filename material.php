@@ -1645,6 +1645,23 @@ if ($action === 'approval_reject') {
         .ant-btn-success:hover { background: #49ad16; border-color: #49ad16; color:#fff; }
         .ant-btn-sm { height: 18px; padding: 0 5px; font-size: 9px; border-radius: 2px; }
         
+        .ant-dropdown-menu {
+            transition: all 0.15s ease-in-out;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12), 0 3px 6px -4px rgba(0, 0, 0, 0.12);
+        }
+        .ant-dropdown-item {
+            cursor: pointer;
+            transition: background 0.15s, color 0.15s;
+        }
+        .ant-dropdown-item:hover {
+            background: rgba(24, 144, 255, 0.08) !important;
+            color: var(--primary) !important;
+        }
+        [data-theme="dark"] .ant-dropdown-item:hover {
+            background: rgba(255, 255, 255, 0.08) !important;
+            color: var(--primary) !important;
+        }
+        
         .filter-panel {
             background: var(--bg-base);
             border: 1px solid var(--border-color);
@@ -1799,30 +1816,97 @@ if ($action === 'approval_reject') {
                 <button type="button" class="ant-btn ant-btn-primary" onclick="openAddModal()">
                     <i class="fa-solid fa-plus"></i> Tambah Item Baru
                 </button>
-                <button type="button" class="ant-btn ant-btn-success" onclick="openImportModal()">
-                    <i class="fa-solid fa-file-excel"></i> Import Excel
-                </button>
-                <button type="button" class="ant-btn" style="background:#722ed1; color:#fff; border-color:#722ed1;" onclick="openDbImportModal('1ab2')">
-                    <i class="fa-solid fa-warehouse"></i> Import IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?>
-                </button>
-                <button type="button" class="ant-btn" style="background:#13c2c2; color:#fff; border-color:#13c2c2;" onclick="openDbImportModal('staging')">
-                    <i class="fa-solid fa-file-invoice"></i> Import Staging Pabean<?= $isAdmin ? ' (bc_ceisa_barang)' : '' ?>
-                </button>
-                <button type="button" class="ant-btn" style="background:#fa8c16; color:#fff; border-color:#fa8c16;" onclick="openKoreksiKlas()">
-                    <i class="fa-solid fa-triangle-exclamation"></i> Koreksi Klasifikasi IT Inv<?= $isAdmin ? ' (KLAS)' : '' ?> <?= $cntInvalidKlas > 0 ? "($cntInvalidKlas)" : '' ?>
-                </button>
-                <button type="button" class="ant-btn" style="background:#531dab; color:#fff; border-color:#531dab;" onclick="openPindahKlasModal()" title="Pindahkan klasifikasi barang yang salah ke kategori lain dan sinkronkan ke IT Inventory">
-                    <i class="fa-solid fa-arrows-split-up-and-left"></i> Pindah Klasifikasi <span id="badgeSelectedMat" style="display:none; background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;">0</span>
-                </button>
-                <button type="button" class="ant-btn" style="background:#096dd9; color:#fff; border-color:#096dd9;" onclick="syncAllKlasTo1ab2()" title="Sinkronkan seluruh klasifikasi master barang ke transaksi IT Inventory">
-                    <i class="fa-solid fa-rotate"></i> Sync KLAS ke IT Inv<?= $isAdmin ? ' (bc_1ab2)' : '' ?>
-                </button>
-                <button type="button" class="ant-btn" style="background:#c41d7f; color:#fff; border-color:#c41d7f;" onclick="openMergeKodeModal()" title="Gabungkan / replace beberapa kode barang ganda menjadi 1 kode utama dan perbarui seluruh transaksi IT Inventory, Traceability, & Pengeluaran">
-                    <i class="fa-solid fa-code-merge"></i> Fix/Merge Kode Dobel <span id="badgeMergeMat" style="display:none; background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;">0</span>
-                </button>
-                <button type="button" class="ant-btn" style="background:#08979c; color:#fff; border-color:#08979c;" onclick="openFixSatuanModal()" title="Cek laporan perbedaan satuan antara Master Barang dan transaksi IT Inventory / Pengeluaran, lalu selaraskan secara otomatis">
-                    <i class="fa-solid fa-scale-balanced"></i> Fix Satuan Beda <span id="badgeDiffSatuan" style="<?= $cntDiffSatuan > 0 ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;"><?= $cntDiffSatuan ?></span>
-                </button>
+                <!-- DROPDOWN IMPORT DATA BARANG -->
+                <div class="ant-dropdown" style="position:relative; display:inline-block;">
+                    <button type="button" class="ant-btn ant-btn-success" onclick="toggleImportDropdown(event)" id="btnImportDropdown" style="font-weight:600;">
+                        <i class="fa-solid fa-file-import"></i> Import Data Barang <i class="fa-solid fa-caret-down" style="font-size:9px; margin-left:2px;"></i>
+                    </button>
+                    <div class="ant-dropdown-menu" id="importDropdownMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:245px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:4px; z-index:1050; padding:4px 0;">
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openImportModal(); closeImportDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-file-excel" style="color:#52c41a; font-size:12px; width:16px; text-align:center;"></i>
+                            <div>
+                                <div style="font-weight:600;">Import Excel</div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Upload master barang dari template file .xlsx</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openDbImportModal('1ab2'); closeImportDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-warehouse" style="color:#722ed1; font-size:12px; width:16px; text-align:center;"></i>
+                            <div>
+                                <div style="font-weight:600;">Import IT Inventory<?= $isAdmin ? ' <span style="font-size:9px; font-weight:normal; opacity:0.8;">(bc_1ab2)</span>' : '' ?></div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Tarik barang unik dari mutasi transaksi IT Inventory</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openDbImportModal('staging'); closeImportDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-file-invoice" style="color:#13c2c2; font-size:12px; width:16px; text-align:center;"></i>
+                            <div>
+                                <div style="font-weight:600;">Import Staging Pabean<?= $isAdmin ? ' <span style="font-size:9px; font-weight:normal; opacity:0.8;">(bc_ceisa_barang)</span>' : '' ?></div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Tarik barang unik dari rincian dokumen BC CEISA</div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
+                <!-- DROPDOWN UTILITAS -->
+                <div class="ant-dropdown" style="position:relative; display:inline-block;">
+                    <button type="button" class="ant-btn" onclick="toggleUtilitasDropdown(event)" id="btnUtilitasDropdown" style="background:#531dab; color:#fff; border-color:#531dab; font-weight:600;">
+                        <i class="fa-solid fa-screwdriver-wrench"></i> Utilitas <i class="fa-solid fa-caret-down" style="font-size:9px; margin-left:2px;"></i>
+                        <span id="badgeUtilitasAlert" style="<?= ($cntInvalidKlas > 0 || $cntDiffSatuan > 0) ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 5px; font-size:9px; margin-left:3px;">!</span>
+                    </button>
+                    <div class="ant-dropdown-menu" id="utilitasDropdownMenu" style="display:none; position:absolute; top:calc(100% + 4px); left:0; min-width:260px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:4px; z-index:1050; padding:4px 0;">
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openKoreksiKlas(); closeUtilitasDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-triangle-exclamation" style="color:#fa8c16; font-size:12px; width:16px; text-align:center;"></i>
+                            <div style="flex:1;">
+                                <div style="font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+                                    <span>Koreksi Klasifikasi IT Inv<?= $isAdmin ? ' (KLAS)' : '' ?></span>
+                                    <span id="badgeInvalidKlas" style="<?= $cntInvalidKlas > 0 ? '' : 'display:none;' ?> background:#fa8c16; color:#fff; font-weight:700; border-radius:10px; padding:0 5px; font-size:9px;"><?= $cntInvalidKlas ?></span>
+                                </div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Cek &amp; perbaiki klasifikasi barang yang tidak valid</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openPindahKlasModal(); closeUtilitasDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-arrows-split-up-and-left" style="color:#722ed1; font-size:12px; width:16px; text-align:center;"></i>
+                            <div style="flex:1;">
+                                <div style="font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+                                    <span>Pindah Klasifikasi</span>
+                                    <span id="badgeSelectedMat" style="display:none; background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:9px;">0</span>
+                                </div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Pindahkan klasifikasi item terpilih &amp; sinkronkan</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="syncAllKlasTo1ab2(); closeUtilitasDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-rotate" style="color:#096dd9; font-size:12px; width:16px; text-align:center;"></i>
+                            <div style="flex:1;">
+                                <div style="font-weight:600;">Sync KLAS ke IT Inv<?= $isAdmin ? ' (bc_1ab2)' : '' ?></div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Sinkronkan seluruh master KLAS ke mutasi IT Inventory</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openMergeKodeModal(); closeUtilitasDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-code-merge" style="color:#c41d7f; font-size:12px; width:16px; text-align:center;"></i>
+                            <div style="flex:1;">
+                                <div style="font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+                                    <span>Fix/Merge Kode Dobel</span>
+                                    <span id="badgeMergeMat" style="display:none; background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:9px;">0</span>
+                                </div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Gabungkan beberapa kode ganda jadi 1 kode utama</div>
+                            </div>
+                        </a>
+                        <div style="height:1px; background:var(--border-color); margin:3px 0;"></div>
+                        <a href="javascript:void(0)" class="ant-dropdown-item" onclick="openFixSatuanModal(); closeUtilitasDropdown();" style="display:flex; align-items:center; gap:8px; padding:6px 12px; font-size:10px; color:var(--text-main); text-decoration:none;">
+                            <i class="fa-solid fa-scale-balanced" style="color:#08979c; font-size:12px; width:16px; text-align:center;"></i>
+                            <div style="flex:1;">
+                                <div style="font-weight:600; display:flex; justify-content:space-between; align-items:center;">
+                                    <span>Fix Satuan Beda</span>
+                                    <span id="badgeDiffSatuan" style="<?= $cntDiffSatuan > 0 ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:9px;"><?= $cntDiffSatuan ?></span>
+                                </div>
+                                <div style="font-size:8.5px; color:var(--text-muted);">Cek &amp; selaraskan perbedaan satuan transaksi</div>
+                            </div>
+                        </a>
+                    </div>
+                </div>
                 <button type="button" class="ant-btn" style="background:#d46b08; color:#fff; border-color:#d46b08;" onclick="openApprovalModal()" title="Approval Pengajuan Kode Barang Baru & Mapping Supplier dari Dokumen Incoming">
                     <i class="fa-solid fa-stamp"></i> Approval Kode Barang <span id="badgePendingApproval" style="<?= $cntPendingApproval > 0 ? '' : 'display:none;' ?> background:#ff4d4f; color:#fff; font-weight:700; border-radius:10px; padding:0 6px; font-size:10px; margin-left:4px;"><?= $cntPendingApproval ?></span>
                 </button>
@@ -2715,6 +2799,46 @@ if ($action === 'approval_reject') {
                 .replace(/\n/g, '\\n')
                 .replace(/\r/g, '\\r');
         }
+
+        function toggleImportDropdown(e) {
+            if (e) e.stopPropagation();
+            const m = document.getElementById('importDropdownMenu');
+            if (!m) return;
+            const isVisible = m.style.display === 'block';
+            closeAllDropdowns();
+            if (!isVisible) m.style.display = 'block';
+        }
+
+        function closeImportDropdown() {
+            const m = document.getElementById('importDropdownMenu');
+            if (m) m.style.display = 'none';
+        }
+
+        function toggleUtilitasDropdown(e) {
+            if (e) e.stopPropagation();
+            const m = document.getElementById('utilitasDropdownMenu');
+            if (!m) return;
+            const isVisible = m.style.display === 'block';
+            closeAllDropdowns();
+            if (!isVisible) m.style.display = 'block';
+        }
+
+        function closeUtilitasDropdown() {
+            const m = document.getElementById('utilitasDropdownMenu');
+            if (m) m.style.display = 'none';
+        }
+
+        function closeAllDropdowns() {
+            closeImportDropdown();
+            closeUtilitasDropdown();
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#btnImportDropdown') && !e.target.closest('#importDropdownMenu') &&
+                !e.target.closest('#btnUtilitasDropdown') && !e.target.closest('#utilitasDropdownMenu')) {
+                closeAllDropdowns();
+            }
+        });
 
         function openKoreksiKlas() {
             if (window.parent && typeof window.parent.switchMainTab === 'function') {

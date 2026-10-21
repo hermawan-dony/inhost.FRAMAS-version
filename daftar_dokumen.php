@@ -5,12 +5,17 @@
  * Format: C:\dp\g-ceisa\share\Portal Ceisa 4.0.html
  */
 require_once __DIR__ . '/koneksi.php';
+require_once __DIR__ . '/app_settings_helper.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
 $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? '');
+
+$appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $sessionCmpId) : [];
+$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 15));
+$syncBatchSize   = max(10, min(1000, (int)($appSettings['ceisa_sync_batch_size'] ?? 50)));
 
 // Ambil daftar profil perusahaan aktif untuk filter
 $targetCompanyRoles = 'tpb';
@@ -1893,12 +1898,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const cmpSelect = document.getElementById('filterCmp');
             const cmp = cmpSelect ? cmpSelect.value : (initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>');
 
-            // Cooldown check (180 detik / 3 menit) jika otomatis, agar aman dari pemblokiran IP
+            // Cooldown check (minimal 15 menit / 900.000 ms jika otomatis)
+            const syncIntervalMs = <?= $syncIntervalMin ?> * 60 * 1000;
             const cacheKey = 'ceisa_last_silent_sync_' + (cmp || 'default');
             if (!isManual) {
                 const lastSync = parseInt(localStorage.getItem(cacheKey) || '0');
                 const now = Date.now();
-                if (now - lastSync < 180000) {
+                if (now - lastSync < syncIntervalMs) {
                     return;
                 }
             }
@@ -1920,7 +1926,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             try {
                 const forceParam = isManual ? '&force=1' : '';
-                const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(cmp)}${forceParam}`);
+                const fetchSize = <?= $syncBatchSize ?>;
+                const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(cmp)}&size=${fetchSize}${forceParam}`);
                 const json = await res.json();
 
                 localStorage.setItem(cacheKey, Date.now().toString());

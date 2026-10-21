@@ -8,7 +8,10 @@ session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 
-$isAdmin = !empty($_SESSION['is_admin']);
+$isSuperAdmin   = !empty($_SESSION['is_super_admin']);
+$isCompanyAdmin = !empty($_SESSION['is_company_admin']);
+$isAdmin        = $isSuperAdmin;
+
 if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'bc') {
     die('<div style="padding:40px; font-family:sans-serif; text-align:center;">
         <h3 style="color:#d46b08;">⛔ Akses Ditolak</h3>
@@ -16,15 +19,25 @@ if (isset($_SESSION['user_role']) && $_SESSION['user_role'] === 'bc') {
     </div>');
 }
 $activeCmp = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : (!empty($cmp_id) ? trim($cmp_id) : '')));
+
+// Non-superadmin WAJIB terkunci pada perusahaannya sendiri
+if (!$isSuperAdmin && !empty($_SESSION['company_cmp_id'])) {
+    $activeCmp = $_SESSION['company_cmp_id'];
+}
+
 $activeCmpName = $namaperusahaan ?: ($_SESSION['company_name'] ?? $activeCmp);
 $activeNpwp = $npwp ?: ($_SESSION['company_npwp'] ?? '');
 $themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
-// Ambil daftar seluruh perusahaan dari database
+// Ambil daftar seluruh perusahaan dari database (Super Admin melihat semua, Admin Perusahaan hanya melihat perusahaannya)
 $companiesList = [];
 if (isset($koneksi) && $koneksi) {
-    $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    if ($isSuperAdmin) {
+        $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    } else {
+        $qComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($activeCmp) . "'");
+    }
     if ($qComp) {
         while ($rC = $qComp->fetch_assoc()) {
             $companiesList[] = $rC;
@@ -93,7 +106,7 @@ $action = $_REQUEST['action'] ?? '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
     if ($action === 'list') {
         header('Content-Type: application/json; charset=utf-8');
-        $targetCmp = trim($_REQUEST['cmp_id'] ?? $activeCmp);
+        $targetCmp = $isSuperAdmin ? trim($_REQUEST['cmp_id'] ?? $activeCmp) : $activeCmp;
         $qCmp = $koneksi->real_escape_string($targetCmp);
         $res = $koneksi->query("SELECT l.cmp_id, IFNULL(c.cmp_name, l.cmp_id) AS cmp_name, l.user_id, l.nama_lengkap, l.lvl, l.role, l.allowed_menus, l.allowed_docs, l.is_active, l.created_at, l.updated_at 
                                 FROM bc_ceisa_login l 
@@ -117,7 +130,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
     if ($action === 'get') {
         header('Content-Type: application/json; charset=utf-8');
         $uid = trim($_REQUEST['user_id'] ?? '');
-        $targetCmp = trim($_REQUEST['cmp_id'] ?? $activeCmp);
+        $targetCmp = $isSuperAdmin ? trim($_REQUEST['cmp_id'] ?? $activeCmp) : $activeCmp;
         $stmt = $koneksi->prepare("SELECT l.cmp_id, IFNULL(c.cmp_name, l.cmp_id) AS cmp_name, l.user_id, l.nama_lengkap, l.lvl, l.role, l.allowed_menus, l.allowed_docs, l.is_active 
                                    FROM bc_ceisa_login l 
                                    LEFT JOIN bc_ceisa_company c ON l.cmp_id = c.cmp_id
@@ -140,10 +153,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
         header('Content-Type: application/json; charset=utf-8');
         $isEdit    = !empty($_POST['is_edit']);
         $userId    = strtolower(trim($_POST['user_id'] ?? ''));
-        $targetCmp = trim($_POST['cmp_id'] ?? $activeCmp);
+        $targetCmp = $isSuperAdmin ? trim($_POST['cmp_id'] ?? $activeCmp) : $activeCmp;
         $nama      = trim($_POST['nama_lengkap'] ?? '');
         $password  = trim($_POST['password'] ?? '');
         $role      = trim($_POST['role'] ?? 'operator');
+        if (!$isSuperAdmin && $role === 'superadmin') {
+            $role = 'admin'; // Company admin cannot create superadmin
+        }
         $isActive  = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
 
         if (empty($targetCmp)) {
@@ -220,8 +236,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
     if ($action === 'delete') {
         header('Content-Type: application/json; charset=utf-8');
         $userId    = trim($_POST['user_id'] ?? '');
-        $targetCmp = trim($_POST['cmp_id'] ?? $activeCmp);
-        if ($userId === 'admin' && empty($_SESSION['is_admin'])) {
+        $targetCmp = $isSuperAdmin ? trim($_POST['cmp_id'] ?? $activeCmp) : $activeCmp;
+        if ($userId === 'dp' || ($userId === 'admin' && empty($_SESSION['is_super_admin']))) {
             echo json_encode(['status' => 'ERROR', 'message' => 'Akun utama Administrator tidak dapat dihapus!']);
             exit;
         }
@@ -240,8 +256,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
     if ($action === 'toggle_status') {
         header('Content-Type: application/json; charset=utf-8');
         $userId    = trim($_POST['user_id'] ?? '');
-        $targetCmp = trim($_POST['cmp_id'] ?? $activeCmp);
+        $targetCmp = $isSuperAdmin ? trim($_POST['cmp_id'] ?? $activeCmp) : $activeCmp;
         $status    = (int)($_POST['status'] ?? 1);
+
+        if ($userId === 'dp') {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Status akun Super Administrator (dp) tidak dapat diubah!']);
+            exit;
+        }
 
         $stmt = $koneksi->prepare("UPDATE bc_ceisa_login SET is_active = ? WHERE cmp_id = ? AND user_id = ?");
         $stmt->bind_param("iss", $status, $targetCmp, $userId);
@@ -689,6 +710,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
             </div>
             <div style="font-size: 10px; color: var(--text-muted); display:flex; align-items:center; gap:8px;">
                 <span style="font-weight:600; text-transform:uppercase;">🏢 Perusahaan:</span>
+                <?php if ($isSuperAdmin): ?>
                 <select id="mainFilterCmp" class="form-control" style="height:26px; font-size:10.5px; font-weight:700; color:var(--text-heading); min-width:240px; cursor:pointer;" onchange="changeMainCompany()">
                     <?php foreach ($companiesList as $c): ?>
                         <option value="<?= htmlspecialchars($c['cmp_id']) ?>" <?= ($c['cmp_id'] === $activeCmp) ? 'selected' : '' ?>>
@@ -696,6 +718,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                         </option>
                     <?php endforeach; ?>
                 </select>
+                <?php else: ?>
+                <span style="font-size:11px; font-weight:700; color:var(--primary); background:rgba(24,144,255,0.08); padding:3px 10px; border-radius:4px; border:1px solid rgba(24,144,255,0.2);">
+                    🏢 <?= htmlspecialchars($activeCmpName) ?> [<?= htmlspecialchars($activeCmp) ?>]
+                </span>
+                <input type="hidden" id="mainFilterCmp" value="<?= htmlspecialchars($activeCmp) ?>">
+                <?php endif; ?>
             </div>
         </div>
 
@@ -756,6 +784,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                     <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(24, 144, 255, 0.08); border:1px solid rgba(24, 144, 255, 0.35); border-radius:4px; padding:3px 10px;">
                         <span style="font-size:12px;">🏢</span>
                         <label for="modalUserCmpId" style="font-size:9.5px; font-weight:700; color:var(--primary); margin:0; text-transform:uppercase; white-space:nowrap;">Perusahaan:</label>
+                        <?php if ($isSuperAdmin): ?>
                         <select id="modalUserCmpId" class="form-control" style="height:26px; font-size:11px; font-weight:700; color:var(--text-heading); border:1px solid var(--border-input); background:var(--bg-card); padding:2px 8px; border-radius:3px; max-width:320px; cursor:pointer;">
                             <?php foreach ($companiesList as $c): ?>
                                 <option value="<?= htmlspecialchars($c['cmp_id']) ?>" <?= ($c['cmp_id'] === $activeCmp) ? 'selected' : '' ?>>
@@ -763,6 +792,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                                 </option>
                             <?php endforeach; ?>
                         </select>
+                        <?php else: ?>
+                        <span style="font-size:11px; font-weight:700; color:var(--text-heading);"><?= htmlspecialchars($activeCmpName) ?> [<?= htmlspecialchars($activeCmp) ?>]</span>
+                        <input type="hidden" id="modalUserCmpId" value="<?= htmlspecialchars($activeCmp) ?>">
+                        <?php endif; ?>
                     </div>
                     <button type="button" onclick="closeUserModal()" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px; padding:2px 6px;">✕</button>
                 </div>

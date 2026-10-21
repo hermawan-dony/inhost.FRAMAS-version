@@ -21,8 +21,8 @@ require_once __DIR__ . '/app_settings_helper.php';
 
 // Ambil konfigurasi aplikasi
 $appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi) : [];
-$defaultBatch = isset($appSettings['ceisa_sync_batch_size']) ? (int)$appSettings['ceisa_sync_batch_size'] : 1000;
-if ($defaultBatch <= 0) $defaultBatch = 1000;
+$defaultBatch = isset($appSettings['ceisa_sync_batch_size']) ? (int)$appSettings['ceisa_sync_batch_size'] : 50;
+if ($defaultBatch <= 0) $defaultBatch = 50;
 
 // Tangkap parameter
 $targetCmp = trim($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
@@ -86,9 +86,12 @@ if (file_exists($quarantineFile)) {
     }
 }
 
-// 2. Cooldown cerdas: 180 detik (3 menit) untuk silent sync, 30 detik untuk manual tombol
-$cooldownSeconds = $isForce ? 30 : 180;
-$lastSyncTime = 0;
+// 2. Cooldown cerdas: Minimal 15 menit (900 detik) untuk background sync, 60 detik untuk manual tombol
+$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 15;
+if ($configuredIntervalMin < 5) $configuredIntervalMin = 15;
+$bgCooldownSeconds = $configuredIntervalMin * 60; // 15 menit = 900 detik
+$cooldownSeconds   = $isForce ? 60 : $bgCooldownSeconds;
+$lastSyncTime      = 0;
 
 if (file_exists($syncCacheFile)) {
     $cContent = @json_decode(@file_get_contents($syncCacheFile), true);

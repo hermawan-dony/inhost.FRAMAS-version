@@ -35,36 +35,7 @@ foreach ($companies as $c) {
     }
 }
 
-// Ambil daftar file di folder xls (contoh file server)
-$candidateDirs = [
-    __DIR__ . '/../xls',
-    __DIR__ . '/xls',
-    __DIR__ . '/../share/xls',
-    '/source/share/xls',
-    '/source/public/xls',
-    'C:/dp/g-ceisa/share/xls'
-];
-$xlsFolder = null;
-foreach ($candidateDirs as $cd) {
-    if (is_dir($cd)) {
-        $xlsFolder = realpath($cd);
-        break;
-    }
-}
 $existingFiles = [];
-if ($xlsFolder && is_dir($xlsFolder)) {
-    $scanned = scandir($xlsFolder);
-    foreach ($scanned as $f) {
-        if (strtolower(pathinfo($f, PATHINFO_EXTENSION)) === 'xlsx') {
-            $fullPath = $xlsFolder . DIRECTORY_SEPARATOR . $f;
-            $existingFiles[] = [
-                'name' => $f,
-                'size' => round(filesize($fullPath) / 1024, 1) . ' KB',
-                'date' => date('d-m-Y H:i', filemtime($fullPath))
-            ];
-        }
-    }
-}
 $isEmbedded = (!empty($_GET['embedded']) && $_GET['embedded'] == '1') || (isset($_SERVER['HTTP_SEC_FETCH_DEST']) && $_SERVER['HTTP_SEC_FETCH_DEST'] === 'iframe');
 ?>
 <!DOCTYPE html>
@@ -748,23 +719,6 @@ $isEmbedded = (!empty($_GET['embedded']) && $_GET['embedded'] == '1') || (isset(
             </button>
             <input type="file" id="fileInput" name="files[]" accept=".xlsx" multiple style="display:none;">
         </div>
-
-        <?php if (!empty($existingFiles)): ?>
-        <div class="server-samples-bar">
-            <span class="server-samples-label">
-                <span>⚡</span> File Contoh di Server (share/xls):
-            </span>
-            <div class="server-sample-pills">
-                <?php foreach ($existingFiles as $ef): ?>
-                    <button type="button" class="sample-pill" onclick="addServerFile('<?= htmlspecialchars($ef['name']) ?>', '<?= $ef['size'] ?>')">
-                        <strong><?= htmlspecialchars($ef['name']) ?></strong>
-                        <span style="color:var(--text-muted);">(<?= $ef['size'] ?>)</span>
-                        <span style="color:var(--primary); font-weight:700;">+</span>
-                    </button>
-                <?php endforeach; ?>
-            </div>
-        </div>
-        <?php endif; ?>
     </div>
 
     <!-- FILE QUEUE CARD -->
