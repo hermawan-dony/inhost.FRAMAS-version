@@ -19,14 +19,15 @@ require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/datalogin.php';
 require_once __DIR__ . '/app_settings_helper.php';
 
-// Ambil konfigurasi aplikasi
-$appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi) : [];
-$defaultBatch = isset($appSettings['ceisa_sync_batch_size']) ? (int)$appSettings['ceisa_sync_batch_size'] : 1000;
-if ($defaultBatch <= 0) $defaultBatch = 1000;
-
 // Tangkap parameter
 $targetCmp = trim($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
 $isForce   = !empty($_REQUEST['force']) && (string)$_REQUEST['force'] === '1';
+
+// Ambil konfigurasi aplikasi (multi-tenant atau global)
+$appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $targetCmp) : [];
+$defaultBatch = isset($appSettings['ceisa_sync_batch_size']) ? (int)$appSettings['ceisa_sync_batch_size'] : 50;
+if ($defaultBatch <= 0) $defaultBatch = 50;
+
 $fetchSize = isset($_REQUEST['size']) ? max(10, min(1000, (int)$_REQUEST['size'])) : $defaultBatch;
 $action    = $_REQUEST['action'] ?? 'sync';
 
@@ -86,9 +87,12 @@ if (file_exists($quarantineFile)) {
     }
 }
 
-// 2. Cooldown cerdas: 180 detik (3 menit) untuk silent sync, 30 detik untuk manual tombol
-$cooldownSeconds = $isForce ? 30 : 180;
-$lastSyncTime = 0;
+// 2. Cooldown cerdas: Minimal 15 menit (900 detik) untuk background sync, 60 detik untuk manual tombol
+$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 15;
+if ($configuredIntervalMin < 5) $configuredIntervalMin = 15;
+$bgCooldownSeconds = $configuredIntervalMin * 60; // 15 menit = 900 detik
+$cooldownSeconds   = $isForce ? 60 : $bgCooldownSeconds;
+$lastSyncTime      = 0;
 
 if (file_exists($syncCacheFile)) {
     $cContent = @json_decode(@file_get_contents($syncCacheFile), true);
@@ -123,7 +127,7 @@ $secretmfa = $secretMfa;
 
 require __DIR__ . '/initmfa.php';
 
-$bearer = $_SESSION["mfatoken_" . $cmpId] ?? ($_SESSION["mfatoken"] ?? '');
+$bearer = $_SESSION["mfatoken_" . $cmpId] ?? '';
 
 if (empty($bearer)) {
     echo json_encode([
@@ -259,10 +263,28 @@ foreach ($npwpVariants as $identitasTarget) {
                 }
             }
         }
+
+        // Optimasi: Jika varian pertama sudah mengumpulkan dokumen >= $fetchSize, tidak perlu request varian berikutnya
+        if (count($rowsByAju) >= $fetchSize) {
+            break;
+        }
     }
 }
 
 $rowsData = array_values($rowsByAju);
+
+// Urutkan dokumen terbaru berdasarkan tanggal respon atau tanggal daftar secara descending
+usort($rowsData, function($a, $b) {
+    $tA = !empty($a['tanggalRespon']) ? $a['tanggalRespon'] : (!empty($a['tanggalDaftar']) ? $a['tanggalDaftar'] : '');
+    $tB = !empty($b['tanggalRespon']) ? $b['tanggalRespon'] : (!empty($b['tanggalDaftar']) ? $b['tanggalDaftar'] : '');
+    return strcmp($tB, $tA);
+});
+
+// Kunci pembatasan ketat: tidak boleh melebihi $fetchSize (default 50 baris)
+if (count($rowsData) > $fetchSize) {
+    $rowsData = array_slice($rowsData, 0, $fetchSize);
+}
+
 $successfulIdentitas = implode(', ', $successfulVariants);
 
 // Simpan timestamp sync berhasil ke shared cache

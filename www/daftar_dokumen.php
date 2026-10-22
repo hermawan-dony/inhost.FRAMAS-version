@@ -5,6 +5,7 @@
  * Format: C:\dp\g-ceisa\share\Portal Ceisa 4.0.html
  */
 require_once __DIR__ . '/koneksi.php';
+require_once __DIR__ . '/app_settings_helper.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -12,24 +13,46 @@ if (session_status() === PHP_SESSION_NONE) {
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
 $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? '');
 
+$appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $sessionCmpId) : [];
+$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 15));
+$syncBatchSize   = max(10, min(1000, (int)($appSettings['ceisa_sync_batch_size'] ?? 50)));
+
 // Ambil daftar profil perusahaan aktif untuk filter
+$targetCompanyRoles = 'tpb';
+$targetCompanyAllowedDocs = null;
 $companies = [];
 if (isset($koneksi) && $koneksi) {
-    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company ORDER BY cmp_name ASC");
     if ($resComp) {
         while ($r = $resComp->fetch_assoc()) {
+            if ($r['cmp_id'] === $sessionCmpId) {
+                $targetCompanyRoles = $r['company_roles'];
+                $targetCompanyAllowedDocs = $r['allowed_docs'];
+            }
             $companies[] = $r;
         }
     }
 }
 
+// Resolusi Dokumen BC yang diizinkan untuk perusahaan ini
+$companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+
 $userAllowedDocs = $_SESSION['allowed_docs'] ?? ['*'];
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
-        global $isAdmin, $userAllowedDocs;
-        if (!empty($isAdmin)) return true;
-        if (empty($userAllowedDocs) || in_array('*', $userAllowedDocs) || in_array('ALL', $userAllowedDocs)) return true;
-        return in_array((string)$d, $userAllowedDocs);
+        global $isAdmin, $sessionCmpId, $companyAllowedDocs, $userAllowedDocs;
+        // Jika Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
+        if (!empty($isAdmin) && empty($sessionCmpId)) {
+            return true;
+        }
+        // Jika ada perusahaan aktif, batasi sesuai allowed_docs perusahaan
+        if (!empty($sessionCmpId)) {
+            return in_array((string)$d, $companyAllowedDocs);
+        }
+        if (empty($userAllowedDocs) || in_array('*', $userAllowedDocs) || in_array('ALL', $userAllowedDocs)) {
+            return in_array((string)$d, $companyAllowedDocs);
+        }
+        return in_array((string)$d, $userAllowedDocs) && in_array((string)$d, $companyAllowedDocs);
     }
 }
 
@@ -1388,21 +1411,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <label>DOKUMEN BC</label>
                     <select id="filterBc" onchange="loadList()" class="filter-control">
                         <option value="">Semua Dokumen</option>
-                        <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                        <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                        <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor)</option><?php endif; ?>
-                        <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                        <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
                         <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
                         <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                        <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                        <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                        <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                        <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
+                        <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
+                        <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
+                        <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
+                        <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor)</option><?php endif; ?>
+                        <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
+                            <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
+                        <?php endif; ?>
                     </select>
                 </div>
                 <div class="filter-col">
@@ -1871,12 +1898,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const cmpSelect = document.getElementById('filterCmp');
             const cmp = cmpSelect ? cmpSelect.value : (initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>');
 
-            // Cooldown check (180 detik / 3 menit) jika otomatis, agar aman dari pemblokiran IP
+            // Cooldown check (minimal 15 menit / 900.000 ms jika otomatis)
+            const syncIntervalMs = <?= $syncIntervalMin ?> * 60 * 1000;
             const cacheKey = 'ceisa_last_silent_sync_' + (cmp || 'default');
             if (!isManual) {
                 const lastSync = parseInt(localStorage.getItem(cacheKey) || '0');
                 const now = Date.now();
-                if (now - lastSync < 180000) {
+                if (now - lastSync < syncIntervalMs) {
                     return;
                 }
             }
@@ -1898,7 +1926,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             try {
                 const forceParam = isManual ? '&force=1' : '';
-                const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(cmp)}${forceParam}`);
+                const fetchSize = <?= (int)($syncBatchSize ?: 50) ?>;
+                const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(cmp)}&size=${fetchSize}${forceParam}`);
                 const json = await res.json();
 
                 localStorage.setItem(cacheKey, Date.now().toString());
@@ -2567,11 +2596,38 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     openTrackingHistory(activeTrackingAju.nomorAju, activeTrackingAju.cmpId);
                     loadList();
                 } else {
-                    Swal.fire({
-                        icon: 'warning',
-                        title: 'Respon CEISA 4.0',
-                        text: result.message || 'Tidak ada pembaruan status baru dari CEISA 4.0.'
-                    });
+                    const isNotFound = result.is_not_found || (result.message && result.message.toLowerCase().includes('tidak ditemukan'));
+                    if (isNotFound) {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: '<span style="font-size:18px; font-weight:700; color:#d97706;">Data Tidak Ditemukan di CEISA 4.0</span>',
+                            html: `
+                                <div style="text-align:center; margin-bottom:14px;">
+                                    <div style="display:inline-block; padding:5px 14px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:6px; font-family:monospace; font-size:13px; font-weight:700; color:#1e293b; letter-spacing:0.5px;">
+                                        ${escapeHtml(activeTrackingAju.nomorAju)}
+                                    </div>
+                                </div>
+                                <div style="font-size:13px; color:#475569; line-height:1.6; margin-bottom:14px; text-align:left;">
+                                    Portal CEISA 4.0 menyatakan dokumen pengajuan ini <b>tidak ditemukan</b> dalam database Bea Cukai.
+                                </div>
+                                <div style="background:#eff6ff; border:1px solid #bfdbfe; border-left:4px solid #3b82f6; border-radius:6px; padding:12px 14px; text-align:left; font-size:12px; color:#1e40af; margin-bottom:14px; line-height:1.5;">
+                                    <div style="font-weight:700; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                        <i class="fas fa-undo-alt" style="color:#2563eb;"></i> Status Pengiriman Direset
+                                    </div>
+                                    Tanda status pengiriman (<code>bc_ceisa_aju_posted</code>) telah dibersihkan sehingga status kembali menjadi <b>Belum Kirim (Putih)</b>.
+                                </div>
+                            `,
+                            confirmButtonText: 'Mengerti',
+                            confirmButtonColor: '#3b82f6'
+                        });
+                        loadList();
+                    } else {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: 'Respon CEISA 4.0',
+                            text: result.message || 'Tidak ada pembaruan status baru dari CEISA 4.0.'
+                        });
+                    }
                 }
             } catch (err) {
                 Swal.fire({

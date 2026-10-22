@@ -80,6 +80,9 @@ if (!function_exists('ensureAppSettingsTable')) {
                 @$dbConn->query("ALTER TABLE bc_ceisa_setting ADD COLUMN cmp_id VARCHAR(50) NOT NULL DEFAULT '' FIRST");
                 @$dbConn->query("ALTER TABLE bc_ceisa_setting DROP PRIMARY KEY, ADD PRIMARY KEY (cmp_id, setting_key)");
             }
+
+            // Migrasi nilai legacy jika batch size masih 1000 (disetel default baru: 50 baris)
+            @$dbConn->query("UPDATE bc_ceisa_setting SET setting_value = '50' WHERE setting_key = 'ceisa_sync_batch_size' AND setting_value = '1000'");
         }
     }
 }

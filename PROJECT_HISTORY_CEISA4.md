@@ -7890,6 +7890,37 @@ Pengguna (**Mas**) memberikan arahan teknis untuk penyempurnaan modul monitoring
   - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
   - Verifikasi cURL: Status HTTP 200 OK, teks `RODA MAJU BAHAGIA` terbukti muat lengkap dan dropdown bersih dari teks contoh perusahaan.
 
+---
+
+### Bagian 64: Penegasan Batas Sinkronisasi Default 50 Baris & Pembaruan Basis Data bc_ceisa_setting
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pengguna mendapati badge sinkronisasi otomatis CEISA 4.0 di dashboard menampilkan pembaruan dalam jumlah sangat besar: `✓ CEISA 4.0 Terupdate (1598 dokumen)`.
+  - Pengguna menanyakan mengapa jumlah yang ditarik begitu banyak, dan meminta agar penarikan default dibatasi hanya **50 baris** saja.
+
+- **Analisis Masalah & Akar Masalah (Root Cause)**:
+  1. Pada basis data Alibaba Cloud RDS MySQL, tabel `bc_ceisa_setting` sebelumnya masih menyimpan nilai legacy `'1000'` pada baris `ceisa_sync_batch_size`. Karena fungsi `getAppSettings()` memprioritaskan nilai dari tabel database dibandingkan nilai default berkas JSON/helper, variabel `$syncBatchSize` tetap terisi `1000`.
+  2. Saat `ceisa_sync_service.php` memanggil API browse CEISA 4.0 dengan ukuran batch 1000 untuk profil PT RODA MAJU BAHAGIA, sistem melakukan query lintas varian format NPWP (22-digit NITKU dan 16-digit standar baru). Hasil dari kedua varian mengembalikan ratusan hingga seribu dokumen yang terakumulasi mencapai 1.598 dokumen unik.
+  3. Pada `ceisa_sync_service.php`, sebelumnya belum diterapkan pengurutan dokumen terbaru (`usort` berdasarkan tanggal respon/daftar terbaru) dan pemotongan array ketat (`array_slice`), sehingga seluruh 1.598 record dieksekusi dan disimpan ke database sekaligus.
+
+- **Solusi & Implementasi Teknis**:
+  1. **Pembaruan Nilai Tabel Database (`bc_ceisa_setting`)**:
+     - Memperbarui baris konfigurasi `ceisa_sync_batch_size` di database `ceisa0400db` dari `1000` menjadi **`50`**, serta memastikan `ceisa_sync_interval_minutes` terdaftar `15`.
+     - Menambahkan auto-migration di [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php) agar jika terdapat baris konfigurasi lama bernilai `1000`, sistem secara otomatis memperbaruinya ke `50`.
+  2. **Pembatasan Ketat & Pengurutan Dokumen Terkini ([`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php))**:
+     - Menambahkan proteksi awal: jika varian identitas pertama telah mengumpulkan dokumen `>= $fetchSize`, pemanggilan ke varian identitas berikutnya langsung dihentikan (`break`) untuk menghemat panggilan API dan kuota jaringan.
+     - Menerapkan pengurutan data (`usort`) berdasarkan tanggal terbaru: memprioritaskan `tanggalRespon` desc dan `tanggalDaftar` desc.
+     - Menerapkan pemotongan ketat `array_slice($rowsData, 0, $fetchSize)` sehingga sistem secara mutlak hanya memproses dan menyimpan maksimal 50 dokumen teratas.
+     - Menyematkan `$targetCmp` pada pemanggilan `getAppSettings($koneksi, $targetCmp)` agar pembacaan konfigurasi per-tenant berjalan presisi.
+  3. **Penegasan Frontend ([`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php))**:
+     - Mengunci parameter `fetchSize` ke `<?= (int)($syncBatchSize ?: 50) ?>`.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas target ([`ceisa_sync_service.php`](file:///c:/dp/g-ceisa/ceisa_sync_service.php), [`app_settings_helper.php`](file:///c:/dp/g-ceisa/app_settings_helper.php), [`daftar_dokumen.php`](file:///c:/dp/g-ceisa/daftar_dokumen.php)) telah dicerminkan ke `www/` dan diunggah ke remote server `/source/public/`.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
+  - Verifikasi pembacaan nilai konfigurasi: `getAppSettings` mengonfirmasi nilai `ceisa_sync_batch_size` bernilai **50** baik pada profil global maupun pada tenant PT RODA MAJU BAHAGIA.
+
+
 
 
 

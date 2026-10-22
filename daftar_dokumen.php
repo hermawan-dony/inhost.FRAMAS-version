@@ -1926,7 +1926,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             try {
                 const forceParam = isManual ? '&force=1' : '';
-                const fetchSize = <?= $syncBatchSize ?>;
+                const fetchSize = <?= (int)($syncBatchSize ?: 50) ?>;
                 const res = await fetch(`ceisa_sync_service.php?cmp_id=${encodeURIComponent(cmp)}&size=${fetchSize}${forceParam}`);
                 const json = await res.json();
 
