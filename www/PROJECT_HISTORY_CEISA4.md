@@ -7920,6 +7920,43 @@ Pengguna (**Mas**) memberikan arahan teknis untuk penyempurnaan modul monitoring
   - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
   - Verifikasi pembacaan nilai konfigurasi: `getAppSettings` mengonfirmasi nilai `ceisa_sync_batch_size` bernilai **50** baik pada profil global maupun pada tenant PT RODA MAJU BAHAGIA.
 
+---
+
+### Bagian 65: Auto-Delete File JSON Setelah Posting CEISA & Pembersihan Sampah Terjadwal
+- **Latar Belakang & Permintaan Pengguna**:
+  - Pengguna mendapati direktori kerja portal dipenuhi oleh puluhan berkas teks sampah berukuran besar (`json*.txt`, seperti `json_000016...txt`, `json_000025...txt`, `json_201049...txt`, dan `json.txt`).
+  - Pengguna meminta agar sistem secara otomatis menghapus (*auto delete*) berkas JSON tersebut setelah proses posting ke CEISA selesai atau menghapus berkas JSON yang sudah lama secara rutin agar tidak memenuhi ruang penyimpanan (*disk space*).
+
+- **Analisis Masalah & Akar Masalah (Root Cause)**:
+  - Pada [`CeisaJsonBuilder.php`](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php), sistem sebelumnya secara permanen menulis salinan file arsip fisik per nomor aju (`json_{nomor_aju}.txt`), per perusahaan (`json_{cmp_id}.txt`), dan global (`json.txt`) setiap kali dokumen dibangun.
+  - Seluruh payload resmi JSON sebenarnya sudah tersimpan secara terstruktur dan permanen di basis data MySQL pada tabel `bc_ceisa_json`. Berkas fisik `.txt` di direktori hanyalah salinan cadangan sementara.
+  - Berkas-berkas fisik ini sebelumnya tidak pernah dihapus seusai pengiriman di [`posting.php`](file:///c:/dp/g-ceisa/posting.php) maupun [`posting_insw.php`](file:///c:/dp/g-ceisa/posting_insw.php).
+  - Ketika perintah `clone!` dijalankan, skrip `sync_and_push.ps1` memaketkan seluruh direktori `/source/public` tanpa filter pengecualian untuk `json*.txt`, sehingga puluhan berkas sampah ikut terunduh ke komputer lokal pengguna (`C:\dp\g-ceisa`).
+
+- **Solusi & Implementasi Teknis**:
+  1. **Penghentian Pembuatan Berkas Sampah Per AJU ([`CeisaJsonBuilder.php`](file:///c:/dp/g-ceisa/CeisaJsonBuilder.php))**:
+     - Menghapus pembuatan berkas arsip permanen `json_{nomor_aju}.txt`. Seluruh riwayat payload dokumen kini murni dan aman dikelola di tabel MySQL `bc_ceisa_json`.
+     - Menambahkan metode pembersih otomatis `CeisaJsonBuilder::cleanupTempJsonFiles($maxAgeSeconds, $deleteAll)`.
+     - Menyematkan pemanggilan `cleanupTempJsonFiles(1800)` otomatis setiap kali dokumen dibangun agar file sementara yang berumur > 30 menit langsung dibersihkan.
+  2. **Auto-Delete Instan Setelah Posting CEISA / INSW ([`posting.php`](file:///c:/dp/g-ceisa/posting.php) & [`posting_insw.php`](file:///c:/dp/g-ceisa/posting_insw.php))**:
+     - Menambahkan blok pembersihan otomatis di akhir alur posting: file `json.txt`, `json_{cmp}.txt`, dan `json_{aju}.txt` langsung dihapus seketika (`@unlink`) begitu request kirim selesai diproses.
+     - Menjalankan garbage collector untuk menyapu file JSON sisa yang berumur lebih dari 10 menit.
+  3. **Penyempurnaan Modul Peninjauan ([`viewjson.php`](file:///c:/dp/g-ceisa/viewjson.php))**:
+     - [`viewjson.php`](file:///c:/dp/g-ceisa/viewjson.php) kini membaca payload JSON langsung dari tabel database `bc_ceisa_json` atau membangun JSON segar *on-the-fly* via `CeisaJsonBuilder::generate()` jika nomor AJU diberikan, tanpa perlu bergantung pada file `.txt` di disk.
+  4. **Pembersihan Menyeluruh & Penjadwalan Rutin Server (*Cron Job*)**:
+     - Seluruh 46 berkas sampah `json*.txt` dan `json` di lokal `C:\dp\g-ceisa` dan remote server `/source/public/` telah dihapus bersih (100% clean).
+     - Memasang tugas terjadwal Linux di `/etc/cron.d/cleanup_json_garbage` (menjalankan `/root/cleanup_json_garbage.sh`) setiap jam untuk menghapus berkas `json*.txt` sementara yang berusia lebih dari 30 menit.
+  5. **Proteksi Skrip Sinkronisasi ([`sync_and_push.ps1`](file:///c:/dp/g-ceisa/sync_and_push.ps1))**:
+     - Menambahkan parameter `--exclude='json*.txt'` dan `--exclude='json'` pada pengemasan tar remote serta instruksi pembersihan lokal otomatis, sehingga perintah `clone!` tidak akan pernah lagi membawa berkas sampah JSON ke PC lokal pengguna.
+     - Menambahkan fallback otomatis SSH SOCKS proxy (127.0.0.1:10808) pada git push untuk mengantisipasi gangguan DNS lokal Windows saat menghubungi GitHub.
+
+- **Deployment & Hasil Verifikasi**:
+  - Berkas dicerminkan ke `www/` dan diunggah ke remote server `/source/public/`.
+  - Pengecekan sintaks remote PHP 8.5: **No syntax errors detected**.
+  - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
+  - Direktori `C:\dp\g-ceisa`, `C:\dp\g-ceisa\www`, `/source/public`, dan `/source/public/www` terkonfirmasi **0 file json*.txt**.
+
+
 
 
 

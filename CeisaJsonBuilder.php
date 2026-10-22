@@ -224,20 +224,19 @@ class CeisaJsonBuilder
             $insJson->close();
         }
 
-        // Tulis ke json.txt untuk kompatibilitas penuh dengan posting.php & viewjson.php
-        $outputFile = __DIR__ . '/json.txt';
-        file_put_contents($outputFile, $rawJson);
+        // Jalankan pembersihan otomatis file JSON sementara yang kadaluarsa (> 30 menit)
+        self::cleanupTempJsonFiles(1800);
 
-        // Simpan file terisolasi per company (cegah tabrakan multi-company)
+        // Tulis ke json.txt sementara untuk kompatibilitas proses posting
+        $outputFile = __DIR__ . '/json.txt';
+        @file_put_contents($outputFile, $rawJson);
+
+        // Simpan file terisolasi sementara per company (cegah tabrakan multi-company)
         $cleanCmp = preg_replace('/[^0-9A-Za-z_-]/', '', $cmp_id);
         if (!empty($cleanCmp)) {
             $cmpFile = __DIR__ . '/json_' . $cleanCmp . '.txt';
             @file_put_contents($cmpFile, $rawJson);
         }
-
-        // Simpan juga arsip per nomor aju
-        $archiveFile = __DIR__ . '/json_' . preg_replace('/[^0-9A-Za-z_-]/', '', $nomor_aju) . '.txt';
-        file_put_contents($archiveFile, $rawJson);
 
         return [
             'status'       => 'OK',
@@ -385,5 +384,38 @@ class CeisaJsonBuilder
                 ");
             }
         }
+    }
+
+    /**
+     * Pembersihan otomatis file JSON sementara yang tersisa / kadaluarsa
+     * Menghapus file json.txt, json_{cmp}.txt, json_{aju}.txt yang lebih lama dari $maxAgeSeconds
+     *
+     * @param int $maxAgeSeconds Batas usia file dalam detik (default: 1800 detik / 30 menit)
+     * @param bool $deleteAll Jika true, hapus seluruh file json sementara tanpa melihat usia
+     * @return int Jumlah file yang berhasil dibersihkan
+     */
+    public static function cleanupTempJsonFiles($maxAgeSeconds = 1800, $deleteAll = false) {
+        $dirs = [__DIR__, dirname(__DIR__) . '/public', dirname(__DIR__) . '/www'];
+        $dirs = array_unique(array_filter($dirs, 'is_dir'));
+        $now = time();
+        $deleted = 0;
+
+        foreach ($dirs as $dir) {
+            $patterns = [$dir . '/json*.txt', $dir . '/json'];
+            foreach ($patterns as $pattern) {
+                $files = @glob($pattern);
+                if (is_array($files)) {
+                    foreach ($files as $file) {
+                        if (!is_file($file)) continue;
+                        if ($deleteAll || ($now - filemtime($file)) >= $maxAgeSeconds) {
+                            if (@unlink($file)) {
+                                $deleted++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return $deleted;
     }
 }

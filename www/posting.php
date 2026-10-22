@@ -130,6 +130,32 @@ if (!empty($activeAju) && (strpos($response, '"status":"OK"') !== false || strpo
     }
 }
 
+// 6. Auto-delete file JSON sementara setelah posting ke CEISA selesai
+$cleanAju = !empty($activeAju) ? preg_replace('/[^0-9A-Za-z_-]/', '', $activeAju) : '';
+$cleanCmp = !empty($cmp_id) ? preg_replace('/[^0-9A-Za-z_-]/', '', $cmp_id) : '';
+
+$filesToClean = [
+    __DIR__ . '/json.txt',
+    __DIR__ . '/json',
+];
+if (!empty($cleanCmp)) {
+    $filesToClean[] = __DIR__ . "/json_{$cleanCmp}.txt";
+}
+if (!empty($cleanAju)) {
+    $filesToClean[] = __DIR__ . "/json_{$cleanAju}.txt";
+}
+
+foreach ($filesToClean as $fTarget) {
+    if (file_exists($fTarget)) {
+        @unlink($fTarget);
+    }
+}
+
+// Jalankan garbage collector untuk membersihkan file JSON sementara yang kadaluarsa (> 10 menit)
+if (class_exists('CeisaJsonBuilder') && method_exists('CeisaJsonBuilder', 'cleanupTempJsonFiles')) {
+    CeisaJsonBuilder::cleanupTempJsonFiles(600);
+}
+
 header('Content-Type: application/json; charset=utf-8');
 echo $response;
 ?>

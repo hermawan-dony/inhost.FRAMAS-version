@@ -134,6 +134,17 @@ if (!empty($insw_token) || (!empty($insw_client_id) && !empty($insw_client_secre
         }
     }
 
+    // Auto-delete file JSON sementara setelah posting ke INSW
+    $cleanAju = !empty($nomor_aju) ? preg_replace('/[^0-9A-Za-z_-]/', '', $nomor_aju) : '';
+    $cleanCmp = !empty($cmp_id) ? preg_replace('/[^0-9A-Za-z_-]/', '', $cmp_id) : '';
+    @unlink(__DIR__ . '/json.txt');
+    @unlink(__DIR__ . '/json');
+    if (!empty($cleanCmp)) @unlink(__DIR__ . "/json_{$cleanCmp}.txt");
+    if (!empty($cleanAju)) @unlink(__DIR__ . "/json_{$cleanAju}.txt");
+    if (class_exists('CeisaJsonBuilder') && method_exists('CeisaJsonBuilder', 'cleanupTempJsonFiles')) {
+        CeisaJsonBuilder::cleanupTempJsonFiles(600);
+    }
+
     header('Content-Type: application/json; charset=utf-8');
     $decodedRes = json_decode($response, true);
     echo json_encode([

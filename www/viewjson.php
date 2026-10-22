@@ -57,6 +57,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+require_once __DIR__ . '/CeisaJsonBuilder.php';
+
+if (!file_exists($file) && !empty($nomor_aju)) {
+    $gen = CeisaJsonBuilder::generate($nomor_aju, $cmp_id);
+    if ($gen['status'] === 'OK') {
+        file_put_contents($file, $gen['json']);
+    }
+}
+
 if (!file_exists($file) && isset($koneksi) && $koneksi) {
     if (!empty($cmp_id)) {
         $stmt = $koneksi->prepare("SELECT json FROM bc_ceisa_json WHERE cmp_id = ? ORDER BY id DESC LIMIT 1");
@@ -92,7 +101,7 @@ if (file_exists($file)) {
         $error = 'Format JSON dalam file tidak valid.';
     }
 } else {
-    $error = 'File JSON belum dibuat. Silakan lakukan proses generate JSON dari aplikasi terlebih dahulu.';
+    $error = 'Data JSON belum dibuat atau sudah dibersihkan setelah posting. Silakan lakukan proses generate JSON jika diperlukan.';
 }
 ?>
 <!DOCTYPE html>
