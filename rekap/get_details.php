@@ -25,10 +25,8 @@ if (!empty($targetCmp) && $targetCmp !== $cmp_id) {
 $cleanNamaPrs = $koneksi->real_escape_string($namaperusahaan ?? 'FRAMAS');
 $cleanCmpId   = $koneksi->real_escape_string($cmp_id ?? '');
 
+// bc_ceisa_data bersifat shared lintas plant
 $whereCmp = "";
-if (!empty($cleanCmpId)) {
-    $whereCmp = "AND (a.cmp_id = '$cleanCmpId' OR a.cmp_id = '' OR a.cmp_id IS NULL)";
-}
 
 $unfinSql = "";
 if ($unfin) {

@@ -126,11 +126,8 @@ $belum_selesai = isset($_GET['belum_selesai']) && $_GET['belum_selesai'] == '1' 
 $cleanNamaPrs = $koneksi->real_escape_string($namaperusahaan ?? 'FRAMAS');
 $cleanCmpId   = $koneksi->real_escape_string($cmp_id ?? '');
 
-// Filter company jika ada
+// bc_ceisa_data bersifat global/shared lintas plant (tidak multi-tenant)
 $whereCmp = "";
-if (!empty($cleanCmpId)) {
-    $whereCmp = "WHERE (cmp_id = '$cleanCmpId' OR cmp_id = '' OR cmp_id IS NULL)";
-}
 
 // Bangun query agregasi dinamis sesuai kolom aktif perusahaan
 $sumSelects = [];

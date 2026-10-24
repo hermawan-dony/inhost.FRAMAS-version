@@ -24,7 +24,7 @@ $akhir  = $_GET['akhir'] ?? date('Y-m-d');
 $search = trim($_GET['search'] ?? '');
 
 $cleanCmpId = $koneksi->real_escape_string($cmp_id ?? '');
-$whereCmp = !empty($cleanCmpId) ? "AND (cmp_id = '$cleanCmpId' OR cmp_id = '' OR cmp_id IS NULL)" : "";
+$whereCmp = ""; // bc_ceisa_data bersifat shared lintas plant
 
 $query = "
     SELECT nomorDaftar, 

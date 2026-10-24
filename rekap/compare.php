@@ -24,7 +24,7 @@ $cek_filter = $_GET['cek'] ?? '';
 $search = trim($_GET['search'] ?? '');
 
 $cleanCmpId = $koneksi->real_escape_string($cmp_id ?? '');
-$whereCmp = !empty($cleanCmpId) ? "AND (a.cmp_id = '$cleanCmpId' OR a.cmp_id = '' OR a.cmp_id IS NULL)" : "";
+$whereCmp = ""; // bc_ceisa_data bersifat shared lintas plant
 
 $whereDoc = "";
 if ($dokumen_filter !== 'all' && !empty($dokumen_filter)) {
