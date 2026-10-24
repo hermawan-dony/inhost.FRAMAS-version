@@ -2838,7 +2838,7 @@ if ($initialTab === 'editor') {
                 <!-- Brand Badge (Logo, App Name, Subtitle) -->
                 <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:14px;">
                     <div class="login-brand-badge">
-                        <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo">
+                        <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
                         <div style="text-align:left;">
                             <div class="login-brand-title"><?= htmlspecialchars($appSettings['app_name']) ?></div>
                             <div class="login-brand-sub"><?= htmlspecialchars($appSettings['app_subtitle']) ?></div>
@@ -2961,7 +2961,7 @@ if ($initialTab === 'editor') {
             <div class="kt-aside__brand" id="kt_aside_brand">
                 <div class="kt-aside__brand-logo">
                     <a href="index.php" style="display:flex; align-items:center; text-decoration:none; gap:7px; width:100%; min-width:0; overflow:hidden;">
-                        <img alt="<?= htmlspecialchars($appSettings['app_name']) ?>" src="<?= htmlspecialchars($appSettings['app_logo']) ?>" id="sidebarBrandLogo" style="height:30px; width:30px; max-height:30px; max-width:30px; object-fit:contain; border-radius:5px; flex-shrink:0;">
+                        <img alt="<?= htmlspecialchars($appSettings['app_name']) ?>" src="<?= htmlspecialchars($appSettings['app_logo']) ?>" id="sidebarBrandLogo" style="height:30px; width:30px; max-height:30px; max-width:30px; object-fit:contain; border-radius:5px; flex-shrink:0;" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
                         <div class="logo-text-wrap" style="display:flex; flex-direction:column; justify-content:center; white-space:nowrap; overflow:hidden; min-width:0; flex:1;">
                             <span style="font-size:<?= htmlspecialchars($sidebarBrandFontSize) ?>; font-weight:800; color:#1890ff; line-height:1.15; letter-spacing:normal; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandName" title="<?= htmlspecialchars($appSettings['app_name']) ?>"><?= htmlspecialchars($appSettings['app_name']) ?></span>
                             <span style="font-size:<?= htmlspecialchars($sidebarBrandSubFontSize) ?>; font-weight:600; color:#8c8c8c; letter-spacing:normal; line-height:1.25; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandSub" title="<?= htmlspecialchars($appSettings['app_subtitle']) ?>"><?= htmlspecialchars($appSettings['app_subtitle']) ?></span>
@@ -2996,7 +2996,7 @@ if ($initialTab === 'editor') {
             <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
                 <div class="sidebar-company-icon" id="sidebarCompanyLogoBox">
                     <?php if (!empty($sessionLogo)): ?>
-                        <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);">
+                        <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
                     <?php else: ?>
                         🏢
                     <?php endif; ?>
