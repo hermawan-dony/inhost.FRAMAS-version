@@ -46,8 +46,10 @@ if (!function_exists('getDefaultAppSettings')) {
             'sidebar_icon_style'    => 'colored', // 'colored' | 'monochrome'
             'show_company_card'        => 'auto', // 'auto' (Sembunyikan untuk User Perusahaan, Tampilkan untuk Admin) | '0' (Hide) | '1' (Show)
             'show_login_company_title' => '0', // '0' (Sembunyikan teks nama perush di login card - Default) | '1' (Tampilkan)
-            'default_page_size'        => '25', // '10' | '25' | '50' | '100'
-            'toast_duration'        => '2600' // milidetik
+            'toast_duration'        => '2600', // milidetik
+            
+            // 6. Audit & Monitoring Pengunjung (Visitor & Menu Activity)
+            'enable_visitor_menu_log' => '1' // '1' = Aktif catat menu yang dibuka user, '0' = Nonaktif
         ];
     }
 }
@@ -275,4 +277,15 @@ if (!function_exists('getAppUpdateVersion')) {
         return $dt->format('Ymd.Hi');
     }
 }
+
+if (!function_exists('isVisitorMenuLogEnabled')) {
+    /**
+     * Memeriksa apakah fitur audit pencatatan menu pengunjung aktif
+     */
+    function isVisitorMenuLogEnabled($dbConn = null, $cmpId = '') {
+        $settings = getAppSettings($dbConn, $cmpId);
+        return ($settings['enable_visitor_menu_log'] ?? '1') !== '0';
+    }
+}
+
 

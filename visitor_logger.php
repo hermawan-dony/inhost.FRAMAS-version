@@ -270,3 +270,54 @@ if (!function_exists('recordVisitorAccess')) {
         return true;
     }
 }
+
+if (!function_exists('recordMenuAccess')) {
+    /**
+     * Mencatat riwayat menu yang diakses oleh pengguna
+     * Waktu pencatatan terstandarisasi Waktu Indonesia Barat (WIB, Asia/Jakarta)
+     */
+    function recordMenuAccess($koneksi, $menuId, $menuTitle = '', $options = []) {
+        if (!$koneksi || $koneksi->connect_error) {
+            return false;
+        }
+
+        $menuId = trim((string)$menuId);
+        if (empty($menuId)) {
+            return false;
+        }
+
+        $userId   = $options['user_id'] ?? ($_SESSION['user_id'] ?? 'guest');
+        $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? '-');
+        $cmpId    = $options['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? null));
+
+        $ip = getVisitorClientIp();
+        $subdomain = detectVisitorSubdomain();
+
+        // Debounce: Hindari pencatatan dobel jika user mengeklik menu yang sama dalam 5 detik
+        $sessKey = 'last_menu_' . md5($ip . '_' . $userId . '_' . $menuId);
+        $now = time();
+        if (!empty($_SESSION[$sessKey]) && ($now - $_SESSION[$sessKey]) < 5) {
+            return true;
+        }
+        $_SESSION[$sessKey] = $now;
+
+        // Waktu Akses WIB (Asia/Jakarta, UTC+7)
+        $dt = new DateTime('now', new DateTimeZone('Asia/Jakarta'));
+        $wibNow = $dt->format('Y-m-d H:i:s');
+
+        $stmt = $koneksi->prepare("INSERT INTO bc_visitor_menu_log (
+            ip_address, subdomain, user_id, user_name, cmp_id, menu_id, menu_title, accessed_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+
+        if ($stmt) {
+            $stmt->bind_param("ssssssss",
+                $ip, $subdomain, $userId, $userName, $cmpId, $menuId, $menuTitle, $wibNow
+            );
+            $stmt->execute();
+            $stmt->close();
+            return true;
+        }
+
+        return false;
+    }
+}

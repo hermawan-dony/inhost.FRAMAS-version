@@ -88,6 +88,12 @@ if (!$koneksi) {
 
 mysqli_set_charset($koneksi, "utf8mb4");
 
+// Standarisasi Waktu ke Waktu Indonesia Barat (WIB, Asia/Jakarta / UTC+7)
+if (function_exists('date_default_timezone_set')) {
+    date_default_timezone_set('Asia/Jakarta');
+}
+@mysqli_query($koneksi, "SET time_zone = '+07:00'");
+
 /**
  * Master Katalog Dokumen Kepabeanan CEISA 4.0 / INSW
  */

@@ -52,7 +52,26 @@ if ($action === 'data') {
         $devBreakdown[] = $r;
     }
 
-    // 5. Data List Lengkap
+    // 5. Menu Activity Aggregates & List
+    $kpiMenuHits = 0;
+    $menuHitsQuery = @$koneksi->query("SELECT COUNT(*) FROM bc_visitor_menu_log");
+    if ($menuHitsQuery && $mrow = $menuHitsQuery->fetch_row()) {
+        $kpiMenuHits = (int)$mrow[0];
+    }
+
+    // Top 10 Menus Dibuka
+    $menuTopRes = @$koneksi->query("SELECT menu_id, IFNULL(NULLIF(menu_title, ''), menu_id) as menu_title, COUNT(*) as cnt 
+                                   FROM bc_visitor_menu_log 
+                                   GROUP BY menu_id, menu_title 
+                                   ORDER BY cnt DESC LIMIT 10");
+    $menuTop = [];
+    if ($menuTopRes) {
+        while ($mr = $menuTopRes->fetch_assoc()) {
+            $menuTop[] = $mr;
+        }
+    }
+
+    // 6. Data List Lengkap Pengunjung
     $filterSub = trim($_GET['subdomain'] ?? '');
     $searchKw  = trim($_GET['q'] ?? '');
     
@@ -72,6 +91,29 @@ if ($action === 'data') {
         $visitors[] = $r;
     }
 
+    // 7. Stream Riwayat Akses Menu (300 data terkini)
+    $menuWhere = ["1=1"];
+    if (!empty($filterSub) && $filterSub !== 'ALL') {
+        $menuWhere[] = "m.subdomain = '" . $koneksi->real_escape_string($filterSub) . "'";
+    }
+    if (!empty($searchKw)) {
+        $escKw = $koneksi->real_escape_string($searchKw);
+        $menuWhere[] = "(m.ip_address LIKE '%$escKw%' OR m.subdomain LIKE '%$escKw%' OR m.user_id LIKE '%$escKw%' OR m.user_name LIKE '%$escKw%' OR m.menu_id LIKE '%$escKw%' OR m.menu_title LIKE '%$escKw%' OR g.city LIKE '%$escKw%')";
+    }
+    $menuWhereSql = implode(' AND ', $menuWhere);
+
+    $menuLogRes = @$koneksi->query("SELECT m.*, g.city, g.country_name, g.isp 
+                                    FROM bc_visitor_menu_log m 
+                                    LEFT JOIN bc_visitor_geo_cache g ON m.ip_address = g.ip_address 
+                                    WHERE $menuWhereSql 
+                                    ORDER BY m.accessed_at DESC LIMIT 300");
+    $menuLogs = [];
+    if ($menuLogRes) {
+        while ($ml = $menuLogRes->fetch_assoc()) {
+            $menuLogs[] = $ml;
+        }
+    }
+
     // Ambil list unik subdomain untuk filter dropdown
     $subFilterList = [];
     $sRes = $koneksi->query("SELECT DISTINCT subdomain FROM bc_visitor_log ORDER BY subdomain ASC");
@@ -85,13 +127,16 @@ if ($action === 'data') {
             'total_hits' => (int)$kpiHits,
             'unique_ips' => (int)$kpiIps,
             'subdomains' => (int)$kpiSubs,
-            'users'      => (int)$kpiUsers
+            'users'      => (int)$kpiUsers,
+            'menu_hits'  => (int)$kpiMenuHits
         ],
         'subdomains' => $subBreakdown,
         'cities'     => $cityBreakdown,
         'devices'    => $devBreakdown,
+        'menuTop'    => $menuTop,
         'subFilterList' => $subFilterList,
-        'visitors'   => $visitors
+        'visitors'   => $visitors,
+        'menuLogs'   => $menuLogs
     ]);
     exit;
 }
@@ -267,6 +312,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .kpi-card.green::after { background-color: #10b981; }
         .kpi-card.purple::after { background-color: #8b5cf6; }
         .kpi-card.orange::after { background-color: #f59e0b; }
+        .kpi-card.teal::after { background-color: #06b6d4; }
 
         .kpi-icon {
             width: 48px;
@@ -283,6 +329,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .kpi-card.green .kpi-icon { background: rgba(16, 185, 129, 0.12); color: #10b981; }
         .kpi-card.purple .kpi-icon { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
         .kpi-card.orange .kpi-icon { background: rgba(245, 158, 11, 0.12); color: #f59e0b; }
+        .kpi-card.teal .kpi-icon { background: rgba(6, 182, 212, 0.12); color: #0891b2; }
 
         .kpi-info {
             flex-grow: 1;
@@ -301,10 +348,68 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             margin-top: 4px;
         }
 
+        /* View Switcher Tabs */
+        .view-switcher-bar {
+            display: flex;
+            gap: 10px;
+            padding: 12px 20px;
+            background: var(--bg-body);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .view-tab-btn {
+            padding: 7px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-card);
+            color: var(--text-muted);
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .view-tab-btn:hover {
+            color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .view-tab-btn.active {
+            background: var(--primary);
+            color: #ffffff;
+            border-color: var(--primary);
+            box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
+        }
+
+        .menu-title-badge {
+            background: rgba(16, 185, 129, 0.12);
+            color: #059669;
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 11.5px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .time-wib-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
         /* Analytics Panels Grid */
         .panels-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             gap: 20px;
             margin-bottom: 24px;
         }
@@ -615,6 +720,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <div class="kpi-value" id="kpiUsers">-</div>
                 </div>
             </div>
+
+            <div class="kpi-card teal">
+                <div class="kpi-icon"><i class="fa-solid fa-list-check"></i></div>
+                <div class="kpi-info">
+                    <div class="kpi-label">TOTAL AKSES MENU</div>
+                    <div class="kpi-value" id="kpiMenuHits">-</div>
+                </div>
+            </div>
         </section>
 
         <!-- Analytics Visual Panels Grid -->
@@ -640,14 +753,36 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <div style="padding:20px; text-align:center; color:var(--text-muted);">Memuat data...</div>
                 </div>
             </div>
+
+            <!-- Panel Menu Teratas -->
+            <div class="panel-card">
+                <div class="panel-header">
+                    <div class="panel-title"><i class="fa-solid fa-fire" style="color:#f59e0b;"></i> Menu Paling Sering Dibuka</div>
+                    <span style="font-size:11.5px; color:var(--text-muted);">Top 10 Menu</span>
+                </div>
+                <div id="topMenuListContainer">
+                    <div style="padding:20px; text-align:center; color:var(--text-muted);">Memuat data...</div>
+                </div>
+            </div>
         </section>
 
-        <!-- Main Data Table -->
+        <!-- Main Data Table Section -->
         <section class="table-section">
+            <!-- View Switcher Tabs -->
+            <div class="view-switcher-bar">
+                <button type="button" class="view-tab-btn active" id="btnTabVisitors" onclick="switchViewTab('visitors')">
+                    <i class="fa-solid fa-users-viewfinder"></i> Log Pengunjung &amp; IP Unik
+                </button>
+                <button type="button" class="view-tab-btn" id="btnTabMenus" onclick="switchViewTab('menus')">
+                    <i class="fa-solid fa-clock-rotate-left"></i> Riwayat Akses Menu Real-Time (WIB)
+                    <span class="badge-hits" id="badgeMenuCount" style="margin-left:4px;">0</span>
+                </button>
+            </div>
+
             <div class="table-controls">
                 <div class="search-box">
                     <i class="fa-solid fa-magnifying-glass"></i>
-                    <input type="text" id="searchInput" placeholder="Cari IP, Subdomain, Kota, ISP, User..." oninput="filterTable()">
+                    <input type="text" id="searchInput" placeholder="Cari IP, Subdomain, Kota, Menu, User..." oninput="filterTable()">
                 </div>
 
                 <div style="display:flex; gap:10px; align-items:center;">
@@ -658,17 +793,18 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 </div>
             </div>
 
-            <div class="table-responsive">
+            <!-- 1. Table Container: Visitor Overview -->
+            <div class="table-responsive" id="visitorTableContainer">
                 <table>
                     <thead>
                         <tr>
                             <th style="width:50px;">#</th>
                             <th>Subdomain</th>
-                            <th>IP Address & Provider</th>
+                            <th>IP Address &amp; Provider</th>
                             <th>Lokasi (Kota / Negara)</th>
                             <th>Akun Pengguna</th>
                             <th>Kunjungan</th>
-                            <th>Perangkat & OS</th>
+                            <th>Perangkat &amp; OS</th>
                             <th>Waktu Terakhir</th>
                             <th>Pertama Akses</th>
                         </tr>
@@ -681,15 +817,39 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 </table>
             </div>
 
+            <!-- 2. Table Container: Menu Activity Stream -->
+            <div class="table-responsive" id="menuTableContainer" style="display:none;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:50px;">#</th>
+                            <th>Waktu Akses (WIB, Jakarta)</th>
+                            <th>Subdomain</th>
+                            <th>Akun / Pengguna</th>
+                            <th>Menu yang Dibuka</th>
+                            <th>IP Address &amp; Provider</th>
+                            <th>Lokasi (Kota / Negara)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="menuTableBody">
+                        <tr>
+                            <td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">Memuat riwayat akses menu...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
             <div class="table-footer">
-                <div>Menampilkan <b id="filteredCount">0</b> dari <b id="totalCount">0</b> data entri log.</div>
-                <div>Sinkronisasi Otomatis Setiap 30 Detik</div>
+                <div>Menampilkan <b id="filteredCount">0</b> dari <b id="totalCount">0</b> data log (<span id="activeViewLabel">Log Pengunjung</span>).</div>
+                <div>Waktu Server: <span style="font-weight:600; color:var(--primary);">WIB (Asia/Jakarta, UTC+7)</span> • Auto Refresh 30s</div>
             </div>
         </section>
     </div>
 
     <script>
         let rawVisitors = [];
+        let rawMenuLogs = [];
+        let activeViewTab = 'visitors'; // 'visitors' | 'menus'
 
         async function loadVisitorData() {
             const icon = document.getElementById('refreshIcon');
@@ -704,12 +864,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     document.getElementById('kpiUniqueIps').textContent = Number(json.kpi.unique_ips).toLocaleString('id-ID');
                     document.getElementById('kpiSubdomains').textContent = Number(json.kpi.subdomains).toLocaleString('id-ID');
                     document.getElementById('kpiUsers').textContent = Number(json.kpi.users).toLocaleString('id-ID');
+                    document.getElementById('kpiMenuHits').textContent = Number(json.kpi.menu_hits || 0).toLocaleString('id-ID');
+                    document.getElementById('badgeMenuCount').textContent = Number(json.kpi.menu_hits || 0).toLocaleString('id-ID');
 
                     // Update Subdomain Breakdown
                     renderSubdomains(json.subdomains);
 
                     // Update City Breakdown
                     renderCities(json.cities);
+
+                    // Update Top Menus Breakdown
+                    renderTopMenus(json.menuTop);
 
                     // Update Subdomain Filter Dropdown
                     const subSelect = document.getElementById('subFilter');
@@ -723,8 +888,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         subSelect.appendChild(opt);
                     });
 
-                    // Update Table Data
+                    // Update Raw Data Arrays
                     rawVisitors = json.visitors || [];
+                    rawMenuLogs = json.menuLogs || [];
+
                     filterTable();
                 }
             } catch (err) {
@@ -749,7 +916,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <span class="subdomain-tag">${escapeHtml(label)}</span>
                         </div>
                         <div class="breakdown-stats">
-                            <span><i class="fa-solid fa-users" style="font-size:11px;"></i> ${item.unique_ips} IP Unik</span>
+                            <span><i class="fa-solid fa-users" style="font-size:11px;"></i> ${item.unique_ips} IP</span>
                             <span class="badge-hits">${Number(item.total_hits).toLocaleString('id-ID')} Hits</span>
                         </div>
                     </div>
@@ -784,30 +951,98 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             wrap.innerHTML = html;
         }
 
+        function renderTopMenus(list) {
+            const wrap = document.getElementById('topMenuListContainer');
+            if (!list || list.length === 0) {
+                wrap.innerHTML = '<div style="padding:15px; color:var(--text-muted); text-align:center;">Belum ada riwayat akses menu.</div>';
+                return;
+            }
+            let html = '';
+            list.forEach(item => {
+                const titleStr = item.menu_title || item.menu_id;
+                html += `
+                    <div class="breakdown-item">
+                        <div class="breakdown-name">
+                            <i class="fa-solid fa-circle-check" style="color:#10b981; font-size:12px;"></i>
+                            <span title="${escapeHtml(item.menu_id)}">${escapeHtml(titleStr)}</span>
+                        </div>
+                        <div class="breakdown-stats">
+                            <span class="badge-hits" style="background:rgba(245,158,11,0.12); color:#d97706;">${Number(item.cnt).toLocaleString('id-ID')}x</span>
+                        </div>
+                    </div>
+                `;
+            });
+            wrap.innerHTML = html;
+        }
+
+        function switchViewTab(tab) {
+            activeViewTab = tab;
+            const btnVisitors = document.getElementById('btnTabVisitors');
+            const btnMenus = document.getElementById('btnTabMenus');
+            const boxVisitors = document.getElementById('visitorTableContainer');
+            const boxMenus = document.getElementById('menuTableContainer');
+            const lbl = document.getElementById('activeViewLabel');
+
+            if (tab === 'visitors') {
+                btnVisitors.classList.add('active');
+                btnMenus.classList.remove('active');
+                boxVisitors.style.display = 'block';
+                boxMenus.style.display = 'none';
+                if (lbl) lbl.textContent = 'Log Pengunjung & IP Unik';
+            } else {
+                btnVisitors.classList.remove('active');
+                btnMenus.classList.add('active');
+                boxVisitors.style.display = 'none';
+                boxMenus.style.display = 'block';
+                if (lbl) lbl.textContent = 'Riwayat Akses Menu Real-Time (WIB)';
+            }
+
+            filterTable();
+        }
+
         function filterTable() {
             const search = (document.getElementById('searchInput').value || '').toLowerCase();
             const subFilter = document.getElementById('subFilter').value;
 
-            const filtered = rawVisitors.filter(r => {
-                const matchSub = (subFilter === 'ALL' || r.subdomain === subFilter);
-                if (!matchSub) return false;
+            if (activeViewTab === 'visitors') {
+                const filtered = rawVisitors.filter(r => {
+                    const matchSub = (subFilter === 'ALL' || r.subdomain === subFilter);
+                    if (!matchSub) return false;
 
-                if (!search) return true;
-                const matchKw = (r.ip_address || '').toLowerCase().includes(search) ||
-                                (r.subdomain || '').toLowerCase().includes(search) ||
-                                (r.city || '').toLowerCase().includes(search) ||
-                                (r.country_name || '').toLowerCase().includes(search) ||
-                                (r.isp || '').toLowerCase().includes(search) ||
-                                (r.user_id || '').toLowerCase().includes(search) ||
-                                (r.user_name || '').toLowerCase().includes(search) ||
-                                (r.browser || '').toLowerCase().includes(search) ||
-                                (r.os || '').toLowerCase().includes(search);
-                return matchKw;
-            });
+                    if (!search) return true;
+                    return (r.ip_address || '').toLowerCase().includes(search) ||
+                           (r.subdomain || '').toLowerCase().includes(search) ||
+                           (r.city || '').toLowerCase().includes(search) ||
+                           (r.country_name || '').toLowerCase().includes(search) ||
+                           (r.isp || '').toLowerCase().includes(search) ||
+                           (r.user_id || '').toLowerCase().includes(search) ||
+                           (r.user_name || '').toLowerCase().includes(search) ||
+                           (r.browser || '').toLowerCase().includes(search) ||
+                           (r.os || '').toLowerCase().includes(search);
+                });
 
-            renderTable(filtered);
-            document.getElementById('filteredCount').textContent = filtered.length;
-            document.getElementById('totalCount').textContent = rawVisitors.length;
+                renderTable(filtered);
+                document.getElementById('filteredCount').textContent = filtered.length;
+                document.getElementById('totalCount').textContent = rawVisitors.length;
+            } else {
+                const filtered = rawMenuLogs.filter(m => {
+                    const matchSub = (subFilter === 'ALL' || m.subdomain === subFilter);
+                    if (!matchSub) return false;
+
+                    if (!search) return true;
+                    return (m.ip_address || '').toLowerCase().includes(search) ||
+                           (m.subdomain || '').toLowerCase().includes(search) ||
+                           (m.user_id || '').toLowerCase().includes(search) ||
+                           (m.user_name || '').toLowerCase().includes(search) ||
+                           (m.menu_id || '').toLowerCase().includes(search) ||
+                           (m.menu_title || '').toLowerCase().includes(search) ||
+                           (m.city || '').toLowerCase().includes(search);
+                });
+
+                renderMenuTable(filtered);
+                document.getElementById('filteredCount').textContent = filtered.length;
+                document.getElementById('totalCount').textContent = rawMenuLogs.length;
+            }
         }
 
         function renderTable(list) {
@@ -860,6 +1095,58 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             tbody.innerHTML = html;
         }
 
+        function renderMenuTable(list) {
+            const tbody = document.getElementById('menuTableBody');
+            if (!list || list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">Belum ada riwayat akses menu pengguna.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            list.forEach((m, idx) => {
+                const subLabel = m.subdomain === 'root' ? 'root (Portal)' : m.subdomain;
+                const locStr = (m.city ? m.city + ', ' : '') + (m.country_name || 'Indonesia');
+                const titleStr = m.menu_title || m.menu_id;
+
+                let userHtml = '<span class="guest-tag">guest</span>';
+                if (m.user_id) {
+                    userHtml = `<span class="user-tag"><i class="fa-solid fa-user-check"></i> ${escapeHtml(m.user_id)}</span>`;
+                    if (m.user_name && m.user_name !== m.user_id && m.user_name !== '-') {
+                        userHtml += `<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">${escapeHtml(m.user_name)}</div>`;
+                    }
+                }
+
+                html += `
+                    <tr>
+                        <td style="color:var(--text-muted);">${idx + 1}</td>
+                        <td style="white-space:nowrap;">
+                            <div class="time-wib-badge">
+                                <i class="fa-regular fa-clock" style="color:var(--primary); font-size:11px;"></i>
+                                <span>${m.accessed_at} WIB</span>
+                            </div>
+                        </td>
+                        <td><span class="subdomain-tag">${escapeHtml(subLabel)}</span></td>
+                        <td>${userHtml}</td>
+                        <td>
+                            <div class="menu-title-badge">
+                                <i class="fa-regular fa-folder-open"></i>
+                                <span>${escapeHtml(titleStr)}</span>
+                            </div>
+                            <div style="font-family:monospace; font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(m.menu_id)}</div>
+                        </td>
+                        <td>
+                            <div class="ip-badge"><i class="fa-solid fa-terminal" style="font-size:10px; color:var(--primary);"></i> ${escapeHtml(m.ip_address)}</div>
+                            <div class="isp-text" title="${escapeHtml(m.isp || '')}">${escapeHtml(m.isp || 'Provider Publik')}</div>
+                        </td>
+                        <td>
+                            <div style="font-weight:500;">${escapeHtml(locStr)}</div>
+                        </td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
         function escapeHtml(str) {
             if (!str) return '';
             return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -870,36 +1157,65 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         function exportToCsv() {
-            if (!rawVisitors || rawVisitors.length === 0) {
-                alert("Tidak ada data pengunjung untuk diekspor!");
-                return;
-            }
-            let csv = "No,Subdomain,IP Address,ISP,Kota,Negara,User ID,User Name,Total Hits,OS,Browser,Device,Last Visit,First Visit\n";
-            rawVisitors.forEach((r, idx) => {
-                const row = [
-                    idx + 1,
-                    `"${r.subdomain || ''}"`,
-                    `"${r.ip_address || ''}"`,
-                    `"${(r.isp || '').replace(/"/g, '""')}"`,
-                    `"${(r.city || '').replace(/"/g, '""')}"`,
-                    `"${(r.country_name || '').replace(/"/g, '""')}"`,
-                    `"${r.user_id || ''}"`,
-                    `"${(r.user_name || '').replace(/"/g, '""')}"`,
-                    r.hit_count || 1,
-                    `"${r.os || ''}"`,
-                    `"${r.browser || ''}"`,
-                    `"${r.device_type || ''}"`,
-                    `"${r.last_visit || ''}"`,
-                    `"${r.first_visit || ''}"`
-                ];
-                csv += row.join(",") + "\n";
-            });
+            if (activeViewTab === 'visitors') {
+                if (!rawVisitors || rawVisitors.length === 0) {
+                    alert("Tidak ada data pengunjung untuk diekspor!");
+                    return;
+                }
+                let csv = "No,Subdomain,IP Address,ISP,Kota,Negara,User ID,User Name,Total Hits,OS,Browser,Device,Last Visit,First Visit\n";
+                rawVisitors.forEach((r, idx) => {
+                    const row = [
+                        idx + 1,
+                        `"${r.subdomain || ''}"`,
+                        `"${r.ip_address || ''}"`,
+                        `"${(r.isp || '').replace(/"/g, '""')}"`,
+                        `"${(r.city || '').replace(/"/g, '""')}"`,
+                        `"${(r.country_name || '').replace(/"/g, '""')}"`,
+                        `"${r.user_id || ''}"`,
+                        `"${(r.user_name || '').replace(/"/g, '""')}"`,
+                        r.hit_count || 1,
+                        `"${r.os || ''}"`,
+                        `"${r.browser || ''}"`,
+                        `"${r.device_type || ''}"`,
+                        `"${r.last_visit || ''}"`,
+                        `"${r.first_visit || ''}"`
+                    ];
+                    csv += row.join(",") + "\n";
+                });
 
+                downloadBlobCsv(csv, "CEISA4_Visitor_Log_" + new Date().toISOString().slice(0,10) + ".csv");
+            } else {
+                if (!rawMenuLogs || rawMenuLogs.length === 0) {
+                    alert("Tidak ada data riwayat akses menu untuk diekspor!");
+                    return;
+                }
+                let csv = "No,Waktu Akses (WIB),Subdomain,User ID,User Name,Menu ID,Menu Title,IP Address,Kota,ISP\n";
+                rawMenuLogs.forEach((m, idx) => {
+                    const row = [
+                        idx + 1,
+                        `"${m.accessed_at} WIB"`,
+                        `"${m.subdomain || ''}"`,
+                        `"${m.user_id || ''}"`,
+                        `"${(m.user_name || '').replace(/"/g, '""')}"`,
+                        `"${m.menu_id || ''}"`,
+                        `"${(m.menu_title || '').replace(/"/g, '""')}"`,
+                        `"${m.ip_address || ''}"`,
+                        `"${(m.city || '').replace(/"/g, '""')}"`,
+                        `"${(m.isp || '').replace(/"/g, '""')}"`
+                    ];
+                    csv += row.join(",") + "\n";
+                });
+
+                downloadBlobCsv(csv, "CEISA4_Menu_Audit_Log_" + new Date().toISOString().slice(0,10) + ".csv");
+            }
+        }
+
+        function downloadBlobCsv(csv, filename) {
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", "CEISA4_Visitor_Log_" + new Date().toISOString().slice(0,10) + ".csv");
+            link.setAttribute("download", filename);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);

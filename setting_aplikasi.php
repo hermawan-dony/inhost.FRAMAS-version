@@ -179,6 +179,8 @@ if ($action === 'save') {
     $showCompCard      = trim($_POST['show_company_card'] ?? 'auto');
     $showLoginCmpTitle = trim($_POST['show_login_company_title'] ?? '0');
     if ($showLoginCmpTitle !== '1') $showLoginCmpTitle = '0';
+    $enableVisitorMenuLog = isset($_POST['enable_visitor_menu_log']) ? trim($_POST['enable_visitor_menu_log']) : '1';
+    if ($enableVisitorMenuLog !== '0') $enableVisitorMenuLog = '1';
 
     // 1. Upload File Logo Kustom jika ada
     if (isset($_FILES['logo_file']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
@@ -247,7 +249,8 @@ if ($action === 'save') {
         'show_company_card'        => $showCompCard,
         'show_login_company_title' => $showLoginCmpTitle,
         'default_page_size'        => $pageSize,
-        'toast_duration'     => $toastDur
+        'toast_duration'           => $toastDur,
+        'enable_visitor_menu_log'  => $enableVisitorMenuLog
     ];
 
     // Hanya simpan CEISA Gateway jika mengedit Global (atau jika Admin)
@@ -1599,6 +1602,25 @@ if ($isCustomScope) {
                                 <option value="2600" <?= (($currentSettings['toast_duration'] ?? '2600') === '2600') ? 'selected' : '' ?>>2.6 Detik (Standar)</option>
                                 <option value="4000" <?= (($currentSettings['toast_duration'] ?? '2600') === '4000') ? 'selected' : '' ?>>4.0 Detik (Santai)</option>
                             </select>
+                        </div>
+                    </div>
+
+                    <div class="form-section-title" style="margin-top: 15px;">
+                        <i class="fa-solid fa-chart-line"></i> Audit &amp; Pemantauan Pengunjung (Visitor &amp; Menu Analytics)
+                    </div>
+                    <div class="form-row single">
+                        <div class="form-group">
+                            <label>
+                                <span>Pencatatan Riwayat Menu &amp; IP Pengunjung (Audit Log)</span>
+                                <span class="hint">Memantau menu yang dibuka dan IP pengunjung di URL /visitor</span>
+                            </label>
+                            <select class="form-control" id="inp_enable_visitor_menu_log" name="enable_visitor_menu_log">
+                                <option value="1" <?= (($currentSettings['enable_visitor_menu_log'] ?? '1') === '1') ? 'selected' : '' ?>>✅ Aktif (Catat Riwayat Menu &amp; IP Pengunjung dengan Jam WIB)</option>
+                                <option value="0" <?= (($currentSettings['enable_visitor_menu_log'] ?? '1') === '0') ? 'selected' : '' ?>>⛔ Non-Aktif (Hentikan Pencatatan Menu)</option>
+                            </select>
+                            <div style="font-size:8.5px; color:var(--text-muted); margin-top:3px;">
+                                Menggunakan mekanisme background beacon berbobot sangat ringan (0 ms latensi antarmuka). Waktu pencatatan terstandarisasi Waktu Indonesia Barat (WIB / Asia/Jakarta).
+                            </div>
                         </div>
                     </div>
                 </div>

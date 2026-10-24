@@ -26,6 +26,23 @@ recordVisitorAccess($koneksi, ['event' => 'visit']);
 $action = $_REQUEST['action'] ?? '';
 
 // -------------------------------------------------------------
+// 0. AJAX / BEACON API: CATAT AKSES MENU PENGGUNA
+// -------------------------------------------------------------
+if ($action === 'log_menu') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cmpId = $_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '');
+    if (isVisitorMenuLogEnabled($koneksi, $cmpId)) {
+        $mId    = trim($_REQUEST['menu_id'] ?? '');
+        $mTitle = trim($_REQUEST['menu_title'] ?? '');
+        if (!empty($mId)) {
+            recordMenuAccess($koneksi, $mId, $mTitle);
+        }
+    }
+    echo json_encode(['status' => 'OK']);
+    exit;
+}
+
+// -------------------------------------------------------------
 // 1. AJAX API: LOGIN
 // -------------------------------------------------------------
 if ($action === 'login') {
@@ -945,6 +962,15 @@ $breadcrumbTitlesPhp = [
     'inv_adjust_spp'  => 'Adjust SPP'
 ];
 $initBreadcrumbText = $breadcrumbTitlesPhp[$initialTab] ?? 'Dashboard Ceisa 4.0';
+
+// Catat log menu awal jika user telah login & fitur audit diaktifkan
+if (!empty($sessionUserId) && isVisitorMenuLogEnabled($koneksi, $sessionCmpId)) {
+    recordMenuAccess($koneksi, $initialTab, $initBreadcrumbText, [
+        'user_id'   => $sessionUserId,
+        'user_name' => $sessionUserName,
+        'cmp_id'    => $sessionCmpId
+    ]);
+}
 
 $adminParam = $isAdmin ? '&is_admin=1' : '&is_admin=0';
 if ($initialTab === 'editor') {
@@ -4402,6 +4428,28 @@ if ($initialTab === 'editor') {
             if (bcEl && breadcrumbTitles[tabId]) {
                 bcEl.innerText = breadcrumbTitles[tabId];
             }
+
+            // Background Beacon: Catat riwayat menu yang dibuka (non-blocking 0 ms)
+            try {
+                if (window.lastLoggedMenuTab !== tabId) {
+                    window.lastLoggedMenuTab = tabId;
+                    const menuTitle = breadcrumbTitles[tabId] || tabId;
+                    if (navigator.sendBeacon) {
+                        const fd = new FormData();
+                        fd.append('action', 'log_menu');
+                        fd.append('menu_id', tabId);
+                        fd.append('menu_title', menuTitle);
+                        navigator.sendBeacon('/index.php', fd);
+                    } else {
+                        fetch('/index.php?action=log_menu', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: `action=log_menu&menu_id=${encodeURIComponent(tabId)}&menu_title=${encodeURIComponent(menuTitle)}`,
+                            keepalive: true
+                        }).catch(() => {});
+                    }
+                }
+            } catch(e) {}
 
             const wrapper = document.getElementById('iframeWrapper');
             if (!wrapper) return;
