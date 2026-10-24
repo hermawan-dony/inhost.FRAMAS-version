@@ -17,10 +17,11 @@ if (!$isAdmin) {
 }
 
 // Validasi & Ambil Daftar Tabel
+$currentDbName = !empty($database) ? $database : 'ceisa0400db';
 $tablesRes = mysqli_query($koneksi, "
     SELECT TABLE_NAME, TABLE_ROWS, (DATA_LENGTH + INDEX_LENGTH) AS TABLE_SIZE 
     FROM information_schema.TABLES 
-    WHERE TABLE_SCHEMA = 'ceisa0400db' 
+    WHERE TABLE_SCHEMA = '$currentDbName' 
     ORDER BY TABLE_NAME ASC
 ");
 

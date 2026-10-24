@@ -57,14 +57,18 @@ if (empty($cmp_name)) {
 }
 
 $companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 
 if (!function_exists('isItDocPermitted')) {
     function isItDocPermitted($d) {
-        global $is_admin, $cmp_id, $companyAllowedDocs;
+        global $is_admin, $cmp_id, $companyAllowedDocs, $effectiveAllowedDocs;
         if (!empty($is_admin) && (empty($cmp_id) || $cmp_id === 'ALL')) {
             return true;
         }
-        return in_array((string)$d, $companyAllowedDocs);
+        if (!empty($is_admin)) {
+            return in_array((string)$d, $companyAllowedDocs);
+        }
+        return in_array((string)$d, $effectiveAllowedDocs);
     }
 }
 

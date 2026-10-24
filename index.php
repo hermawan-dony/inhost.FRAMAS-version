@@ -28,21 +28,32 @@ if ($action === 'login') {
         exit;
     }
 
-    // A. Login Khusus SUPER ADMINISTRATOR (Pilihan [ADMIN] ATAU Username 'dp')
-    $isSuperAdminAttempt = (strtolower($cmp_id) === 'admin' || $username === 'dp');
+    // A. Login Khusus SUPER ADMINISTRATOR (Pilihan [ADMIN] ATAU Username 'dp' / 'admin')
+    $isSuperAdminAttempt = (strtolower($cmp_id) === 'admin' || $username === 'dp' || $username === 'admin');
     if ($isSuperAdminAttempt) {
-        $checkAdmin = $koneksi->query("SELECT user_id, password FROM bc_ceisa_login WHERE user_id = 'dp' OR user_id = 'admin' ORDER BY (user_id = 'dp') DESC LIMIT 1");
-        $validPass = '1234';
+        $targetUser = !empty($username) ? $username : 'dp';
+        $uEsc = $koneksi->real_escape_string($targetUser);
+
+        $checkAdmin = $koneksi->query("SELECT user_id, nama_lengkap, password, role FROM bc_ceisa_login 
+                                       WHERE (user_id = '{$uEsc}' OR user_id = 'dp' OR user_id = 'admin') 
+                                         AND (role = 'superadmin' OR cmp_id = 'SYSTEM' OR user_id = 'admin' OR user_id = 'dp') 
+                                       ORDER BY (user_id = '{$uEsc}') DESC, (role = 'superadmin') DESC LIMIT 1");
+        $validPass = '';
+        $adminUserRow = null;
         if ($checkAdmin && $ar = $checkAdmin->fetch_assoc()) {
-            $validPass = !empty($ar['password']) ? $ar['password'] : '1234';
+            $adminUserRow = $ar;
+            $validPass = $ar['password'] ?? '';
         }
 
-        if ($password === $validPass || $password === '1234') {
+        if (!empty($validPass) && $password === $validPass) {
+            $loggedUserId = $adminUserRow['user_id'] ?? 'dp';
+            $loggedName   = $adminUserRow['nama_lengkap'] ?? 'Super Administrator (DP)';
+
             $_SESSION['is_super_admin']   = true;
             $_SESSION['is_admin']         = true; // Super Admin memegang kendali penuh
             $_SESSION['is_company_admin'] = false;
-            $_SESSION['user_id']          = 'dp';
-            $_SESSION['user_name']        = 'Super Administrator (DP)';
+            $_SESSION['user_id']          = $loggedUserId;
+            $_SESSION['user_name']        = $loggedName;
             $_SESSION['user_role']        = 'superadmin';
             $_SESSION['allowed_menus']    = ['*'];
             $_SESSION['allowed_docs']     = ['*'];
@@ -79,9 +90,9 @@ if ($action === 'login') {
                 $_SESSION['company_card_color'] = '';
             }
 
-            // Pastikan akun 'dp' tersimpan di bc_ceisa_login
+            // Pastikan akun tersimpan di bc_ceisa_login
             @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto)
-                             VALUES ('SYSTEM', 'dp', 'Super Administrator (DP)', '{$password}', '1', 'superadmin', '*', '*', 1, 'ALL')
+                             VALUES ('SYSTEM', '{$loggedUserId}', '{$loggedName}', '{$password}', '1', 'superadmin', '*', '*', 1, 'ALL')
                              ON DUPLICATE KEY UPDATE password = VALUES(password), role = 'superadmin', is_active = 1");
 
             echo json_encode([
@@ -89,11 +100,11 @@ if ($action === 'login') {
                 'is_admin'       => true,
                 'is_super_admin' => true,
                 'user_role'      => 'superadmin',
-                'message'        => 'Login Super Administrator (DP) berhasil!'
+                'message'        => 'Login Super Administrator berhasil!'
             ]);
             exit;
         } else {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Password Super Administrator salah! (Default awal: 1234)']);
+            echo json_encode(['status' => 'ERROR', 'message' => 'Username atau Password Administrator salah!']);
             exit;
         }
     }
@@ -151,8 +162,18 @@ if ($action === 'login') {
                         $m = $u['allowed_menus'];
                         $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
                     }
+                    $compAllowed = ceisa_resolve_allowed_docs($comp['company_roles'] ?: 'tpb', $comp['allowed_docs'] ?? null);
+                    $_SESSION['company_allowed_docs'] = $compAllowed;
+
                     $d = $u['allowed_docs'];
-                    $_SESSION['allowed_docs']  = ($d === '*' || empty($d)) ? ['*'] : (json_decode($d, true) ?: [$d]);
+                    $uDocs = ceisa_parse_docs($d);
+                    $_SESSION['user_allowed_docs'] = $uDocs;
+
+                    if ($isSuper || in_array('*', $uDocs)) {
+                        $_SESSION['allowed_docs'] = $isSuper ? ['*'] : $compAllowed;
+                    } else {
+                        $_SESSION['allowed_docs'] = array_values(array_intersect($uDocs, $compAllowed));
+                    }
 
                     echo json_encode([
                         'status'           => 'OK',
@@ -256,7 +277,14 @@ if ($action === 'switch_company') {
             $_SESSION['company_npwp']       = $comp['npwp'];
             $_SESSION['is_inv']             = (int)$comp['IS_INV'];
             $_SESSION['company_roles']      = $comp['company_roles'] ?: 'tpb';
-            $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
+            $_SESSION['company_allowed_docs'] = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
+            if (!empty($_SESSION['is_super_admin'])) {
+                $_SESSION['user_allowed_docs'] = ['*'];
+                $_SESSION['allowed_docs']      = ['*'];
+            } else {
+                $uDocs = ceisa_parse_docs($_SESSION['user_allowed_docs'] ?? '*');
+                $_SESSION['allowed_docs'] = (in_array('*', $uDocs) || in_array('ALL', $uDocs)) ? $_SESSION['company_allowed_docs'] : array_values(array_intersect($uDocs, $_SESSION['company_allowed_docs']));
+            }
             $_SESSION['company_erp_name']   = $comp['ERP_Name'] ?: '-';
             $_SESSION['company_logo']       = $comp['logo'] ?? '';
             $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
@@ -326,16 +354,18 @@ if ($action === 'change_password') {
     }
 
     if (!empty($_SESSION['is_admin'])) {
-        $chk = $koneksi->query("SELECT password FROM bc_ceisa_login WHERE user_id = 'admin' LIMIT 1");
-        $curr = '1234';
+        $sessUser = $_SESSION['user_id'] ?? 'dp';
+        $uEsc = $koneksi->real_escape_string($sessUser);
+        $chk = $koneksi->query("SELECT password FROM bc_ceisa_login WHERE (user_id = '{$uEsc}' OR user_id = 'dp') AND (role = 'superadmin' OR cmp_id = 'SYSTEM') ORDER BY (user_id = '{$uEsc}') DESC LIMIT 1");
+        $curr = '';
         if ($chk && $cr = $chk->fetch_assoc()) {
-            $curr = !empty($cr['password']) ? $cr['password'] : '1234';
+            $curr = $cr['password'] ?? '';
         }
-        if ($oldPass !== $curr) {
+        if (empty($curr) || $oldPass !== $curr) {
             echo json_encode(['status' => 'ERROR', 'message' => 'Password lama Administrator salah!']);
             exit;
         }
-        $upd = $koneksi->prepare("UPDATE bc_ceisa_login SET password = ? WHERE user_id = 'admin'");
+        $upd = $koneksi->prepare("UPDATE bc_ceisa_login SET password = ? WHERE user_id IN ('dp', 'admin') AND (role = 'superadmin' OR cmp_id = 'SYSTEM')");
         if ($upd) {
             $upd->bind_param("s", $newPass);
             $upd->execute();
@@ -514,35 +544,46 @@ if ($res) {
 // Deteksi Subdomain Perusahaan (misal: https://framas.inhost.web.id atau index.php?subdomain=framas)
 $subdomainCompany = null;
 $detectedSubdomain = '';
+$isSubdomainUnregistered = false;
+$isAdminOnlyLogin = false;
 
 $rawHost = strtolower($_SERVER['HTTP_HOST'] ?? '');
 $cleanHost = explode(':', $rawHost)[0];
+$parts = explode('.', $cleanHost);
+$subCandidate = '';
 
 if (isset($_GET['subdomain'])) {
     $paramSub = strtolower(preg_replace('/[^a-zA-Z0-9_-]/', '', trim($_GET['subdomain'])));
-    if (!in_array($paramSub, ['none', 'root', 'all', 'portal', 'admin', 'www', 'localhost', ''])) {
-        $detectedSubdomain = $paramSub;
-    } else {
-        $detectedSubdomain = '';
+    if ($paramSub === 'admin') {
+        $isAdminOnlyLogin = true;
+    } elseif (!in_array($paramSub, ['none', 'root', 'all', 'portal', 'www', 'localhost', ''])) {
+        $subCandidate = $paramSub;
     }
 } else {
-    $parts = explode('.', $cleanHost);
     if (count($parts) >= 3) {
         $firstPart = strtolower($parts[0]);
-        if (!in_array($firstPart, ['www', 'root', 'admin', 'portal', 'api', 'app', 'mail', 'cpanel', 'localhost'])) {
-            $detectedSubdomain = $firstPart;
+        if ($firstPart === 'admin') {
+            $isAdminOnlyLogin = true;
+        } elseif (!in_array($firstPart, ['www', 'root', 'portal', 'api', 'app', 'mail', 'cpanel', 'localhost'])) {
+            $subCandidate = $firstPart;
         }
     }
 }
 
-if (!empty($detectedSubdomain) && isset($koneksi) && $koneksi) {
+if (!empty($subCandidate) && isset($koneksi) && $koneksi) {
     $subStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company WHERE LOWER(subdomain) = ? AND is_active = 1 LIMIT 1");
     if ($subStmt) {
-        $subStmt->bind_param("s", $detectedSubdomain);
+        $subStmt->bind_param("s", $subCandidate);
         $subStmt->execute();
         $subRes = $subStmt->get_result();
         if ($subRes && $subRes->num_rows > 0) {
             $subdomainCompany = $subRes->fetch_assoc();
+            $detectedSubdomain = $subCandidate;
+        } else {
+            // Subdomain dipanggil tapi belum terdaftar sebagai perusahaan -> Akses khusus login Administrator!
+            $isSubdomainUnregistered = true;
+            $isAdminOnlyLogin = true;
+            $detectedSubdomain = $subCandidate;
         }
         $subStmt->close();
     }
@@ -577,9 +618,9 @@ if (!empty($urlCmpParam) && isset($koneksi) && $koneksi) {
             // Jika ada parameter &user=... khusus, periksa hak akses profil pengguna spesifik
             if (!empty($_GET['user'])) {
                 $specificUser = trim($_GET['user']);
-                $uStmt = $koneksi->prepare("SELECT user_id, nama_lengkap, role, allowed_menus, allowed_docs FROM bc_ceisa_login WHERE (user_id = ? OR username = ?) AND cmp_id = ? AND is_active = 1 LIMIT 1");
+                $uStmt = $koneksi->prepare("SELECT user_id, nama_lengkap, role, allowed_menus, allowed_docs FROM bc_ceisa_login WHERE user_id = ? AND cmp_id = ? AND is_active = 1 LIMIT 1");
                 if ($uStmt) {
-                    $uStmt->bind_param("sss", $specificUser, $specificUser, $cRow['cmp_id']);
+                    $uStmt->bind_param("ss", $specificUser, $cRow['cmp_id']);
                     $uStmt->execute();
                     $uRes = $uStmt->get_result();
                     if ($uRes && $uData = $uRes->fetch_assoc()) {
@@ -639,16 +680,48 @@ if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
         $_SESSION['company_subdomain'] = $sessionSubdomain;
         $_SESSION['company_card_color'] = $sessionCardColor;
         $_SESSION['company_roles'] = $sessionCompanyRoles;
-        $_SESSION['allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, $rInv['allowed_docs'] ?? null);
+        $_SESSION['company_allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, $rInv['allowed_docs'] ?? null);
         $_SESSION['company_erp_name'] = $sessionErpName;
     } elseif (isset($_SESSION['is_inv'])) {
         $sessionIsInv = (int)$_SESSION['is_inv'];
         $sessionCompanyRoles = $_SESSION['company_roles'] ?? 'tpb';
         $sessionErpName = $_SESSION['company_erp_name'] ?? '-';
+        if (!isset($_SESSION['company_allowed_docs'])) {
+            $_SESSION['company_allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, null);
+        }
     }
 } else {
     $sessionCompanyRoles = $_SESSION['company_roles'] ?? 'tpb';
     $sessionErpName = $_SESSION['company_erp_name'] ?? '-';
+    if (!isset($_SESSION['company_allowed_docs'])) {
+        $_SESSION['company_allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, null);
+    }
+}
+
+// Sinkronisasi Hak Akses Dokumen Pengguna yang Sedang Login
+if (!empty($_SESSION['is_super_admin'])) {
+    $_SESSION['user_allowed_docs'] = ['*'];
+    $_SESSION['allowed_docs'] = ['*'];
+} else {
+    if (!empty($sessionUserId) && !empty($sessionCmpId) && isset($koneksi) && $koneksi) {
+        $uStmt = $koneksi->prepare("SELECT allowed_docs, role FROM bc_ceisa_login WHERE user_id = ? AND cmp_id = ? LIMIT 1");
+        if ($uStmt) {
+            $uStmt->bind_param("ss", $sessionUserId, $sessionCmpId);
+            $uStmt->execute();
+            $uRes = $uStmt->get_result();
+            if ($uRes && $uRow = $uRes->fetch_assoc()) {
+                $_SESSION['user_allowed_docs'] = ceisa_parse_docs($uRow['allowed_docs']);
+            }
+            $uStmt->close();
+        }
+    }
+    $uDocs = ceisa_parse_docs($_SESSION['user_allowed_docs'] ?? '*');
+    $cDocs = $_SESSION['company_allowed_docs'] ?? ceisa_resolve_allowed_docs($sessionCompanyRoles, null);
+    if (in_array('*', $uDocs) || in_array('ALL', $uDocs)) {
+        $_SESSION['allowed_docs'] = $cDocs;
+    } else {
+        $_SESSION['allowed_docs'] = array_values(array_intersect($uDocs, (array)$cDocs));
+    }
 }
 
 // Resolusi App Settings (Multi-tenant: Prioritas Company Subdomain / Active Session -> Fallback Global)
@@ -673,18 +746,19 @@ $hasRolePib      = in_array('pib', $activeRolesList);
 $hasRolePeb      = in_array('peb', $activeRolesList);
 $hasRoleTpb      = in_array('tpb', $activeRolesList);
 $hasRolePpkek    = in_array('ppkek', $activeRolesList);
+$hasRolePlb      = in_array('plb', $activeRolesList);
 
 // Perusahaan HANYA berperan Manifest (tanpa dokumen BC kepabeanan lainnya)
-$isManifestOnlyCompany = ($hasRoleManifest && !$hasRolePib && !$hasRolePeb && !$hasRoleTpb && !$hasRolePpkek);
+$isManifestOnlyCompany = ($hasRoleManifest && !$hasRolePib && !$hasRolePeb && !$hasRoleTpb && !$hasRolePpkek && !$hasRolePlb);
 
-// Dokumen pabean standar ada jika memiliki salah satu dari PIB, PEB, TPB, atau PPKEK
-$hasStandardCustomsDocs = ($hasRolePib || $hasRolePeb || $hasRoleTpb || $hasRolePpkek);
+// Dokumen pabean standar ada jika memiliki salah satu dari PIB, PEB, TPB, PPKEK, atau PLB
+$hasStandardCustomsDocs = ($hasRolePib || $hasRolePeb || $hasRoleTpb || $hasRolePpkek || $hasRolePlb);
 
 // Apakah ERP yang dipakai adalah Odoo
 $isOdooErpCompany = (strtoupper(trim($sessionErpName)) === 'ODOO');
 
-// Rule User: yang perlu Modul Inventory HANYA TPB & PPKEK, selain itu HIDE
-$isInventoryModuleAllowed = ($hasRoleTpb || $hasRolePpkek) && ($sessionIsInv === 1 || $userRole === 'bc');
+// Rule User: yang perlu Modul Inventory HANYA TPB, PPKEK & PLB, selain itu HIDE
+$isInventoryModuleAllowed = ($hasRoleTpb || $hasRolePpkek || $hasRolePlb) && ($sessionIsInv === 1 || $userRole === 'bc');
 
 /**
  * Helper menghitung style inline dan variabel CSS untuk card perusahaan di sidebar
@@ -988,6 +1062,71 @@ if ($initialTab === 'editor') {
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
             overflow-x: hidden;
+        }
+
+        /* -------------------------------------------------------------
+           IFRAME VIEW LOADER & PROGRESS BAR
+           ------------------------------------------------------------- */
+        .iframe-loader-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--bg-base);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 999;
+            opacity: 1;
+            transition: opacity 0.25s ease, visibility 0.25s ease;
+            pointer-events: none;
+        }
+
+        .iframe-top-progress {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 3px;
+            background: linear-gradient(90deg, #1890ff 0%, #40a9ff 50%, #52c41a 100%);
+            background-size: 200% 100%;
+            animation: iframeProgressAnim 1.4s ease-in-out infinite;
+            z-index: 1000;
+        }
+
+        @keyframes iframeProgressAnim {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        .iframe-spinner {
+            width: 38px;
+            height: 38px;
+            border: 3.5px solid rgba(24, 144, 255, 0.16);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: iframeSpinAnim 0.75s linear infinite;
+        }
+
+        @keyframes iframeSpinAnim {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .iframe-loader-title {
+            margin-top: 15px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            letter-spacing: 0.2px;
+        }
+
+        .iframe-loader-subtitle {
+            font-size: 10.5px;
+            color: var(--text-muted);
+            margin-top: 4px;
         }
 
         /* -------------------------------------------------------------
@@ -2709,7 +2848,12 @@ if ($initialTab === 'editor') {
                 <?php 
                 $showLoginCompanyTitle = ($appSettings['show_login_company_title'] ?? '0') === '1';
                 ?>
-                <?php if ($subdomainCompany): ?>
+                <?php if ($isAdminOnlyLogin): ?>
+                    <div style="margin-top:2px; margin-bottom:14px;">
+                        <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;">Login Administrator</h2>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0;">Silakan masukkan akun Administrator</p>
+                    </div>
+                <?php elseif ($subdomainCompany): ?>
                     <?php if ($showLoginCompanyTitle): ?>
                         <div id="loginCompanyTitleWrap" style="margin-top:2px; margin-bottom:8px;">
                             <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;"><?= htmlspecialchars($subdomainCompany['cmp_name']) ?></h2>
@@ -2729,7 +2873,10 @@ if ($initialTab === 'editor') {
                     <input type="text" name="fake_user_remember" tabindex="-1" autocomplete="off">
                     <input type="password" name="fake_pass_remember" tabindex="-1" autocomplete="new-password">
                 </div>
-                <?php if ($subdomainCompany): ?>
+                <?php if ($isAdminOnlyLogin): ?>
+                    <!-- Akses Khusus Administrator -->
+                    <input type="hidden" id="loginCmp" value="admin">
+                <?php elseif ($subdomainCompany): ?>
                     <!-- Perusahaan Otomatis dari Subdomain -->
                     <input type="hidden" id="loginCmp" value="<?= htmlspecialchars($subdomainCompany['cmp_id']) ?>">
                 <?php else: ?>
@@ -2750,13 +2897,13 @@ if ($initialTab === 'editor') {
                         </select>
                     </div>
                 <?php endif; ?>
-                <div class="form-group" id="groupLoginUsername" style="<?= $subdomainCompany ? 'display:block;' : '' ?>">
+                <div class="form-group" id="groupLoginUsername" style="<?= ($isAdminOnlyLogin || $subdomainCompany) ? 'display:block;' : '' ?>">
                     <label for="loginUsername">
-                        <span><i class="fa-solid fa-user" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Nama Pengguna (Username)<span style="color:#ff4d4f; margin-left:3px;">*</span></span>
+                        <span><i class="fa-solid <?= $isAdminOnlyLogin ? 'fa-user-shield' : 'fa-user' ?>" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Nama Pengguna (Username)<span style="color:#ff4d4f; margin-left:3px;">*</span></span>
                     </label>
                     <div class="corporate-input-wrap">
-                        <i class="fa-solid fa-user input-icon"></i>
-                        <input type="text" id="loginUsername" name="login_user_<?= date('Ymd') ?>" value="" <?= $subdomainCompany ? 'required' : '' ?> placeholder="Masukkan username pengguna..." autocomplete="off" readonly onfocus="this.removeAttribute('readonly');">
+                        <i class="fa-solid <?= $isAdminOnlyLogin ? 'fa-user-shield' : 'fa-user' ?> input-icon"></i>
+                        <input type="text" id="loginUsername" name="login_user_<?= date('Ymd') ?>" value="" <?= ($isAdminOnlyLogin || $subdomainCompany) ? 'required' : '' ?> placeholder="<?= $isAdminOnlyLogin ? 'Masukkan username administrator...' : 'Masukkan username pengguna...' ?>" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');">
                     </div>
                 </div>
                 <div class="form-group">
@@ -2774,7 +2921,7 @@ if ($initialTab === 'editor') {
                 <div id="loginMsg"></div>
                 <button type="submit" class="btn-login-submit" id="btnLogin">
                     <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:13px;"></i>
-                    <span>MASUK KE SISTEM</span>
+                    <span><?= $isAdminOnlyLogin ? 'MASUK SEBAGAI ADMINISTRATOR' : 'MASUK KE SISTEM' ?></span>
                 </button>
             </form>
             <script>
@@ -3671,6 +3818,14 @@ if ($initialTab === 'editor') {
 
             <!-- MAIN IFRAME VIEW -->
             <div id="iframeWrapper" style="flex:1; width:100%; height:calc(100vh - 38px); position:relative; overflow:hidden;">
+                <!-- LOADER OVERLAY -->
+                <div id="iframeLoader" class="iframe-loader-overlay">
+                    <div class="iframe-top-progress"></div>
+                    <div class="iframe-spinner"></div>
+                    <div id="iframeLoaderTitle" class="iframe-loader-title">Memuat <?= htmlspecialchars($breadcrumbTitlesPhp[$initialTab] ?? 'Dashboard Ceisa 4.0') ?>...</div>
+                    <div class="iframe-loader-subtitle">Menghubungkan ke server...</div>
+                </div>
+
                 <iframe id="mainFrame" class="iframe-container" data-tab="<?= htmlspecialchars($initialTab) ?>" src="<?= htmlspecialchars($initSrc) ?>" style="width:100%; height:100%; border:none; display:block;"></iframe>
             </div>
             <script>
@@ -3873,14 +4028,54 @@ if ($initialTab === 'editor') {
             } catch(e) {}
         }
 
+        let loaderTimeout = null;
+        function showIframeLoader(title) {
+            const loader = document.getElementById('iframeLoader');
+            const titleEl = document.getElementById('iframeLoaderTitle');
+            if (!loader) return;
+            if (titleEl) {
+                titleEl.innerText = title ? `Memuat ${title}...` : 'Memuat data...';
+            }
+            loader.style.display = 'flex';
+            requestAnimationFrame(() => {
+                loader.style.opacity = '1';
+            });
+            if (loaderTimeout) clearTimeout(loaderTimeout);
+            loaderTimeout = setTimeout(hideIframeLoader, 12000);
+        }
+
+        function hideIframeLoader() {
+            const loader = document.getElementById('iframeLoader');
+            if (!loader) return;
+            if (loaderTimeout) {
+                clearTimeout(loaderTimeout);
+                loaderTimeout = null;
+            }
+            loader.style.opacity = '0';
+            setTimeout(() => {
+                if (loader.style.opacity === '0') {
+                    loader.style.display = 'none';
+                }
+            }, 260);
+        }
+
         function attachIframeSync(ifrm) {
             if (!ifrm) return;
             ifrm.addEventListener('load', function() {
                 syncIframeState(ifrm);
+                hideIframeLoader();
+            });
+            ifrm.addEventListener('error', function() {
+                hideIframeLoader();
             });
         }
         if (initMainIframe) {
             attachIframeSync(initMainIframe);
+            try {
+                if (initMainIframe.contentDocument && initMainIframe.contentDocument.readyState === 'complete') {
+                    hideIframeLoader();
+                }
+            } catch(e) {}
         }
 
         let currentCompanyRoles = <?= json_encode($sessionCompanyRoles) ?>;
@@ -4148,12 +4343,14 @@ if ($initialTab === 'editor') {
                 if (window.tabIframes['editor']) {
                     const targetUrl = getTabUrl('editor', currentCmpId, currentAjuParam);
                     if (window.tabIframes['editor'].getAttribute('data-aju') !== currentAjuParam) {
+                        showIframeLoader(breadcrumbTitles['editor'] || 'Form Editor Dokumen');
                         window.tabIframes['editor'].src = targetUrl;
                         window.tabIframes['editor'].setAttribute('data-aju', currentAjuParam);
                     }
                     window.tabIframes['editor'].style.display = 'block';
                     syncIframeState(window.tabIframes['editor']);
                 } else {
+                    showIframeLoader(breadcrumbTitles['editor'] || 'Form Editor Dokumen');
                     const ifrm = document.createElement('iframe');
                     ifrm.className = 'iframe-container';
                     ifrm.style.width = '100%';
@@ -4178,6 +4375,7 @@ if ($initialTab === 'editor') {
                         }, '*');
                     } catch(e) {}
                 } else {
+                    showIframeLoader(breadcrumbTitles['transfer'] || 'Data Host to Host');
                     const ifrm = document.createElement('iframe');
                     ifrm.className = 'iframe-container';
                     ifrm.style.width = '100%';
@@ -4194,6 +4392,7 @@ if ($initialTab === 'editor') {
                 if (window.tabIframes['manifest']) {
                     const targetUrl = getTabUrl('manifest', currentCmpId, currentAjuParam);
                     if (currentAjuParam && window.tabIframes['manifest'].getAttribute('data-aju') !== currentAjuParam) {
+                        showIframeLoader(breadcrumbTitles['manifest'] || 'Manifest Dokumen');
                         window.tabIframes['manifest'].src = targetUrl;
                         window.tabIframes['manifest'].setAttribute('data-aju', currentAjuParam);
                     }
@@ -4207,6 +4406,7 @@ if ($initialTab === 'editor') {
                         }
                     } catch(e) {}
                 } else {
+                    showIframeLoader(breadcrumbTitles['manifest'] || 'Manifest Dokumen');
                     const ifrm = document.createElement('iframe');
                     ifrm.className = 'iframe-container';
                     ifrm.style.width = '100%';
@@ -4230,6 +4430,7 @@ if ($initialTab === 'editor') {
                         }
                     } catch(e) {}
                 } else {
+                    showIframeLoader(breadcrumbTitles['manifest_ceisa'] || 'Manifest CEISA 4.0');
                     const ifrm = document.createElement('iframe');
                     ifrm.className = 'iframe-container';
                     ifrm.style.width = '100%';
@@ -4252,6 +4453,7 @@ if ($initialTab === 'editor') {
                         }
                     } catch(e) {}
                 } else {
+                    showIframeLoader(breadcrumbTitles[tabId] || 'Modul');
                     const ifrm = document.createElement('iframe');
                     ifrm.className = 'iframe-container';
                     ifrm.style.width = '100%';
@@ -4529,10 +4731,12 @@ if ($initialTab === 'editor') {
 
             if (!cmp || !pass) return;
 
-            // Validasi Username Wajib untuk Login Akun Perusahaan
-            if (cmp.toLowerCase() !== 'admin' && !username) {
+            // Validasi Username Wajib untuk Login Akun Perusahaan ATAU Login Administrator
+            const grpUser = document.getElementById('groupLoginUsername');
+            const isUserRequired = grpUser && grpUser.style.display !== 'none';
+            if (isUserRequired && !username) {
                 msg.style.display = 'block';
-                msg.innerText = 'Nama Pengguna (Username) wajib diisi untuk login perusahaan.';
+                msg.innerHTML = '<i class="fa-solid fa-circle-exclamation" style="margin-right:6px;"></i> ' + ((cmp.toLowerCase() === 'admin') ? 'Nama Pengguna (Username) Administrator wajib diisi.' : 'Nama Pengguna (Username) wajib diisi.');
                 document.getElementById('loginUsername')?.focus();
                 return;
             }

@@ -50,6 +50,7 @@ $isErpConfigured = (!empty($companyErpName) && $companyErpName !== '-' && strtou
 
 // Resolusi Dokumen BC yang Diizinkan untuk Perusahaan ini (mengacu allowed_docs & preset role)
 $companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
+$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 
 // Katalog Dokumen Pabean Berdasarkan Role Perusahaan
 $allBcCatalog = [
@@ -73,16 +74,26 @@ $allBcCatalog = [
 
 $allowedBcOptions = [];
 foreach ($allBcCatalog as $code => $info) {
-    if (in_array((string)$code, $companyAllowedDocs)) {
+    if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $effectiveAllowedDocs)) {
         $allowedBcOptions[$code] = $info['label'];
     }
 }
 if (empty($allowedBcOptions)) {
     foreach ($allBcCatalog as $code => $info) {
-        $allowedBcOptions[$code] = $info['label'];
+        if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $companyAllowedDocs)) {
+            $allowedBcOptions[$code] = $info['label'];
+        }
     }
 }
-$whereCmp = !empty($filterCmp) ? "WHERE a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'" : "";
+$whereConditions = [];
+if (!empty($filterCmp)) {
+    $whereConditions[] = "a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'";
+}
+if (empty($_SESSION['is_super_admin']) && !empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
+    $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $effectiveAllowedDocs);
+    $whereConditions[] = "a.kode_dokumen IN (" . implode(',', $escapedDocs) . ")";
+}
+$whereCmp = !empty($whereConditions) ? "WHERE " . implode(' AND ', $whereConditions) : "";
 
 // Ambil daftar AJU untuk selector dropdown
 $ajuList = [];

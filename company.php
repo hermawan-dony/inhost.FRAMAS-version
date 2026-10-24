@@ -274,7 +274,7 @@ if ($action === 'save') {
     if (!is_array($rolesInput)) {
         $rolesInput = explode(',', (string)$rolesInput);
     }
-    $validRoles = ['manifest', 'pib', 'peb', 'tpb', 'ppkek'];
+    $validRoles = ['manifest', 'pib', 'peb', 'tpb', 'ppkek', 'plb'];
     $cleanRoles = [];
     foreach ($rolesInput as $r) {
         $r = strtolower(trim($r));
@@ -302,6 +302,14 @@ if ($action === 'save') {
     }
     if (!empty($cleanDocs)) {
         $allowed_docs = implode(',', $cleanDocs);
+        // Selaraskan role otomatis jika dokumen terkait dicentang secara manual
+        if (array_intersect(['16', '28', '33', '331'], $cleanDocs) && !in_array('plb', $cleanRoles)) {
+            $cleanRoles[] = 'plb';
+        }
+        if (array_intersect(['611', '613', '631'], $cleanDocs) && !in_array('ppkek', $cleanRoles) && !in_array('kek', $cleanRoles)) {
+            $cleanRoles[] = 'ppkek';
+        }
+        $company_roles = implode(',', $cleanRoles);
     } elseif (isset($_POST['allowed_docs_submitted'])) {
         $allowed_docs = 'NONE';
     } else {
@@ -2332,9 +2340,20 @@ $theme = $_GET['theme'] ?? 'light';
                                             </div>
                                         </div>
                                     </label>
+                                    <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
+                                        <input type="checkbox" name="company_roles[]" value="plb" id="role_plb" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🏬</span> PLB
+                                            </div>
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.25; margin-top:1px;">
+                                                Pusat Logistik Berikat (BC 1.6, 2.8, 3.3, 3.3.1, 2.7). Menampilkan Modul Inventory.
+                                            </div>
+                                        </div>
+                                    </label>
                                 </div>
                                 <div style="font-size:8.5px; color:var(--text-muted); margin-top:6px;">
-                                    💡 <em>Aturan Sistem:</em> Modul Inventory <strong>HANYA</strong> tampil untuk role <strong>TPB & PPKEK</strong>. Menu <strong>Load ERP (Odoo)</strong> hanya tampil jika ERP diset ke <strong>ODOO</strong>.
+                                    💡 <em>Aturan Sistem:</em> Modul Inventory <strong>HANYA</strong> tampil untuk role <strong>TPB, PPKEK & PLB</strong>. Menu <strong>Load ERP (Odoo)</strong> hanya tampil jika ERP diset ke <strong>ODOO</strong>.
                                 </div>
                             </div>
 
@@ -3030,6 +3049,7 @@ $theme = $_GET['theme'] ?? 'light';
                                         if (roles.includes('peb')) html += '<span class="ant-badge ant-badge-orange" style="font-size:8.5px; padding:1px 5px; background:#fff7e6; color:#d46b08; border-color:#ffd591;" title="Role: PEB (BC 3.0)">📤 PEB</span>';
                                         if (roles.includes('tpb')) html += '<span class="ant-badge ant-badge-purple" style="font-size:8.5px; padding:1px 5px;" title="Role: Semua TPB kecuali PPKEK">🏭 TPB</span>';
                                         if (roles.includes('ppkek')) html += '<span class="ant-badge ant-badge-gold" style="font-size:8.5px; padding:1px 5px;" title="Role: PPKEK saja">⚡ PPKEK</span>';
+                                        if (roles.includes('plb')) html += '<span class="ant-badge ant-badge-green" style="font-size:8.5px; padding:1px 5px; background:#f6ffed; color:#389e0d; border-color:#b7eb8f;" title="Role: Pusat Logistik Berikat (BC 1.6, 2.8, 3.3, 3.3.1, 2.7)">🏬 PLB</span>';
                                         return html;
                                     })()}
                                 </div>
@@ -3044,7 +3064,8 @@ $theme = $_GET['theme'] ?? 'light';
                                         } else {
                                             const roles = (row.company_roles || 'tpb').toLowerCase().split(',').map(s => s.trim());
                                             if (roles.includes('ppkek') || roles.includes('kek')) ['611', '613', '631', '25', '41'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
-                                            if (roles.includes('tpb')) ['23', '25', '261', '262', '27', '40', '41', '16', '28', '33', '331'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
+                                            if (roles.includes('tpb')) ['23', '25', '261', '262', '27', '40', '41'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
+                                            if (roles.includes('plb')) ['16', '28', '33', '331', '27'].forEach(d => { if (!docArr.includes(d)) docArr.push(d); });
                                             if (roles.includes('pib')) { if (!docArr.includes('20')) docArr.push('20'); }
                                             if (roles.includes('peb')) { if (!docArr.includes('30')) docArr.push('30'); }
                                         }
@@ -3492,6 +3513,7 @@ $theme = $_GET['theme'] ?? 'light';
             if (document.getElementById('role_peb')) document.getElementById('role_peb').checked = false;
             if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = true;
             if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = false;
+            if (document.getElementById('role_plb')) document.getElementById('role_plb').checked = false;
 
             // Dokumen Pabean Aktif default (Preset TPB)
             applyPresetDocsFromRoles(true);
@@ -3510,6 +3532,7 @@ $theme = $_GET['theme'] ?? 'light';
         function applyPresetDocsFromRoles(force = false) {
             const isPpkek    = document.getElementById('role_ppkek')?.checked;
             const isTpb      = document.getElementById('role_tpb')?.checked;
+            const isPlb      = document.getElementById('role_plb')?.checked;
             const isPib      = document.getElementById('role_pib')?.checked;
             const isPeb      = document.getElementById('role_peb')?.checked;
             const isManifest = document.getElementById('role_manifest')?.checked;
@@ -3523,15 +3546,19 @@ $theme = $_GET['theme'] ?? 'light';
             if (isTpb) {
                 ['23', '25', '261', '262', '27', '40', '41'].forEach(d => presetDocs.add(d));
             }
-            // 3. PIB: hanya BC 2.0
+            // 3. PLB: dokumen khusus PLB (BC 1.6, 2.8, 3.3, 3.3.1, 2.7)
+            if (isPlb) {
+                ['16', '28', '33', '331', '27'].forEach(d => presetDocs.add(d));
+            }
+            // 4. PIB: hanya BC 2.0
             if (isPib) {
                 presetDocs.add('20');
             }
-            // 4. PEB: hanya BC 3.0
+            // 5. PEB: hanya BC 3.0
             if (isPeb) {
                 presetDocs.add('30');
             }
-            // 5. Manifest: tidak ada dokumen pabean default
+            // 6. Manifest: tidak ada dokumen pabean default
 
             document.querySelectorAll('.chk-doc-allowed').forEach(cb => {
                 cb.checked = presetDocs.has(cb.value);
@@ -3588,6 +3615,7 @@ $theme = $_GET['theme'] ?? 'light';
                         if (document.getElementById('role_peb')) document.getElementById('role_peb').checked = roles.includes('peb');
                         if (document.getElementById('role_tpb')) document.getElementById('role_tpb').checked = roles.includes('tpb');
                         if (document.getElementById('role_ppkek')) document.getElementById('role_ppkek').checked = roles.includes('ppkek');
+                        if (document.getElementById('role_plb')) document.getElementById('role_plb').checked = roles.includes('plb');
 
                         // Dokumen Pabean Aktif (Allowed Docs)
                         const rawAllowedDocs = d.allowed_docs;
@@ -3783,6 +3811,7 @@ $theme = $_GET['theme'] ?? 'light';
                         if (document.getElementById('role_peb') && document.getElementById('role_peb').checked) rolesArr.push('peb');
                         if (document.getElementById('role_tpb') && document.getElementById('role_tpb').checked) rolesArr.push('tpb');
                         if (document.getElementById('role_ppkek') && document.getElementById('role_ppkek').checked) rolesArr.push('ppkek');
+                        if (document.getElementById('role_plb') && document.getElementById('role_plb').checked) rolesArr.push('plb');
                         const rolesVal = rolesArr.length ? rolesArr.join(',') : 'tpb';
                         const erpVal = document.getElementById('f_ERP_Name') ? document.getElementById('f_ERP_Name').value.trim() : '-';
 

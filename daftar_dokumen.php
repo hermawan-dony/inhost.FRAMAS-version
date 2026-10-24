@@ -37,22 +37,22 @@ if (isset($koneksi) && $koneksi) {
 // Resolusi Dokumen BC yang diizinkan untuk perusahaan ini
 $companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
 
-$userAllowedDocs = $_SESSION['allowed_docs'] ?? ['*'];
+// Resolusi Dokumen BC yang berhak diakses pengguna (irisan izin pengguna & perusahaan)
+$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
+
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
-        global $isAdmin, $sessionCmpId, $companyAllowedDocs, $userAllowedDocs;
-        // Jika Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
+        global $isAdmin, $sessionCmpId, $companyAllowedDocs, $effectiveAllowedDocs;
+        // Jika Super Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
         if (!empty($isAdmin) && empty($sessionCmpId)) {
             return true;
         }
-        // Jika ada perusahaan aktif, batasi sesuai allowed_docs perusahaan
-        if (!empty($sessionCmpId)) {
-            return in_array((string)$d, $companyAllowedDocs);
+        // Jika Super Admin memilih perusahaan tertentu, batasi sesuai dokumen perusahaan
+        if (!empty($isAdmin)) {
+            return in_array((string)$d, (array)$companyAllowedDocs);
         }
-        if (empty($userAllowedDocs) || in_array('*', $userAllowedDocs) || in_array('ALL', $userAllowedDocs)) {
-            return in_array((string)$d, $companyAllowedDocs);
-        }
-        return in_array((string)$d, $userAllowedDocs) && in_array((string)$d, $companyAllowedDocs);
+        // Pengguna standar (operator/admin perusahaan): batasi ketat sesuai izin efektif
+        return in_array((string)$d, (array)$effectiveAllowedDocs);
     }
 }
 
@@ -104,11 +104,11 @@ if ($action === 'list') {
     }
 
     // Penegakan Izin Jenis Dokumen Bea Cukai Pengguna
-    if (!$isAdmin && !in_array('*', $userAllowedDocs) && !in_array('ALL', $userAllowedDocs)) {
-        if (!empty($userAllowedDocs)) {
-            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $userAllowedDocs);
+    if (!$isAdmin) {
+        if (!empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
+            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $effectiveAllowedDocs);
             $where[] = "a.kodeDokumen IN (" . implode(',', $escapedDocs) . ")";
-        } else {
+        } elseif (empty($effectiveAllowedDocs)) {
             $where[] = "1=0";
         }
     }

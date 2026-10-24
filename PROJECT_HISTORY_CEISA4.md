@@ -7956,6 +7956,248 @@ Pengguna (**Mas**) memberikan arahan teknis untuk penyempurnaan modul monitoring
   - Layanan PHP-FPM direload (`systemctl reload php8.5-fpm`).
   - Direktori `C:\dp\g-ceisa`, `C:\dp\g-ceisa\www`, `/source/public`, dan `/source/public/www` terkonfirmasi **0 file json*.txt**.
 
+### Pembaruan 23 Oktober 2026: Penambahan Iframe View Loader & Perbaikan Penanganan Error Upload Excel
+
+- **Kebutuhan Pengguna:**
+  1. Pengguna merasakan jeda (delay) saat membuka menu (misalnya Master Data Referensi `tab=reff`), di mana layar tampak putih kosong (*blank screen*) sehingga menimbulkan kesan aplikasi sedang macet (*hang*).
+  2. Mengalami kendala HTTP 500 saat mengunggah file Excel pada hosting cPanel baru.
+
+- **Implementasi Solusi:**
+  1. **Indikator Pemuatan Modern (*Iframe View Loader*) di [`index.php`](file:///d:/vd/inhost_web_app/index.php)**:
+     - Menambahkan komponen overlay loader modern (`#iframeLoader`) lengkap dengan animated top progress bar (ala YouTube/NProgress), dual-ring spinner berkecepatan tinggi, serta label dinamis judul modul yang sedang dibuka (contoh: *"Memuat Master Data Referensi..."*).
+     - Menambahkan fungsi JavaScript `showIframeLoader(title)` dan `hideIframeLoader()` yang terhubung otomatis ke siklus hidup iframe (`attachIframeSync` event `load` dan `error`).
+     - Setiap pergantian menu di `switchMainTab()`, loader langsung menyala seketika dan otomatis memudar halus (*smooth fade-out*) saat iframe selesai dimuat oleh browser.
+     - Jika tab sudah pernah dibuka sebelumnya (sudah di-cache oleh `window.tabIframes`), modul langsung terbuka instan (0-ms latency).
+  2. **Penanganan Error Impor Excel di [`api_import_excel.php`](file:///d:/vd/inhost_web_app/api_import_excel.php)**:
+     - Mengubah blok `catch (Exception $e)` menjadi `catch (Throwable $e)` agar Fatal Error PHP (seperti ketiadaan modul `ZipArchive` di cPanel) tertangkap dan dikembalikan dalam bentuk pesan JSON deskriptif, alih-alih melempar kode mentah HTTP 500.
+
+### Pembaruan 23 Oktober 2026: Web Form Upload & File Sharing Terpisah (`/share`)
+
+- **Kebutuhan Pengguna:** Membutuhkan web form mandiri untuk upload dan manajemen berkas yang diletakkan pada subfolder terpisah agar dapat diakses melalui `https://bohler.inhost.id/share/` (atau subdomain inhost lainnya).
+- **Implementasi Solusi:**
+  1. **Pembuatan Modul Mandiri [`share/index.php`](file:///d:/vd/inhost_web_app/share/index.php)**:
+     - Menyediakan antarmuka modern drag-and-drop file uploader dengan real-time AJAX upload progress bar.
+     - Mendukung multi-file upload sekaligus untuk segala format berkas (PDF, XLSX, DOCX, ZIP, Gambar, dll).
+     - Menampilkan tabel berkas tersimpan dilengkapi informasi ukuran file, timestamp, tombol unduh langsung (*direct download*), serta fitur hapus berkas konfirmasi SweetAlert2.
+     - Penyimpanan file terisolasi di dalam `share/files/` yang dilengkapi proteksi `.htaccess` anti-execution untuk keamanan server.
+  2. **Penyempurnaan Otomasi Deploy [`deploy.ps1`](file:///d:/vd/inhost_web_app/deploy.ps1)**:
+     - Menambahkan fungsi rekursif `Ensure-FtpDirectory` agar skrip deployment mampu membuat direktori remote baru secara otomatis sebelum mengunggah file bertingkat.
+     - Berkas berhasil di-deploy ke hosting dan diuji coba live (`HTTP 200 OK`, tes upload & delete API 100% lulus).
+  3. **Multi-Tenant Wildcard Subdomain & Proteksi Login ([`share/index.php`](file:///d:/vd/inhost_web_app/share/index.php))**:
+     - **Multi-Tenant Ruang Penyimpanan Terpisah**: Sistem secara dinamis mendeteksi nama subdomain dari `HTTP_HOST` (contoh: `bohler`, `tvl`, `rmb`). Folder berkas otomatis dialokasikan terpisah di `share/files/{subdomain}/` sehingga berkas antar subdomain tidak akan pernah bercampur.
+     - **Form Login Otentikasi**: Sebelum mengakses berkas atau form upload, pengguna diwajibkan login terlebih dahulu pada form login modern.
+     - **Metode Login Fleksibel**:
+       * Master Super Administrator: User `dp` atau `admin` dengan password master `@combro#` (dapat mengakses seluruh subdomain).
+       * Akun Perusahaan: Menggunakan username & password akun perusahaan di `bc_ceisa_login` atau password portal perusahaan (`app_password` / default: `1234`).
+     - Berkas terunggah sebelumnya (`bohler-logo.jpg`) telah dimigrasikan otomatis ke folder `share/files/bohler/`.
+     - Seluruh perubahan telah di-deploy dan teruji live di `bohler.inhost.id/share/`, `tvl.inhost.id/share/`, dan `rmb.inhost.id/share/`.
+
+---
+
+## 🔒 132. ISOLASI KETAT LOGIN MULTI-TENANT & VERIFIKASI PENGGUNA BOHLER (`didi`)
+
+### A. Latar Belakang & Investigasi Database
+* **Keluhan Pengguna:** User `didi` dapat login ke portal `rmb.inhost.id/share/`, padahal seharusnya `didi` adalah user milik **VOESTALPINE BOHLER WELDING ASIA PACIFIC (`bohler`)**, bukan **PT RODA MAJU BAHAGIA (`rmb`)**.
+* **Pengecekan Langsung ke Database (`bc2faktur_inhost` di `inhost.id:3306`):**
+  * Tabel `bc_ceisa_login`:
+    * `user_id = 'didi'` terdaftar dengan `cmp_id = '018244244055000'`.
+  * Tabel `bc_ceisa_company`:
+    * `cmp_id = '018244244055000'` terdaftar sebagai `VOESTALPINE BOHLER WELDING ASIA PACIFIC` dengan subdomain `bohler`.
+    * `cmp_id = '080167772504400'` terdaftar sebagai `PT RODA MAJU BAHAGIA` dengan subdomain `rmb`.
+  * **Kesimpulan Database:** Benar 100%, user `didi` adalah user resmi Bohler dan tidak memiliki hak akses di RMB.
+* **Akar Masalah (Root Cause):**
+  * Di `share/index.php` sebelumnya terdapat blok *fallback offline* toleran:
+    `if ($inputPass === '@combro#' || $inputPass === '1234') { $authSuccess = true; }`
+  * Karena password user `didi` adalah `1234`, ketika query ke database gagal mencocokkan `didi` dengan `cmp_id` milik RMB, sistem mengeksekusi blok fallback dan meloloskan login `didi` ke portal RMB.
+
+### B. Perbaikan & Pengetatan Logika Otentikasi (`share/index.php`)
+1. **Penghapusan Fallback Longgar:**
+   * Menghilangkan pengecekan fallback `$inputPass === '1234'`.
+   * Fallback darurat hanya aktif jika koneksi database benar-benar terputus secara fisik (`!$koneksi`), dan hanya dapat diakses dengan password Super Administrator (`@combro#`).
+2. **Strict Cross-Tenant Rejection:**
+   * Ketika user mencoba login, sistem memeriksa apakah `user_id` terdaftar pada `cmp_id` perusahaan aktif.
+   * Jika tidak cocok, sistem melakukan query silang ke seluruh database untuk mendeteksi apakah user terdaftar pada perusahaan lain:
+     * Jika ditemukan, sistem secara eksplisit menolak login dan memberikan notifikasi edukatif:
+       `"Pengguna didi terdaftar pada VOESTALPINE BOHLER WELDING ASIA PACIFIC (bohler), bukan PT RODA MAJU BAHAGIA. Silakan login via portal: bohler.inhost.id/share/"` lengkap dengan tautan langsung ke portal yang benar.
+3. **Pengujian Simulasi & Deployment:**
+   * Simulasi login membuktikan:
+     * `didi` di `rmb.inhost.id` -> **Ditolak (FAILED)** dengan pesan mismatch perusahaan.
+     * `didi` di `bohler.inhost.id` -> **Diterima (SUCCESS)** sebagai user Bohler.
+     * User asing sembarang dengan password `1234` di `rmb.inhost.id` -> **Ditolak (FAILED)**.
+     * Super Admin `dp` dengan `@combro#` -> **Diterima (SUCCESS)** di seluruh subdomain.
+   * Berkas [`share/index.php`](file:///d:/vd/inhost_web_app/share/index.php) telah berhasil di-deploy ke live hosting via FTP (`deploy.ps1`).
+
+---
+
+# 🚀 LOG: UPDATE VERSI-2 (CPANEL HOSTING & MULTI-TENANT SUBDOMAIN MIGRATION)
+> **Periode Pembaruan:** 21 – 23 Oktober 2026  
+> **Target Repositori:** `https://github.com/hermawan-dony/inhost.id-Web-APP` (Versi cPanel MariaDB)  
+> **Arsitektur:** Multi-Company & Wildcard Subdomain di cPanel Hosting (`inhost.id`)
+
+Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambahan fitur dari kemarin hingga hari ini:
+
+### 1. Migrasi Lingkungan & Integrasi Database Dual-Environment (`koneksi.php`, `db.php`)
+* **Deteksi Otomatis cPanel vs Server Dedicated:**
+  * Menambahkan sistem deteksi cerdas untuk membedakan server Alibaba Cloud RDS (`ceisa0400db` port 63306) dengan cPanel Hosting (`bc2faktur_inhost` port 3306 di `inhost.id`).
+  * Polyfill fungsi PHP 8 (`str_starts_with`, `str_ends_with`, `str_contains`) untuk menjamin kompatibilitas penuh jika hosting menjalankan versi PHP berbeda.
+* **Auto-Schema Migration:**
+  * Penambahan kolom `allowed_docs` pada tabel `bc_ceisa_company` untuk manajemen hak akses dokumen per perusahaan secara dinamis.
+
+### 2. Fitur Baru: File Share & Upload Portal Mandiri Subdomain (`share/`)
+* **Arsitektur Multi-Tenant Wildcard Subdomain:**
+  * Membangun portal file sharing mandiri di subfolder `/share/` yang dapat diakses langsung oleh masing-masing subdomain (`bohler.inhost.id/share/`, `rmb.inhost.id/share/`, `tvl.inhost.id/share/`).
+* **Isolasi Penyimpanan Berkas:**
+  * Seluruh file yang diunggah disimpan terisolasi di folder khusus per subdomain (`share/files/{subdomain}/`).
+  * Pembuatan file `.htaccess` otomatis di folder penyimpanan guna memblokir eksekusi skrip PHP berbahaya (`deny from all for *.php`).
+* **Sistem Otentikasi & Keamanan Lintas Perusahaan (Cross-Tenant):**
+  * Verifikasi login langsung mencocokkan `user_id` dengan `cmp_id` perusahaan aktif dari database `bc_ceisa_login`.
+  * Menolak akses lintas perusahaan secara otomatis (misal: user `didi` dari Bohler tidak bisa login ke portal RMB).
+  * Menghapus seluruh celah fallback password default (`1234`).
+  * Alert error interaktif yang mengarahkan user ke URL portal perusahaannya jika salah masuk subdomain.
+
+### 3. Peningkatan Pengalaman Pengguna & Dashboard UI (`index.php`)
+* **Interactive Global Loader:**
+  * Menambahkan animasi overlay loading interaktif saat user membuka atau berpindah tab menu.
+  * Mencegah kesan aplikasi "hang" atau lambat saat memuat data tabel transaksi yang berat.
+* **Penguatan Sesi & Multi-Role Dokumen:**
+  * Penyesuaian filter menu dan dokumen pabean aktif sesuai role perusahaan (`ppkek`, `tpb`, `plb`, `pib`, `peb`, `manifest`).
+
+### 4. Perbaikan Modul Import Excel (`import_excel.php`, `api_import_excel.php`)
+* **Penanganan Error Upload Dokumen Excel:**
+  * Mengatasi kendala upload Excel di server cPanel (alokasi memori, sanitasi format file `.xlsx`/`.xls`, penyesuaian temporary directory).
+  * Menghindari crash saat memproses rincian ribuan barang dari file spreadsheet.
+
+### 5. Dukungan Template JSON Dokumen Pabean Lengkap (`sql_templates/`, `CeisaJsonBuilder.php`, `posting.php`)
+* Penambahan template resmi SQL dan builder JSON CEISA 4.0 untuk dokumen baru:
+  * **BC 1.6** (Pusat Logistik Berikat - PLB)
+  * **PPKEK 6.1.1** (Pemasukan LDP ke KEK)
+  * **PPKEK 6.1.3** (Pemasukan TLDDP ke KEK)
+  * **BC 2.0** (Impor PIB)
+* **Sanitasi Karakter Khusus JSON:** Pembersihan otomatis tanda kutip ganda (`"`), newline, dan karakter kontrol pada uraian barang dan alamat perusahaan guna mencegah JSON malformed.
+
+### 6. Otomatisasi Deploy Berkas Hosting (`deploy.ps1`, `GEMINI.md`)
+* Pembuatan skrip otomatisasi FTP PowerShell (`deploy.ps1`) untuk mengunggah berkas yang baru diubah secara selektif ke server hosting (`root@inhost.id`).
+* Penambahan perintah cepat **`deploy!`** pada *Workspace Rules* AI Assistant.
+
+---
+
+## 📌 45. OPTIMASI MULTI-TENANT SUBDOMAIN & LOGIN KHUSUS ADMINISTRATOR (23 OKTOBER 2026)
+
+### A. Latar Belakang & Permintaan
+* Pengguna menguji akses subdomain baru pada domain wildcard `*.inhost.web.id` (misalnya: `https://joko.inhost.web.id`).
+* Jika subdomain yang dipanggil belum terdaftar sebagai profil perusahaan di tabel `bc_ceisa_company`:
+  1. Jangan tampilkan dropdown umum `Pilih Akses / Perusahaan`.
+  2. Tampilkan form login khusus **Administrator** yang meminta **Nama Pengguna (Username)** dan **Kata Sandi (Password)**.
+  3. Hilangkan semua petunjuk (hint) default `1234` demi keamanan.
+
+### B. Perubahan yang Diterapkan
+1. **Deteksi Subdomain Tidak Terdaftar (`index.php`)**:
+   - Menambahkan variabel status `$isSubdomainUnregistered` dan `$isAdminOnlyLogin`.
+   - Logika pemindaian memeriksa subdomain kandidat dari host atau parameter URL. Jika subdomain dipanggil namun tidak ditemukan di tabel `bc_ceisa_company`, sistem otomatis mengaktifkan mode login Administrator.
+2. **UI Card Login Administrator**:
+   - Mengganti dropdown pilihan perusahaan menjadi input hidden `cmp_id = 'admin'`.
+   - Menampilkan notifikasi visual: *Subdomain "[nama_subdomain]" belum terdaftar sebagai perusahaan*.
+   - Menyediakan kolom input Nama Pengguna (Username) dan Kata Sandi (Password) khusus Administrator.
+   - Mengubah teks tombol submit menjadi `MASUK SEBAGAI ADMINISTRATOR`.
+3. **Penyempurnaan Autentikasi Backend & Validasi**:
+   - Login Administrator mendukung username `dp` maupun `admin` (atau akun superadmin terdaftar di `bc_ceisa_login`).
+   - Validasi JavaScript `submitLogin` memastikan input username wajib diisi sebelum form dikirimkan.
+   - Pesan kegagalan login diubah menjadi: *"Username atau Password Administrator salah!"* tanpa menyebutkan hint password `1234`.
+4. **Deploy ke VPS Bekasi (`202.10.35.199`)**:
+   - Berkas `index.php` telah disinkronkan langsung ke `/var/www/inhost/index.php`.
+   - Pengujian live pada `https://joko.inhost.web.id/index.php` terverifikasi sukses HTTP 200 OK dengan form login Administrator.
+5. **Pembaruan Password Administrator & Penghapusan Hardcode Fallback**:
+   - Menghapus pengecekan hardcode fallback `|| $password === '1234'` dan `$validPass = '1234'` pada `index.php`. Autentikasi Administrator kini **100% murni membaca database**.
+   - Memperbarui password user `dp` dan `admin` pada tabel `bc_ceisa_login` menjadi **`K@y010782`**.
+   - Memperbarui handler `action === 'change_password'` agar dinamis untuk akun Administrator yang sedang aktif.
+   - Verifikasi pengujian: login dengan password lama `1234` ditolak (`ERROR: Username atau Password Administrator salah!`), sedangkan login dengan `K@y010782` sukses (`OK`).
+
+---
+
+## 📌 46. INTEGRASI ROLE PUSAT LOGISTIK BERIKAT (PLB) & PRESET DOKUMEN KEPABEANAN (23 OKTOBER 2026)
+
+### A. Latar Belakang & Permintaan
+* Pengguna meminta penambahan role **PLB** pada form kelola perusahaan (*Role & Ruang Lingkup Dokumen Perusahaan*).
+* Ketika role PLB dicentang, seluruh dokumen kepabeanan yang termasuk dalam ruang lingkup PLB (BC 1.6, BC 2.8, BC 3.3, BC 3.3.1, dan BC 2.7) harus otomatis tampil dan aktif.
+
+### B. Perubahan yang Diterapkan
+1. **Frontend Modal Kelola Perusahaan (`company.php`)**:
+   - Menambahkan kartu checkbox role `🏬 PLB` berdampingan dengan role `⚡ KEK / PPKEK`.
+   - Mengintegrasikan checkbox `role_plb` pada fungsi preset dokumen JavaScript `applyPresetDocsFromRoles()`. Saat PLB dicentang, dokumen `16`, `28`, `33`, `331`, dan `27` otomatis terpilih.
+   - Menyelaraskan form reset `openAddModal()`, pemuatan data saat edit `openEditModal()`, dan pengumpulan data `rolesArr` saat form disimpan.
+   - Menambahkan badge visual `🏬 PLB` pada daftar tabel perusahaan di modul Company.
+2. **Backend Resolver & Validasi (`koneksi.php` & `company.php`)**:
+   - Menambahkan `'plb'` ke daftar `$validRoles` di backend `company.php`.
+   - Menyelaraskan fungsi resolver `ceisa_resolve_allowed_docs()` di `koneksi.php` agar menyertakan dokumen PLB (`16`, `28`, `33`, `331`, `27`) saat role PLB aktif.
+3. **Penyelarasan Menu Dashboard & Modul Inventory (`index.php`)**:
+   - Menghitung variabel `$hasRolePlb` dalam penentuan visibilitas menu dokumen standar `$hasStandardCustomsDocs` dan Modul Inventory `$isInventoryModuleAllowed`.
+   - Perusahaan dengan role PLB otomatis memiliki hak akses Modul IT Inventory dan menu dokumen pabean terkait.
+4. **Deploy & Verifikasi di VPS Bekasi (`202.10.35.199`)**:
+   - Berkas `koneksi.php`, `company.php`, dan `index.php` telah disinkronkan langsung via SCP.
+
+---
+
+## 📌 47. PENEGAKAN KETAT IZIN DOKUMEN PENGGUNA (USER ALLOWED DOCS ENFORCEMENT) (23 OKTOBER 2026)
+
+### A. Latar Belakang & Masalah
+* Pengguna mengonfigurasi user `didi` pada perusahaan `VOESTALPINE BOHLER WELDING ASIA PACIFIC` agar **hanya** dapat mengakses dokumen BC 4.0 (`40`) dan BC 4.1 (`41`).
+* Namun saat `didi` login, pada modul Data Host to Host (`transfer.php`), Daftar Dokumen CEISA (`daftar_dokumen.php`), dan modul lainnya, seluruh dokumen milik perusahaan (seperti BC 2.5, BC 2.3, BC 2.7, BC 2.6.1, BC 2.6.2) tetap tampil di dropdown filter dan tabel data.
+
+### B. Akar Penyebab (Root Causes)
+1. **Pelepasan / Penimpaan Sesi di `index.php` (Line 666)**:
+   - Pada setiap kali halaman dimuat, `$_SESSION['allowed_docs']` ditimpa dengan hasil `ceisa_resolve_allowed_docs(...)` milik perusahaan, sehingga izin spesifik milik user (`user_allowed_docs = ['40', '41']`) langsung terhapus.
+2. **Bypass / Early Return di `isDocPermitted($d)`**:
+   - Pada `transfer.php` dan `daftar_dokumen.php`, fungsi `isDocPermitted($d)` memiliki pengecekan `if (!empty($sessionCmpId)) return in_array($d, $companyAllowedDocs);`. Karena user perusahaan selalu memiliki `sessionCmpId`, fungsi tersebut selalu mengembalikan true berdasarkan dokumen perusahaan dan mengabaikan pembatasan user.
+3. **Ketiadaan Saringan Izin Dokumen Efektif di Modul Editor (`editor.php`)**:
+   - Dropdown opsi dokumen dan kueri selector nomor AJU di `editor.php` hanya membaca `companyAllowedDocs`.
+
+### C. Solusi & Perubahan yang Diterapkan
+1. **Helper Global Baru di `koneksi.php`**:
+   - `ceisa_parse_docs($rawDocs)`: Parser tangguh untuk format `*`, `ALL`, array JSON (`["40","41"]`), atau teks koma (`40,41`).
+   - `ceisa_get_effective_allowed_docs($companyAllowedDocs)`: Menghitung izin dokumen **efektif** secara presisi, yaitu hasil **irisan (intersection)** antara izin dokumen user dan izin dokumen perusahaan (Super Administrator tetap mendapatkan akses penuh `['*']`).
+2. **Penyimpanan Sesi yang Terpisah di `index.php`**:
+   - `$_SESSION['company_allowed_docs']`: Menyimpan dokumen aktif perusahaan.
+   - `$_SESSION['user_allowed_docs']`: Menyimpan daftar dokumen yang diizinkan untuk pengguna tersebut dari tabel `bc_ceisa_login`.
+   - `$_SESSION['allowed_docs']`: Secara otomatis diset ke dokumen efektif hasil irisan user dan perusahaan.
+3. **Penyelarasan Modul Aplikasi**:
+   - [`transfer.php`](file:///d:/vd/inhost_web_app/transfer.php): `isDocPermitted($d)` dan kueri AJAX `action === 'list'` kini secara ketat membatasi data berdasarkan `$effectiveAllowedDocs`.
+   - [`daftar_dokumen.php`](file:///d:/vd/inhost_web_app/daftar_dokumen.php): Filter dropdown dan kueri daftar dokumen menggunakan `$effectiveAllowedDocs`.
+   - [`editor.php`](file:///d:/vd/inhost_web_app/editor.php): Opsi jenis dokumen dan daftar dropdown AJU difilter sesuai `$effectiveAllowedDocs`.
+   - [`it_inventory.php`](file:///d:/vd/inhost_web_app/it_inventory.php) & [`rekap/index.php`](file:///d:/vd/inhost_web_app/rekap/index.php): Selaras dengan batasan dokumen efektif pengguna.
+4. **Verifikasi & Pengujian Langsung di VPS Bekasi (`202.10.35.199`)**:
+   - Pengujian login sesi `didi` via curl mengonfirmasi dropdown filter Dokumen BC **hanya memuat opsi BC 4.0 dan BC 4.1**.
+   - Kueri data `action=list` hanya menampilkan data dokumen `40` dan `41`. Dokumen `23`, `25`, `27`, `261`, `262` tersembunyi sepenuhnya dari user `didi`.
+
+---
+
+## 📌 48. PEMULIHAN BERKAS SQL TEMPLATES DARI FOLDER ASLI MASTER (24 OKTOBER 2026)
+
+### A. Latar Belakang & Masalah
+* Saat melakukan proses Transfer Dokumen ke Portal CEISA 4.0 pada `bohler.inhost.web.id`, muncul pesan kesalahan validasi:
+  `Gagal generate JSON: Berkas template SQL '/var/www/inhost/sql_templates/bc40.sql' tidak ditemukan.`
+* Hal ini disebabkan karena pada saat persiapan versi clean cPanel sebelumnya, folder `sql_templates/` tertinggal dan belum disalin ke repositori aktif maupun ke server VPS.
+
+### B. Solusi & Pemulihan Berkas
+1. **Pemeriksaan Komparatif terhadap Folder Master Asli (`D:\vd\inhost\inhost.web.id-main`)**:
+   - Membandingkan seluruh berkas dan struktur direktori antara master asli dan lingkungan kerja aktif `d:\vd\inhost_web_app`.
+   - Mengidentifikasi direktori dan berkas penting yang diperlukan sistem:
+     - `sql_templates/`: Seluruh 15 file template builder JSON pabean (`bc16.sql`, `bc20.sql`, `bc23.sql`, `bc25.sql`, `bc261.sql`, `bc262.sql`, `bc27.sql`, `bc28.sql`, `bc30.sql`, `bc33.sql`, `bc40.sql`, `bc41.sql`, `bc611.sql`, `bc613.sql`, `p3bet.sql`).
+     - `database/`: Berkas dump database `ceisa0400db.sql.zip`.
+     - `.gitignore`, `adminer-auto.php`, `db-admin.php`.
+2. **Sinkronisasi ke Proyek Lokal & VPS Remote**:
+   - Menyalin berkas dan folder tersebut ke `d:\vd\inhost_web_app`.
+   - Mengunggah seluruh folder `sql_templates/*.sql` ke `/var/www/inhost/sql_templates/` di VPS Bekasi (`202.10.35.199`) via PSCP.
+   - Mengatur kepemilikan dan hak akses berkas remote ke `www-data:www-data` (chmod 755).
+3. **Verifikasi Pengujian**:
+   - Menjalankan builder JSON untuk nomor AJU `05104001824420261023000001` (BC 4.0 Bohler):
+     `SUCCESS: JSON successfully generated! Length: 1879 bytes | Dokumen BC: 40`.
+
+
+
+
+
+
+
 
 
 

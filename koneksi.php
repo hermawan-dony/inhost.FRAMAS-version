@@ -1,20 +1,74 @@
 <?php
 /**
  * CEISA 4.0 Database Connection
- * Terhubung ke Alibaba Cloud RDS MySQL (ceisa0400db)
+ * Terhubung ke Alibaba Cloud RDS MySQL (ceisa0400db) atau database lokal cPanel
  */
-$host     = 'rm-d9j4584f890612j7vro.mysql.ap-southeast-5.rds.aliyuncs.com';
-$port     = 63306;
-$user     = 'ceisarwuser';
-$password = 'CiT8T2#h4Jd#3wer$9d36hd';
-$database = 'ceisa0400db';
 
-// Hubungkan ke database RDS Alibaba Cloud
-$koneksi = @mysqli_connect($host, $user, $password, $database, $port);
+// Polyfill untuk kompatibilitas ke PHP 7.4 jika hosting masih menggunakan PHP 7
+if (!function_exists('str_starts_with')) {
+    function str_starts_with(?string $haystack, ?string $needle): bool {
+        return (string)$needle !== '' && strncmp((string)$haystack, (string)$needle, strlen((string)$needle)) === 0;
+    }
+}
+if (!function_exists('str_ends_with')) {
+    function str_ends_with(?string $haystack, ?string $needle): bool {
+        return (string)$needle === '' || $needle === substr((string)$haystack, -strlen((string)$needle));
+    }
+}
+if (!function_exists('str_contains')) {
+    function str_contains(?string $haystack, ?string $needle): bool {
+        return (string)$needle !== '' && mb_strpos((string)$haystack, (string)$needle) !== false;
+    }
+}
 
-// Fallback ke port database lokal jika koneksi langsung tidak tersedia
-if (!$koneksi) {
-    $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
+// Deteksi Otomatis Lingkungan cPanel Hosting (inhost.id / palapa13 / bc2faktur)
+$isCpanel = (
+    (isset($_SERVER['DOCUMENT_ROOT']) && strpos($_SERVER['DOCUMENT_ROOT'], 'bc2faktur') !== false) ||
+    (isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'inhost.id') !== false) ||
+    (isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'inhost.id') !== false) ||
+    (isset($_SERVER['HOME']) && strpos($_SERVER['HOME'], 'bc2faktur') !== false) ||
+    file_exists('/home/bc2faktur') ||
+    file_exists('/var/www/inhost')
+);
+
+if ($isCpanel) {
+    // Kredensial Khusus Hosting / VPS (Prioritaskan 'localhost' UNIX Socket untuk latensi 0 ms)
+    $user     = 'bc2faktur_root';
+    $password = '@combro#';
+    $database = 'bc2faktur_inhost';
+
+    $koneksi = @mysqli_connect('localhost', $user, $password, $database);
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
+    }
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('inhost.id', $user, $password, $database, 3306);
+    }
+} else {
+    // Kredensial Standar Server Alibaba Cloud RDS MySQL
+    $host     = 'rm-d9j4584f890612j7vro.mysql.ap-southeast-5.rds.aliyuncs.com';
+    $port     = 63306;
+    $user     = 'ceisarwuser';
+    $password = 'CiT8T2#h4Jd#3wer$9d36hd';
+    $database = 'ceisa0400db';
+
+    $koneksi = @mysqli_connect($host, $user, $password, $database, $port);
+
+    // Fallback 1: Jika di lingkungan cPanel/VPS namun host header berbeda
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('localhost', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost');
+    }
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('inhost.id', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost', 3306);
+        if ($koneksi) {
+            $database = 'bc2faktur_inhost';
+        }
+    }
+
+    // Fallback 2: Port database lokal pengembang
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
+    }
 }
 
 if (!$koneksi) {
@@ -22,12 +76,6 @@ if (!$koneksi) {
 }
 
 mysqli_set_charset($koneksi, "utf8mb4");
-
-// Auto-migration: pastikan kolom allowed_docs tersedia di bc_ceisa_company
-$chkColAllowedDocs = @$koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'allowed_docs'");
-if ($chkColAllowedDocs && $chkColAllowedDocs->num_rows === 0) {
-    @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN allowed_docs VARCHAR(255) NULL AFTER company_roles");
-}
 
 /**
  * Master Katalog Dokumen Kepabeanan CEISA 4.0 / INSW
@@ -88,10 +136,6 @@ if (!function_exists('ceisa_resolve_allowed_docs')) {
                 return [];
             }
             $parsed = array_values(array_filter(array_map('trim', explode(',', $val))));
-            // Jika perusahaan TPB murni (tanpa role PLB), kecualikan dokumen PLB/PDPLB: 16, 28, 33, 331
-            if (!in_array('plb', $roles)) {
-                $parsed = array_values(array_diff($parsed, ['16', '28', '33', '331']));
-            }
             return $parsed;
         }
 
@@ -104,9 +148,9 @@ if (!function_exists('ceisa_resolve_allowed_docs')) {
         if (in_array('tpb', $roles)) {
             $docs = array_merge($docs, ['23', '25', '261', '262', '27', '40', '41']);
         }
-        // 3. PLB / PDPLB: Dokumen khusus PLB
+        // 3. PLB / PDPLB: Dokumen khusus PLB (BC 1.6, 2.8, 3.3, 3.3.1, 2.7)
         if (in_array('plb', $roles)) {
-            $docs = array_merge($docs, ['16', '28', '33', '331']);
+            $docs = array_merge($docs, ['16', '28', '33', '331', '27']);
         }
         // 4. PIB: hanya BC 2.0
         if (in_array('pib', $roles)) {
@@ -124,4 +168,48 @@ if (!function_exists('ceisa_resolve_allowed_docs')) {
         return array_values(array_unique($docs));
     }
 }
+
+if (!function_exists('ceisa_parse_docs')) {
+    function ceisa_parse_docs($rawDocs) {
+        if ($rawDocs === '*' || empty($rawDocs) || $rawDocs === 'ALL') {
+            return ['*'];
+        }
+        if (is_array($rawDocs)) {
+            return array_values(array_filter(array_map('strval', $rawDocs)));
+        }
+        $rawStr = trim((string)$rawDocs);
+        if ($rawStr === '' || $rawStr === '*' || strtoupper($rawStr) === 'ALL') {
+            return ['*'];
+        }
+        if (strtoupper($rawStr) === 'NONE' || $rawStr === '-') {
+            return [];
+        }
+        $decoded = json_decode($rawStr, true);
+        if (is_array($decoded)) {
+            return array_values(array_filter(array_map('strval', $decoded)));
+        }
+        return array_values(array_filter(array_map('trim', explode(',', $rawStr))));
+    }
+}
+
+if (!function_exists('ceisa_get_effective_allowed_docs')) {
+    function ceisa_get_effective_allowed_docs($companyAllowedDocs = null) {
+        $isSuperAdmin = !empty($_SESSION['is_super_admin']);
+        if ($isSuperAdmin) {
+            return ['*'];
+        }
+        if ($companyAllowedDocs === null) {
+            $companyRoles = $_SESSION['company_roles'] ?? 'tpb';
+            $companyAllowedDocs = $_SESSION['company_allowed_docs'] ?? ceisa_resolve_allowed_docs($companyRoles, null);
+        }
+        $rawUserDocs = $_SESSION['user_allowed_docs'] ?? ($_SESSION['allowed_docs'] ?? ['*']);
+        $userDocs = ceisa_parse_docs($rawUserDocs);
+
+        if (in_array('*', $userDocs) || in_array('ALL', $userDocs)) {
+            return (array)$companyAllowedDocs;
+        }
+        return array_values(array_intersect($userDocs, (array)$companyAllowedDocs));
+    }
+}
 ?>
+

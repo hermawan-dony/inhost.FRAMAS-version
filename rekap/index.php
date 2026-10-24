@@ -37,6 +37,8 @@ if (empty($namaperusahaan)) {
 
 // Resolusi hak akses dokumen perusahaan (mengacu setting perusahaan & preset role)
 $allowedDocs = ceisa_resolve_allowed_docs($companyRoles, $allowedDocsStr);
+$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($allowedDocs);
+$docCatalogFilter = !empty($_SESSION['is_super_admin']) ? $allowedDocs : $effectiveAllowedDocs;
 
 // Master Katalog Metadata Dokumen (Pemasukan / Masuk vs Pengeluaran / Keluar)
 $masterCatalog = [
@@ -68,7 +70,7 @@ $activeKeluarCols = [];
 
 foreach ($masterCatalog as $key => $meta) {
     $base = (string)($meta['base_code'] ?? $meta['code']);
-    if (in_array($base, $allowedDocs, true)) {
+    if (in_array($base, $docCatalogFilter, true)) {
         if ($meta['type'] === 'masuk') {
             $activeMasukCols[] = $meta;
         } else {
