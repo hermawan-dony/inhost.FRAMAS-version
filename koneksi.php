@@ -222,5 +222,3 @@ if (!function_exists('ceisa_get_effective_allowed_docs')) {
         return array_values(array_intersect($userDocs, (array)$companyAllowedDocs));
     }
 }
-?>
-

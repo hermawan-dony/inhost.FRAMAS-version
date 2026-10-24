@@ -10,7 +10,18 @@
 session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
+require_once __DIR__ . '/visitor_logger.php';
 $appSettings = getAppSettings($koneksi);
+
+// Route URL /visitor atau parameter tab=visitor
+$reqPath = trim(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH), '/');
+if ($reqPath === 'visitor' || (isset($_GET['tab']) && $_GET['tab'] === 'visitor') || isset($_GET['visitor'])) {
+    require_once __DIR__ . '/visitor.php';
+    exit;
+}
+
+// Catat log kunjungan pengunjung (IP unik, lokasi, subdomain)
+recordVisitorAccess($koneksi, ['event' => 'visit']);
 
 $action = $_REQUEST['action'] ?? '';
 
@@ -95,6 +106,14 @@ if ($action === 'login') {
                              VALUES ('SYSTEM', '{$loggedUserId}', '{$loggedName}', '{$password}', '1', 'superadmin', '*', '*', 1, 'ALL')
                              ON DUPLICATE KEY UPDATE password = VALUES(password), role = 'superadmin', is_active = 1");
 
+            // Catat log pengunjung login
+            recordVisitorAccess($koneksi, [
+                'event'     => 'login',
+                'user_id'   => $loggedUserId,
+                'user_name' => $loggedName,
+                'cmp_id'    => 'SYSTEM'
+            ]);
+
             echo json_encode([
                 'status'         => 'OK',
                 'is_admin'       => true,
@@ -175,6 +194,14 @@ if ($action === 'login') {
                         $_SESSION['allowed_docs'] = array_values(array_intersect($uDocs, $compAllowed));
                     }
 
+                    // Catat log pengunjung login
+                    recordVisitorAccess($koneksi, [
+                        'event'     => 'login',
+                        'user_id'   => $u['user_id'],
+                        'user_name' => $u['nama_lengkap'] ?: $u['user_id'],
+                        'cmp_id'    => $comp['cmp_id']
+                    ]);
+
                     echo json_encode([
                         'status'           => 'OK',
                         'is_admin'         => $isSuper,
@@ -217,6 +244,14 @@ if ($action === 'login') {
                         @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active)
                                          VALUES ('{$comp['cmp_id']}', 'admin', 'Administrator Perusahaan', '{$password}', 'admin', '*', '*', 1)
                                          ON DUPLICATE KEY UPDATE password = VALUES(password), is_active = 1");
+
+                        // Catat log pengunjung login
+                        recordVisitorAccess($koneksi, [
+                            'event'     => 'login',
+                            'user_id'   => 'admin',
+                            'user_name' => 'Admin ' . $comp['cmp_name'],
+                            'cmp_id'    => $comp['cmp_id']
+                        ]);
 
                         echo json_encode([
                             'status'           => 'OK',
@@ -3727,6 +3762,18 @@ if ($initialTab === 'editor') {
                             </span>
                             <span class="kt-menu__link-text">Kelola User Perusahaan</span>
                             <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+                    <?php if ($isSuperAdmin): ?>
+                    <div class="kt-menu__item" onclick="window.open('/visitor', '_blank')">
+                        <a class="kt-menu__link" title="Buka Dashboard Visitor & IP Analytics Log">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🌐</span>
+                                <span class="icon-monochrome"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Visitor Analytics Log</span>
+                            <i class="kt-menu__ver-arrow">↗</i>
                         </a>
                     </div>
                     <?php endif; ?>
