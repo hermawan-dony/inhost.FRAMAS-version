@@ -193,7 +193,11 @@ if (!function_exists('recordVisitorAccess')) {
 
         $event    = $options['event'] ?? 'visit'; // 'visit' atau 'login'
         $userId   = $options['user_id'] ?? ($_SESSION['user_id'] ?? null);
-        $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? null);
+        $userId   = trim((string)$userId);
+        if (empty($userId) || strtolower($userId) === 'guest') {
+            return false; // Hanya mencatat aktivitas pengguna yang sudah login
+        }
+        $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? $userId);
         $cmpId    = $options['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? null));
 
         $ip = getVisitorClientIp();
@@ -286,8 +290,12 @@ if (!function_exists('recordMenuAccess')) {
             return false;
         }
 
-        $userId   = $options['user_id'] ?? ($_SESSION['user_id'] ?? 'guest');
-        $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? '-');
+        $userId   = $options['user_id'] ?? ($_SESSION['user_id'] ?? null);
+        $userId   = trim((string)$userId);
+        if (empty($userId) || strtolower($userId) === 'guest') {
+            return false; // Hanya mencatat menu pengguna yang sudah login
+        }
+        $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? $userId);
         $cmpId    = $options['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? null));
 
         $ip = getVisitorClientIp();

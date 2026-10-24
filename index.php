@@ -20,8 +20,10 @@ if ($reqPath === 'visitor' || (isset($_GET['tab']) && $_GET['tab'] === 'visitor'
     exit;
 }
 
-// Catat log kunjungan pengunjung (IP unik, lokasi, subdomain)
-recordVisitorAccess($koneksi, ['event' => 'visit']);
+// Catat log kunjungan pengguna jika sudah login
+if (!empty($_SESSION['user_id'])) {
+    recordVisitorAccess($koneksi, ['event' => 'visit']);
+}
 
 $action = $_REQUEST['action'] ?? '';
 
@@ -30,12 +32,14 @@ $action = $_REQUEST['action'] ?? '';
 // -------------------------------------------------------------
 if ($action === 'log_menu') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId = $_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '');
-    if (isVisitorMenuLogEnabled($koneksi, $cmpId)) {
-        $mId    = trim($_REQUEST['menu_id'] ?? '');
-        $mTitle = trim($_REQUEST['menu_title'] ?? '');
-        if (!empty($mId)) {
-            recordMenuAccess($koneksi, $mId, $mTitle);
+    if (!empty($_SESSION['user_id'])) {
+        $cmpId = $_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '');
+        if (isVisitorMenuLogEnabled($koneksi, $cmpId)) {
+            $mId    = trim($_REQUEST['menu_id'] ?? '');
+            $mTitle = trim($_REQUEST['menu_title'] ?? '');
+            if (!empty($mId)) {
+                recordMenuAccess($koneksi, $mId, $mTitle);
+            }
         }
     }
     echo json_encode(['status' => 'OK']);

@@ -9,8 +9,10 @@ session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/visitor_logger.php';
 
-// Pastikan pengunjung yang membuka /visitor tetap tercatat
-recordVisitorAccess($koneksi, ['event' => 'visit']);
+// Pastikan hanya pengunjung yang sudah login yang dicatat
+if (!empty($_SESSION['user_id']) && strtolower($_SESSION['user_id']) !== 'guest') {
+    recordVisitorAccess($koneksi, ['event' => 'visit']);
+}
 
 // Handle AJAX Request untuk Data Real-time & Export
 $action = $_GET['action'] ?? '';
@@ -18,15 +20,19 @@ $action = $_GET['action'] ?? '';
 if ($action === 'data') {
     header('Content-Type: application/json; charset=utf-8');
     
-    // 1. KPI Aggregates
-    $kpiHits    = $koneksi->query("SELECT IFNULL(SUM(hit_count), 0) FROM bc_visitor_log")->fetch_row()[0] ?? 0;
-    $kpiIps     = $koneksi->query("SELECT COUNT(DISTINCT ip_address) FROM bc_visitor_log")->fetch_row()[0] ?? 0;
-    $kpiSubs    = $koneksi->query("SELECT COUNT(DISTINCT subdomain) FROM bc_visitor_log")->fetch_row()[0] ?? 0;
-    $kpiUsers   = $koneksi->query("SELECT COUNT(DISTINCT user_id) FROM bc_visitor_log WHERE user_id IS NOT NULL AND user_id != ''")->fetch_row()[0] ?? 0;
+    // Syarat wajib: Hanya akun yang sudah login (bukan guest / bukan pre-login)
+    $authCondition = "user_id IS NOT NULL AND user_id != '' AND user_id != 'guest'";
 
-    // 2. Breakdown per Subdomain
+    // 1. KPI Aggregates
+    $kpiHits    = $koneksi->query("SELECT IFNULL(SUM(hit_count), 0) FROM bc_visitor_log WHERE $authCondition")->fetch_row()[0] ?? 0;
+    $kpiIps     = $koneksi->query("SELECT COUNT(DISTINCT ip_address) FROM bc_visitor_log WHERE $authCondition")->fetch_row()[0] ?? 0;
+    $kpiSubs    = $koneksi->query("SELECT COUNT(DISTINCT subdomain) FROM bc_visitor_log WHERE $authCondition")->fetch_row()[0] ?? 0;
+    $kpiUsers   = $koneksi->query("SELECT COUNT(DISTINCT user_id) FROM bc_visitor_log WHERE $authCondition")->fetch_row()[0] ?? 0;
+
+    // 2. Breakdown per Subdomain (Hanya yang login)
     $subRes = $koneksi->query("SELECT subdomain, COUNT(DISTINCT ip_address) as unique_ips, SUM(hit_count) as total_hits 
                                FROM bc_visitor_log 
+                               WHERE $authCondition 
                                GROUP BY subdomain 
                                ORDER BY total_hits DESC LIMIT 10");
     $subBreakdown = [];
@@ -34,10 +40,10 @@ if ($action === 'data') {
         $subBreakdown[] = $r;
     }
 
-    // 3. Breakdown per Kota / Lokasi
+    // 3. Breakdown per Kota / Lokasi (Hanya yang login)
     $cityRes = $koneksi->query("SELECT city, country_name, country_code, COUNT(DISTINCT ip_address) as unique_ips, SUM(hit_count) as total_hits 
                                 FROM bc_visitor_log 
-                                WHERE city IS NOT NULL AND city != '' 
+                                WHERE city IS NOT NULL AND city != '' AND $authCondition 
                                 GROUP BY city, country_name, country_code 
                                 ORDER BY total_hits DESC LIMIT 10");
     $cityBreakdown = [];
@@ -45,23 +51,24 @@ if ($action === 'data') {
         $cityBreakdown[] = $r;
     }
 
-    // 4. Breakdown per Device & OS
-    $devRes = $koneksi->query("SELECT device_type, COUNT(*) as cnt FROM bc_visitor_log GROUP BY device_type");
+    // 4. Breakdown per Device & OS (Hanya yang login)
+    $devRes = $koneksi->query("SELECT device_type, COUNT(*) as cnt FROM bc_visitor_log WHERE $authCondition GROUP BY device_type");
     $devBreakdown = [];
     while ($r = $devRes->fetch_assoc()) {
         $devBreakdown[] = $r;
     }
 
-    // 5. Menu Activity Aggregates & List
+    // 5. Menu Activity Aggregates & List (Hanya yang login)
     $kpiMenuHits = 0;
-    $menuHitsQuery = @$koneksi->query("SELECT COUNT(*) FROM bc_visitor_menu_log");
+    $menuHitsQuery = @$koneksi->query("SELECT COUNT(*) FROM bc_visitor_menu_log WHERE $authCondition");
     if ($menuHitsQuery && $mrow = $menuHitsQuery->fetch_row()) {
         $kpiMenuHits = (int)$mrow[0];
     }
 
-    // Top 10 Menus Dibuka
+    // Top 10 Menus Dibuka (Hanya yang login)
     $menuTopRes = @$koneksi->query("SELECT menu_id, IFNULL(NULLIF(menu_title, ''), menu_id) as menu_title, COUNT(*) as cnt 
                                    FROM bc_visitor_menu_log 
+                                   WHERE $authCondition 
                                    GROUP BY menu_id, menu_title 
                                    ORDER BY cnt DESC LIMIT 10");
     $menuTop = [];
@@ -71,11 +78,11 @@ if ($action === 'data') {
         }
     }
 
-    // 6. Data List Lengkap Pengunjung
+    // 6. Data List Lengkap Pengunjung Login
     $filterSub = trim($_GET['subdomain'] ?? '');
     $searchKw  = trim($_GET['q'] ?? '');
     
-    $where = ["1=1"];
+    $where = [$authCondition];
     if (!empty($filterSub) && $filterSub !== 'ALL') {
         $where[] = "subdomain = '" . $koneksi->real_escape_string($filterSub) . "'";
     }
@@ -91,8 +98,8 @@ if ($action === 'data') {
         $visitors[] = $r;
     }
 
-    // 7. Stream Riwayat Akses Menu (300 data terkini)
-    $menuWhere = ["1=1"];
+    // 7. Stream Riwayat Akses Menu (300 data terkini - Hanya yang login)
+    $menuWhere = ["m.user_id IS NOT NULL", "m.user_id != ''", "m.user_id != 'guest'"];
     if (!empty($filterSub) && $filterSub !== 'ALL') {
         $menuWhere[] = "m.subdomain = '" . $koneksi->real_escape_string($filterSub) . "'";
     }
@@ -114,9 +121,9 @@ if ($action === 'data') {
         }
     }
 
-    // Ambil list unik subdomain untuk filter dropdown
+    // Ambil list unik subdomain untuk filter dropdown (Hanya yang login)
     $subFilterList = [];
-    $sRes = $koneksi->query("SELECT DISTINCT subdomain FROM bc_visitor_log ORDER BY subdomain ASC");
+    $sRes = $koneksi->query("SELECT DISTINCT subdomain FROM bc_visitor_log WHERE $authCondition ORDER BY subdomain ASC");
     while ($sr = $sRes->fetch_assoc()) {
         $subFilterList[] = $sr['subdomain'];
     }
