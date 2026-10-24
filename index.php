@@ -735,6 +735,7 @@ if (!$isSuperAdmin) {
     }
 }
 $appSettings = getAppSettings($koneksi, $activeAppCmpId);
+$appUpdateVersion = getAppUpdateVersion();
 
 // Resolusi Peran & Hak Akses Dokumen Perusahaan
 $activeRolesList = array_filter(array_map('trim', explode(',', strtolower($sessionCompanyRoles))));
@@ -1251,7 +1252,8 @@ if ($initialTab === 'editor') {
         body.sidebar-unpinned .kt-aside:not(:hover) .Menu_searchWrapper__1Kj_Z,
         body.sidebar-unpinned .kt-aside:not(:hover) .kt-menu__section-text,
         body.sidebar-unpinned .kt-aside:not(:hover) .kt-menu__link-text,
-        body.sidebar-unpinned .kt-aside:not(:hover) .kt-menu__ver-arrow {
+        body.sidebar-unpinned .kt-aside:not(:hover) .kt-menu__ver-arrow,
+        body.sidebar-unpinned .kt-aside:not(:hover) .kt-aside__footer {
             display: none !important;
         }
         body.sidebar-unpinned .kt-aside:not(:hover) .kt-aside__brand {
@@ -1408,6 +1410,23 @@ if ($initialTab === 'editor') {
         }
         .kt-aside-menu::-webkit-scrollbar { width: 4px; }
         .kt-aside-menu::-webkit-scrollbar-thumb { background: #d9d9d9; border-radius: 4px; }
+
+        /* Sidebar Footer (Versi Update) */
+        .kt-aside__footer {
+            padding: 8px 12px;
+            font-size: 9.5px;
+            font-weight: 500;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-sidebar);
+            flex-shrink: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            text-align: center;
+            letter-spacing: 0.25px;
+            user-select: none;
+        }
 
         .kt-menu__section {
             margin: 6px 0 2px;
@@ -3742,6 +3761,11 @@ if ($initialTab === 'editor') {
                     </div>
                 </div>
                 <?php endif; // End of if ($userRole === 'bc') else ?>
+            </div>
+
+            <!-- SIDEBAR FOOTER (Versi Update) -->
+            <div class="kt-aside__footer" title="Versi Update Sistem">
+                Versi Update : <?= htmlspecialchars($appUpdateVersion) ?>
             </div>
         </aside>
 

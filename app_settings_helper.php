@@ -254,3 +254,25 @@ if (!function_exists('resetAppSettings')) {
         return getAppSettings($dbConn, $cmpId);
     }
 }
+
+if (!function_exists('getAppUpdateVersion')) {
+    /**
+     * Mengambil nomor versi update sistem terkini
+     * Mengutamakan file version.txt, fallback ke filemtime index.php (Asia/Jakarta)
+     * Format: YYYYMMDD.HHmm (contoh: 20261024.1124)
+     */
+    function getAppUpdateVersion() {
+        $vf = __DIR__ . '/version.txt';
+        if (file_exists($vf)) {
+            $v = trim((string)@file_get_contents($vf));
+            if (!empty($v)) {
+                return $v;
+            }
+        }
+        $ts = file_exists(__DIR__ . '/index.php') ? filemtime(__DIR__ . '/index.php') : time();
+        $dt = new DateTime("@$ts");
+        $dt->setTimezone(new DateTimeZone('Asia/Jakarta'));
+        return $dt->format('Ymd.Hi');
+    }
+}
+

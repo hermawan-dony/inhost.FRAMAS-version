@@ -34,6 +34,7 @@ cookie.txt
 
 # Debug outputs, logs, and sample text/PDF files
 *.txt
+!version.txt
 *.log
 webhook_log.txt
 *.pdf
