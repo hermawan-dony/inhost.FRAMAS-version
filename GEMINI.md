@@ -47,15 +47,15 @@ Ketika pengguna memberikan instruksi/perintah **`clone!`** (atau meminta backup 
    - Lakukan commit dan push ke repositori GitHub: `https://github.com/hermawan-dony/inhost.web.id` pada branch `main`.
    - Skrip otomasi siap pakai dapat dijalankan via: `powershell -ExecutionPolicy Bypass -File c:\dp\g-ceisa\sync_and_push.ps1`.
 
-## 3. Aturan Perintah "deploy!"
+## 3. Aturan Perintah "deploy!" (Dual-Deploy: VPS Bekasi + cPanel)
 Ketika pengguna memberikan instruksi/perintah **`deploy!`** (atau meminta upload/sinkronkan perubahan ke hosting):
 1. **Deteksi Berkas**:
    - Jika pengguna menyebutkan nama file spesifik, prioritaskan file tersebut.
    - Jika tidak menyebut file tertentu, deteksi seluruh file proyek yang baru saja diperbarui atau dimodifikasi dalam sesi kerja terkini.
-2. **Eksekusi Pengunggahan Otomatis**:
-   - Unggah ke VPS Bekasi (`202.10.35.199`) via SCP:
-     `& "C:\Program Files\PuTTY\pscp.exe" -batch -hostkey "SHA256:uCOFAdVGHhaGAWzAEPhrz/ZEmNRxEamt8/89vpVENis" -P 22 -pw "K@y010782" <daftar_file> root@202.10.35.199:/var/www/inhost/`
-   - Jika diminta deploy ke hosting cPanel lama:
+2. **Eksekusi Pengunggahan Otomatis Ganda (Dual-Deploy)**:
+   - Jalankan otomasi dual-deploy yang langsung mengunggah file ke **KEDUA SERVER** (VPS Bekasi via PSCP dan cPanel via FTP) dalam satu kali jalan:
      `powershell -ExecutionPolicy Bypass -File d:\vd\inhost_web_app\deploy.ps1 [nama_file]`
+   - Jika ingin deploy seluruh proyek:
+     `powershell -ExecutionPolicy Bypass -File d:\vd\inhost_web_app\deploy.ps1 -All`
 3. **Verifikasi & Laporkan**:
-   - Laporkan daftar berkas yang berhasil diunggah beserta ringkasan statusnya kepada pengguna secara rapi dan jelas.
+   - Laporkan daftar berkas yang berhasil diunggah beserta status keberhasilan untuk kedua target (VPS Bekasi & cPanel) kepada pengguna secara rapi dan jelas.

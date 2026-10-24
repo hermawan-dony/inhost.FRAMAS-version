@@ -14,11 +14,14 @@ Pengembangan sistem dan acuan operasional saat ini berpusat pada server **VPS BE
 | **User SSH** | `root` |
 | **Password SSH** | `K@y010782` |
 | **Direktori Web Root** | `/var/www/inhost/` |
-| **OS Server** | Linux Ubuntu Server / Nginx & PHP 7.4/8.x |
-| **Database Server** | MySQL / MariaDB (UNIX socket `localhost` / `127.0.0.1:3306`) |
+| **OS Server** | Ubuntu 22.04 LTS / Nginx & PHP-FPM 8.2 |
+| **Database Server** | MariaDB 10.6.23 (`localhost:3306` & `202.10.35.199:3306`) |
 | **Nama Database** | `bc2faktur_inhost` |
 | **User Database** | `bc2faktur_root` |
 | **Password Database** | `@combro#` |
+| **Collation Database** | **`utf8mb4_unicode_ci`** (100% seragam untuk seluruh 95 tabel) |
+| **Tuning MariaDB** | Buffer Pool: `1024M` (1 GB) \| Query Cache: `64M` \| Temp Table: `64M` \| Max Conn: `200` |
+| **Whitelist Client IP** | cPanel inhost.id (`101.50.1.111`) diberi izin akses langsung ke DB VPS |
 
 ### Database Alternatif (Alibaba Cloud RDS - Secondary)
 - Host: `rm-d9j4584f890612j7vro.mysql.ap-southeast-5.rds.aliyuncs.com:63306`
@@ -26,11 +29,13 @@ Pengembangan sistem dan acuan operasional saat ini berpusat pada server **VPS BE
 - Password: `CiT8T2#h4Jd#3wer$9d36hd`
 - Database: `ceisa0400db`
 
-### Otomasi Upload & Deployment ke VPS Bekasi
-Antigravity dan terminal lokal dapat mengunggah berkas yang dimodifikasi ke VPS Bekasi menggunakan `pscp.exe`:
+### Otomasi Dual-Deploy (VPS Bekasi + cPanel inhost.id)
+Sistem menggunakan skrip `deploy.ps1` untuk menyinkronkan perubahan ke **KEDUA SERVER SEKALIGUS**:
 ```powershell
-& "C:\Program Files\PuTTY\pscp.exe" -batch -hostkey "SHA256:uCOFAdVGHhaGAWzAEPhrz/ZEmNRxEamt8/89vpVENis" -P 22 -pw "K@y010782" <daftar_file_lokal> root@202.10.35.199:/var/www/inhost/
+powershell -ExecutionPolicy Bypass -File d:\vd\inhost_web_app\deploy.ps1 [nama_file]
 ```
+- **Target 1**: VPS Bekasi (`202.10.35.199:/var/www/inhost/`) via PSCP
+- **Target 2**: cPanel (`inhost.id`) via FTP
 
 Eksekusi perintah remote via SSH:
 ```powershell

@@ -21,18 +21,20 @@ if (!function_exists('str_contains')) {
     }
 }
 
-// Deteksi Otomatis Lingkungan cPanel Hosting (inhost.id / palapa13 / bc2faktur)
-$isCpanel = (
-    (isset($_SERVER['DOCUMENT_ROOT']) && strpos($_SERVER['DOCUMENT_ROOT'], 'bc2faktur') !== false) ||
-    (isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'inhost.id') !== false) ||
-    (isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'inhost.id') !== false) ||
-    (isset($_SERVER['HOME']) && strpos($_SERVER['HOME'], 'bc2faktur') !== false) ||
-    file_exists('/home/bc2faktur') ||
-    file_exists('/var/www/inhost')
+// Deteksi Otomatis Lingkungan Server (VPS Bekasi vs cPanel inhost.id)
+$isVpsBekasi = file_exists('/var/www/inhost');
+$isCpanel    = (
+    !$isVpsBekasi && (
+        (isset($_SERVER['DOCUMENT_ROOT']) && strpos($_SERVER['DOCUMENT_ROOT'], 'bc2faktur') !== false) ||
+        (isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'inhost.id') !== false) ||
+        (isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'inhost.id') !== false) ||
+        (isset($_SERVER['HOME']) && strpos($_SERVER['HOME'], 'bc2faktur') !== false) ||
+        file_exists('/home/bc2faktur')
+    )
 );
 
-if ($isCpanel) {
-    // Kredensial Khusus Hosting / VPS (Prioritaskan 'localhost' UNIX Socket untuk latensi 0 ms)
+if ($isVpsBekasi) {
+    // 1. VPS BEKASI (DCI CIBITUNG): Prioritaskan 'localhost' UNIX Socket untuk latensi 0 ms
     $user     = 'bc2faktur_root';
     $password = '@combro#';
     $database = 'bc2faktur_inhost';
@@ -41,11 +43,22 @@ if ($isCpanel) {
     if (!$koneksi) {
         $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
     }
+} elseif ($isCpanel) {
+    // 2. CPANEL HOSTING (inhost.id): Terhubung langsung ke Database Terpusat VPS Bekasi (202.10.35.199)
+    $user     = 'bc2faktur_root';
+    $password = '@combro#';
+    $database = 'bc2faktur_inhost';
+
+    $koneksi = @mysqli_connect('202.10.35.199', $user, $password, $database, 3306);
+    // Fallback darurat ke MariaDB lokal cPanel jika jaringan WAN terputus
     if (!$koneksi) {
-        $koneksi = @mysqli_connect('inhost.id', $user, $password, $database, 3306);
+        $koneksi = @mysqli_connect('localhost', $user, $password, $database);
+    }
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
     }
 } else {
-    // Kredensial Standar Server Alibaba Cloud RDS MySQL
+    // 3. Kredensial Standar Server Alibaba Cloud RDS MySQL / Lingkungan Lokal
     $host     = 'rm-d9j4584f890612j7vro.mysql.ap-southeast-5.rds.aliyuncs.com';
     $port     = 63306;
     $user     = 'ceisarwuser';
@@ -54,20 +67,18 @@ if ($isCpanel) {
 
     $koneksi = @mysqli_connect($host, $user, $password, $database, $port);
 
-    // Fallback 1: Jika di lingkungan cPanel/VPS namun host header berbeda
+    // Fallback 1: VPS Bekasi / cPanel
     if (!$koneksi) {
-        $koneksi = @mysqli_connect('localhost', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost');
-    }
-    if (!$koneksi) {
-        $koneksi = @mysqli_connect('inhost.id', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost', 3306);
+        $koneksi = @mysqli_connect('202.10.35.199', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost', 3306);
         if ($koneksi) {
             $database = 'bc2faktur_inhost';
         }
     }
-
-    // Fallback 2: Port database lokal pengembang
     if (!$koneksi) {
-        $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3306);
+        $koneksi = @mysqli_connect('localhost', 'bc2faktur_root', '@combro#', 'bc2faktur_inhost');
+        if ($koneksi) {
+            $database = 'bc2faktur_inhost';
+        }
     }
 }
 
