@@ -37,8 +37,9 @@ if (empty($namaperusahaan)) {
 
 // Resolusi hak akses dokumen perusahaan (mengacu setting perusahaan & preset role)
 $allowedDocs = ceisa_resolve_allowed_docs($companyRoles, $allowedDocsStr);
-$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($allowedDocs);
-$docCatalogFilter = !empty($_SESSION['is_super_admin']) ? $allowedDocs : $effectiveAllowedDocs;
+
+// Aturan Rekap Matriks Dokumen: Wajib menampilkan seluruh dokumen BC aktif untuk PERUSAHAAN (bukan per user)
+$docCatalogFilter = $allowedDocs;
 
 // Master Katalog Metadata Dokumen (Pemasukan / Masuk vs Pengeluaran / Keluar)
 $masterCatalog = [
@@ -340,9 +341,20 @@ if ($cRes) {
     .error-row {
       background-color: #fff1f0 !important;
     }
+    @keyframes rekapPageSpin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
+
+<!-- Page Loader Overlay -->
+<div id="pageLoaderOverlay" style="position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(255,255,255,0.95); backdrop-filter:blur(3px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; z-index:99999; transition:opacity 0.25s ease;">
+  <div style="width:42px; height:42px; border:3.5px solid #e6f7ff; border-top:3.5px solid #1890ff; border-radius:50%; animation:rekapPageSpin 0.75s linear infinite;"></div>
+  <div style="font-size:13px; font-weight:600; color:#1890ff; letter-spacing:0.3px;">Memuat Matriks Rekapitulasi Dokumen...</div>
+  <div style="font-size:11px; color:#8c8c8c;">Mengagregasi data dokumen pabean <?= htmlspecialchars($namaperusahaan) ?></div>
+</div>
 
 <!-- Navigation Bar -->
 <nav class="navbar navbar-expand-lg navbar-light border-bottom">
@@ -372,7 +384,7 @@ if ($cRes) {
     </ul>
     <div class="d-flex align-items-center" style="gap:8px;">
       <?php if (count($companies) > 1): ?>
-        <select class="form-control form-control-sm" style="width:160px; font-size:11px; height:26px;" onchange="location.href='index.php?cmp_id='+encodeURIComponent(this.value)+'&belum_selesai=<?= $belum_selesai ?>'">
+        <select class="form-control form-control-sm" style="width:160px; font-size:11px; height:26px;" onchange="showPageLoader(); location.href='index.php?cmp_id='+encodeURIComponent(this.value)+'&belum_selesai=<?= $belum_selesai ?>'">
           <?php foreach ($companies as $c): ?>
             <option value="<?= htmlspecialchars($c['cmp_id']) ?>" <?= ($c['cmp_id'] === $cmp_id) ? 'selected' : '' ?>>
               <?= htmlspecialchars($c['cmp_name']) ?>
@@ -380,7 +392,7 @@ if ($cRes) {
           <?php endforeach; ?>
         </select>
       <?php endif; ?>
-      <button class="btn btn-outline-secondary btn-custom" onclick="window.location.reload();">
+      <button class="btn btn-outline-secondary btn-custom" onclick="showPageLoader(); window.location.reload();">
         <i class="fas fa-redo-alt mr-1"></i> Muat Ulang
       </button>
       <a href="../daftar_dokumen.php?cmp_id=<?= urlencode($cmp_id) ?>" class="btn btn-outline-primary btn-custom">
@@ -401,7 +413,7 @@ if ($cRes) {
         <form method="GET" action="" id="filterForm" class="form-inline m-0">
           <input type="hidden" name="cmp_id" value="<?= htmlspecialchars($cmp_id) ?>">
           <div class="custom-control custom-checkbox mr-2">
-            <input type="checkbox" class="custom-control-input" id="belum_selesai" name="belum_selesai" value="1" <?= $belum_selesai ? 'checked' : '' ?> onchange="document.getElementById('filterForm').submit();">
+            <input type="checkbox" class="custom-control-input" id="belum_selesai" name="belum_selesai" value="1" <?= $belum_selesai ? 'checked' : '' ?> onchange="showPageLoader(); document.getElementById('filterForm').submit();">
             <label class="custom-control-label" style="cursor:pointer; font-weight:600; color:#cf1322;" for="belum_selesai">
               ⚠️ Tampilkan Belum Selesai (<span style="color:#cf1322;">&lt;&gt; Selesai Proses</span>)
             </label>
@@ -746,6 +758,23 @@ function exportToExcel() {
   const safeYm = currentYm.replace(/[^0-9\-]/g, '');
   const fileName = `Rekap_${currentKodeDokumen}_${safeYm}.xlsx`;
   XLSX.writeFile(wb, fileName);
+}
+
+// Handler Page Loader Overlay
+window.addEventListener('load', function() {
+  const plo = document.getElementById('pageLoaderOverlay');
+  if (plo) {
+    plo.style.opacity = '0';
+    setTimeout(function() { plo.style.display = 'none'; }, 250);
+  }
+});
+
+function showPageLoader() {
+  const plo = document.getElementById('pageLoaderOverlay');
+  if (plo) {
+    plo.style.display = 'flex';
+    plo.style.opacity = '1';
+  }
 }
 </script>
 </body>

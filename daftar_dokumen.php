@@ -1325,6 +1325,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             opacity: 0.65;
             pointer-events: none;
         }
+        @keyframes rekapViewerSpin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -1769,6 +1773,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 </div>
             </div>
             <div style="flex:1; width:100%; height:100%; position:relative; background:#f0f2f5;">
+                <!-- LOADER MODAL REKAP VIEWER -->
+                <div id="rekapViewerLoader" style="position:absolute; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.92); backdrop-filter:blur(3px); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:12px; z-index:20;">
+                    <div style="width:40px; height:40px; border:3.5px solid #e6f7ff; border-top:3.5px solid #1890ff; border-radius:50%; animation:rekapViewerSpin 0.75s linear infinite;"></div>
+                    <div style="font-size:12.5px; font-weight:600; color:#1890ff; letter-spacing:0.3px;">Memuat Utilitas CEISA 4.0...</div>
+                    <div style="font-size:11px; color:#8c8c8c;">Menyiapkan matriks dokumen & data real-time...</div>
+                </div>
                 <iframe id="rekapViewerFrame" src="" style="width:100%; height:100%; border:none;"></iframe>
             </div>
         </div>
@@ -1823,15 +1833,31 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             activeRekapUrl = `rekap/${path}?cmp_id=${encodeURIComponent(cmpId)}`;
             const rvt = document.getElementById('rekapViewerTitle');
             if (rvt) rvt.innerText = title || 'Utilitas CEISA 4.0';
+            
+            // Tampilkan loader modal rekap viewer saat iframe mulai memuat
+            const ldr = document.getElementById('rekapViewerLoader');
+            if (ldr) ldr.style.display = 'flex';
+
             const rvf = document.getElementById('rekapViewerFrame');
-            if (rvf) rvf.src = activeRekapUrl;
+            if (rvf) {
+                rvf.onload = function() {
+                    if (ldr) ldr.style.display = 'none';
+                };
+                rvf.src = activeRekapUrl;
+            }
             const mrv = document.getElementById('modalRekapViewer');
             if (mrv) mrv.style.display = 'flex';
         }
 
         function closeRekapViewer() {
             document.getElementById('modalRekapViewer').style.display = 'none';
-            document.getElementById('rekapViewerFrame').src = '';
+            const rvf = document.getElementById('rekapViewerFrame');
+            if (rvf) {
+                rvf.onload = null;
+                rvf.src = '';
+            }
+            const ldr = document.getElementById('rekapViewerLoader');
+            if (ldr) ldr.style.display = 'none';
             loadList();
         }
 
