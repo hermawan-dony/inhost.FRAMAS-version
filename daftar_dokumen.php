@@ -16,7 +16,7 @@ $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['
 $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? '');
 
 $appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $sessionCmpId) : [];
-$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 15));
+$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 120));
 $syncBatchSize   = max(10, min(1000, (int)($appSettings['ceisa_sync_batch_size'] ?? 50)));
 
 // Ambil daftar profil perusahaan aktif untuk filter
@@ -1941,12 +1941,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const indicatorText = document.getElementById('silentSyncText');
             const btnSync = document.getElementById('btnSyncCeisa');
 
-            if (indicator) {
+            if (indicator && isManual) {
                 indicator.style.display = 'inline-flex';
                 indicator.className = 'sync-indicator sync-active';
                 if (indicatorText) indicatorText.innerText = 'Menyinkronkan data CEISA...';
             }
-            if (btnSync) {
+            if (btnSync && isManual) {
                 btnSync.classList.add('btn-loading');
                 btnSync.disabled = true;
             }
@@ -1960,7 +1960,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 localStorage.setItem(cacheKey, Date.now().toString());
 
                 if (json.status === 'OK') {
-                    if (indicator && indicatorText) {
+                    if (indicator && indicatorText && (isManual || json.inserted > 0)) {
+                        indicator.style.display = 'inline-flex';
                         indicator.className = 'sync-indicator sync-success';
                         indicatorText.innerText = `✓ CEISA 4.0 Terupdate (${json.inserted} dokumen)`;
                         setTimeout(() => {
@@ -1973,7 +1974,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         loadList(true);
                     }
                 } else if (json.status === 'RATE_LIMITED') {
-                    if (indicator && indicatorText) {
+                    if (indicator && indicatorText && isManual) {
+                        indicator.style.display = 'inline-flex';
                         indicator.className = 'sync-indicator sync-warning';
                         indicatorText.innerText = json.message || 'Antrean padat: Sinkronisasi dijeda sementara';
                         setTimeout(() => {
@@ -1984,6 +1986,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     if (indicator) indicator.style.display = 'none';
                 } else {
                     if (indicator && indicatorText && isManual) {
+                        indicator.style.display = 'inline-flex';
                         indicator.className = 'sync-indicator sync-warning';
                         indicatorText.innerText = json.message || 'Sinkronisasi dilewati';
                         setTimeout(() => {

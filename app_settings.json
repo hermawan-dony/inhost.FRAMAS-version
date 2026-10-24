@@ -13,7 +13,7 @@
     "login_bg_dimmer": "0",
     "ceisa_env": "production",
     "ceisa_api_url": "https://apis-gw.beacukai.go.id",
-    "ceisa_sync_interval_minutes": "60",
+    "ceisa_sync_interval_minutes": "120",
     "ceisa_sync_batch_size": "50",
     "tracking_refresh": "0",
     "api_timeout": "30",

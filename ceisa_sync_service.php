@@ -87,10 +87,10 @@ if (file_exists($quarantineFile)) {
     }
 }
 
-// 2. Cooldown cerdas: Minimal 15 menit (900 detik) untuk background sync, 60 detik untuk manual tombol
-$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 15;
-if ($configuredIntervalMin < 5) $configuredIntervalMin = 15;
-$bgCooldownSeconds = $configuredIntervalMin * 60; // 15 menit = 900 detik
+// 2. Cooldown cerdas: Minimal interval sesuai konfigurasi (default 120 menit / 7.200 detik), 60 detik untuk manual tombol
+$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 120;
+if ($configuredIntervalMin < 5) $configuredIntervalMin = 120;
+$bgCooldownSeconds = $configuredIntervalMin * 60; // 120 menit = 7200 detik
 $cooldownSeconds   = $isForce ? 60 : $bgCooldownSeconds;
 $lastSyncTime      = 0;
 
@@ -334,6 +334,8 @@ $sqlUpdatePosted = "UPDATE bc_ceisa_aju_posted
     SET nomor_daftar = ?, tanggal_daftar = ? 
     WHERE nomor_aju = ? AND (nomor_daftar IS NULL OR nomor_daftar = '' OR nomor_daftar != ?)";
 $stmtUpdatePosted = $koneksi->prepare($sqlUpdatePosted);
+
+$cleanCmp = $koneksi->real_escape_string($cmpId);
 
 // Amankan data SPPB lama dari bc_ceisa_data sebelum tertimpa
 $sqlArchiveSppb = "INSERT INTO bc_ceisa_sppb (

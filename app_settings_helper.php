@@ -28,7 +28,7 @@ if (!function_exists('getDefaultAppSettings')) {
             // 3. CEISA 4.0 Integration & Environment (Khusus Admin Global)
             'ceisa_env'                   => 'production', // 'production' | 'staging'
             'ceisa_api_url'               => 'https://apis-gw.beacukai.go.id',
-            'ceisa_sync_interval_minutes' => '15', // Interval sinkronisasi background (minimal 15 menit)
+            'ceisa_sync_interval_minutes' => '120', // Interval sinkronisasi background (default 120 menit / 2 jam)
             'ceisa_sync_batch_size'       => '50', // Jumlah dokumen ditarik per sync (default 50 baris)
             'tracking_refresh'            => '0', // detik (0 = Non-Aktif / Manual Saja)
             'api_timeout'                 => '30', // detik

@@ -1442,10 +1442,11 @@ if ($isCustomScope) {
                                 <span class="hint">Minimal 15 menit sekali agar penarikan tidak terlalu cepat</span>
                             </label>
                             <select class="form-control" id="inp_ceisa_sync_interval_minutes" name="ceisa_sync_interval_minutes">
-                                <option value="15" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 15) === 15) ? 'selected' : '' ?>>15 Menit Sekali (Default &amp; Rekomendasi)</option>
-                                <option value="30" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 15) === 30) ? 'selected' : '' ?>>30 Menit Sekali</option>
-                                <option value="60" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 15) === 60) ? 'selected' : '' ?>>60 Menit (1 Jam Sekali)</option>
-                                <option value="120" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 15) === 120) ? 'selected' : '' ?>>120 Menit (2 Jam Sekali)</option>
+                                <option value="15" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 15) ? 'selected' : '' ?>>15 Menit Sekali</option>
+                                <option value="30" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 30) ? 'selected' : '' ?>>30 Menit Sekali</option>
+                                <option value="60" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 60) ? 'selected' : '' ?>>60 Menit (1 Jam Sekali)</option>
+                                <option value="120" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 120) ? 'selected' : '' ?>>120 Menit (2 Jam Sekali - Rekomendasi)</option>
+                                <option value="240" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 240) ? 'selected' : '' ?>>240 Menit (4 Jam Sekali)</option>
                             </select>
                         </div>
                         <div class="form-group">
