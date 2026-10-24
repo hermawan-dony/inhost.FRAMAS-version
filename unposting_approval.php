@@ -22,8 +22,12 @@ if ($action === 'list') {
     $tgl2   = trim($_GET['tgl2'] ?? date('Y-m-d'));
     $status = trim($_GET['status'] ?? '');
     $search = trim($_GET['q'] ?? '');
+    $cmpId  = !empty($_GET['cmp_id']) ? trim($_GET['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : ($_SESSION['cmp_id'] ?? ''));
 
     $where = [];
+    if (!empty($cmpId) && $cmpId !== 'ALL') {
+        $where[] = "u.cmp_id = '" . $koneksi->real_escape_string($cmpId) . "'";
+    }
     if (!empty($tgl1) && !empty($tgl2)) {
         $where[] = "TGL_REQ BETWEEN '" . $koneksi->real_escape_string($tgl1) . "' AND '" . $koneksi->real_escape_string($tgl2) . "'";
     }

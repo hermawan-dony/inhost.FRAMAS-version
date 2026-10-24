@@ -634,6 +634,9 @@ if ($activeTab === 'home') {
                (SELECT COUNT(*) FROM bc_1ab2_revisi rv WHERE rv.CEK = r.ROWID) AS JUMLAH_REVISI
                FROM bc_ceisa_req_unpost r
                WHERE 1=1 ";
+    if (!empty($escCmp)) {
+        $sqlLog .= " AND r.cmp_id = '$escCmp' ";
+    }
     $params = [];
     $types = "";
 

@@ -813,22 +813,37 @@ if ($action === 'unpost_it') {
         }
 
         // 1. Simpan log request unposting
-        $hRes = $koneksi->query("SELECT kode_dokumen, nama_pernyataan FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
-        $bc = ''; $bs = '';
+        $hRes = $koneksi->query("SELECT cmp_id, kode_dokumen, nama_pernyataan FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        $bc = ''; $bs = ''; $docCmpId = '';
         if ($hRes && $hr = $hRes->fetch_assoc()) {
             $bc = substr(trim($hr['kode_dokumen'] ?? ''), 0, 5);
-            $bs = substr(trim($hr['nama_pernyataan'] ?? ''), 0, 200);
+            $docCmpId = $hr['cmp_id'] ?? '';
+        }
+        // Ambil nama badan usaha dari bc_1ab2 atau entitas partner
+        $bRes = $koneksi->query("SELECT NAMA_BS FROM bc_1ab2 WHERE nomor_aju = '$escAju' LIMIT 1");
+        if ($bRes && ($br = $bRes->fetch_assoc()) && !empty($br['NAMA_BS'])) {
+            $bs = substr(trim($br['NAMA_BS']), 0, 200);
+        } else {
+            $eRes = $koneksi->query("SELECT nama_entitas FROM bc_ceisa_entitas WHERE nomor_aju = '$escAju' AND kode_entitas IN ('3', '7') LIMIT 1");
+            if ($eRes && ($er = $eRes->fetch_assoc()) && !empty($er['nama_entitas'])) {
+                $bs = substr(trim($er['nama_entitas']), 0, 200);
+            } else {
+                $bs = substr(trim($hr['nama_pernyataan'] ?? ''), 0, 200);
+            }
+        }
+        if (empty($docCmpId)) {
+            $docCmpId = !empty($_SESSION['company_cmp_id']) ? $_SESSION['company_cmp_id'] : ($_SESSION['cmp_id'] ?? '');
         }
         $user_req = substr(trim($_SESSION['user_name'] ?? 'USER'), 0, 30);
         $tglToday = date('Y-m-d'); // 10 karakter: YYYY-MM-DD sesuai tipe varchar(10)
 
-        $koneksi->query("INSERT INTO bc_ceisa_req_unpost (NOMOR_AJU, BC, NAMA_BS, TGL_REQ, USER_REQ, ALASAN, STATUS, USER_APPV, TGL_APPV)
-                         VALUES ('$escAju', '$bc', '$bs', '$tglToday', '$user_req', 'Unposting melalui Daftar Dokumen Web', 'Y', '$user_req', '$tglToday')");
+        $koneksi->query("INSERT INTO bc_ceisa_req_unpost (cmp_id, NOMOR_AJU, BC, NAMA_BS, TGL_REQ, USER_REQ, ALASAN, STATUS, USER_APPV, TGL_APPV)
+                         VALUES ('$docCmpId', '$escAju', '$bc', '" . $koneksi->real_escape_string($bs) . "', '$tglToday', '$user_req', 'Unposting melalui Daftar Dokumen Web', 'Y', '$user_req', '$tglToday')");
         $unpostId = (int)$koneksi->insert_id;
 
         // 2. Arsipkan ke bc_1ab2_revisi
-        $koneksi->query("INSERT INTO bc_1ab2_revisi (CEK, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES)
-                         SELECT $unpostId, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES
+        $koneksi->query("INSERT INTO bc_1ab2_revisi (cmp_id, CEK, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES)
+                         SELECT '$docCmpId', $unpostId, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES
                          FROM bc_1ab2 WHERE nomor_aju = '$escAju'");
 
         // 3. Hapus dari bc_1ab2
