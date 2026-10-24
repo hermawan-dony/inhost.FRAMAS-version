@@ -1413,10 +1413,11 @@ if ($initialTab === 'editor') {
 
         /* Sidebar Footer (Versi Update) */
         .kt-aside__footer {
-            padding: 8px 12px;
-            font-size: 9.5px;
-            font-weight: 500;
+            padding: 4px 8px;
+            font-size: 7.5px;
+            font-weight: 400;
             color: var(--text-muted);
+            opacity: 0.75;
             border-top: 1px solid var(--border-color);
             background: var(--bg-sidebar);
             flex-shrink: 0;
@@ -1424,7 +1425,7 @@ if ($initialTab === 'editor') {
             overflow: hidden;
             text-overflow: ellipsis;
             text-align: center;
-            letter-spacing: 0.25px;
+            letter-spacing: 0.2px;
             user-select: none;
         }
 
