@@ -313,14 +313,14 @@ $sqlDelete = "DELETE FROM bc_ceisa_data WHERE nomorAju = ?";
 $stmtDelete = $koneksi->prepare($sqlDelete);
 
 $sqlInsertData = "INSERT INTO bc_ceisa_data (
-    cmp_id, idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
+    idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
     kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas, namaProses, 
     idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb, nipAp, kodeJalur, 
     flagHardcopy, flagHardcopySka, waktuTerimaHardcopy, jatuhtempoHardcopy, namaPpjk, 
     nomorBc11, totalCount, tanggalBc11, subposBc11, posBc11, kodeProsesPerbaikan, 
     namaProsesPerbaikan, flagSsm, idKepTujuan, nomorSkep, idRespon, namaRespon, 
     nomorRespon, tanggalRespon, pdf, asalData, statusPkb
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 $stmtInsertData = $koneksi->prepare($sqlInsertData);
 
 // Update nomor & tanggal daftar ke bc_ceisa_header jika tersedia
@@ -342,7 +342,7 @@ $sqlArchiveSppb = "INSERT INTO bc_ceisa_sppb (
     namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb,
     nipAp, kodeJalur, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf
 ) SELECT 
-    cmp_id, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
+    '$cleanCmp', nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
     kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas,
     namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb,
     nipAp, kodeJalur, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf
@@ -462,8 +462,8 @@ try {
             $statusPkbVal  = (string)($row['statusPkb'] ?? '');
 
             $stmtInsertData->bind_param(
-                "ssssssssssssssssssssssssssisssssssssssssss",
-                $cmpId, $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
+                "sssssssssssssssssssssssssisssssssssssssss",
+                $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
                 $kdKantorVal, $nmKantorVal, $nmEntitasVal, $kdProsesVal, $kdEntitasVal, $nmProsesVal,
                 $idPrshVal, $nmPrshVal, $idPpjkVal, $nipPfpdVal, $nipPfpbVal, $nipApVal, $kdJalurVal,
                 $flgHrdVal, $flgSkaVal, $wktHrdVal, $jthHrdVal, $nmPpjkVal,

@@ -1048,7 +1048,7 @@ if ($action === 'delete_aju') {
     // Cek apakah dokumen ada
     $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
     $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
     $hasData = ($chkData && $chkData->num_rows > 0);
 
     if (!$hasHdr && !$hasData) {

@@ -1,4 +1,6 @@
 <?php
+@ini_set('memory_limit', '512M');
+@ini_set('max_execution_time', '300');
 /**
  * CEISA 4.0 - Transfer Dokumen Pabean Dashboard (transfer.php)
  * Mengadopsi Layout, Warna, Font, dan Ant Design Style Resmi Portal CEISA 4.0 (portal.beacukai.go.id/dokumen-pabean/)
@@ -72,6 +74,11 @@ if (PHP_SAPI === 'cli' && empty($action)) {
 }
 
 if ($action === 'list') {
+    @ini_set('memory_limit', '512M');
+    @ini_set('max_execution_time', '300');
+    if (!ob_start('ob_gzhandler')) {
+        ob_start();
+    }
     header('Content-Type: application/json; charset=utf-8');
     $filter_cmp  = trim($_GET['cmp_id'] ?? '');
     $filter_bc   = trim($_GET['bc'] ?? '');
@@ -85,18 +92,12 @@ if ($action === 'list') {
 
     $where = [];
     $cmpIsInv = 1;
+    $cleanCmp = '';
     if (!empty($filter_cmp)) {
         $cleanCmp = $koneksi->real_escape_string($filter_cmp);
-        $cmpNpwp = '';
         $resComp = $koneksi->query("SELECT npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
         if ($resComp && $cr = $resComp->fetch_assoc()) {
-            $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
             $cmpIsInv = (int)$cr['IS_INV'];
-        }
-        if (!empty($cmpNpwp)) {
-            $where[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwp%')";
-        } else {
-            $where[] = "a.cmp_id = '$cleanCmp'";
         }
     }
     if (!empty($filter_bc)) {
@@ -137,7 +138,7 @@ if ($action === 'list') {
         a.asalData AS user_id,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS upd_time,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_pernyataan,
-        COALESCE(NULLIF(a.cmp_id, ''), cmp.cmp_id, '') AS cmp_id,
+        COALESCE(hdr.cmp_id, '$cleanCmp', '') AS cmp_id,
         a.kodeKantor AS kode_kantor,
         COALESCE(NULLIF(a.namaPerusahaan, ''), cmp.cmp_name, '') AS cmp_name,
         COALESCE(NULLIF(a.idPerusahaan, ''), cmp.npwp, '') AS cmp_npwp,
@@ -160,7 +161,12 @@ if ($action === 'list') {
         COALESCE(cmp.IS_INV, $cmpIsInv, 1) AS is_inv,
         IFNULL(it_inv.jml, 0) AS in_it_inv
     FROM bc_ceisa_data a
-    LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
+    LEFT JOIN (
+        SELECT nomor_aju, MAX(cmp_id) AS cmp_id
+        FROM bc_ceisa_header
+        GROUP BY nomor_aju
+    ) hdr ON a.nomorAju = hdr.nomor_aju
+    LEFT JOIN bc_ceisa_company cmp ON hdr.cmp_id = cmp.cmp_id
     LEFT JOIN (
         SELECT DISTINCT nomor_aju, 1 AS jml
         FROM bc_1ab2
@@ -257,7 +263,7 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
                       tanggalDaftar AS tanggal_daftar, namaPerusahaan AS nama_perusahaan, idPerusahaan AS id_perusahaan, 
                       kodeKantor AS kode_kantor, namaKantorPendek AS nama_kantor, namaProses AS nama_proses, 
                       namaRespon AS nama_respon, nomorRespon AS nomor_respon, tanggalRespon AS tanggal_respon, 
-                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, cmp_id
+                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, '' AS cmp_id
                FROM bc_ceisa_data 
                WHERE nomorAju = '$escAju' LIMIT 1";
     $resBcd = $koneksi->query($sqlBcd);

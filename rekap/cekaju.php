@@ -102,11 +102,11 @@ $rows = $data['data'] ?? [];
 $inserted = 0;
 
 if (!empty($rows)) {
-    $sql_delete = "DELETE FROM bc_ceisa_data WHERE nomorAju = ? AND (cmp_id = ? OR cmp_id = '' OR cmp_id IS NULL)";
+    $sql_delete = "DELETE FROM bc_ceisa_data WHERE nomorAju = ?";
     $stmt_del = $koneksi->prepare($sql_delete);
 
     $sql_insert = "INSERT INTO bc_ceisa_data (
-        cmp_id, idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, 
+        idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, 
         namaDokumen, kodeKantor, namaKantorPendek, namaEntitas, kodeProses, 
         kodeEntitas, namaProses, idPerusahaan, namaPerusahaan, idPpjk, 
         nipPfpd, nipPfpb, nipAp, kodeJalur, flagHardcopy, 
@@ -122,7 +122,7 @@ if (!empty($rows)) {
         ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
         ?, ?, ?, ?, ?, 
-        ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?
     )";
     $stmt_ins = $koneksi->prepare($sql_insert);
 
@@ -146,15 +146,15 @@ if (!empty($rows)) {
         }
 
         if ($stmt_del) {
-            $stmt_del->bind_param("ss", $row['nomorAju'], $cmp_id);
+            $stmt_del->bind_param("s", $row['nomorAju']);
             $stmt_del->execute();
         }
 
         if ($stmt_ins) {
             $totalCountVal = (int)($row['totalCount'] ?? 0);
             $stmt_ins->bind_param(
-                "ssssssssssssssssssssssssssisssssssssssssss",
-                $cmp_id, $row['idHeader'], $row['nomorAju'], $row['nomorDaftar'], $tglDaftar, $row['kodeDokumen'],
+                "sssssssssssssssssssssssssisssssssssssssss",
+                $row['idHeader'], $row['nomorAju'], $row['nomorDaftar'], $tglDaftar, $row['kodeDokumen'],
                 $row['namaDokumen'], $row['kodeKantor'], $row['namaKantorPendek'], $row['namaEntitas'], $row['kodeProses'],
                 $row['kodeEntitas'], $row['namaProses'], $row['idPerusahaan'], $row['namaPerusahaan'], $row['idPpjk'],
                 $row['nipPfpd'], $row['nipPfpb'], $row['nipAp'], $row['kodeJalur'], $row['flagHardcopy'],

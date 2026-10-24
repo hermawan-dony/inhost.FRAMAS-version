@@ -61,12 +61,12 @@ if ($err) {
 $data = json_decode($response, true);
 
 if (isset($data['data']) && is_array($data['data']) && isset($koneksi) && $koneksi) {
-    $delStmt = $koneksi->prepare("DELETE FROM bc_ceisa_data WHERE (cmp_id = ? OR cmp_id = '') AND nomorAju = ?");
+    $delStmt = $koneksi->prepare("DELETE FROM bc_ceisa_data WHERE nomorAju = ?");
     
     $insStmt = $koneksi->prepare("
         INSERT INTO bc_ceisa_data 
-        (cmp_id, idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas, namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb, nipAp, kodeJalur, flagHardcopy, flagHardcopySka, waktuTerimaHardcopy, jatuhtempoHardcopy, namaPpjk, nomorBc11, totalCount, tanggalBc11, subposBc11, posBc11, kodeProsesPerbaikan, namaProsesPerbaikan, flagSsm, idKepTujuan, nomorSkep, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf, asalData, statusPkb) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas, namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb, nipAp, kodeJalur, flagHardcopy, flagHardcopySka, waktuTerimaHardcopy, jatuhtempoHardcopy, namaPpjk, nomorBc11, totalCount, tanggalBc11, subposBc11, posBc11, kodeProsesPerbaikan, namaProsesPerbaikan, flagSsm, idKepTujuan, nomorSkep, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf, asalData, statusPkb) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ");
 
     $savedCount = 0;
@@ -76,7 +76,7 @@ if (isset($data['data']) && is_array($data['data']) && isset($koneksi) && $konek
 
         // Bersihkan data lama
         if ($delStmt) {
-            $delStmt->bind_param("ss", $cmp_id, $nomorAju);
+            $delStmt->bind_param("s", $nomorAju);
             $delStmt->execute();
         }
 
@@ -91,8 +91,7 @@ if (isset($data['data']) && is_array($data['data']) && isset($koneksi) && $konek
 
         if ($insStmt) {
             $insStmt->bind_param(
-                "ssssssssssssssssssssssssssssssssssssssssss",
-                $cmp_id,
+                "sssssssssssssssssssssssssssssssssssssssss",
                 $row['idHeader'],
                 $nomorAju,
                 $row['nomorDaftar'],

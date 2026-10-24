@@ -490,12 +490,8 @@ if ($action === 'get_alert_notifications') {
 
     // 1. Jumlah Dokumen yang Belum Selesai (CEISA 4.0)
     $whereCmpData = [];
-    if (!empty($cleanCmp)) {
-        if (!empty($cmpNpwpDigits)) {
-            $whereCmpData[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwpDigits%')";
-        } else {
-            $whereCmpData[] = "a.cmp_id = '$cleanCmp'";
-        }
+    if (!empty($cleanCmp) && !empty($cmpNpwpDigits)) {
+        $whereCmpData[] = "a.idPerusahaan LIKE '%$cmpNpwpDigits%'";
     }
     $whereCmpDataSql = !empty($whereCmpData) ? ' AND ' . implode(' AND ', $whereCmpData) : '';
 

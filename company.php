@@ -714,23 +714,12 @@ if ($action === 'clear_data') {
             }
         } catch (\Throwable $e) {}
 
-        try {
-            $qAju2 = $koneksi->query("SELECT DISTINCT nomorAju FROM bc_ceisa_data WHERE cmp_id = '$escCmp'");
-            if ($qAju2) {
-                while ($ra = $qAju2->fetch_assoc()) {
-                    $na = trim($ra['nomorAju'] ?? '');
-                    if (!empty($na)) $nomorAjuMap[$na] = true;
-                }
-            }
-        } catch (\Throwable $e) {}
-
         $nomorAjuList = array_keys($nomorAjuMap);
         $totalAju = count($nomorAjuList);
         
         // 2. Daftar seluruh tabel transaksi kepabeanan & log yang memiliki kolom cmp_id
         $tablesWithCmp = [
             'bc_ceisa_header',
-            'bc_ceisa_data',
             'bc_ceisa_sppb',
             'bc_ceisa_pengangkut',
             'bc_ceisa_kemasan',
