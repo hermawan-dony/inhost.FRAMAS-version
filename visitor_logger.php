@@ -329,3 +329,97 @@ if (!function_exists('recordMenuAccess')) {
         return false;
     }
 }
+
+if (!function_exists('ensureVisitorTables')) {
+    /**
+     * Memastikan seluruh tabel skema audit visitor & menu tersedia di database
+     */
+    function ensureVisitorTables($koneksi) {
+        if (!$koneksi || $koneksi->connect_error) {
+            return false;
+        }
+
+        // 1. bc_visitor_geo_cache
+        @$koneksi->query("CREATE TABLE IF NOT EXISTS `bc_visitor_geo_cache` (
+            `ip_address` VARCHAR(45) NOT NULL,
+            `country_code` VARCHAR(10) DEFAULT 'ID',
+            `country_name` VARCHAR(100) DEFAULT 'Indonesia',
+            `region_name` VARCHAR(100) DEFAULT NULL,
+            `city` VARCHAR(100) DEFAULT NULL,
+            `isp` VARCHAR(150) DEFAULT NULL,
+            `latitude` DECIMAL(10,6) DEFAULT NULL,
+            `longitude` DECIMAL(10,6) DEFAULT NULL,
+            `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`ip_address`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+        // 2. bc_visitor_log
+        @$koneksi->query("CREATE TABLE IF NOT EXISTS `bc_visitor_log` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ip_address` VARCHAR(45) NOT NULL,
+            `subdomain` VARCHAR(100) NOT NULL DEFAULT 'root',
+            `host` VARCHAR(150) DEFAULT NULL,
+            `user_id` VARCHAR(100) DEFAULT NULL,
+            `user_name` VARCHAR(150) DEFAULT NULL,
+            `cmp_id` VARCHAR(50) DEFAULT NULL,
+            `country_code` VARCHAR(10) DEFAULT 'ID',
+            `country_name` VARCHAR(100) DEFAULT 'Indonesia',
+            `region_name` VARCHAR(100) DEFAULT NULL,
+            `city` VARCHAR(100) DEFAULT NULL,
+            `isp` VARCHAR(150) DEFAULT NULL,
+            `user_agent` TEXT DEFAULT NULL,
+            `browser` VARCHAR(100) DEFAULT NULL,
+            `os` VARCHAR(100) DEFAULT NULL,
+            `device_type` VARCHAR(50) DEFAULT 'Desktop',
+            `hit_count` INT UNSIGNED NOT NULL DEFAULT 1,
+            `first_visit` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `last_visit` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `idx_ip_subdomain` (`ip_address`, `subdomain`),
+            KEY `idx_ip` (`ip_address`),
+            KEY `idx_subdomain` (`subdomain`),
+            KEY `idx_user_id` (`user_id`),
+            KEY `idx_last_visit` (`last_visit`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+        // 3. bc_visitor_hits
+        @$koneksi->query("CREATE TABLE IF NOT EXISTS `bc_visitor_hits` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ip_address` VARCHAR(45) NOT NULL,
+            `subdomain` VARCHAR(100) NOT NULL DEFAULT 'root',
+            `user_id` VARCHAR(100) DEFAULT NULL,
+            `cmp_id` VARCHAR(50) DEFAULT NULL,
+            `action_event` VARCHAR(50) NOT NULL DEFAULT 'visit',
+            `page_url` TEXT DEFAULT NULL,
+            `referer` TEXT DEFAULT NULL,
+            `city` VARCHAR(100) DEFAULT NULL,
+            `country_name` VARCHAR(100) DEFAULT NULL,
+            `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_hit_ip` (`ip_address`),
+            KEY `idx_hit_subdomain` (`subdomain`),
+            KEY `idx_hit_time` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+        // 4. bc_visitor_menu_log
+        @$koneksi->query("CREATE TABLE IF NOT EXISTS `bc_visitor_menu_log` (
+            `id` BIGINT NOT NULL AUTO_INCREMENT,
+            `ip_address` VARCHAR(45) NOT NULL,
+            `subdomain` VARCHAR(100) NOT NULL DEFAULT 'root',
+            `user_id` VARCHAR(100) DEFAULT NULL,
+            `user_name` VARCHAR(150) DEFAULT NULL,
+            `cmp_id` VARCHAR(50) DEFAULT NULL,
+            `menu_id` VARCHAR(100) NOT NULL,
+            `menu_title` VARCHAR(150) DEFAULT NULL,
+            `accessed_at` DATETIME NOT NULL,
+            PRIMARY KEY (`id`),
+            KEY `idx_vml_ip` (`ip_address`),
+            KEY `idx_vml_sub` (`subdomain`),
+            KEY `idx_vml_user` (`user_id`),
+            KEY `idx_vml_time` (`accessed_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+        return true;
+    }
+}
+

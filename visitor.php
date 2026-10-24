@@ -9,6 +9,9 @@ session_start();
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/visitor_logger.php';
 
+// Pastikan skema tabel visitor dan menu audit selalu tersedia
+ensureVisitorTables($koneksi);
+
 // Pastikan hanya pengunjung yang sudah login yang dicatat
 if (!empty($_SESSION['user_id']) && strtolower($_SESSION['user_id']) !== 'guest') {
     recordVisitorAccess($koneksi, ['event' => 'visit']);

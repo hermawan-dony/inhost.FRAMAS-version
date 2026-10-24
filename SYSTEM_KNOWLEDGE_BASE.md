@@ -124,7 +124,11 @@ Setiap perusahaan memiliki satu atau lebih peran kepabeanan yang dipisahkan tand
    - Modul Laporan IT Inventory Bea Cukai (Laporan Pemasukan, Pengeluaran, Mutasi Bahan Baku, Barang Jadi, Mesin, Scrap).
 8. **[`rekap/index.php`](file:///d:/vd/inhost_web_app/rekap/index.php)**:
    - Dashboard Rekapitulasi Dokumen Pemasukan & Pengeluaran CEISA.
-9. **[`PROJECT_HISTORY_CEISA4.md`](file:///d:/vd/inhost_web_app/PROJECT_HISTORY_CEISA4.md)**:
+9. **[`visitor.php`](file:///d:/vd/inhost_web_app/visitor.php) & [`visitor_logger.php`](file:///d:/vd/inhost_web_app/visitor_logger.php)**:
+   - Dashboard & Engine Analytics Pengunjung, Pelacakan IP Unik, Subdomain, Geolokasi (Kota/Negara/ISP), dan Riwayat Akses Menu Real-Time (WIB / Asia/Jakarta).
+   - Skema Database: `bc_visitor_geo_cache`, `bc_visitor_log`, `bc_visitor_hits`, `bc_visitor_menu_log` (Skrip DDL: `database/visitor_tables.sql`).
+   - Hanya mencatat aktivitas pengguna yang sudah terotentikasi/login (non-login disaring).
+10. **[`PROJECT_HISTORY_CEISA4.md`](file:///d:/vd/inhost_web_app/PROJECT_HISTORY_CEISA4.md)**:
    - Riwayat lengkap seluruh perbaikan bug, integrasi fitur, dan catatan teknis proyek. **Wajib diperbarui setiap ada perubahan arsitektural/fungsional baru.**
 
 ---

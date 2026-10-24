@@ -4,6 +4,7 @@
 !www/sql_templates/*.sql
 database/*.sql
 !database/ceisa0400db.sql.zip
+!database/visitor_tables.sql
 
 # Archives & Installers & Binaries
 *.tar.gz
