@@ -54,9 +54,9 @@ if (-not $cred -or -not $cred[1]) {
 
 $user = $cred[0]
 $token = $cred[1].Trim()
-$remoteUrl = "https://${user}:${token}@github.com/hermawan-dony/inhost.web.id.git"
+$remoteUrl = "https://${user}:${token}@github.com/hermawan-dony/inhost.FRAMAS-version.git"
 
-Write-Host "Mendorong perubahan (push) ke GitHub repository: https://github.com/hermawan-dony/inhost.web.id..." -ForegroundColor Cyan
+Write-Host "Mendorong perubahan (push) ke GitHub repository: https://github.com/hermawan-dony/inhost.FRAMAS-version..." -ForegroundColor Cyan
 git push $remoteUrl main
 
 if ($LASTEXITCODE -eq 0) {

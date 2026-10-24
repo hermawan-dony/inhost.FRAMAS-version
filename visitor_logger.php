@@ -200,6 +200,9 @@ if (!function_exists('recordVisitorAccess')) {
         $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? $userId);
         $cmpId    = $options['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? null));
 
+        // Pastikan skema visitor tersedia (DB baru / setelah migrate)
+        ensureVisitorTables($koneksi);
+
         $ip = getVisitorClientIp();
         $subdomain = detectVisitorSubdomain();
         $host = strtolower($_SERVER['HTTP_HOST'] ?? '');
@@ -297,6 +300,8 @@ if (!function_exists('recordMenuAccess')) {
         }
         $userName = $options['user_name'] ?? ($_SESSION['user_name'] ?? $userId);
         $cmpId    = $options['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? null));
+
+        ensureVisitorTables($koneksi);
 
         $ip = getVisitorClientIp();
         $subdomain = detectVisitorSubdomain();

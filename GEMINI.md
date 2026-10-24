@@ -44,8 +44,8 @@ Ketika pengguna memberikan instruksi/perintah **`clone!`** (atau meminta backup 
      - Direktori installer lokal (`share/`)
 4. **Git Commit & Push ke GitHub**:
    - Ambil token otentikasi GitHub secara aman dari Windows Credential Manager (`LegacyGeneric:target=GitHub - https://api.github.com/hermawan-dony`).
-   - Lakukan commit dan push ke repositori GitHub: `https://github.com/hermawan-dony/inhost.web.id` pada branch `main`.
-   - Skrip otomasi siap pakai dapat dijalankan via: `powershell -ExecutionPolicy Bypass -File c:\dp\g-ceisa\sync_and_push.ps1`.
+   - Lakukan commit dan push ke repositori GitHub: `https://github.com/hermawan-dony/inhost.FRAMAS-version` pada branch `main`.
+   - Skrip otomasi siap pakai dapat dijalankan via: `powershell -ExecutionPolicy Bypass -File push_github.ps1`.
 
 ## 3. Aturan Perintah "deploy!" (Dual-Deploy: VPS Bekasi + cPanel)
 Ketika pengguna memberikan instruksi/perintah **`deploy!`** (atau meminta upload/sinkronkan perubahan ke hosting):

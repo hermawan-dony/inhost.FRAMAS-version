@@ -21,10 +21,17 @@ if (!function_exists('str_contains')) {
     }
 }
 
-// Deteksi Otomatis Lingkungan Server (VPS Bekasi vs cPanel inhost.id)
+// Deteksi Otomatis Lingkungan Server (Windows lokal / VPS Bekasi / cPanel inhost.id)
+$isWindowsLocal = (
+    strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ||
+    (isset($_SERVER['DOCUMENT_ROOT']) && (
+        stripos($_SERVER['DOCUMENT_ROOT'], 'xampp') !== false ||
+        stripos($_SERVER['DOCUMENT_ROOT'], 'inhost-web-id') !== false
+    ))
+);
 $isVpsBekasi = file_exists('/var/www/inhost');
 $isCpanel    = (
-    !$isVpsBekasi && (
+    !$isVpsBekasi && !$isWindowsLocal && (
         (isset($_SERVER['DOCUMENT_ROOT']) && strpos($_SERVER['DOCUMENT_ROOT'], 'bc2faktur') !== false) ||
         (isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'inhost.id') !== false) ||
         (isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'inhost.id') !== false) ||
@@ -33,7 +40,17 @@ $isCpanel    = (
     )
 );
 
-if ($isVpsBekasi) {
+if ($isWindowsLocal) {
+    // 0. WINDOWS / XAMPP LOKAL: MySQL 8.0.45 (port 3307) database multi-tenant framasbc
+    $user     = 'beacukai';
+    $password = 'beacukai';
+    $database = 'framasbc';
+
+    $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3307);
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('localhost', $user, $password, $database, 3307);
+    }
+} elseif ($isVpsBekasi) {
     // 1. VPS BEKASI (DCI CIBITUNG): Prioritaskan 'localhost' UNIX Socket untuk latensi 0 ms
     $user     = 'bc2faktur_root';
     $password = '@combro#';
@@ -80,6 +97,13 @@ if ($isVpsBekasi) {
             $database = 'bc2faktur_inhost';
         }
     }
+    // Fallback 2: Windows lokal multi-tenant (MySQL 8.0.45 :3307)
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('127.0.0.1', 'beacukai', 'beacukai', 'framasbc', 3307);
+        if ($koneksi) {
+            $database = 'framasbc';
+        }
+    }
 }
 
 if (!$koneksi) {
@@ -87,6 +111,7 @@ if (!$koneksi) {
 }
 
 mysqli_set_charset($koneksi, "utf8mb4");
+@mysqli_query($koneksi, "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
 
 // Standarisasi Waktu ke Waktu Indonesia Barat (WIB, Asia/Jakarta / UTC+7)
 if (function_exists('date_default_timezone_set')) {
