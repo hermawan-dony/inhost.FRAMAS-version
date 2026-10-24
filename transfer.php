@@ -2356,7 +2356,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn ant-btn-primary" onclick="transferActiveAju()" title="Transfer Dokumen ke Portal CEISA 4.0">
                             <span>&#128640; Transfer CEISA</span>
                         </button>
-                        <button type="button" class="ant-btn ant-btn-insw" id="btnPostingInsw" onclick="postInswActiveAju()" title="Posting / Transfer Dokumen ke Portal INSW (PPKEK 613/611/612 & FTZ)">
+                        <!-- Sementara di-hide karena API pembuatan dokumen INSW belum tersedia -->
+                        <button type="button" class="ant-btn ant-btn-insw" id="btnPostingInsw" onclick="postInswActiveAju()" title="Posting / Transfer Dokumen ke Portal INSW (PPKEK 613/611/612 & FTZ)" style="display:none !important;">
                             <span>🌐 Posting INSW</span>
                         </button>
                         <button type="button" class="ant-btn" onclick="setH2HActiveAju()" title="Set Status Dokumen ke H2H (Siap Kirim)">
@@ -2839,7 +2840,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="context-menu-item" onclick="contextAction('delete')"><i class="fa-solid fa-trash-can" style="color:#ff4d4f; width:16px;"></i> Hapus AJU</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('transfer_ceisa')"><i class="fa-solid fa-rocket" style="color:#1890ff; width:16px;"></i> Transfer CEISA</div>
-        <div class="context-menu-item" onclick="contextAction('post_insw')" style="color:#722ed1; font-weight:600;"><i class="fa-solid fa-globe" style="color:#722ed1; width:16px;"></i> Posting INSW</div>
+        <!-- Sementara di-hide karena API pembuatan dokumen INSW belum tersedia -->
+        <div class="context-menu-item" onclick="contextAction('post_insw')" style="color:#722ed1; font-weight:600; display:none !important;"><i class="fa-solid fa-globe" style="color:#722ed1; width:16px;"></i> Posting INSW</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('sync')"><i class="fa-solid fa-cloud-arrow-down" style="color:#52c41a; width:16px;"></i> Tarik / Sync Respon</div>
         <div class="context-menu-item" onclick="contextAction('reset_posted')"><i class="fa-solid fa-rotate-left" style="color:#fa8c16; width:16px;"></i> Reset Status Kirim (Putih)</div>
@@ -4735,7 +4737,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
-            // Peringatan otomatis jika dokumen bertipe PPKEK / KPBPB (613, 611, 612)
+            // Peringatan otomatis jika dokumen bertipe PPKEK / KPBPB (Sementara dinonaktifkan karena API INSW belum tersedia)
+            /*
             if (activeBc === '613' || activeBc === '611' || activeBc === '612') {
                 const swalCheck = await Swal.fire({
                     title: 'Dokumen PPKEK Terdeteksi',
@@ -4754,6 +4757,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     return;
                 }
             }
+            */
 
             const ok = await showConfirm(
                 `Apakah Anda yakin ingin mentransfer dokumen AJU <strong>${escapeHtml(activeAju)}</strong> ke Portal CEISA 4.0?`,
