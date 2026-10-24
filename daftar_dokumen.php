@@ -159,7 +159,7 @@ if ($action === 'list') {
         COALESCE(NULLIF(a.namaPerusahaan, ''), '') AS bcd_namaPerusahaan,
         COALESCE(NULLIF(a.idPerusahaan, ''), '') AS bcd_idPerusahaan,
         COALESCE(cmp.IS_INV, $cmpIsInv, 1) AS is_inv,
-        IFNULL(it_inv.jml, 0) AS in_it_inv
+        CASE WHEN EXISTS (SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju) THEN 1 ELSE 0 END AS in_it_inv
     FROM bc_ceisa_data a
     LEFT JOIN (
         SELECT nomor_aju, MAX(cmp_id) AS cmp_id
@@ -167,11 +167,6 @@ if ($action === 'list') {
         GROUP BY nomor_aju
     ) hdr ON a.nomorAju = hdr.nomor_aju
     LEFT JOIN bc_ceisa_company cmp ON hdr.cmp_id = cmp.cmp_id
-    LEFT JOIN (
-        SELECT DISTINCT nomor_aju, 1 AS jml
-        FROM bc_1ab2
-        WHERE nomor_aju IS NOT NULL AND nomor_aju != ''
-    ) it_inv ON a.nomorAju = it_inv.nomor_aju
     LEFT JOIN (
         SELECT nomorAju, MIN(nomorRespon) AS nomorRespon, MAX(tanggalRespon) AS tanggalRespon, MAX(pdf) AS pdf
         FROM bc_ceisa_sppb
