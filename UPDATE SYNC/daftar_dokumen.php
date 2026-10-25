@@ -1,4 +1,6 @@
 <?php
+@ini_set('memory_limit', '512M');
+@ini_set('max_execution_time', '300');
 /**
  * CEISA 4.0 - Transfer Dokumen Pabean Dashboard (transfer.php)
  * Mengadopsi Layout, Warna, Font, dan Ant Design Style Resmi Portal CEISA 4.0 (portal.beacukai.go.id/dokumen-pabean/)
@@ -72,6 +74,11 @@ if (PHP_SAPI === 'cli' && empty($action)) {
 }
 
 if ($action === 'list') {
+    @ini_set('memory_limit', '512M');
+    @ini_set('max_execution_time', '300');
+    if (!ob_start('ob_gzhandler')) {
+        ob_start();
+    }
     header('Content-Type: application/json; charset=utf-8');
     $filter_cmp  = trim($_GET['cmp_id'] ?? '');
     $filter_bc   = trim($_GET['bc'] ?? '');
@@ -85,18 +92,12 @@ if ($action === 'list') {
 
     $where = [];
     $cmpIsInv = 1;
+    $cleanCmp = '';
     if (!empty($filter_cmp)) {
         $cleanCmp = $koneksi->real_escape_string($filter_cmp);
-        $cmpNpwp = '';
         $resComp = $koneksi->query("SELECT npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
         if ($resComp && $cr = $resComp->fetch_assoc()) {
-            $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
             $cmpIsInv = (int)$cr['IS_INV'];
-        }
-        if (!empty($cmpNpwp)) {
-            $where[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwp%')";
-        } else {
-            $where[] = "a.cmp_id = '$cleanCmp'";
         }
     }
     if (!empty($filter_bc)) {
@@ -144,7 +145,7 @@ if ($action === 'list') {
         a.asalData AS user_id,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS upd_time,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_pernyataan,
-        COALESCE(NULLIF(a.cmp_id, ''), cmp.cmp_id, '') AS cmp_id,
+        COALESCE(hdr.cmp_id, '$cleanCmp', '') AS cmp_id,
         a.kodeKantor AS kode_kantor,
         COALESCE(NULLIF(a.namaPerusahaan, ''), cmp.cmp_name, '') AS cmp_name,
         COALESCE(NULLIF(a.idPerusahaan, ''), cmp.npwp, '') AS cmp_npwp,
@@ -169,7 +170,12 @@ if ($action === 'list') {
         IFNULL(it_inv.jml, 0) AS in_it_inv,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d 00:00:00'), '') AS effective_tanggal_respon
     FROM bc_ceisa_data a
-    LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
+    LEFT JOIN (
+        SELECT nomor_aju, MAX(cmp_id) AS cmp_id
+        FROM bc_ceisa_header
+        GROUP BY nomor_aju
+    ) hdr ON a.nomorAju = hdr.nomor_aju
+    LEFT JOIN bc_ceisa_company cmp ON hdr.cmp_id = cmp.cmp_id
     LEFT JOIN (
         SELECT DISTINCT nomor_aju, 1 AS jml
         FROM bc_1ab2
@@ -266,7 +272,7 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
                       tanggalDaftar AS tanggal_daftar, namaPerusahaan AS nama_perusahaan, idPerusahaan AS id_perusahaan, 
                       kodeKantor AS kode_kantor, namaKantorPendek AS nama_kantor, namaProses AS nama_proses, 
                       namaRespon AS nama_respon, nomorRespon AS nomor_respon, tanggalRespon AS tanggal_respon, 
-                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, cmp_id
+                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, '' AS cmp_id
                FROM bc_ceisa_data 
                WHERE nomorAju = '$escAju' LIMIT 1";
     $resBcd = $koneksi->query($sqlBcd);
@@ -274,7 +280,7 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
 
     // Ambil live riwayat status dari CEISA 4.0 via getRiwayatStatus/$idHeader jika tersedia dan ID User CEISA telah diatur
     $liveIdHeader = trim($rowBcd['id_header'] ?? '');
-    $liveCmp = $cmp_id ?: ($rowBcd['cmp_id'] ?? '');
+    $liveCmp = $cmp_id ?: ($rowBcd['id_perusahaan'] ?? '');
     $liveComp = ceisa_get_company($liveCmp ?: $escAju);
     if (!empty($liveIdHeader) && !empty($liveComp['id_user_ceisa'])) {
         $cmp_id = $liveCmp;
@@ -460,11 +466,11 @@ if ($action === 'view_json_lnsw') {
     if (empty($idHeader) && !empty($nomor_aju)) {
         $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
         $escAju = $koneksi->real_escape_string($cleanAju);
-        $sqlDoc = "SELECT idHeader, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+        $sqlDoc = "SELECT idHeader, idPerusahaan FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
         $resDoc = $koneksi->query($sqlDoc);
         if ($resDoc && $rowDoc = $resDoc->fetch_assoc()) {
             $idHeader = trim($rowDoc['idHeader'] ?? '');
-            if (empty($targetCmp)) $targetCmp = $rowDoc['cmp_id'] ?? '';
+            if (empty($targetCmp)) $targetCmp = $rowDoc['idPerusahaan'] ?? '';
         }
     }
 
@@ -555,15 +561,15 @@ if ($action === 'cetak_formulir') {
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
     $escAju = $koneksi->real_escape_string($cleanAju);
 
-    // Ambil idHeader, kodeDokumen, cmp_id, dan pdf dari bc_ceisa_data
-    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id, pdf FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    // Ambil idHeader, kodeDokumen, idPerusahaan, dan pdf dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, idPerusahaan, pdf FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
     $resDoc = $koneksi->query($sqlDoc);
     $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
 
     $idHeader = trim($rowDoc['idHeader'] ?? '');
     $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
-    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
-        $targetCmp = $rowDoc['cmp_id'];
+    if (empty($targetCmp) && !empty($rowDoc['idPerusahaan'])) {
+        $targetCmp = $rowDoc['idPerusahaan'];
     }
 
     $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $cleanAju);
@@ -649,14 +655,14 @@ if ($action === 'unduh_excel') {
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
     $escAju = $koneksi->real_escape_string($cleanAju);
 
-    // Ambil idHeader, kodeDokumen, dan cmp_id dari bc_ceisa_data
-    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    // Ambil idHeader, kodeDokumen, dan idPerusahaan dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, idPerusahaan FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
     $resDoc = $koneksi->query($sqlDoc);
     $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
 
     $kodeDokumen = trim($_REQUEST['kode_dokumen'] ?? ($rowDoc['kodeDokumen'] ?? ''));
-    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
-        $targetCmp = $rowDoc['cmp_id'];
+    if (empty($targetCmp) && !empty($rowDoc['idPerusahaan'])) {
+        $targetCmp = $rowDoc['idPerusahaan'];
     } elseif (empty($targetCmp)) {
         $comp = ceisa_get_company($cleanAju);
         if ($comp && !empty($comp['cmp_id'])) {
@@ -699,15 +705,15 @@ if ($action === 'import_to_h2h') {
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
     $escAju = $koneksi->real_escape_string($cleanAju);
 
-    // Ambil idHeader, kodeDokumen, dan cmp_id dari bc_ceisa_data
-    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    // Ambil idHeader, kodeDokumen, dan idPerusahaan dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, idPerusahaan FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
     $resDoc = $koneksi->query($sqlDoc);
     $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
 
     $idHeader = trim($rowDoc['idHeader'] ?? '');
     $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
-    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
-        $targetCmp = $rowDoc['cmp_id'];
+    if (empty($targetCmp) && !empty($rowDoc['idPerusahaan'])) {
+        $targetCmp = $rowDoc['idPerusahaan'];
     } elseif (empty($targetCmp)) {
         $comp = ceisa_get_company($cleanAju);
         if ($comp && !empty($comp['cmp_id'])) {

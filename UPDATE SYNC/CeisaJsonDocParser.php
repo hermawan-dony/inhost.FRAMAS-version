@@ -37,9 +37,12 @@ class CeisaJsonDocParser {
         global $koneksi;
         if (empty($cmpId) && $koneksi) {
             $escId = $koneksi->real_escape_string($cleanIdHeader);
-            $q = $koneksi->query("SELECT cmp_id FROM bc_ceisa_data WHERE idHeader = '{$escId}' LIMIT 1");
+            $q = $koneksi->query("SELECT idPerusahaan FROM bc_ceisa_data WHERE idHeader = '{$escId}' LIMIT 1");
             if ($q && $r = $q->fetch_assoc()) {
-                $cmpId = $r['cmp_id'];
+                $comp = ceisa_get_company($r['idPerusahaan']);
+                if ($comp && !empty($comp['cmp_id'])) {
+                    $cmpId = $comp['cmp_id'];
+                }
             }
         }
         if (empty($cmpId) && !empty($_SESSION['company_cmp_id'])) {

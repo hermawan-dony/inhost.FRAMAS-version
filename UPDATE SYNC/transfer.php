@@ -299,7 +299,7 @@ if ($action === 'list') {
         FROM bc_1ab2
         GROUP BY cmp_id, nomor_aju
     ) cekit ON kiri.cmp_id = cekit.cmp_id AND kiri.nomor_aju = cekit.nomor_aju
-    LEFT JOIN bc_ceisa_data bcd ON kiri.cmp_id = bcd.cmp_id AND kiri.nomor_aju = bcd.nomorAju
+    LEFT JOIN bc_ceisa_data bcd ON kiri.nomor_aju = bcd.nomorAju
     $whereOuterSql
     ORDER BY kiri.tanggal_pernyataan DESC, kiri.nomor_aju DESC";
 
@@ -1167,7 +1167,7 @@ if ($action === 'delete_aju') {
     // Cek apakah dokumen ada
     $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
     $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
     $hasData = ($chkData && $chkData->num_rows > 0);
 
     if (!$hasHdr && !$hasData) {

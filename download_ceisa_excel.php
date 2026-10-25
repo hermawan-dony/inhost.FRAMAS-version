@@ -177,10 +177,20 @@ if (!$force && file_exists($cachedFile)) {
 // 2.2 Tentukan Perusahaan & Kode Dokumen
 if (empty($targetCmp) && $koneksi) {
     $escA = $koneksi->real_escape_string($cleanAju);
-    $qDoc = $koneksi->query("SELECT cmp_id, kodeDokumen FROM bc_ceisa_data WHERE nomorAju = '{$escA}' LIMIT 1");
-    if ($qDoc && $rDoc = $qDoc->fetch_assoc()) {
-        if (!empty($rDoc['cmp_id'])) $targetCmp = $rDoc['cmp_id'];
-        if (empty($customKodeDokumen) && !empty($rDoc['kodeDokumen'])) $customKodeDokumen = $rDoc['kodeDokumen'];
+    $qHdr = $koneksi->query("SELECT cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '{$escA}' LIMIT 1");
+    if ($qHdr && $rHdr = $qHdr->fetch_assoc()) {
+        if (!empty($rHdr['cmp_id'])) $targetCmp = $rHdr['cmp_id'];
+        if (empty($customKodeDokumen) && !empty($rHdr['kode_dokumen'])) $customKodeDokumen = $rHdr['kode_dokumen'];
+    }
+    if (empty($customKodeDokumen) || empty($targetCmp)) {
+        $qDoc = $koneksi->query("SELECT idPerusahaan, kodeDokumen FROM bc_ceisa_data WHERE nomorAju = '{$escA}' LIMIT 1");
+        if ($qDoc && $rDoc = $qDoc->fetch_assoc()) {
+            if (empty($customKodeDokumen) && !empty($rDoc['kodeDokumen'])) $customKodeDokumen = $rDoc['kodeDokumen'];
+            if (empty($targetCmp) && !empty($rDoc['idPerusahaan'])) {
+                $comp = ceisa_get_company($rDoc['idPerusahaan']);
+                if ($comp && !empty($comp['cmp_id'])) $targetCmp = $comp['cmp_id'];
+            }
+        }
     }
 }
 

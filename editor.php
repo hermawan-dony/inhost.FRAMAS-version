@@ -174,19 +174,23 @@ if (isset($koneksi) && $koneksi) {
 require_once __DIR__ . '/erp/ErpManager.php';
 $action = $_REQUEST['action'] ?? '';
 
-// 1. Ambil Konfigurasi Format Penomoran AJU (26 Digit)
+// 1. Ambil Konfigurasi Format Penomoran AJU & Default Header
 if ($action === 'get_config_aju') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
-    $bc    = substr(str_pad(preg_replace('/[^0-9]/', '', $_GET['bc'] ?? '23'), 2, '0', STR_PAD_LEFT), 0, 2);
+    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $bcRaw   = trim($_GET['bc'] ?? '23');
+    $bcClean = preg_replace('/[^0-9]/', '', $bcRaw);
+    $bc2     = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
 
     $escCmp = $koneksi->real_escape_string($cmpId);
-    $escBc  = $koneksi->real_escape_string($bc);
+    $escBc  = $koneksi->real_escape_string($bcClean);
+    $escBc2 = $koneksi->real_escape_string($bc2);
 
     $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
     $comp = $qCmp ? $qCmp->fetch_assoc() : [];
 
-    $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND bc = '$escBc' LIMIT 1");
+    // Prioritaskan pencarian exact match bcClean, fallback ke bc2
+    $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
     if ($qSet && $rSet = $qSet->fetch_assoc()) {
         $a = $rSet['a'];
         $b = $rSet['b'];
@@ -194,6 +198,13 @@ if ($action === 'get_config_aju') {
         $nama_ttd = $rSet['nama_ttd'] ?? '';
         $jabatan_ttd = $rSet['jabatan_ttd'] ?? '';
         $kota_ttd = $rSet['kota_ttd'] ?? '';
+        $kode_kantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a);
+        $kode_jenis_tpb = $rSet['kode_jenis_tpb'] ?? '';
+        $kode_tujuan_pengiriman = $rSet['kode_tujuan_pengiriman'] ?? '';
+        $kode_tujuan_pemasukan = $rSet['kode_tujuan_pemasukan'] ?? ($bcClean === '40' ? '1' : '');
+        $kode_tujuan_pengeluaran = $rSet['kode_tujuan_pengeluaran'] ?? '';
+        $kode_valuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : 'USD';
+        $header_defaults = $rSet['header_defaults'] ?? '';
     } else {
         $a = !empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000';
         $a = str_pad($a, 4, '0', STR_PAD_LEFT);
@@ -203,53 +214,125 @@ if ($action === 'get_config_aju') {
         $nama_ttd = '';
         $jabatan_ttd = '';
         $kota_ttd = '';
+        $kode_kantor = !empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a;
+        $kode_jenis_tpb = '';
+        $kode_tujuan_pengiriman = '';
+        $kode_tujuan_pemasukan = ($bcClean === '40' ? '1' : '');
+        $kode_tujuan_pengeluaran = '';
+        $kode_valuta = 'USD';
+        $header_defaults = '';
     }
 
     echo json_encode([
         'status' => 'OK',
         'data' => [
-            'cmp_id'      => $cmpId,
-            'bc'          => $bc,
-            'a'           => $a,
-            'b'           => $b,
-            'aju'         => $aju,
-            'nama_ttd'    => $nama_ttd,
-            'jabatan_ttd' => $jabatan_ttd,
-            'kota_ttd'    => $kota_ttd,
-            'preview'     => sprintf('%04s%02s%06s%s%06d', $a, $bc, $b, date('Ymd'), $aju + 1)
+            'cmp_id'                 => $cmpId,
+            'bc'                     => $bcClean,
+            'a'                      => $a,
+            'b'                      => $b,
+            'aju'                    => $aju,
+            'nama_ttd'               => $nama_ttd,
+            'jabatan_ttd'            => $jabatan_ttd,
+            'kota_ttd'               => $kota_ttd,
+            'kode_kantor'            => $kode_kantor,
+            'kode_jenis_tpb'         => $kode_jenis_tpb,
+            'kode_tujuan_pengiriman' => $kode_tujuan_pengiriman,
+            'kode_tujuan_pemasukan'  => $kode_tujuan_pemasukan,
+            'kode_tujuan_pengeluaran'=> $kode_tujuan_pengeluaran,
+            'kode_valuta'            => $kode_valuta,
+            'header_defaults'        => $header_defaults,
+            'preview'                => sprintf('%04s%02s%06s%s%06d', $a, $bc2, $b, date('Ymd'), $aju + 1)
         ]
     ]);
     exit;
 }
 
-// 2. Simpan Konfigurasi Penomoran AJU ke bc_ceisa_setaju
+// 2. Simpan Konfigurasi Penomoran AJU & Default Header ke bc_ceisa_setaju
 if ($action === 'save_config_aju') {
     header('Content-Type: application/json; charset=utf-8');
     $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
-    $bc          = substr(str_pad(preg_replace('/[^0-9]/', '', $_POST['bc'] ?? '23'), 2, '0', STR_PAD_LEFT), 0, 2);
+    $bcClean     = preg_replace('/[^0-9]/', '', $_POST['bc'] ?? '23');
     $a           = str_pad(substr(preg_replace('/[^0-9]/', '', $_POST['a'] ?? '0000'), 0, 4), 4, '0', STR_PAD_LEFT);
     $b           = str_pad(substr(preg_replace('/[^A-Za-z0-9]/', '', $_POST['b'] ?? '000000'), 0, 6), 6, '0', STR_PAD_RIGHT);
     $aju         = intval($_POST['aju'] ?? 0);
     $nama_ttd    = trim($_POST['nama_ttd'] ?? '');
     $jabatan_ttd = trim($_POST['jabatan_ttd'] ?? '');
     $kota_ttd    = trim($_POST['kota_ttd'] ?? '');
+    $kode_kantor = trim($_POST['kode_kantor'] ?? '');
+    $kode_jenis_tpb = trim($_POST['kode_jenis_tpb'] ?? '');
+    $kode_tujuan_pengiriman = trim($_POST['kode_tujuan_pengiriman'] ?? '');
+    $kode_tujuan_pemasukan = trim($_POST['kode_tujuan_pemasukan'] ?? '');
+    $kode_tujuan_pengeluaran = trim($_POST['kode_tujuan_pengeluaran'] ?? '');
+    $kode_valuta = strtoupper(trim($_POST['kode_valuta'] ?? 'USD'));
 
     $escCmp   = $koneksi->real_escape_string($cmpId);
-    $escBc    = $koneksi->real_escape_string($bc);
+    $escBc    = $koneksi->real_escape_string($bcClean);
     $escA     = $koneksi->real_escape_string($a);
     $escB     = $koneksi->real_escape_string($b);
     $escNama  = $koneksi->real_escape_string($nama_ttd);
     $escJab   = $koneksi->real_escape_string($jabatan_ttd);
     $escKota  = $koneksi->real_escape_string($kota_ttd);
+    $escKantor= $koneksi->real_escape_string($kode_kantor);
+    $escTpb   = $koneksi->real_escape_string($kode_jenis_tpb);
+    $escTujuan= $koneksi->real_escape_string($kode_tujuan_pengiriman);
+    $escMasuk = $koneksi->real_escape_string($kode_tujuan_pemasukan);
+    $escKeluar= $koneksi->real_escape_string($kode_tujuan_pengeluaran);
+    $escVal   = $koneksi->real_escape_string($kode_valuta);
 
-    $sql = "INSERT INTO bc_ceisa_setaju (cmp_id, bc, a, b, aju, nama_ttd, jabatan_ttd, kota_ttd)
-            VALUES ('$escCmp', '$escBc', '$escA', '$escB', $aju, '$escNama', '$escJab', '$escKota')
-            ON DUPLICATE KEY UPDATE a = '$escA', b = '$escB', aju = $aju, nama_ttd = '$escNama', jabatan_ttd = '$escJab', kota_ttd = '$escKota'";
+    $sql = "INSERT INTO bc_ceisa_setaju (
+                cmp_id, bc, a, b, aju, nama_ttd, jabatan_ttd, kota_ttd,
+                kode_kantor, kode_jenis_tpb, kode_tujuan_pengiriman,
+                kode_tujuan_pemasukan, kode_tujuan_pengeluaran, kode_valuta
+            ) VALUES (
+                '$escCmp', '$escBc', '$escA', '$escB', $aju, '$escNama', '$escJab', '$escKota',
+                '$escKantor', '$escTpb', '$escTujuan', '$escMasuk', '$escKeluar', '$escVal'
+            )
+            ON DUPLICATE KEY UPDATE 
+                a = '$escA', b = '$escB', aju = $aju, 
+                nama_ttd = '$escNama', jabatan_ttd = '$escJab', kota_ttd = '$escKota',
+                kode_kantor = '$escKantor', kode_jenis_tpb = '$escTpb',
+                kode_tujuan_pengiriman = '$escTujuan', kode_tujuan_pemasukan = '$escMasuk',
+                kode_tujuan_pengeluaran = '$escKeluar', kode_valuta = '$escVal'";
+
     if ($koneksi->query($sql)) {
-        echo json_encode(['status' => 'OK', 'message' => 'Konfigurasi Penomoran AJU berhasil disimpan!']);
+        echo json_encode(['status' => 'OK', 'message' => 'Konfigurasi AJU & Nilai Bawaan Header berhasil disimpan!']);
     } else {
         echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan konfigurasi: ' . $koneksi->error]);
     }
+    exit;
+}
+
+// 2b. Ambil Default Header untuk Dokumen Aktif
+if ($action === 'get_header_defaults') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $kodeBc  = trim($_GET['kode_dokumen'] ?? '23');
+    $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
+    $cleanBc2= substr(str_pad($cleanBc, 2, '0', STR_PAD_LEFT), 0, 2);
+
+    $escCmp  = $koneksi->real_escape_string($cmpId);
+    $escBc   = $koneksi->real_escape_string($cleanBc);
+    $escBc2  = $koneksi->real_escape_string($cleanBc2);
+
+    $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
+    $comp = $qCmp ? $qCmp->fetch_assoc() : [];
+
+    $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
+    $rSet = ($qSet && $qSet->num_rows > 0) ? $qSet->fetch_assoc() : [];
+
+    $defaults = [
+        'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : ''),
+        'kode_jenis_tpb'         => $rSet['kode_jenis_tpb'] ?? '',
+        'kode_tujuan_pengiriman' => $rSet['kode_tujuan_pengiriman'] ?? '',
+        'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : ''),
+        'kode_tujuan_pengeluaran'=> $rSet['kode_tujuan_pengeluaran'] ?? '',
+        'kode_valuta'            => !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : 'USD',
+        'nama_pernyataan'        => $rSet['nama_ttd'] ?? '',
+        'jabatan_pernyataan'     => $rSet['jabatan_ttd'] ?? '',
+        'kota_pernyataan'        => $rSet['kota_ttd'] ?? '',
+    ];
+
+    echo json_encode(['status' => 'OK', 'data' => $defaults]);
     exit;
 }
 
@@ -1064,8 +1147,10 @@ if ($action === 'create_new_aju') {
         $comp = $rCmp;
     }
 
-    $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND bc = '$escBc2' LIMIT 1");
-    if (!$qSet || $qSet->num_rows === 0) {
+    $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
+    $rSet = ($qSet && $qSet->num_rows > 0) ? $qSet->fetch_assoc() : null;
+
+    if (!$rSet) {
         $a = !empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000';
         $a = str_pad($a, 4, '0', STR_PAD_LEFT);
         $b = substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6);
@@ -1078,30 +1163,52 @@ if ($action === 'create_new_aju') {
             $lastSeq = intval(substr($rMax['nomor_aju'], -6));
         }
         $nextSeq = $lastSeq + 1;
-        $koneksi->query("INSERT INTO bc_ceisa_setaju (cmp_id, bc, a, b, aju) VALUES ('$escCmp', '$escBc2', '$a', '$b', $nextSeq)");
+        $koneksi->query("INSERT INTO bc_ceisa_setaju (cmp_id, bc, a, b, aju) VALUES ('$escCmp', '$escBc', '$a', '$b', $nextSeq)");
+        $rSet = ['a' => $a, 'b' => $b, 'aju' => $nextSeq];
     } else {
-        $rSet = $qSet->fetch_assoc();
         $a = str_pad(substr($rSet['a'] ?? '0000', 0, 4), 4, '0', STR_PAD_LEFT);
         $b = str_pad(substr($rSet['b'] ?? '000000', 0, 6), 6, '0', STR_PAD_RIGHT);
         $nextSeq = intval($rSet['aju'] ?? 0) + 1;
-        $koneksi->query("UPDATE bc_ceisa_setaju SET aju = $nextSeq WHERE cmp_id = '$escCmp' AND bc = '$escBc2'");
+        $koneksi->query("UPDATE bc_ceisa_setaju SET aju = $nextSeq WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2')");
     }
+
+    // Default header values dari profil perusahaan & konfigurasi setaju
+    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a);
+    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : '';
+    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : '';
+    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '');
+    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : '';
+    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : $valuta;
+    $defNama   = $rSet['nama_ttd'] ?? '';
+    $defJab    = $rSet['jabatan_ttd'] ?? '';
+    $defKota   = $rSet['kota_ttd'] ?? '';
 
     // Nomor AJU 26 Digit: A (4) + BC (2) + B (6) + YYYYMMDD (8) + SEQ (6)
     $nomorAju = sprintf('%04s%02s%06s%08s%06d', $a, $cleanBc2, $b, $ymd, $nextSeq);
     $escAju   = $koneksi->real_escape_string($nomorAju);
     $escBc    = $koneksi->real_escape_string($cleanBc);
-    $escKantor= $koneksi->real_escape_string($comp['kode_kantor'] ?? $a);
-    $escVal   = $koneksi->real_escape_string($valuta);
+    $escKantor= $koneksi->real_escape_string($defKantor);
+    $escVal   = $koneksi->real_escape_string($defValuta);
+    $escTpb   = $koneksi->real_escape_string($defTpb);
+    $escTujuan= $koneksi->real_escape_string($defTujuan);
+    $escMasuk = $koneksi->real_escape_string($defMasuk);
+    $escKeluar= $koneksi->real_escape_string($defKeluar);
+    $escNama  = $koneksi->real_escape_string($defNama);
+    $escJab   = $koneksi->real_escape_string($defJab);
+    $escKota  = $koneksi->real_escape_string($defKota);
 
     $koneksi->begin_transaction();
     try {
-        // 1. Insert Header Staging
+        // 1. Insert Header Staging dengan nilai bawaan otomatis
         $sqlHdr = "INSERT INTO bc_ceisa_header (
             nomor_aju, kode_dokumen, cmp_id, tanggal_pernyataan, kode_kantor, kode_valuta, ndpbm,
+            kode_jenis_tpb, kode_tujuan_pengiriman, kode_tujuan_pemasukan, kode_tujuan_pengeluaran,
+            nama_pernyataan, jabatan_pernyataan, kota_pernyataan,
             fob, cif, netto, bruto
         ) VALUES (
             '$escAju', '$escBc', '$escCmp', '$tanggal', '$escKantor', '$escVal', $ndpbm,
+            '$escTpb', '$escTujuan', '$escMasuk', '$escKeluar',
+            '$escNama', '$escJab', '$escKota',
             0, 0, 0, 0
         )";
         if (!$koneksi->query($sqlHdr)) {
@@ -1109,9 +1216,9 @@ if ($action === 'create_new_aju') {
         }
 
         if ($cleanBc === '30') {
-            $koneksi->query("UPDATE bc_ceisa_header SET kode_jenis_ekspor = '1', kode_kategori_ekspor = '1', kode_cara_dagang = '1' WHERE nomor_aju = '$escAju'");
+            $koneksi->query("UPDATE bc_ceisa_header SET kode_jenis_ekspor = IF(kode_jenis_ekspor IS NULL OR kode_jenis_ekspor='', '1', kode_jenis_ekspor), kode_kategori_ekspor = IF(kode_kategori_ekspor IS NULL OR kode_kategori_ekspor='', '1', kode_kategori_ekspor), kode_cara_dagang = IF(kode_cara_dagang IS NULL OR kode_cara_dagang='', '1', kode_cara_dagang) WHERE nomor_aju = '$escAju'");
         } elseif ($cleanBc === '40') {
-            $koneksi->query("UPDATE bc_ceisa_header SET kode_tujuan_pemasukan = '1' WHERE nomor_aju = '$escAju'");
+            $koneksi->query("UPDATE bc_ceisa_header SET kode_tujuan_pemasukan = IF(kode_tujuan_pemasukan IS NULL OR kode_tujuan_pemasukan='', '1', kode_tujuan_pemasukan) WHERE nomor_aju = '$escAju'");
         }
 
         // 2. Insert Pengangkut Seri 1
@@ -1693,7 +1800,7 @@ if ($action === 'delete_aju') {
     // Cek apakah dokumen ada
     $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
     $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
     $hasData = ($chkData && $chkData->num_rows > 0);
 
     if (!$hasHdr && !$hasData) {
@@ -5362,7 +5469,10 @@ $isEditMode = !empty($selectedAjuParam);
                 <div class="form-col">
                     <!-- S1: Identitas & Pendaftaran Dokumen -->
                     <div class="form-section">
-                        <div class="section-title">📄 Identitas & Pendaftaran Dokumen</div>
+                        <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>📄 Identitas & Pendaftaran Dokumen</span>
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="applyHeaderDefaults()" style="font-size:10px; padding:2px 8px; font-weight:600; cursor:pointer;" title="Terapkan nilai bawaan header yang sudah disetel pada Konfigurasi Perusahaan & Dokumen ini">⚡ Terapkan Nilai Bawaan</button>
+                        </div>
                         <div class="field-group" data-col="nomor_aju">
                             <label>Nomor AJU (26 Digit)</label>
                             <input type="text" id="hdr_nomor_aju" readonly style="font-weight:700; color:var(--primary);">
@@ -7158,14 +7268,14 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
-    <!-- CONFIG AJU MODAL (bc_ceisa_setaju) -->
+    <!-- CONFIG AJU & DEFAULT HEADER MODAL (bc_ceisa_setaju) -->
     <div class="modal-overlay" id="modalConfigAju">
-        <div class="modal" style="max-width:550px;">
+        <div class="modal" style="max-width:680px; width:95vw;">
             <div class="modal-header">
-                <h3>⚙️ Konfigurasi Format Penomoran AJU (26 Digit)</h3>
+                <h3>⚙️ Konfigurasi Format AJU & Nilai Bawaan Header</h3>
                 <button class="btn btn-secondary btn-sm" onclick="closeModal('modalConfigAju')">✕</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="max-height:calc(85vh - 120px); overflow-y:auto;">
                 <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:12px;">
                     <div style="font-size:10px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">LIVE PREVIEW NOMOR AJU (26 DIGIT):</div>
                     <div id="cfgPreviewAju" style="font-family:monospace; font-size:13px; font-weight:700; color:var(--primary); background:var(--bg-card); padding:8px; border:1px dashed var(--primary); border-radius:4px; text-align:center;">
@@ -7212,9 +7322,9 @@ $isEditMode = !empty($selectedAjuParam);
                     </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
                     <div>
-                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">A - Kode Kantor (4 Digit):</label>
+                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">A - Kode Kantor Penomoran (4 Digit):</label>
                         <input type="text" id="cfgA" maxlength="4" value="0000" style="width:100%; font-family:monospace;" oninput="updateConfigAjuPreview()">
                     </div>
                     <div>
@@ -7223,8 +7333,73 @@ $isEditMode = !empty($selectedAjuParam);
                     </div>
                 </div>
 
-                <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:10px;">
-                    <div style="font-size:10px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">DATA TANDA TANGAN PEMBERITAHU (OPSIONAL):</div>
+                <!-- SECTION NILAI BAWAAN HEADER -->
+                <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:10px; margin-bottom:12px;">
+                    <div style="font-size:10px; font-weight:700; color:var(--primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+                        <span>📋 NILAI BAWAAN HEADER (INIT OTOMATIS SAAT BUAT DOKUMEN BARU)</span>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Kode Kantor Pabean (6 Digit):</label>
+                            <input type="text" id="cfgKodeKantor" placeholder="Contoh: 051000" maxlength="8" style="width:100%;">
+                        </div>
+                        <div>
+                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Jenis TPB:</label>
+                            <select id="cfgKodeJenisTpb" style="width:100%;">
+                                <option value="">-- Tidak Disetel --</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                        <div>
+                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pengiriman:</label>
+                            <select id="cfgKodeTujuanPengiriman" style="width:100%;">
+                                <option value="">-- Tidak Disetel --</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pemasukan / Pengeluaran:</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                                <select id="cfgKodeTujuanPemasukan" style="width:100%;" title="Tujuan Pemasukan">
+                                    <option value="">Pemasukan...</option>
+                                </select>
+                                <select id="cfgKodeTujuanPengeluaran" style="width:100%;" title="Tujuan Pengeluaran">
+                                    <option value="">Pengeluaran...</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                        <div>
+                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Valuta Bawaan:</label>
+                            <select id="cfgKodeValuta" style="width:100%;">
+                                <option value="USD">USD - DOLLAR AMERIKA SERIKAT</option>
+                                <option value="IDR">IDR - RUPIAH INDONESIA</option>
+                                <option value="EUR">EUR - EURO</option>
+                                <option value="SGD">SGD - DOLLAR SINGAPURA</option>
+                                <option value="JPY">JPY - YEN JEPANG</option>
+                                <option value="CNY">CNY - YUAN CHINA</option>
+                                <option value="GBP">GBP - POUNDSTERLING INGGRIS</option>
+                                <option value="AUD">AUD - DOLLAR AUSTRALIA</option>
+                                <option value="KRW">KRW - WON KOREA</option>
+                                <option value="MYR">MYR - RINGGIT MALAYSIA</option>
+                                <option value="HKD">HKD - DOLLAR HONGKONG</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; align-items:center;">
+                            <div style="font-size:9px; color:var(--text-muted); line-height:1.4; background:var(--bg-base); padding:6px 8px; border-radius:4px; border:1px solid var(--border); width:100%;">
+                                💡 <em>Nilai di atas otomatis diterapkan saat membuat dokumen AJU baru atau via tombol <strong>⚡ Terapkan Nilai Bawaan</strong> di Header.</em>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SECTION DATA PENANDATANGAN -->
+                <div style="border-top:1px solid var(--border); padding-top:10px;">
+                    <div style="font-size:10px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">DATA TANDA TANGAN PEMBERITAHU (PERNYATAAN DOKUMEN):</div>
                     <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
                         <div>
                             <label style="font-size:9.5px; display:block; margin-bottom:2px;">Nama TTD:</label>
@@ -8348,7 +8523,7 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         // -------------------------------------------------------------
-        // KONFIG AJU MODAL LOGIC (bc_ceisa_setaju)
+        // KONFIG AJU & DEFAULT HEADER MODAL LOGIC (bc_ceisa_setaju)
         // -------------------------------------------------------------
         async function openConfigAjuModal() {
             const currentBc = document.getElementById('entryDocBc')?.value || (currentData.header?.kode_dokumen || '23');
@@ -8356,6 +8531,50 @@ $isEditMode = !empty($selectedAjuParam);
             if (selBc) selBc.value = currentBc.replace(/[^0-9]/g, '');
             await loadConfigAjuForBc(selBc ? selBc.value : '23');
             document.getElementById('modalConfigAju').style.display = 'flex';
+        }
+
+        function populateConfigReffSelect(selectId, reffKey, selectedVal) {
+            const sel = document.getElementById(selectId);
+            if (!sel) return;
+            let opts = (typeof currentReffOptions !== 'undefined' && currentReffOptions && currentReffOptions[reffKey]) ? currentReffOptions[reffKey] : [];
+            
+            // Fallback jika currentReffOptions belum terisi, salin dari select di panel Header
+            if (!opts || opts.length === 0) {
+                const hdrSel = document.querySelector(`#panel-header select[data-reff="${reffKey}"]`);
+                if (hdrSel && hdrSel.options.length > 1) {
+                    sel.innerHTML = '<option value="">-- Tidak Disetel --</option>';
+                    for (let i = 0; i < hdrSel.options.length; i++) {
+                        const opt = hdrSel.options[i];
+                        if (opt.value) {
+                            const no = document.createElement('option');
+                            no.value = opt.value;
+                            no.innerText = opt.innerText;
+                            sel.appendChild(no);
+                        }
+                    }
+                    if (selectedVal !== undefined && selectedVal !== null) sel.value = selectedVal;
+                    return;
+                }
+            }
+
+            const frag = document.createDocumentFragment();
+            const defOpt = document.createElement('option');
+            defOpt.value = '';
+            defOpt.innerText = '-- Tidak Disetel --';
+            frag.appendChild(defOpt);
+            if (Array.isArray(opts)) {
+                opts.forEach(o => {
+                    const opt = document.createElement('option');
+                    opt.value = o.kode;
+                    opt.innerText = `${o.kode} - ${o.teks}`;
+                    frag.appendChild(opt);
+                });
+            }
+            sel.innerHTML = '';
+            sel.appendChild(frag);
+            if (selectedVal !== undefined && selectedVal !== null) {
+                sel.value = selectedVal;
+            }
         }
 
         async function loadConfigAjuForBc(bc) {
@@ -8371,6 +8590,17 @@ $isEditMode = !empty($selectedAjuParam);
                     document.getElementById('cfgNamaTtd').value = d.nama_ttd || '';
                     document.getElementById('cfgJabatanTtd').value = d.jabatan_ttd || '';
                     document.getElementById('cfgKotaTtd').value = d.kota_ttd || '';
+
+                    // Default Header Values
+                    document.getElementById('cfgKodeKantor').value = d.kode_kantor || '';
+                    populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', d.kode_jenis_tpb);
+                    populateConfigReffSelect('cfgKodeTujuanPengiriman', 'TUJUAN PENGIRIMAN', d.kode_tujuan_pengiriman);
+                    populateConfigReffSelect('cfgKodeTujuanPemasukan', 'TUJUAN PEMASUKAN', d.kode_tujuan_pemasukan);
+                    populateConfigReffSelect('cfgKodeTujuanPengeluaran', 'TUJUAN PENGELUARAN', d.kode_tujuan_pengeluaran);
+                    if (document.getElementById('cfgKodeValuta')) {
+                        document.getElementById('cfgKodeValuta').value = d.kode_valuta || 'USD';
+                    }
+
                     updateConfigAjuPreview();
                 }
             } catch(e) {
@@ -8401,6 +8631,12 @@ $isEditMode = !empty($selectedAjuParam);
             const nama_ttd = document.getElementById('cfgNamaTtd')?.value || '';
             const jabatan_ttd = document.getElementById('cfgJabatanTtd')?.value || '';
             const kota_ttd = document.getElementById('cfgKotaTtd')?.value || '';
+            const kode_kantor = document.getElementById('cfgKodeKantor')?.value || '';
+            const kode_jenis_tpb = document.getElementById('cfgKodeJenisTpb')?.value || '';
+            const kode_tujuan_pengiriman = document.getElementById('cfgKodeTujuanPengiriman')?.value || '';
+            const kode_tujuan_pemasukan = document.getElementById('cfgKodeTujuanPemasukan')?.value || '';
+            const kode_tujuan_pengeluaran = document.getElementById('cfgKodeTujuanPengeluaran')?.value || '';
+            const kode_valuta = document.getElementById('cfgKodeValuta')?.value || 'USD';
             const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
 
             const fd = new FormData();
@@ -8411,6 +8647,12 @@ $isEditMode = !empty($selectedAjuParam);
             fd.append('nama_ttd', nama_ttd);
             fd.append('jabatan_ttd', jabatan_ttd);
             fd.append('kota_ttd', kota_ttd);
+            fd.append('kode_kantor', kode_kantor);
+            fd.append('kode_jenis_tpb', kode_jenis_tpb);
+            fd.append('kode_tujuan_pengiriman', kode_tujuan_pengiriman);
+            fd.append('kode_tujuan_pemasukan', kode_tujuan_pemasukan);
+            fd.append('kode_tujuan_pengeluaran', kode_tujuan_pengeluaran);
+            fd.append('kode_valuta', kode_valuta);
             fd.append('cmp_id', cmpId);
 
             try {
@@ -8420,13 +8662,68 @@ $isEditMode = !empty($selectedAjuParam);
                 });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    showToast('Konfigurasi Penomoran AJU disimpan!');
+                    showToast('✓ Konfigurasi AJU & Nilai Bawaan Header berhasil disimpan!');
                     closeModal('modalConfigAju');
                 } else {
                     alert('Gagal simpan konfigurasi: ' + (json.message || ''));
                 }
             } catch(e) {
                 alert('Kesalahan jaringan: ' + e.message);
+            }
+        }
+
+        async function applyHeaderDefaults() {
+            const kodeBc = (typeof currentData !== 'undefined' && currentData.header && currentData.header.kode_dokumen)
+                ? currentData.header.kode_dokumen
+                : (document.getElementById('hdr_kode_dokumen')?.value || document.getElementById('entryDocBc')?.value || '23');
+            let cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            if (!cmpId && typeof currentData !== 'undefined' && currentData.header && currentData.header.cmp_id) {
+                cmpId = currentData.header.cmp_id;
+            }
+
+            try {
+                const res = await fetch(`editor.php?action=get_header_defaults&kode_dokumen=${encodeURIComponent(kodeBc)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && json.data) {
+                    const d = json.data;
+                    let applied = 0;
+                    const fieldMappings = [
+                        { id: 'hdr_kode_kantor', val: d.kode_kantor },
+                        { id: 'hdr_kode_jenis_tpb', val: d.kode_jenis_tpb },
+                        { id: 'hdr_kode_tujuan_pengiriman', val: d.kode_tujuan_pengiriman },
+                        { id: 'hdr_kode_tujuan_pemasukan', val: d.kode_tujuan_pemasukan },
+                        { id: 'hdr_kode_tujuan_pengeluaran', val: d.kode_tujuan_pengeluaran },
+                        { id: 'hdr_kode_valuta', val: d.kode_valuta },
+                        { id: 'hdr_nama_pernyataan', val: d.nama_pernyataan },
+                        { id: 'hdr_jabatan_pernyataan', val: d.jabatan_pernyataan },
+                        { id: 'hdr_kota_pernyataan', val: d.kota_pernyataan }
+                    ];
+
+                    fieldMappings.forEach(item => {
+                        if (item.val !== undefined && item.val !== null && item.val !== '') {
+                            const el = document.getElementById(item.id);
+                            if (el) {
+                                el.value = item.val;
+                                const colKey = item.id.replace('hdr_', '');
+                                if (typeof currentData !== 'undefined' && currentData.header) {
+                                    currentData.header[colKey] = item.val;
+                                }
+                                applied++;
+                            }
+                        }
+                    });
+
+                    if (typeof showToast === 'function') {
+                        showToast(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                    } else {
+                        alert(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                    }
+                } else {
+                    alert('Nilai bawaan belum dikonfigurasi untuk jenis dokumen ini. Silakan atur pada menu "⚙️ Konfig AJU".');
+                }
+            } catch (err) {
+                console.error('Error applying header defaults:', err);
+                alert('Gagal mengambil nilai bawaan header: ' + err.message);
             }
         }
 
