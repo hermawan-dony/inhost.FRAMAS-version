@@ -129,7 +129,9 @@ if ($action === 'list') {
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
     $sql = "SELECT
+        COALESCE(NULLIF(a.idHeader, ''), '') AS id_header,
         a.kodeDokumen AS bc,
+        a.kodeDokumen AS kode_dokumen,
         a.nomorAju AS nomor_aju,
         COALESCE(NULLIF(a.nomorDaftar, ''), '-') AS nomor_daftar,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_daftar,
@@ -257,7 +259,7 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     $header = $resHdr ? $resHdr->fetch_assoc() : null;
 
     // 4. Data dari bc_ceisa_data (fallback jika header kosong atau butuh info kantor/perusahaan)
-    $sqlBcd = "SELECT kodeDokumen AS kode_dokumen, nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, 
+    $sqlBcd = "SELECT idHeader AS id_header, kodeDokumen AS kode_dokumen, nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, 
                       tanggalDaftar AS tanggal_daftar, namaPerusahaan AS nama_perusahaan, idPerusahaan AS id_perusahaan, 
                       kodeKantor AS kode_kantor, namaKantorPendek AS nama_kantor, namaProses AS nama_proses, 
                       namaRespon AS nama_respon, nomorRespon AS nomor_respon, tanggalRespon AS tanggal_respon, 
@@ -266,6 +268,55 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
                WHERE nomorAju = '$escAju' LIMIT 1";
     $resBcd = $koneksi->query($sqlBcd);
     $rowBcd = $resBcd ? $resBcd->fetch_assoc() : null;
+
+    // Ambil live riwayat status dari CEISA 4.0 via getRiwayatStatus/$idHeader jika tersedia
+    $liveIdHeader = trim($rowBcd['id_header'] ?? '');
+    if (!empty($liveIdHeader)) {
+        $liveCmp = $cmp_id ?: ($rowBcd['cmp_id'] ?? '');
+        $cmp_id = $liveCmp;
+        $_GET['cmp_id'] = $liveCmp;
+        require_once __DIR__ . '/initmfa.php';
+
+        $liveComp = ceisa_get_company($liveCmp);
+        $liveApiKey = !empty($liveComp['api_key_ceisa']) ? trim($liveComp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => "https://apis-gw.beacukai.go.id/v2/parser/v1/proses/getRiwayatStatus/" . urlencode($liveIdHeader),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 12,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $liveApiKey,
+                    'Accept: application/json, text/plain, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $liveStatusJson = curl_exec($ch);
+            curl_close($ch);
+            $liveStatusArr = @json_decode($liveStatusJson, true);
+            if (!empty($liveStatusArr['data']) && is_array($liveStatusArr['data'])) {
+                $liveList = [];
+                foreach ($liveStatusArr['data'] as $st) {
+                    $liveList[] = [
+                        'kode_dokumen'   => $rowBcd['kode_dokumen'] ?? '',
+                        'nomor_aju'      => $nomor_aju,
+                        'nomor_daftar'   => $rowBcd['nomor_daftar'] ?? '',
+                        'tanggal_daftar' => $rowBcd['tanggal_daftar'] ?? '',
+                        'kode_proses'    => $st['kodeProses'] ?? '',
+                        'waktu_status'   => $st['waktuMulai'] ?? ($st['waktuStatus'] ?? ($st['waktuSelesai'] ?? '')),
+                        'keterangan'     => $st['catatan'] ?? ($st['namaProses'] ?? ('Proses ' . ($st['kodeProses'] ?? '')))
+                    ];
+                }
+                if (!empty($liveList)) {
+                    $listStatus = $liveList;
+                }
+            }
+        }
+    }
 
     if (!$header && $rowBcd) {
         $header = [
@@ -392,6 +443,154 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     exit;
 }
 
+// =============================================================================
+// CEISA 4.0 OFFICIAL GATEWAY ACTIONS (BERBASIS idHeader, kodeDokumen & initMFA)
+// =============================================================================
+
+// 1. CETAK DOKUMEN: https://apis-gw.beacukai.go.id/v2/report-service/formulir/$kodeDokumen/$idHeader
+if ($action === 'cetak_formulir') {
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        http_response_code(400);
+        die("Nomor pengajuan tidak boleh kosong.");
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil idHeader, kodeDokumen, cmp_id, dan pdf dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id, pdf FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    }
+
+    $pdfContent = null;
+
+    // Panggil report-service formulir resmi CEISA 4.0 jika idHeader dan kodeDokumen ada
+    if (!empty($idHeader) && !empty($kodeDokumen)) {
+        $cmp_id = $targetCmp;
+        $_GET['cmp_id'] = $targetCmp;
+        require_once __DIR__ . '/initmfa.php';
+
+        $comp = ceisa_get_company($targetCmp);
+        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $url = "https://apis-gw.beacukai.go.id/v2/report-service/formulir/" . urlencode($kodeDokumen) . "/" . urlencode($idHeader);
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 25,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $apiKey,
+                    'Accept: application/pdf, application/json, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $resp = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode === 200 && substr($resp, 0, 4) === '%PDF') {
+                $pdfContent = $resp;
+            }
+        }
+    }
+
+    // Jika berhasil mendapatkan PDF formulir resmi dari report-service
+    if ($pdfContent !== null) {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="Formulir_BC' . $kodeDokumen . '_' . $cleanAju . '.pdf"');
+        header('Content-Length: ' . strlen($pdfContent));
+        header('Cache-Control: public, max-age=86400');
+        echo $pdfContent;
+        exit;
+    }
+
+    // Fallback: Jika formulir live belum dapat diakses, buka PDF respon resmi jika ada di database
+    $pdfFile = $rowDoc['pdf'] ?? '';
+    if (!empty($pdfFile)) {
+        header("Location: /pdf.php?aju=" . urlencode($cleanAju) . "&pdf=" . urlencode($pdfFile) . "&cmp_id=" . urlencode($targetCmp) . "&view=1");
+        exit;
+    }
+
+    http_response_code(404);
+    echo '<div style="font-family:sans-serif; text-align:center; padding:40px; color:#cf1322;">
+        <h3>⚠️ Berkas Formulir Belum Tersedia</h3>
+        <p>Formulir resmi atau PDF respon belum dapat diakses dari CEISA 4.0 untuk pengajuan <b>' . htmlspecialchars($cleanAju) . '</b>.</p>
+    </div>';
+    exit;
+}
+
+// 2. UNDUH EXCEL: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
+if ($action === 'unduh_excel') {
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        http_response_code(400);
+        die("Nomor pengajuan tidak boleh kosong.");
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil idHeader dan cmp_id dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    }
+
+    // Panggil report-parser LNSW via initMFA jika idHeader ada
+    if (!empty($idHeader)) {
+        $cmp_id = $targetCmp;
+        $_GET['cmp_id'] = $targetCmp;
+        require_once __DIR__ . '/initmfa.php';
+        $comp = ceisa_get_company($targetCmp);
+        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=" . urlencode($idHeader);
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 20,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $apiKey,
+                    'Accept: application/json, text/plain, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $respJson = curl_exec($ch);
+            curl_close($ch);
+        }
+    }
+
+    // Unduh berkas Excel resmi 21 Sheet via service CEISA 4.0
+    header("Location: /download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp));
+    exit;
+}
+
+// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
 if ($action === 'import_to_h2h') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
@@ -403,14 +602,18 @@ if ($action === 'import_to_h2h') {
     }
 
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
-    $cacheDir = __DIR__ . '/excel_cache';
-    if (!is_dir($cacheDir)) {
-        @mkdir($cacheDir, 0777, true);
-    }
-    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+    $escAju = $koneksi->real_escape_string($cleanAju);
 
-    // Jika targetCmp belum diset, ambil dari database
-    if (empty($targetCmp)) {
+    // Ambil idHeader, kodeDokumen, dan cmp_id dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    } elseif (empty($targetCmp)) {
         $comp = ceisa_get_company($cleanAju);
         if ($comp && !empty($comp['cmp_id'])) {
             $targetCmp = $comp['cmp_id'];
@@ -419,13 +622,49 @@ if ($action === 'import_to_h2h') {
         }
     }
 
-    // 1. Cek apakah berkas Excel sudah ada di cache
+    // Coba ambil JSON via API report-parser LNSW jika idHeader ada
+    if (!empty($idHeader)) {
+        $cmp_id = $targetCmp;
+        $_GET['cmp_id'] = $targetCmp;
+        require_once __DIR__ . '/initmfa.php';
+
+        $comp = ceisa_get_company($targetCmp);
+        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=" . urlencode($idHeader);
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 25,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $apiKey,
+                    'Accept: application/json, text/plain, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $respJson = curl_exec($ch);
+            curl_close($ch);
+            $docArr = @json_decode($respJson, true);
+        }
+    }
+
+    // Pastikan berkas Excel CEISA tersedia untuk impor presisi 21 Sheet
+    $cacheDir = __DIR__ . '/excel_cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0777, true);
+    }
+    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+
     if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
         $genSuccess = false;
         if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
             require_once __DIR__ . '/CeisaXlsxExporter.php';
             try {
-                $escAju = $koneksi->real_escape_string($cleanAju);
                 $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
                 if ($chk && $chk->num_rows > 0) {
                     $exporter = new CeisaXlsxExporter($koneksi);
@@ -455,12 +694,12 @@ if ($action === 'import_to_h2h') {
     if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
         echo json_encode([
             'status' => 'ERROR',
-            'message' => "Berkas Excel CEISA untuk nomor pengajuan {$cleanAju} tidak ditemukan di server dan belum berhasil diunduh. Silakan gunakan opsi 'Unduh Excel' terlebih dahulu untuk memastikan koneksi ke CEISA 4.0 aktif."
+            'message' => "Berkas dokumen CEISA untuk pengajuan {$cleanAju} tidak ditemukan di server dan belum berhasil diunduh. Silakan gunakan opsi 'Unduh Excel' terlebih dahulu untuk memastikan koneksi ke CEISA 4.0 aktif."
         ]);
         exit;
     }
 
-    // 2. Eksekusi CeisaXlsxImporter
+    // Eksekusi CeisaXlsxImporter
     try {
         require_once __DIR__ . '/CeisaXlsxImporter.php';
         $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
@@ -2485,6 +2724,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             </svg>
             <span>Cetak Dokumen</span>
         </div>
+        <div class="row-action-item" onclick="triggerRowAction('status')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
+            </svg>
+            <span>Status Dokumen</span>
+        </div>
     </div>
 
     <!-- 3. MODAL: BATCH DOWNLOAD EXCEL PROGRESS & ANTI-WAF ENGINE -->
@@ -3166,7 +3412,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         </td>
                         <td style="font-size:10.5px; color:#595959;">${escapeHtml(kantorName)}</td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
+                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
                                 Aksi
                             </button>
                         </td>
@@ -3472,9 +3718,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         let activeActionAju = '';
         let activeActionCmp = '';
         let activeActionPdf = '';
+        let activeActionIdHeader = '';
+        let activeActionKodeDok = '';
         let activeActionTriggerBtn = null;
 
-        function openRowActionMenu(event, nomorAju, cmpId, pdfFile) {
+        function openRowActionMenu(event, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen) {
             event.stopPropagation();
 
             const menu = document.getElementById('rowActionMenu');
@@ -3486,6 +3734,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             activeActionAju = nomorAju;
             activeActionCmp = cmpId;
             activeActionPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+            activeActionIdHeader = idHeader || '';
+            activeActionKodeDok = kodeDokumen || '';
 
             if (activeActionTriggerBtn) {
                 activeActionTriggerBtn.classList.remove('active');
@@ -3498,8 +3748,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (!menu) return;
 
             const rect = event.currentTarget.getBoundingClientRect();
-            const menuWidth = 155;
-            const menuHeight = 110;
+            const menuWidth = 160;
+            const menuHeight = 145;
 
             let left = rect.right - menuWidth;
             if (left < 10) left = rect.left;
@@ -3537,30 +3787,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const aju = activeActionAju;
             const cmp = activeActionCmp;
             const pdf = activeActionPdf;
+            const idHeader = activeActionIdHeader;
+            const kodeDok = activeActionKodeDok;
             closeRowActionMenu();
 
             if (!aju) return;
 
             if (type === 'excel') {
-                downloadSingleCeisaExcel(aju, cmp);
+                // Unduh Excel Resmi CEISA 4.0 via backend action
+                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
+                window.open(url, '_blank');
             } else if (type === 'import_h2h') {
                 await executeImportToH2H(aju, cmp);
             } else if (type === 'cetak') {
-                if (pdf) {
-                    const pdfUrl = `/pdf.php?aju=${encodeURIComponent(aju)}&pdf=${encodeURIComponent(pdf)}&cmp_id=${encodeURIComponent(cmp || '')}&view=1`;
-                    window.open(pdfUrl, '_blank');
-                } else {
-                    if (typeof Swal !== 'undefined') {
-                        Swal.fire({
-                            icon: 'info',
-                            title: 'Dokumen Belum Tersedia',
-                            text: `Berkas PDF respon belum tersedia untuk pengajuan ${aju}.`,
-                            confirmButtonColor: '#1890ff'
-                        });
-                    } else {
-                        alert(`Berkas PDF respon belum tersedia untuk pengajuan ${aju}.`);
-                    }
-                }
+                // Cetak Dokumen via report-service formulir resmi CEISA 4.0
+                const url = `daftar_dokumen.php?action=cetak_formulir&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
+                window.open(url, '_blank');
+            } else if (type === 'status') {
+                openTrackingHistory(aju, cmp);
             }
         }
 
