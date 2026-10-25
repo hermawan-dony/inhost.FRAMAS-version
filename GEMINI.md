@@ -1,20 +1,19 @@
 # Workspace Rules: CEISA 4.0 (inhost.web.id)
 
-## 0. Acuan Lingkungan & Server Utama (VPS BEKASI / DCI CIBITUNG)
-Seluruh aktivitas pengembangan, pengujian, dan deployment sistem saat ini berpusat pada server **VPS BEKASI**:
-- **IP Publik Server**: `202.10.35.199` (SSH Port 22)
-- **User SSH**: `root` | **Password SSH**: `K@y010782`
-- **Direktori Web Remote**: `/var/www/inhost/`
-- **Database VPS**: MySQL/MariaDB `bc2faktur_inhost` (User: `bc2faktur_root` / Pass: `@combro#`)
-- **Super Administrator Web**:
-  - Username: `dp` (atau `admin`)
-  - Password: `K@y010782` (**DILARANG KERAS** menggunakan/memunculkan hint `1234`)
-  - Subdomain belum terdaftar: Hanya tampilkan form login khusus Super Administrator tanpa hint apa pun.
-- **Pengunggahan Otomatis ke VPS Bekasi via PSCP**:
-  ```powershell
-  & "C:\Program Files\PuTTY\pscp.exe" -batch -hostkey "SHA256:uCOFAdVGHhaGAWzAEPhrz/ZEmNRxEamt8/89vpVENis" -P 22 -pw "K@y010782" <daftar_file_lokal> root@202.10.35.199:/var/www/inhost/
-  ```
-- **Panduan Teknis Lengkap**: Baca berkas `SYSTEM_KNOWLEDGE_BASE.md`.
+## 0. ATURAN MUTLAK: DILARANG UPDATE KE VPS BEKASI & CPANEL (SINKRONISASI HANYA 1 ARAH KE LOKAL)
+1. **DILARANG KERAS UPDATE / UPLOAD / DEPLOY KE VPS BEKASI & CPANEL**:
+   - **MUTLAK**: Mulai sekarang, **DILARANG KERAS** melakukan upload, deployment, rsync, PSCP, FTP, atau update apapun ke server **VPS BEKASI (`202.10.35.199`)** maupun **cPanel (`inhost.id`)**.
+   - Dilarang menjalankan skrip `deploy.ps1` atau utilitas upload remote apa pun tanpa instruksi tertulis yang sangat spesifik dan eksplisit dari pengguna.
+   - Jangan pernah mengacak-acak konfigurasi, file web, atau database di VPS Bekasi dan cPanel.
+2. **SINKRONISASI BERSIFAT 1 ARAH KE LOKAL SAJA**:
+   - Segala bentuk sinkronisasi data/source code sifatnya **HANYA 1 ARAH KE LOKAL** (menarik/pull/import dari remote/UPDATE SYNC ke lokal).
+   - **TIDAK ADA** pengunggahan atau pembalikan file dari lokal ke server VPS atau cPanel.
+3. **Pengembangan & Pengujian 100% Lokal**:
+   - Seluruh aktivitas penambahan fitur, perbaikan bug, dan pengujian query dilakukan di environment lokal (`d:\xampp\htdocs\inhost-web-id`, PHP lokal, dan database lokal `framasbc` di port 3307).
+4. **Super Administrator Web**:
+   - Username: `dp` (atau `admin`)
+   - Password: `K@y010782` (**DILARANG KERAS** menggunakan/memunculkan hint `1234`)
+   - Subdomain belum terdaftar: Hanya tampilkan form login khusus Super Administrator tanpa hint apa pun.
 
 ## 1. Aturan Hak Akses Dokumen Pabean (Multi-Tenant)
 1. **Konfigurasi Manual Otoritas Tertinggi**:
@@ -47,15 +46,10 @@ Ketika pengguna memberikan instruksi/perintah **`clone!`** (atau meminta backup 
    - Lakukan commit dan push ke repositori GitHub: `https://github.com/hermawan-dony/inhost.FRAMAS-version` pada branch `main`.
    - Skrip otomasi siap pakai dapat dijalankan via: `powershell -ExecutionPolicy Bypass -File push_github.ps1`.
 
-## 3. Aturan Perintah "deploy!" (Dual-Deploy: VPS Bekasi + cPanel)
-Ketika pengguna memberikan instruksi/perintah **`deploy!`** (atau meminta upload/sinkronkan perubahan ke hosting):
-1. **Deteksi Berkas**:
-   - Jika pengguna menyebutkan nama file spesifik, prioritaskan file tersebut.
-   - Jika tidak menyebut file tertentu, deteksi seluruh file proyek yang baru saja diperbarui atau dimodifikasi dalam sesi kerja terkini.
-2. **Eksekusi Pengunggahan Otomatis Ganda (Dual-Deploy)**:
-   - Jalankan otomasi dual-deploy yang langsung mengunggah file ke **KEDUA SERVER** (VPS Bekasi via PSCP dan cPanel via FTP) dalam satu kali jalan:
-     `powershell -ExecutionPolicy Bypass -File d:\vd\inhost_web_app\deploy.ps1 [nama_file]`
-   - Jika ingin deploy seluruh proyek:
-     `powershell -ExecutionPolicy Bypass -File d:\vd\inhost_web_app\deploy.ps1 -All`
-3. **Verifikasi & Laporkan**:
-   - Laporkan daftar berkas yang berhasil diunggah beserta status keberhasilan untuk kedua target (VPS Bekasi & cPanel) kepada pengguna secara rapi dan jelas.
+## 3. Aturan Sinkronisasi (Hanya 1 Arah ke Lokal)
+1. **Sifat Sinkronisasi**:
+   - Segala bentuk sinkronisasi (UPDATE SYNC / remote) sifatnya **HANYA 1 ARAH MENARIK KE LOKAL**.
+   - Dilarang keras melakukan deploy/upload balik ke VPS Bekasi maupun cPanel.
+2. **Deployment Dilarang**:
+   - Operasi `deploy.ps1` dinonaktifkan / tidak boleh dijalankan.
+   - Pengembangan difokuskan murni pada environment lokal dan repositori GitHub jika diminta pengguna.
