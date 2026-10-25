@@ -1,114 +1,17 @@
 -- =========================================================================
--- DATABASE MIGRATION SCRIPT UNTUK SYNC FITUR TERBARU
--- Tanggal: 2026-10-25
--- Target Database: MySQL / MariaDB (VPS Bekasi & Alibaba Cloud RDS)
+-- CEISA 4.0 - DATABASE MIGRATION SCRIPT
+-- =========================================================================
+-- Fitur: Inisialisasi Otomatis & Default Header Dokumen per Perusahaan (bc_ceisa_setaju)
+-- Waktu: 2026-10-25
 -- =========================================================================
 
--- 1. Tabel Referensi Urutan Default Entitas Dokumen BC (bc_ceisa_entidx)
-CREATE TABLE IF NOT EXISTS `bc_ceisa_entidx` (
-  `cmp_id` varchar(30) NOT NULL DEFAULT '',
-  `bc` varchar(5) DEFAULT NULL,
-  `kode_entitas` varchar(5) DEFAULT NULL,
-  `idx` int(11) DEFAULT NULL,
-  KEY `idx_cmp_id` (`cmp_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 2. Tabel Referensi Urutan Default Dokumen Lampiran Dokumen BC (bc_ceisa_docidx)
-CREATE TABLE IF NOT EXISTS `bc_ceisa_docidx` (
-  `cmp_id` varchar(30) NOT NULL DEFAULT '',
-  `bc` varchar(5) DEFAULT NULL,
-  `kode_dokumen` varchar(5) DEFAULT NULL,
-  `idx` int(11) DEFAULT NULL,
-  KEY `idx_cmp_id` (`cmp_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- =========================================================================
--- 3. SEED DATA DEFAULT bc_ceisa_docidx (GLOBAL: cmp_id = '')
--- =========================================================================
-INSERT INTO `bc_ceisa_docidx` (`cmp_id`, `bc`, `kode_dokumen`, `idx`) VALUES
-('', '25', '380', 1),
-('', '25', '217', 2),
-('', '262', '911', 1),
-('', '262', '315', 2),
-('', '27', '217', 1),
-('', '27', '380', 2),
-('', '30', '380', 1),
-('', '30', '217', 2),
-('', '30', '920', 3),
-('', '40', '630', 1),
-('', '40', '388', 2),
-('', '40', '380', 3),
-('', '40', '217', 4),
-('', '40', '315', 5),
-('', '41', '380', 1),
-('', '41', '217', 2),
-('', '41', '40', 3)
-ON DUPLICATE KEY UPDATE `idx` = VALUES(`idx`);
-
--- =========================================================================
--- 4. SEED DATA DEFAULT bc_ceisa_entidx (GLOBAL: cmp_id = '')
--- =========================================================================
-INSERT INTO `bc_ceisa_entidx` (`cmp_id`, `bc`, `kode_entitas`, `idx`) VALUES
-('', '16', '10', 1),
-('', '16', '3', 2),
-('', '16', '7', 3),
-('', '16', '9', 4),
-('', '20', '1', 1),
-('', '20', '7', 2),
-('', '20', '9', 3),
-('', '20', '10', 4),
-('', '20', '11', 5),
-('', '20', '4', 6),
-('', '23', '3', 1),
-('', '23', '5', 2),
-('', '23', '7', 3),
-('', '25', '3', 1),
-('', '25', '7', 2),
-('', '25', '8', 3),
-('', '261', '3', 1),
-('', '261', '7', 2),
-('', '261', '8', 3),
-('', '262', '3', 1),
-('', '262', '7', 2),
-('', '262', '9', 3),
-('', '27', '3', 1),
-('', '27', '7', 2),
-('', '27', '8', 3),
-('', '28', '1', 1),
-('', '28', '10', 2),
-('', '28', '3', 3),
-('', '28', '7', 4),
-('', '28', '4', 5),
-('', '30', '2', 1),
-('', '30', '7', 2),
-('', '30', '8', 3),
-('', '30', '6', 4),
-('', '30', '4', 5),
-('', '30', '23', 6),
-('', '33', '2', 1),
-('', '33', '3', 2),
-('', '33', '6', 3),
-('', '33', '8', 4),
-('', '33', '9', 5),
-('', '33', '7', 6),
-('', '33', '4', 7),
-('', '331', '3', 1),
-('', '331', '8', 2),
-('', '331', '7', 3),
-('', '40', '3', 1),
-('', '40', '7', 2),
-('', '40', '9', 3),
-('', '41', '3', 1),
-('', '41', '7', 2),
-('', '41', '8', 3),
-('', '611', '7', 1),
-('', '611', '3', 2),
-('', '611', '2', 3),
-('', '611', '5', 4),
-('', '611', '12', 5),
-('', '611', '1', 6),
-('', '613', '3', 1),
-('', '613', '9', 2),
-('', '613', '7', 3),
-('', '613', '12', 4)
-ON DUPLICATE KEY UPDATE `idx` = VALUES(`idx`);
+-- 1. Penambahan Kolom Default Header pada Tabel bc_ceisa_setaju
+ALTER TABLE bc_ceisa_setaju 
+    MODIFY COLUMN bc VARCHAR(10),
+    ADD COLUMN IF NOT EXISTS kode_kantor VARCHAR(10) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS kode_jenis_tpb VARCHAR(10) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS kode_tujuan_pengiriman VARCHAR(10) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS kode_tujuan_pemasukan VARCHAR(10) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS kode_tujuan_pengeluaran VARCHAR(10) DEFAULT NULL,
+    ADD COLUMN IF NOT EXISTS kode_valuta VARCHAR(10) DEFAULT 'USD',
+    ADD COLUMN IF NOT EXISTS header_defaults TEXT DEFAULT NULL;

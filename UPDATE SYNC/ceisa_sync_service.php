@@ -87,10 +87,10 @@ if (file_exists($quarantineFile)) {
     }
 }
 
-// 2. Cooldown cerdas: Minimal interval sesuai konfigurasi (default 120 menit / 7.200 detik), 60 detik untuk manual tombol
-$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 120;
-if ($configuredIntervalMin < 5) $configuredIntervalMin = 120;
-$bgCooldownSeconds = $configuredIntervalMin * 60; // 120 menit = 7200 detik
+// 2. Cooldown cerdas: Minimal 60 menit (3600 detik) untuk background sync, 60 detik untuk manual tombol
+$configuredIntervalMin = isset($appSettings['ceisa_sync_interval_minutes']) ? (int)$appSettings['ceisa_sync_interval_minutes'] : 60;
+if ($configuredIntervalMin < 15) $configuredIntervalMin = 60;
+$bgCooldownSeconds = $configuredIntervalMin * 60; // default 60 menit = 3600 detik
 $cooldownSeconds   = $isForce ? 60 : $bgCooldownSeconds;
 $lastSyncTime      = 0;
 
@@ -313,14 +313,14 @@ $sqlDelete = "DELETE FROM bc_ceisa_data WHERE nomorAju = ?";
 $stmtDelete = $koneksi->prepare($sqlDelete);
 
 $sqlInsertData = "INSERT INTO bc_ceisa_data (
-    idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
+    cmp_id, idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
     kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas, namaProses, 
     idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb, nipAp, kodeJalur, 
     flagHardcopy, flagHardcopySka, waktuTerimaHardcopy, jatuhtempoHardcopy, namaPpjk, 
     nomorBc11, totalCount, tanggalBc11, subposBc11, posBc11, kodeProsesPerbaikan, 
     namaProsesPerbaikan, flagSsm, idKepTujuan, nomorSkep, idRespon, namaRespon, 
     nomorRespon, tanggalRespon, pdf, asalData, statusPkb
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 $stmtInsertData = $koneksi->prepare($sqlInsertData);
 
 // Update nomor & tanggal daftar ke bc_ceisa_header jika tersedia
@@ -335,8 +335,6 @@ $sqlUpdatePosted = "UPDATE bc_ceisa_aju_posted
     WHERE nomor_aju = ? AND (nomor_daftar IS NULL OR nomor_daftar = '' OR nomor_daftar != ?)";
 $stmtUpdatePosted = $koneksi->prepare($sqlUpdatePosted);
 
-$cleanCmp = $koneksi->real_escape_string($cmpId);
-
 // Amankan data SPPB lama dari bc_ceisa_data sebelum tertimpa
 $sqlArchiveSppb = "INSERT INTO bc_ceisa_sppb (
     cmp_id, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
@@ -344,7 +342,7 @@ $sqlArchiveSppb = "INSERT INTO bc_ceisa_sppb (
     namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb,
     nipAp, kodeJalur, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf
 ) SELECT 
-    '$cleanCmp', nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
+    cmp_id, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen,
     kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas,
     namaProses, idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb,
     nipAp, kodeJalur, idRespon, namaRespon, nomorRespon, tanggalRespon, pdf
@@ -375,9 +373,14 @@ ON DUPLICATE KEY UPDATE
     upd_time = NOW()";
 $stmtUpsertSppb = $koneksi->prepare($sqlUpsertSppb);
 
-$insertedCount  = 0;
-$updatedHdrCount = 0;
-$newHdrCount    = 0;
+// Cek data lama sebelum ditimpa untuk mendeteksi perubahan riil
+$stmtCheckOld = $koneksi->prepare("SELECT nomorDaftar, namaRespon, nomorRespon, kodeProses FROM bc_ceisa_data WHERE nomorAju = ? LIMIT 1");
+
+$insertedCount    = 0;
+$updatedHdrCount  = 0;
+$newHdrCount      = 0;
+$newDocCount      = 0;
+$changedRespCount = 0;
 
 $koneksi->begin_transaction();
 
@@ -385,6 +388,17 @@ try {
     foreach ($rowsData as $row) {
         $nomorAju = trim($row['nomorAju'] ?? '');
         if (empty($nomorAju)) continue;
+
+        // Cek data lama sebelum dihapus
+        $oldRecord = null;
+        if ($stmtCheckOld) {
+            $stmtCheckOld->bind_param("s", $nomorAju);
+            $stmtCheckOld->execute();
+            $resOld = $stmtCheckOld->get_result();
+            if ($resOld && $rO = $resOld->fetch_assoc()) {
+                $oldRecord = $rO;
+            }
+        }
 
         // Parsing tanggal Daftar (d-m-Y atau Y-m-d)
         $tanggalDaftar = null;
@@ -464,8 +478,8 @@ try {
             $statusPkbVal  = (string)($row['statusPkb'] ?? '');
 
             $stmtInsertData->bind_param(
-                "sssssssssssssssssssssssssisssssssssssssss",
-                $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
+                "ssssssssssssssssssssssssssisssssssssssssss",
+                $cmpId, $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
                 $kdKantorVal, $nmKantorVal, $nmEntitasVal, $kdProsesVal, $kdEntitasVal, $nmProsesVal,
                 $idPrshVal, $nmPrshVal, $idPpjkVal, $nipPfpdVal, $nipPfpbVal, $nipApVal, $kdJalurVal,
                 $flgHrdVal, $flgSkaVal, $wktHrdVal, $jthHrdVal, $nmPpjkVal,
@@ -475,6 +489,19 @@ try {
             );
             $stmtInsertData->execute();
             $insertedCount++;
+
+            // Deteksi apakah dokumen baru atau responnya berubah riil
+            if ($oldRecord === null) {
+                $newDocCount++;
+            } else {
+                $respChanged = ($oldRecord['namaRespon'] !== $nmResponVal) 
+                            || ($oldRecord['nomorRespon'] !== $noResponVal) 
+                            || ($oldRecord['kodeProses'] !== $kdProsesVal)
+                            || (empty($oldRecord['nomorDaftar']) && !empty($noDaftarVal));
+                if ($respChanged) {
+                    $changedRespCount++;
+                }
+            }
 
             // 2b. Simpan / Amankan respon SPPB secara permanen ke bc_ceisa_sppb agar tidak hilang jika kelak tertimpa status baru
             if (stripos($nmResponVal, 'SPPB') !== false && $stmtUpsertSppb) {
@@ -515,6 +542,7 @@ try {
     exit;
 }
 
+if (isset($stmtCheckOld) && $stmtCheckOld) $stmtCheckOld->close();
 if (isset($stmtDelete) && $stmtDelete) $stmtDelete->close();
 if (isset($stmtInsertData) && $stmtInsertData) $stmtInsertData->close();
 if (isset($stmtUpdateHdr) && $stmtUpdateHdr) $stmtUpdateHdr->close();
@@ -525,17 +553,23 @@ if (isset($stmtUpsertSppb) && $stmtUpsertSppb) $stmtUpsertSppb->close();
 // Simpan waktu sync terakhir ke session
 $_SESSION['last_ceisa_sync_' . $cmpId] = $now;
 
+$hasRealChanges = ($newDocCount > 0 || $changedRespCount > 0 || $updatedHdrCount > 0 || $newHdrCount > 0);
+
 echo json_encode([
-    'status'          => 'OK',
-    'cmp_id'          => $cmpId,
-    'cmp_name'        => $cmpName,
-    'identitas'       => $successfulIdentitas,
-    'total_portal'    => $totalPortal,
-    'fetched'         => count($rowsData),
-    'inserted'        => $insertedCount,
-    'updated_headers' => $updatedHdrCount,
-    'new_headers'     => $newHdrCount,
-    'has_changes'     => ($updatedHdrCount > 0 || $newHdrCount > 0),
-    'timestamp'       => date('Y-m-d H:i:s', $now),
-    'message'         => "Sinkronisasi CEISA 4.0 berhasil! Diproses: $insertedCount dokumen, Diperbarui: $updatedHdrCount, Baru: $newHdrCount."
+    'status'            => 'OK',
+    'cmp_id'            => $cmpId,
+    'cmp_name'          => $cmpName,
+    'identitas'         => $successfulIdentitas,
+    'total_portal'      => $totalPortal,
+    'fetched'           => count($rowsData),
+    'inserted'          => $insertedCount,
+    'new_docs'          => $newDocCount,
+    'changed_responses' => $changedRespCount,
+    'updated_headers'   => $updatedHdrCount,
+    'new_headers'       => $newHdrCount,
+    'has_changes'       => $hasRealChanges,
+    'timestamp'         => date('Y-m-d H:i:s', $now),
+    'message'           => $hasRealChanges
+        ? "Sinkronisasi CEISA 4.0 berhasil! Ditemukan pembaruan: $newDocCount baru, $changedRespCount respon berubah, $updatedHdrCount header diupdate."
+        : "Data CEISA sudah mutakhir (tidak ada dokumen baru atau perubahan status)."
 ]);

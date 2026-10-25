@@ -166,8 +166,7 @@ if ($action === 'save') {
     $password_ceisa = trim($_POST['password_ceisa'] ?? '');
     $secret_mfa     = trim(str_replace(' ', '', strtoupper($_POST['secret_mfa'] ?? '')));
     $id_user_ceisa  = trim($_POST['id_user_ceisa'] ?? '');
-    // Kolom is_final di MySQL 8 = TINYINT(1); form mengirim "true"/"false"
-    $is_final       = (isset($_POST['is_final']) && in_array(strtolower((string)$_POST['is_final']), ['true', '1', 'yes'], true)) ? 1 : 0;
+    $is_final       = (isset($_POST['is_final']) && strtolower($_POST['is_final']) === 'true') ? 'true' : 'false';
     $token_ceisa    = trim($_POST['token_ceisa'] ?? '');
     $api_key_ceisa  = trim($_POST['api_key_ceisa'] ?? 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83');
     $insw_client_id     = trim($_POST['insw_client_id'] ?? '');
@@ -347,7 +346,7 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssissssssssssssiissii",
+            "sssssssssssssssssssssssssssssssiisii",
             $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
@@ -356,14 +355,10 @@ if ($action === 'save') {
             $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted
         );
         
-        try {
-            if ($stmt->execute()) {
-                echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_name' berhasil ditambahkan!"]);
-            } else {
-                echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $stmt->error]);
-            }
-        } catch (Throwable $e) {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $e->getMessage()]);
+        if ($stmt->execute()) {
+            echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_name' berhasil ditambahkan!"]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $stmt->error]);
         }
         $stmt->close();
         exit;
@@ -385,7 +380,7 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssissssssssssssiissiis",
+            "ssssssssssssssssssssssssssssssiisiis",
             $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
@@ -394,30 +389,26 @@ if ($action === 'save') {
             $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
         );
         
-        try {
-            if ($stmt->execute()) {
-                // Update session jika perusahaan yang diedit sedang aktif
-                if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
-                    $_SESSION['company_name']            = $cmp_name;
-                    $_SESSION['company_npwp']            = $npwp;
-                    $_SESSION['is_inv']                  = $is_inv;
-                    $_SESSION['company_roles']           = $company_roles;
-                    $_SESSION['allowed_docs']            = ceisa_resolve_allowed_docs($company_roles, $allowed_docs);
-                    $_SESSION['company_erp_name']        = $erp_name;
-                    $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
-                    $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
-                    $_SESSION['company_alert_it_inv_unposted'] = $alert_it_inv_unposted;
-                    $_SESSION['alert_it_inv_unposted']   = $alert_it_inv_unposted;
-                    $_SESSION['company_logo']            = $logo;
-                    $_SESSION['company_subdomain']       = $subdomain;
-                    $_SESSION['company_card_color']      = $card_color;
-                }
-                echo json_encode(['status' => 'OK', 'message' => "Data perusahaan '$cmp_name' berhasil diperbarui!"]);
-            } else {
-                echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $stmt->error]);
+        if ($stmt->execute()) {
+            // Update session jika perusahaan yang diedit sedang aktif
+            if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
+                $_SESSION['company_name']            = $cmp_name;
+                $_SESSION['company_npwp']            = $npwp;
+                $_SESSION['is_inv']                  = $is_inv;
+                $_SESSION['company_roles']           = $company_roles;
+                $_SESSION['allowed_docs']            = ceisa_resolve_allowed_docs($company_roles, $allowed_docs);
+                $_SESSION['company_erp_name']        = $erp_name;
+                $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
+                $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
+                $_SESSION['company_alert_it_inv_unposted'] = $alert_it_inv_unposted;
+                $_SESSION['alert_it_inv_unposted']   = $alert_it_inv_unposted;
+                $_SESSION['company_logo']            = $logo;
+                $_SESSION['company_subdomain']       = $subdomain;
+                $_SESSION['company_card_color']      = $card_color;
             }
-        } catch (Throwable $e) {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $e->getMessage()]);
+            echo json_encode(['status' => 'OK', 'message' => "Data perusahaan '$cmp_name' berhasil diperbarui!"]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $stmt->error]);
         }
         $stmt->close();
         exit;
@@ -714,12 +705,23 @@ if ($action === 'clear_data') {
             }
         } catch (\Throwable $e) {}
 
+        try {
+            $qAju2 = $koneksi->query("SELECT DISTINCT nomorAju FROM bc_ceisa_data WHERE cmp_id = '$escCmp'");
+            if ($qAju2) {
+                while ($ra = $qAju2->fetch_assoc()) {
+                    $na = trim($ra['nomorAju'] ?? '');
+                    if (!empty($na)) $nomorAjuMap[$na] = true;
+                }
+            }
+        } catch (\Throwable $e) {}
+
         $nomorAjuList = array_keys($nomorAjuMap);
         $totalAju = count($nomorAjuList);
         
         // 2. Daftar seluruh tabel transaksi kepabeanan & log yang memiliki kolom cmp_id
         $tablesWithCmp = [
             'bc_ceisa_header',
+            'bc_ceisa_data',
             'bc_ceisa_sppb',
             'bc_ceisa_pengangkut',
             'bc_ceisa_kemasan',
