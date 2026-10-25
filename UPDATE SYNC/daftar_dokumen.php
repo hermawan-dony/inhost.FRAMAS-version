@@ -130,6 +130,7 @@ if ($action === 'list') {
 
     $sql = "SELECT
         COALESCE(NULLIF(a.idHeader, ''), '') AS id_header,
+        COALESCE(NULLIF(a.kodeProses, ''), '') AS kode_proses,
         a.kodeDokumen AS bc,
         a.kodeDokumen AS kode_dokumen,
         a.nomorAju AS nomor_aju,
@@ -741,6 +742,178 @@ if ($action === 'import_to_h2h') {
         echo json_encode([
             'status'  => 'ERROR',
             'message' => 'Gagal mengimpor ke H2H: ' . $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
+// 4. HAPUS DOKUMEN PEREKAMAN: https://apis-gw.beacukai.go.id/v2/logging-service/v1/log-dokumen/delete-dokumen
+if ($action === 'hapus_dokumen') {
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Metode request tidak valid. Harus POST.']);
+        exit;
+    }
+
+    $nomor_aju   = trim($_POST['nomor_aju'] ?? ($_REQUEST['nomor_aju'] ?? ''));
+    $targetCmp   = trim($_POST['cmp_id'] ?? ($_REQUEST['cmp_id'] ?? ''));
+    $idHeaderReq = trim($_POST['id_header'] ?? ($_REQUEST['id_header'] ?? ''));
+    $kodeProses  = trim($_POST['kode_proses'] ?? ($_REQUEST['kode_proses'] ?? '001'));
+    $userParam   = trim($_POST['username'] ?? ($_REQUEST['username'] ?? ''));
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor Pengajuan (nomorAju) tidak boleh kosong.']);
+        exit;
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju   = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil data dokumen dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, kodeProses, namaProses, nomorDaftar, namaRespon, cmp_id, asalData 
+               FROM bc_ceisa_data 
+               WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = !empty($idHeaderReq) ? $idHeaderReq : trim($rowDoc['idHeader'] ?? '');
+    if (empty($idHeader)) {
+        echo json_encode(['status' => 'ERROR', 'message' => "idHeader tidak ditemukan untuk nomor pengajuan {$cleanAju}."]);
+        exit;
+    }
+
+    // Validasi ketat: Hanya dokumen yang masih berstatus perekaman dokumen (001) yang boleh dihapus
+    $docKodeProses  = trim($rowDoc['kodeProses'] ?? $kodeProses);
+    $docNamaProses  = strtolower(trim($rowDoc['namaProses'] ?? ''));
+    $docNomorDaftar = trim($rowDoc['nomorDaftar'] ?? '');
+
+    $isPerekaman = ($docKodeProses === '001') || 
+                   strpos($docNamaProses, 'rekam') !== false || 
+                   (empty($docNomorDaftar) || $docNomorDaftar === '-');
+
+    if (!$isPerekaman && !empty($docNomorDaftar) && $docNomorDaftar !== '-') {
+        echo json_encode([
+            'status' => 'ERROR', 
+            'message' => "Dokumen {$cleanAju} telah memiliki nomor pendaftaran ({$docNomorDaftar}) atau sudah melewati tahap perekaman, sehingga tidak dapat dihapus."
+        ]);
+        exit;
+    }
+
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    } elseif (empty($targetCmp)) {
+        $comp = ceisa_get_company($cleanAju);
+        if ($comp && !empty($comp['cmp_id'])) {
+            $targetCmp = $comp['cmp_id'];
+        } elseif (!empty($_SESSION['company_cmp_id'])) {
+            $targetCmp = $_SESSION['company_cmp_id'];
+        }
+    }
+
+    // Otentikasi CEISA via initmfa.php
+    $_GET['cmp_id'] = $targetCmp;
+    $cmp_id = $targetCmp;
+    require_once __DIR__ . '/initmfa.php';
+
+    $activeComp = ceisa_get_company($targetCmp);
+    $usernamePortal = !empty($userParam) ? $userParam : (!empty($activeComp['username_ceisa']) ? trim($activeComp['username_ceisa']) : '');
+    $apiKey = !empty($activeComp['api_key_ceisa']) ? trim($activeComp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+    if (empty($usernamePortal)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Username portal CEISA tidak ditemukan pada konfigurasi perusahaan.']);
+        exit;
+    }
+
+    if (empty($activeToken)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mendapatkan token autentikasi MFA CEISA 4.0. Silakan periksa kredensial login & OTP perusahaan.']);
+        exit;
+    }
+
+    // Siapkan payload POST sesuai spesifikasi CEISA
+    $deletePayload = [
+        "idHeader"   => (string)$idHeader,
+        "nomorAju"   => (string)$cleanAju,
+        "kodeProses" => !empty($docKodeProses) ? (string)$docKodeProses : "001",
+        "username"   => (string)$usernamePortal
+    ];
+
+    $deleteUrl = "https://apis-gw.beacukai.go.id/v2/logging-service/v1/log-dokumen/delete-dokumen";
+
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL            => $deleteUrl,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CUSTOMREQUEST  => "POST",
+        CURLOPT_POSTFIELDS     => json_encode($deletePayload),
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $activeToken,
+            'beacukai-api-key: ' . $apiKey,
+            'Content-Type: application/json',
+            'Accept: application/json, text/plain, */*',
+            'Origin: https://portal.beacukai.go.id',
+            'Referer: https://portal.beacukai.go.id/'
+        ]
+    ]);
+
+    $responseJson = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Koneksi ke gateway CEISA 4.0 gagal: ' . $curlErr]);
+        exit;
+    }
+
+    $respData = @json_decode($responseJson, true);
+    
+    // Evaluasi respon CEISA
+    $isSuccess = false;
+    $msgCeisa = '';
+
+    if (is_array($respData)) {
+        $msgCeisa = $respData['message'] ?? ($respData['item'] ?? ($respData['data'] ?? ''));
+        if (is_array($msgCeisa)) $msgCeisa = json_encode($msgCeisa);
+
+        if (isset($respData['status']) && ($respData['status'] === true || $respData['status'] === 'true' || $respData['status'] === 200 || strtolower((string)$respData['status']) === 'success')) {
+            $isSuccess = true;
+        } elseif ($httpCode === 200 && empty($respData['status']) && !empty($respData['message']) && strpos(strtolower($respData['message']), 'berhasil') !== false) {
+            $isSuccess = true;
+        } elseif ($httpCode === 200 && !isset($respData['status'])) {
+            $isSuccess = true;
+        }
+    } elseif ($httpCode === 200) {
+        $isSuccess = true;
+        $msgCeisa = $responseJson;
+    }
+
+    if ($isSuccess) {
+        // Hapus dari tabel lokal jika ada
+        $koneksi->query("DELETE FROM bc_ceisa_data WHERE nomorAju = '{$escAju}'");
+        $koneksi->query("DELETE FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}'");
+        $koneksi->query("DELETE FROM bc_ceisa_barang WHERE nomor_aju = '{$escAju}'");
+        $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '{$escAju}'");
+        $koneksi->query("DELETE FROM bc_ceisa_status WHERE nomor_aju = '{$escAju}'");
+        $koneksi->query("DELETE FROM bc_ceisa_respons WHERE nomor_aju = '{$escAju}'");
+
+        echo json_encode([
+            'status'         => 'OK',
+            'nomor_aju'      => $cleanAju,
+            'message'        => !empty($msgCeisa) ? $msgCeisa : "Dokumen pengajuan {$cleanAju} berhasil dihapus dari portal CEISA 4.0.",
+            'ceisa_response' => $respData
+        ]);
+    } else {
+        echo json_encode([
+            'status'         => 'ERROR',
+            'nomor_aju'      => $cleanAju,
+            'http_code'      => $httpCode,
+            'message'        => !empty($msgCeisa) ? $msgCeisa : "Gagal menghapus dokumen dari portal CEISA 4.0 (HTTP {$httpCode}).",
+            'ceisa_response' => $respData,
+            'raw'            => $responseJson
         ]);
     }
     exit;
@@ -2220,6 +2393,28 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             background: #111d2c;
             color: #177ddc;
         }
+        .row-action-item-danger {
+            color: #ff4d4f !important;
+        }
+        .row-action-item-danger:hover {
+            background: #fff1f0 !important;
+            color: #cf1322 !important;
+        }
+        body[data-theme="dark"] .row-action-item-danger {
+            color: #ff7875 !important;
+        }
+        body[data-theme="dark"] .row-action-item-danger:hover {
+            background: rgba(255, 77, 79, 0.15) !important;
+            color: #ff4d4f !important;
+        }
+        .row-action-divider {
+            height: 1px;
+            background: #f0f0f0;
+            margin: 3px 0;
+        }
+        body[data-theme="dark"] .row-action-divider {
+            background: #303030;
+        }
         .row-action-item svg {
             flex-shrink: 0;
         }
@@ -2821,6 +3016,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
             </svg>
             <span>Status Dokumen</span>
+        </div>
+        <div class="row-action-divider" id="rowActionDeleteDivider" style="display:none;"></div>
+        <div class="row-action-item row-action-item-danger" id="rowActionDelete" onclick="triggerRowAction('hapus')" style="display:none;" title="Hapus dokumen yang masih berstatus perekaman">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
+                <path d="M864 256H736V160c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v96H160c-17.7 0-32 14.3-32 32v16c0 4.4 3.6 8 8 8h56.4l41.6 572.2c2.6 35.7 32.4 63.8 68.2 63.8h419.6c35.8 0 65.6-28.1 68.2-63.8L831.6 312H888c4.4 0 8-3.6 8-8v-16c0-17.7-14.3-32-32-32zM368 176h288v80H368v-80zm386.1 704H269.9l-39.6-544h533.4l-39.6 544z"/>
+                <path d="M432 400h48v336h-48zm112 0h48v336h-48z"/>
+            </svg>
+            <span style="font-weight:600;">Hapus Dokumen</span>
         </div>
     </div>
 
@@ -3502,7 +3705,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
                         </td>
                         <td style="text-align:center; white-space:nowrap;" class="td-col-aksi">
-                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
+                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}', '${r.kode_proses || ''}', '${r.namaProses ? encodeURIComponent(r.namaProses) : ''}', '${r.nomor_daftar || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
                                 <span>Aksi</span>
                                 <span style="font-size:8px; opacity:0.75; transform:scale(0.85); display:inline-block;">▼</span>
                             </button>
@@ -3811,9 +4014,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         let activeActionPdf = '';
         let activeActionIdHeader = '';
         let activeActionKodeDok = '';
+        let activeActionKodeProses = '';
+        let activeActionNamaProses = '';
+        let activeActionNomorDaftar = '';
         let activeActionTriggerBtn = null;
 
-        function openRowActionMenu(event, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen) {
+        function openRowActionMenu(event, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen, kodeProses, namaProses, nomorDaftar) {
             if (event) {
                 if (typeof event.stopPropagation === 'function') event.stopPropagation();
             }
@@ -3829,6 +4035,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             activeActionPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
             activeActionIdHeader = idHeader || '';
             activeActionKodeDok = kodeDokumen || '';
+            activeActionKodeProses = kodeProses || '';
+            activeActionNamaProses = namaProses ? decodeURIComponent(namaProses) : '';
+            activeActionNomorDaftar = nomorDaftar || '';
 
             if (activeActionTriggerBtn) {
                 activeActionTriggerBtn.classList.remove('active');
@@ -3840,9 +4049,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             if (!menu) return;
 
+            // Logika "hanya khusus yang statusnya masih perekaman dokumen"
+            const delBtn = document.getElementById('rowActionDelete');
+            const delDiv = document.getElementById('rowActionDeleteDivider');
+            
+            const isPerekaman = (activeActionKodeProses === '001') || 
+                                (activeActionNamaProses && activeActionNamaProses.toLowerCase().includes('rekam')) ||
+                                ((!activeActionKodeProses || activeActionKodeProses === '001') && (!activeActionNomorDaftar || activeActionNomorDaftar === '-'));
+
+            if (delBtn) {
+                delBtn.style.display = isPerekaman ? 'flex' : 'none';
+            }
+            if (delDiv) {
+                delDiv.style.display = isPerekaman ? 'block' : 'none';
+            }
+
             const rect = activeActionTriggerBtn ? activeActionTriggerBtn.getBoundingClientRect() : { right: window.innerWidth - 100, bottom: 200, left: 100, top: 100 };
             const menuWidth = 165;
-            const menuHeight = 155;
+            const menuHeight = isPerekaman ? 195 : 155;
 
             let left = rect.right - menuWidth;
             if (left < 10) left = Math.max(10, rect.left);
@@ -3882,6 +4106,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const pdf = activeActionPdf;
             const idHeader = activeActionIdHeader;
             const kodeDok = activeActionKodeDok;
+            const kodeProses = activeActionKodeProses;
             closeRowActionMenu();
 
             if (!aju) return;
@@ -3898,6 +4123,97 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 window.open(url, '_blank');
             } else if (type === 'status') {
                 openTrackingHistory(aju, cmp);
+            } else if (type === 'hapus') {
+                await executeDeleteDocument(aju, cmp, idHeader, kodeDok, kodeProses);
+            }
+        }
+
+        async function executeDeleteDocument(aju, cmp, idHeader, kodeDok, kodeProses) {
+            if (!aju) return;
+
+            const activeCmp = cmp || document.getElementById('filterCmp')?.value || '';
+
+            if (typeof Swal !== 'undefined') {
+                const res = await Swal.fire({
+                    title: 'Hapus Dokumen CEISA?',
+                    html: `Apakah Anda yakin ingin menghapus dokumen perekaman:<br><b style="font-family:monospace; color:#cf1322; font-size:13px;">${escapeHtml(aju)}</b>?<br><br><span style="font-size:11px; color:#8c8c8c;">Perintah penghapusan resmi (<b>delete-dokumen</b>) akan dikirim ke portal CEISA 4.0.</span>`,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#ff4d4f',
+                    cancelButtonColor: '#8c8c8c',
+                    confirmButtonText: '🗑️ Ya, Hapus Dokumen',
+                    cancelButtonText: 'Batal',
+                    reverseButtons: true
+                });
+                if (!res.isConfirmed) return;
+
+                Swal.fire({
+                    title: 'Menghapus Dokumen...',
+                    html: 'Menghubungi API CEISA 4.0 logging-service...',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+            } else {
+                if (!confirm(`Hapus dokumen perekaman ${aju} dari portal CEISA 4.0?`)) return;
+            }
+
+            try {
+                const formData = new FormData();
+                formData.append('nomor_aju', aju);
+                formData.append('cmp_id', activeCmp);
+                formData.append('id_header', idHeader || '');
+                formData.append('kode_proses', kodeProses || '001');
+
+                const response = await fetch('daftar_dokumen.php?action=hapus_dokumen', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+
+                if (result.status === 'OK') {
+                    if (typeof Swal !== 'undefined') {
+                        await Swal.fire({
+                            title: 'Berhasil Dihapus!',
+                            text: result.message || `Dokumen ${aju} berhasil dihapus dari portal CEISA 4.0.`,
+                            icon: 'success',
+                            confirmButtonColor: '#52c41a'
+                        });
+                    } else {
+                        alert(result.message || 'Dokumen berhasil dihapus.');
+                    }
+
+                    // Hapus baris dari array lokal dan update tampilan tabel
+                    ajuData = ajuData.filter(item => item.nomor_aju !== aju);
+                    filteredData = filteredData.filter(item => item.nomor_aju !== aju);
+                    selectedAju.delete(aju);
+                    
+                    const rowElem = document.getElementById(`row-${aju}`);
+                    if (rowElem) {
+                        rowElem.remove();
+                    }
+                    applyFilterAndSort();
+                } else {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            title: 'Gagal Menghapus Dokumen',
+                            html: `<div style="text-align:left; font-size:12px; color:#cf1322;">${escapeHtml(result.message || 'Gagal menghapus dokumen dari portal CEISA.')}</div>`,
+                            icon: 'error',
+                            confirmButtonColor: '#1890ff'
+                        });
+                    } else {
+                        alert('Gagal: ' + (result.message || 'Gagal menghapus dokumen'));
+                    }
+                }
+            } catch (err) {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        title: 'Koneksi Gagal',
+                        text: 'Terjadi kegagalan jaringan saat menghubungi backend: ' + err.message,
+                        icon: 'error'
+                    });
+                } else {
+                    alert('Koneksi Gagal: ' + err.message);
+                }
             }
         }
 
