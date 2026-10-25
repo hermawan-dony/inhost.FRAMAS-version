@@ -1475,13 +1475,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span>Rekap Dokumen</span>
                 </button>
 
-                <!-- Rekap Belum IT Inv -->
-                <button type="button" class="ant-btn" id="btnRekapNotInv" onclick="toggleRekapBulananNotInv()" title="Buka Rekap Dokumen Belum Masuk IT Inventory per Bulan">
-                    <svg viewBox="64 64 896 896" width="12" height="12" fill="#cf1322">
-                        <path d="M880 184H712v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H384v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H144c-17.7 0-32 14.3-32 32v664c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V216c0-17.7-14.3-32-32-32zm-40 656H184V336h656v504zm0-568H184v-40h136v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h256v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h136v40z"></path>
-                    </svg>
-                    <span style="color:#cf1322; font-weight:600;">Rekap Belum IT Inv</span>
-                </button>
 
                 <!-- Filter -->
                 <button type="button" class="ant-btn" onclick="toggleFilterPanel()">
