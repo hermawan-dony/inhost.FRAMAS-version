@@ -49,36 +49,68 @@ class CeisaJsonDocParser {
         $targetCmp = $cmpId;
         $cmp_id = $targetCmp;
         $_GET['cmp_id'] = $targetCmp;
-        require_once __DIR__ . '/initmfa.php';
+        $tokenCacheFile = sys_get_temp_dir() . '/ceisa_token_' . preg_replace('/[^a-zA-Z0-9_-]/', '_', $targetCmp ?: 'default') . '.json';
+        require __DIR__ . '/initmfa.php';
 
-        $comp = function_exists('ceisa_get_company') ? ceisa_get_company($targetCmp) : null;
-        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
-
-        $activeToken = function_exists('get_cached_mfatoken') ? get_cached_mfatoken($targetCmp, $tokenCacheFile ?? '') : ($activeToken ?? '');
+        $activeToken = function_exists('get_cached_mfatoken') ? get_cached_mfatoken($targetCmp, $tokenCacheFile) : ($activeToken ?? '');
 
         if (empty($activeToken)) {
             throw new Exception("Gagal mendapatkan Token MFA aktif untuk perusahaan {$targetCmp}. Silakan periksa kredensial MFA di Kelola Perusahaan.");
         }
 
+        // Endpoint resmi CEISA 4.0 Report Parser LNSW (/td-header)
         $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=" . urlencode($cleanIdHeader);
         $ch = curl_init();
         curl_setopt_array($ch, [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 25,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_ENCODING => "", // Otomatis decompress gzip/deflate
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $activeToken,
-                'beacukai-api-key: ' . $apiKey,
+                'beacukai-api-key: 6222a75e-1dbb-493e-9461-27f721097e9c',
                 'Accept: application/json, text/plain, */*',
                 'Origin: https://portal.beacukai.go.id',
-                'Referer: https://portal.beacukai.go.id/'
+                'Referer: https://portal.beacukai.go.id/',
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
             ]
         ]);
         $respJson = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErr = curl_error($ch);
         curl_close($ch);
+
+        // Jika token kedaluwarsa (401 / 403), hapus cache dan coba minta token baru 1x
+        if ($httpCode === 401 || $httpCode === 403) {
+            @unlink($tokenCacheFile);
+            unset($_SESSION["mfatoken_" . $targetCmp]);
+            unset($_SESSION["mfatoken_created_at_" . $targetCmp]);
+            require __DIR__ . '/initmfa.php';
+            $activeToken = function_exists('get_cached_mfatoken') ? get_cached_mfatoken($targetCmp, $tokenCacheFile) : ($activeToken ?? '');
+            if (!empty($activeToken)) {
+                $ch = curl_init();
+                curl_setopt_array($ch, [
+                    CURLOPT_URL => $url,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 30,
+                    CURLOPT_SSL_VERIFYPEER => false,
+                    CURLOPT_ENCODING => "",
+                    CURLOPT_HTTPHEADER => [
+                        'Authorization: Bearer ' . $activeToken,
+                        'beacukai-api-key: 6222a75e-1dbb-493e-9461-27f721097e9c',
+                        'Accept: application/json, text/plain, */*',
+                        'Origin: https://portal.beacukai.go.id',
+                        'Referer: https://portal.beacukai.go.id/',
+                        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
+                    ]
+                ]);
+                $respJson = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlErr = curl_error($ch);
+                curl_close($ch);
+            }
+        }
 
         if ($curlErr) {
             throw new Exception("cURL Error ke API LNSW: " . $curlErr);
@@ -90,7 +122,8 @@ class CeisaJsonDocParser {
 
         $docArr = json_decode($respJson, true);
         if (!$docArr || empty($docArr['data'])) {
-            throw new Exception("Payload JSON dari LNSW tidak valid atau data kosong: " . substr((string)$respJson, 0, 300));
+            $msg = $docArr['message'] ?? 'Data dokumen tidak ditemukan pada API LNSW CEISA 4.0';
+            throw new Exception("LNSW: " . $msg);
         }
 
         return $docArr;
@@ -119,6 +152,21 @@ class CeisaJsonDocParser {
             $kodeDokumen = $m[1];
         }
 
+        // Ambil fallback nomor_daftar & tanggal_daftar dari bc_ceisa_data jika di JSON tidak tersedia
+        $nomorDaftar = !empty($d['nomorDaftar']) ? $d['nomorDaftar'] : null;
+        $tanggalDaftar = self::formatDate($d['tanggalDaftar'] ?? null);
+        if (empty($nomorDaftar) && !empty($nomorAju)) {
+            global $koneksi;
+            if ($koneksi) {
+                $escA = $koneksi->real_escape_string($nomorAju);
+                $qD = $koneksi->query("SELECT nomorDaftar, tanggalDaftar FROM bc_ceisa_data WHERE nomorAju = '{$escA}' LIMIT 1");
+                if ($qD && $rD = $qD->fetch_assoc()) {
+                    if (!empty($rD['nomorDaftar'])) $nomorDaftar = $rD['nomorDaftar'];
+                    if (empty($tanggalDaftar) && !empty($rD['tanggalDaftar'])) $tanggalDaftar = self::formatDate($rD['tanggalDaftar']);
+                }
+            }
+        }
+
         // Siapkan kerangka 21 sheet
         $ajuData = [];
         foreach (CeisaXlsxExporter::$sheetTableMap as $sheet => $tbl) {
@@ -129,6 +177,8 @@ class CeisaJsonDocParser {
         $ajuData['HEADER'][] = [
             'nomor_aju'                => $nomorAju,
             'kode_dokumen'             => $kodeDokumen,
+            'nomor_daftar'             => $nomorDaftar,
+            'tanggal_daftar'           => $tanggalDaftar,
             'kode_kantor'              => $d['kodeKantor'] ?? null,
             'kode_kantor_bongkar'      => $d['kodeKantorBongkar'] ?? null,
             'kode_kantor_muat'         => $d['kodeKantorMuat'] ?? null,

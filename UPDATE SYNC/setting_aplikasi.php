@@ -1416,7 +1416,7 @@ if ($isCustomScope) {
                         <div class="form-group">
                             <label>
                                 <span>Interval Auto-Refresh Tracking Respon</span>
-                                <span class="hint">Disarankan "Non-Aktif" agar terhindar dari pemblokiran rate-limit IP</span>
+                                <span class="hint">Disarankan "Non-Aktif" untuk menjaga efisiensi dan kestabilan request portal</span>
                             </label>
                             <select class="form-control" id="inp_tracking_refresh" name="tracking_refresh">
                                 <option value="0" <?= ($currentSettings['tracking_refresh'] === '0') ? 'selected' : '' ?>>Non-Aktif (Manual Saja - Direkomendasikan)</option>

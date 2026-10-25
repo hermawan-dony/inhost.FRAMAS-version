@@ -6,6 +6,7 @@
  */
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
+require_once __DIR__ . '/datalogin.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -22,7 +23,7 @@ $targetCompanyRoles = 'tpb';
 $targetCompanyAllowedDocs = null;
 $companies = [];
 if (isset($koneksi) && $koneksi) {
-    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa FROM bc_ceisa_company ORDER BY cmp_name ASC");
     if ($resComp) {
         while ($r = $resComp->fetch_assoc()) {
             if ($r['cmp_id'] === $sessionCmpId) {
@@ -163,6 +164,7 @@ if ($action === 'list') {
         COALESCE(NULLIF(a.namaKantorPendek, ''), CONCAT('KPPBC ', a.kodeKantor)) AS bcd_namaKantorPendek,
         COALESCE(NULLIF(a.namaPerusahaan, ''), '') AS bcd_namaPerusahaan,
         COALESCE(NULLIF(a.idPerusahaan, ''), '') AS bcd_idPerusahaan,
+        COALESCE(NULLIF(cmp.id_user_ceisa, ''), '') AS id_user_ceisa,
         COALESCE(cmp.IS_INV, $cmpIsInv, 1) AS is_inv,
         IFNULL(it_inv.jml, 0) AS in_it_inv,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d 00:00:00'), '') AS effective_tanggal_respon
@@ -270,15 +272,15 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     $resBcd = $koneksi->query($sqlBcd);
     $rowBcd = $resBcd ? $resBcd->fetch_assoc() : null;
 
-    // Ambil live riwayat status dari CEISA 4.0 via getRiwayatStatus/$idHeader jika tersedia
+    // Ambil live riwayat status dari CEISA 4.0 via getRiwayatStatus/$idHeader jika tersedia dan ID User CEISA telah diatur
     $liveIdHeader = trim($rowBcd['id_header'] ?? '');
-    if (!empty($liveIdHeader)) {
-        $liveCmp = $cmp_id ?: ($rowBcd['cmp_id'] ?? '');
+    $liveCmp = $cmp_id ?: ($rowBcd['cmp_id'] ?? '');
+    $liveComp = ceisa_get_company($liveCmp ?: $escAju);
+    if (!empty($liveIdHeader) && !empty($liveComp['id_user_ceisa'])) {
         $cmp_id = $liveCmp;
         $_GET['cmp_id'] = $liveCmp;
         require_once __DIR__ . '/initmfa.php';
 
-        $liveComp = ceisa_get_company($liveCmp);
         $liveApiKey = !empty($liveComp['api_key_ceisa']) ? trim($liveComp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
 
         if (!empty($activeToken)) {
@@ -448,6 +450,99 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
 // CEISA 4.0 OFFICIAL GATEWAY ACTIONS (BERBASIS idHeader, kodeDokumen & initMFA)
 // =============================================================================
 
+// 0. LIHAT JSON LNSW: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
+if ($action === 'view_json_lnsw') {
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $idHeader  = trim($_REQUEST['id_header'] ?? '');
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+    $isRaw     = !empty($_REQUEST['raw']);
+
+    if (empty($idHeader) && !empty($nomor_aju)) {
+        $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+        $escAju = $koneksi->real_escape_string($cleanAju);
+        $sqlDoc = "SELECT idHeader, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+        $resDoc = $koneksi->query($sqlDoc);
+        if ($resDoc && $rowDoc = $resDoc->fetch_assoc()) {
+            $idHeader = trim($rowDoc['idHeader'] ?? '');
+            if (empty($targetCmp)) $targetCmp = $rowDoc['cmp_id'] ?? '';
+        }
+    }
+
+    if (empty($idHeader)) {
+        http_response_code(400);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ERROR', 'message' => 'idHeader tidak ditemukan untuk dokumen ini.'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $nomor_aju);
+    if (empty($comp['id_user_ceisa'])) {
+        http_response_code(400);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID User CEISA belum diatur di menu Kelola Perusahaan (Tab Akun CEISA & TOTP MFA).'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    $cmp_id = !empty($comp['cmp_id']) ? $comp['cmp_id'] : $targetCmp;
+    $_GET['cmp_id'] = $cmp_id;
+    require_once __DIR__ . '/initmfa.php';
+
+    if (empty($activeToken)) {
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mendapatkan token otentikasi MFA dari Bea Cukai.'], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    // Endpoint resmi CEISA 4.0 Report Parser LNSW (/td-header)
+    $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=" . urlencode($idHeader);
+    $ch = curl_init();
+    curl_setopt_array($ch, [
+        CURLOPT_URL => $url,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_ENCODING => "", // Otomatis decompress gzip/deflate
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $activeToken,
+            'beacukai-api-key: 6222a75e-1dbb-493e-9461-27f721097e9c',
+            'Accept: application/json, text/plain, */*',
+            'Origin: https://portal.beacukai.go.id',
+            'Referer: https://portal.beacukai.go.id/',
+            'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36'
+        ]
+    ]);
+    $resp = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr = curl_error($ch);
+    curl_close($ch);
+
+    header('Content-Type: application/json; charset=utf-8');
+
+    if ($isRaw) {
+        $decoded = json_decode($resp, true);
+        if (json_last_error() === JSON_ERROR_NONE) {
+            echo json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        } else {
+            echo $resp ?: json_encode(['status' => 'ERROR', 'http_code' => $httpCode, 'error' => $curlErr], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+        }
+        exit;
+    }
+
+    $decoded = json_decode($resp, true);
+    echo json_encode([
+        'status'    => ($httpCode === 200) ? 'OK' : 'ERROR',
+        'http_code' => $httpCode,
+        'url'       => $url,
+        'nomor_aju' => $nomor_aju,
+        'id_header' => $idHeader,
+        'cmp_id'    => $cmp_id,
+        'raw_json'  => (json_last_error() === JSON_ERROR_NONE) ? json_encode($decoded, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : $resp,
+        'data'      => $decoded
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
 // 1. CETAK DOKUMEN: https://apis-gw.beacukai.go.id/v2/report-service/formulir/$kodeDokumen/$idHeader
 if ($action === 'cetak_formulir') {
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
@@ -472,6 +567,15 @@ if ($action === 'cetak_formulir') {
         $targetCmp = $rowDoc['cmp_id'];
     }
 
+    $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $cleanAju);
+    if (empty($comp['id_user_ceisa'])) {
+        http_response_code(400);
+        die('<div style="font-family:sans-serif; padding:30px; text-align:center; color:#cf1322;">
+            <h3>⚠️ ID User CEISA Belum Diatur</h3>
+            <p>Fitur <b>Cetak Dokumen</b> memerlukan <b>ID User CEISA</b> aktif.<br>Silakan lengkapi konfigurasi perusahaan di menu <b>Kelola Perusahaan &rarr; Akun CEISA &amp; TOTP MFA</b>.</p>
+        </div>');
+    }
+
     $pdfContent = null;
 
     // Panggil report-service formulir resmi CEISA 4.0 jika idHeader dan kodeDokumen ada
@@ -480,7 +584,6 @@ if ($action === 'cetak_formulir') {
         $_GET['cmp_id'] = $targetCmp;
         require_once __DIR__ . '/initmfa.php';
 
-        $comp = ceisa_get_company($targetCmp);
         $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
 
         if (!empty($activeToken)) {
@@ -534,7 +637,7 @@ if ($action === 'cetak_formulir') {
     exit;
 }
 
-// 2. UNDUH EXCEL: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
+// 2. UNDUH EXCEL: Panggil service resmi download_ceisa_excel.php (Endpoint Resmi excel-service)
 if ($action === 'unduh_excel') {
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
     $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
@@ -547,12 +650,12 @@ if ($action === 'unduh_excel') {
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
     $escAju = $koneksi->real_escape_string($cleanAju);
 
-    // Ambil idHeader dan cmp_id dari bc_ceisa_data
+    // Ambil idHeader, kodeDokumen, dan cmp_id dari bc_ceisa_data
     $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
     $resDoc = $koneksi->query($sqlDoc);
     $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
 
-    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    $kodeDokumen = trim($_REQUEST['kode_dokumen'] ?? ($rowDoc['kodeDokumen'] ?? ''));
     if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
         $targetCmp = $rowDoc['cmp_id'];
     } elseif (empty($targetCmp)) {
@@ -564,60 +667,26 @@ if ($action === 'unduh_excel') {
         }
     }
 
-    $cacheDir = __DIR__ . '/excel_cache';
-    if (!is_dir($cacheDir)) {
-        @mkdir($cacheDir, 0777, true);
-    }
-    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
-
-    require_once __DIR__ . '/CeisaJsonDocParser.php';
-
-    // 1. Prioritas Utama: Ambil payload JSON resmi via API LNSW report-parser jika idHeader ada
-    if (!empty($idHeader)) {
-        try {
-            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
-            if (!empty($docArr['data'])) {
-                CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
-                // Sekaligus lakukan staging ke database MySQL agar data langsung sinkron
-                try {
-                    CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
-                } catch (\Throwable $eStg) {}
-            }
-        } catch (\Throwable $eLnsw) {
-            error_log("unduh_excel LNSW error: " . $eLnsw->getMessage());
-        }
+    // Validasi ID User CEISA sebelum menjalankan InitMFA
+    $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $cleanAju);
+    if (empty($comp['id_user_ceisa'])) {
+        http_response_code(400);
+        die('<div style="font-family:sans-serif; padding:30px; text-align:center; color:#cf1322;">
+            <h3>⚠️ ID User CEISA Belum Diatur</h3>
+            <p>Fitur <b>Unduh Excel</b> memerlukan <b>ID User CEISA</b> aktif.<br>Silakan lengkapi konfigurasi perusahaan di menu <b>Kelola Perusahaan &rarr; Akun CEISA &amp; TOTP MFA</b>.</p>
+        </div>');
     }
 
-    // 2. Fallback: Jika berkas belum ada di cache, coba bangun dari tabel staging database
-    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
-        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
-            require_once __DIR__ . '/CeisaXlsxExporter.php';
-            try {
-                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
-                if ($chk && $chk->num_rows > 0) {
-                    $exporter = new CeisaXlsxExporter($koneksi);
-                    $exporter->generateXlsx($cleanAju, $excelPath);
-                }
-            } catch (\Throwable $eExp) {}
-        }
+    // Arahkan langsung ke service download_ceisa_excel.php yang terintegrasi langsung ke excel-service
+    $redirUrl = "download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp);
+    if (!empty($kodeDokumen)) {
+        $redirUrl .= "&kode_dokumen=" . urlencode($kodeDokumen);
     }
-
-    // Jika berkas Excel sudah berhasil dibuat / ada di cache
-    if (file_exists($excelPath) && filesize($excelPath) >= 1500) {
-        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-        header('Content-Disposition: attachment; filename="' . $cleanAju . '.xlsx"');
-        header('Content-Length: ' . filesize($excelPath));
-        header('Cache-Control: public, max-age=86400');
-        readfile($excelPath);
-        exit;
-    }
-
-    // 3. Fallback Terakhir: Arahkan ke service download_ceisa_excel.php
-    header("Location: /download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp));
+    header("Location: " . $redirUrl);
     exit;
 }
 
-// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
+// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
 if ($action === 'import_to_h2h') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
@@ -655,95 +724,85 @@ if ($action === 'import_to_h2h') {
     }
     $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
 
-    require_once __DIR__ . '/CeisaJsonDocParser.php';
+    // Validasi ID User CEISA sebelum menjalankan InitMFA / report-parser
+    $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $cleanAju);
+    if (empty($comp['id_user_ceisa'])) {
+        echo json_encode([
+            'status'  => 'ERROR',
+            'code'    => 'MISSING_ID_USER',
+            'message' => 'ID User CEISA belum diset pada profil perusahaan ini di menu Kelola Perusahaan (Tab Akun CEISA & TOTP MFA).'
+        ]);
+        exit;
+    }
 
-    // 1. Prioritas Utama: Impor langsung via LNSW JSON report-parser (cepat, lengkap, presisi)
+    // 1. Prioritas Utama: Unduh & Impor Berkas Excel Resmi CEISA 4.0 (excel-service)
+    // Berkas resmi ini PASTI DATA VALID, lengkap dengan Nomor Daftar, Tanggal Daftar, dan 21 Sheet
+    if (!file_exists($excelPath) || filesize($excelPath) < 2000) {
+        $host = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+        $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+        $dlUrl = $proto . $host . "/download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp) . "&format=json";
+        
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $dlUrl,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0
+        ]);
+        $resCurl = curl_exec($ch);
+        curl_close($ch);
+    }
+
+    if (file_exists($excelPath) && filesize($excelPath) > 2000) {
+        try {
+            require_once __DIR__ . '/CeisaXlsxImporter.php';
+            $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
+            $result = $importer->import($excelPath, ['overwrite' => true]);
+
+            echo json_encode([
+                'status'    => 'OK',
+                'nomor_aju' => $cleanAju,
+                'cmp_id'    => $targetCmp,
+                'source'    => 'OFFICIAL_EXCEL',
+                'message'   => "Dokumen {$cleanAju} berhasil diimpor dari Berkas Excel Resmi CEISA 4.0 ke Staging Host to Host!",
+                'details'   => $result
+            ]);
+            exit;
+        } catch (\Throwable $eEx) {
+            error_log("import_to_h2h via official Excel failed: " . $eEx->getMessage());
+        }
+    }
+
+    // 2. Fallback: Impor via API LNSW report-parser (/td-header) jika Excel gagal
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+    $lnswErrMsg = '';
     if (!empty($idHeader)) {
         try {
             $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
             if (!empty($docArr['data'])) {
                 $importResult = CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
                 
-                // Simpan berkas Excel ke cache sekaligus
-                try {
-                    CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
-                } catch (\Throwable $eEx) {}
-
                 echo json_encode([
                     'status'    => 'OK',
                     'nomor_aju' => $cleanAju,
                     'cmp_id'    => $targetCmp,
                     'source'    => 'LNSW_JSON',
-                    'message'   => "Dokumen {$cleanAju} berhasil diimpor langsung dari CEISA 4.0 ke Staging Host to Host!",
+                    'message'   => "Dokumen {$cleanAju} berhasil diimpor dari API LNSW ke Staging Host to Host!",
                     'details'   => $importResult
                 ]);
                 exit;
             }
         } catch (\Throwable $eLnsw) {
-            error_log("import_to_h2h via LNSW failed: " . $eLnsw->getMessage() . ". Falling back to Excel importer.");
+            $lnswErrMsg = $eLnsw->getMessage();
+            error_log("import_to_h2h via LNSW failed: " . $lnswErrMsg);
         }
     }
 
-    // 2. Fallback: Gunakan file Excel jika sudah ada di cache atau generate dari service
-    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
-        $genSuccess = false;
-        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
-            require_once __DIR__ . '/CeisaXlsxExporter.php';
-            try {
-                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
-                if ($chk && $chk->num_rows > 0) {
-                    $exporter = new CeisaXlsxExporter($koneksi);
-                    $genSuccess = $exporter->generateXlsx($cleanAju, $excelPath);
-                }
-            } catch (\Throwable $e) {}
-        }
-
-        if (!$genSuccess || !file_exists($excelPath) || filesize($excelPath) < 1500) {
-            $host = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
-            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-            $dlUrl = $proto . $host . "/download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp) . "&format=json";
-            
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $dlUrl,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 30,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => 0
-            ]);
-            $resCurl = curl_exec($ch);
-            curl_close($ch);
-        }
-    }
-
-    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
-        echo json_encode([
-            'status' => 'ERROR',
-            'message' => "Dokumen pengajuan {$cleanAju} tidak dapat diakses dari API LNSW maupun Excel service. Pastikan kredensial login dan OTP MFA perusahaan telah aktif."
-        ]);
-        exit;
-    }
-
-    // Eksekusi CeisaXlsxImporter dari file Excel
-    try {
-        require_once __DIR__ . '/CeisaXlsxImporter.php';
-        $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
-        $result = $importer->import($excelPath, ['overwrite' => true]);
-
-        echo json_encode([
-            'status'    => 'OK',
-            'nomor_aju' => $cleanAju,
-            'cmp_id'    => $targetCmp,
-            'source'    => 'XLSX_FILE',
-            'message'   => "Dokumen {$cleanAju} berhasil diimpor ke Data Host to Host!",
-            'details'   => $result
-        ]);
-    } catch (\Throwable $e) {
-        echo json_encode([
-            'status'  => 'ERROR',
-            'message' => 'Gagal mengimpor ke H2H: ' . $e->getMessage()
-        ]);
-    }
+    echo json_encode([
+        'status' => 'ERROR',
+        'message' => "Dokumen pengajuan {$cleanAju} tidak dapat diakses dari API Excel maupun LNSW. Pastikan kredensial login dan OTP MFA perusahaan telah aktif." . (!empty($lnswErrMsg) ? " ($lnswErrMsg)" : "")
+    ]);
     exit;
 }
 
@@ -809,6 +868,17 @@ if ($action === 'hapus_dokumen') {
         } elseif (!empty($_SESSION['company_cmp_id'])) {
             $targetCmp = $_SESSION['company_cmp_id'];
         }
+    }
+
+    // Validasi ID User CEISA sebelum menjalankan InitMFA / delete-dokumen
+    $comp = ceisa_get_company(!empty($targetCmp) ? $targetCmp : $cleanAju);
+    if (empty($comp['id_user_ceisa'])) {
+        echo json_encode([
+            'status'  => 'ERROR',
+            'code'    => 'MISSING_ID_USER',
+            'message' => 'ID User CEISA belum diset pada profil perusahaan ini di menu Kelola Perusahaan (Tab Akun CEISA & TOTP MFA).'
+        ]);
+        exit;
     }
 
     // Otentikasi CEISA via initmfa.php
@@ -2415,6 +2485,15 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         body[data-theme="dark"] .row-action-divider {
             background: #303030;
         }
+        .dd-context-item.is-disabled, .row-action-item.is-disabled {
+            opacity: 0.45 !important;
+            cursor: not-allowed !important;
+            filter: grayscale(85%);
+        }
+        .dd-context-item.is-disabled:hover, .row-action-item.is-disabled:hover {
+            background: transparent !important;
+            color: var(--text-muted) !important;
+        }
         .row-action-item svg {
             flex-shrink: 0;
         }
@@ -2978,6 +3057,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             </svg>
             <span>Cetak Dokumen</span>
         </div>
+        <div class="dd-context-item" id="ctxItemViewJson">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#722ed1">
+                <path d="M780.8 520.1L646.6 385.9a8.03 8.03 0 0 0-11.3 0l-45.3 45.3a8.03 8.03 0 0 0 0 11.3L698.8 551l-108.8 108.8a8.03 8.03 0 0 0 0 11.3l45.3 45.3c3.1 3.1 8.2 3.1 11.3 0l134.2-134.2c6.2-6.2 6.2-16.4 0-22.1zM243.2 503.9l134.2-134.2c3.1-3.1 3.1-8.2 0-11.3l-45.3-45.3a8.03 8.03 0 0 0-11.3 0L186.6 447.3c-6.2 6.2-6.2 16.4 0 22.1l134.2 134.2c3.1 3.1 8.2 3.1 11.3 0l45.3-45.3c3.1-3.1 3.1-8.2 0-11.3L268.6 438.2l-25.4 65.7z"/>
+            </svg>
+            <span>Lihat JSON LNSW</span>
+        </div>
         <div class="dd-context-item" id="ctxItemViewPdf">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
                 <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
@@ -3008,28 +3093,34 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
     <!-- 2.1 DROPDOWN MENU AKSI TOMBOL KOLOM PALING KANAN -->
     <div id="rowActionMenu" class="row-action-menu">
-        <div class="row-action-item" onclick="triggerRowAction('excel')">
+        <div class="row-action-item" id="rowActionExcel" onclick="triggerRowAction('excel')">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
                 <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
                 <path d="M514.1 639.9l61.7-89c3.1-4.5 4.7-9.9 4.7-15.3 0-14.7-11.9-26.6-26.6-26.6h-34.9c-7.3 0-14.1 3.5-18.4 9.4l-40.3 58-40.3-58c-4.3-5.9-11.1-9.4-18.4-9.4h-34.9c-14.7 0-26.6 11.9-26.6 26.6 0 5.4 1.6 10.8 4.7 15.3l61.7 89-63.5 91.6c-3.1 4.5-4.7 9.9-4.7 15.3 0 14.7 11.9 26.6 26.6 26.6h35.5c7.3 0 14.1-3.5 18.4-9.4l42-60.5 42 60.5c4.3 5.9 11.1 9.4 18.4 9.4h35.5c14.7 0 26.6-11.9 26.6-26.6 0-5.4-1.6-10.8-4.7-15.3l-63.5-91.6z"/>
             </svg>
             <span>Unduh Excel</span>
         </div>
-        <div class="row-action-item" onclick="triggerRowAction('import_h2h')">
+        <div class="row-action-item" id="rowActionImportH2H" onclick="triggerRowAction('import_h2h')">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
                 <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
                 <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
             </svg>
             <span>Import ke H2H</span>
         </div>
-        <div class="row-action-item" onclick="triggerRowAction('cetak')">
+        <div class="row-action-item" id="rowActionCetak" onclick="triggerRowAction('cetak')">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
                 <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
                 <path d="M336 496h352v64H336zm0 144h352v64H336z"/>
             </svg>
             <span>Cetak Dokumen</span>
         </div>
-        <div class="row-action-item" onclick="triggerRowAction('status')">
+        <div class="row-action-item" id="rowActionViewJson" onclick="triggerRowAction('json')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#722ed1">
+                <path d="M780.8 520.1L646.6 385.9a8.03 8.03 0 0 0-11.3 0l-45.3 45.3a8.03 8.03 0 0 0 0 11.3L698.8 551l-108.8 108.8a8.03 8.03 0 0 0 0 11.3l45.3 45.3c3.1 3.1 8.2 3.1 11.3 0l134.2-134.2c6.2-6.2 6.2-16.4 0-22.1zM243.2 503.9l134.2-134.2c3.1-3.1 3.1-8.2 0-11.3l-45.3-45.3a8.03 8.03 0 0 0-11.3 0L186.6 447.3c-6.2 6.2-6.2 16.4 0 22.1l134.2 134.2c3.1 3.1 8.2 3.1 11.3 0l45.3-45.3c3.1-3.1 3.1-8.2 0-11.3L268.6 438.2l-25.4 65.7z"/>
+            </svg>
+            <span>Lihat JSON LNSW</span>
+        </div>
+        <div class="row-action-item" id="rowActionStatus" onclick="triggerRowAction('status')">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
                 <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
                 <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
@@ -3051,10 +3142,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="modal" style="max-width:620px; width:95%; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.25); overflow:hidden;">
             <div class="modal-header" style="background:var(--bg-filter); border-bottom:1px solid var(--border-card); padding:12px 18px; display:flex; justify-content:space-between; align-items:center;">
                 <div style="display:flex; align-items:center; gap:8px;">
-                    <span style="font-size:16px;">🛡️</span>
+                    <span style="font-size:16px;">📥</span>
                     <div>
                         <h3 id="batchModalTitle" style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Unduh Excel Massal CEISA 4.0</h3>
-                        <div id="batchModalSubtitle" style="font-size:10px; color:#52c41a; font-weight:600; margin-top:2px;">Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif</div>
+                        <div id="batchModalSubtitle" style="font-size:10px; color:#1890ff; font-weight:600; margin-top:2px;">Proses Sekuensial Otomatis</div>
                     </div>
                 </div>
                 <button type="button" class="ant-btn ant-btn-sm" onclick="cancelBatchDownload()">✕</button>
@@ -3096,6 +3187,41 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         </div>
     </div>
 
+    <!-- 4. MODAL: LIHAT JSON LNSW (report-parser/v1/lnsw/get-data-doc) -->
+    <div class="modal-overlay" id="modalJsonViewer" style="display:none;">
+        <div class="modal" style="max-width:860px; width:95%; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.25); overflow:hidden; display:flex; flex-direction:column; max-height:88vh;">
+            <div class="modal-header" style="background:var(--bg-filter); border-bottom:1px solid var(--border-card); padding:12px 18px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">🔍</span>
+                    <div>
+                        <h3 id="jsonModalTitle" style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Payload JSON LNSW CEISA 4.0 (report-parser)</h3>
+                        <div id="jsonModalSubtitle" style="font-size:10.5px; color:#1890ff; font-family:monospace; margin-top:2px;">idHeader: -</div>
+                    </div>
+                </div>
+                <button type="button" class="ant-btn ant-btn-sm" onclick="closeJsonModal()">✕</button>
+            </div>
+            <div class="modal-body" style="padding:14px 18px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); background:var(--bg-input); padding:6px 12px; border-radius:6px; border:1px solid var(--border-card);">
+                    <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;">Endpoint: <code id="jsonModalUrl" style="color:#722ed1; font-size:10px;">-</code></div>
+                    <div id="jsonModalStatusBadge"><span class="ant-tag ant-tag-blue">HTTP 200</span></div>
+                </div>
+                <div style="position:relative; flex:1; min-height:300px;">
+                    <pre id="jsonModalContent" style="margin:0; padding:12px; background:#1e1e1e; color:#d4d4d4; font-family:Consolas, 'Courier New', monospace; font-size:11px; line-height:1.5; border-radius:6px; height:100%; min-height:300px; max-height:55vh; overflow:auto; white-space:pre-wrap; word-break:break-all;"></pre>
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:10px 18px; border-top:1px solid var(--border-card); background:var(--bg-filter); display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:11px; color:var(--text-muted);">
+                    <span id="jsonModalSizeInfo">-</span>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnCopyJson" onclick="copyJsonToClipboard()">📋 Salin JSON</button>
+                    <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" id="btnOpenJsonTab" onclick="openJsonInNewTab()">↗️ Buka di Tab Baru</button>
+                    <button type="button" class="ant-btn ant-btn-sm" onclick="closeJsonModal()">Tutup</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let ajuData = [];
         let filteredData = [];
@@ -3127,6 +3253,50 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         if (initialCmp) {
             const cmpSelect = document.getElementById('filterCmp');
             if (cmpSelect) cmpSelect.value = initialCmp;
+        }
+
+        // Peta ID User CEISA per perusahaan untuk memblokir menu InitMFA jika belum diset
+        const companyIdUserMap = <?= json_encode(array_column($companies, 'id_user_ceisa', 'cmp_id')) ?>;
+
+        function hasIdUserCeisa(cmpId, aju) {
+            const cId = cmpId || document.getElementById('filterCmp')?.value || initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>';
+            if (cId && companyIdUserMap && typeof companyIdUserMap[cId] !== 'undefined') {
+                return !!(companyIdUserMap[cId] && companyIdUserMap[cId].trim());
+            }
+            if (aju && typeof ajuData !== 'undefined' && Array.isArray(ajuData)) {
+                const item = ajuData.find(d => d.nomor_aju === aju);
+                if (item && typeof item.id_user_ceisa !== 'undefined') {
+                    return !!(item.id_user_ceisa && item.id_user_ceisa.trim());
+                }
+            }
+            return false;
+        }
+
+        function checkIdUserCeisaOrAlert(cmpId, actionName, aju) {
+            if (!hasIdUserCeisa(cmpId, aju)) {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'warning',
+                        title: '<span style="font-size:15px; font-weight:700;">ID User CEISA Belum Diatur</span>',
+                        html: `
+                            <div style="text-align:left; font-size:12px; line-height:1.6;">
+                                Fitur <b>${escapeHtml(actionName || 'ini')}</b> memerlukan integrasi <b>InitMFA</b> dengan akun pabean CEISA 4.0.<br><br>
+                                Saat ini <b>ID User CEISA</b> pada profil perusahaan ini belum dikonfigurasi.<br><br>
+                                <div style="background:rgba(250,173,20,0.1); border-left:3px solid #faad14; padding:8px 12px; border-radius:4px; margin:8px 0; font-size:11.5px;">
+                                    📌 <b>Petunjuk Pengaturan:</b><br>
+                                    Buka menu <b>Kelola Perusahaan</b> &rarr; Tab <b>Akun CEISA &amp; TOTP MFA</b> &rarr; Isi kolom <b>ID User CEISA</b>.
+                                </div>
+                            </div>
+                        `,
+                        confirmButtonText: 'Mengerti',
+                        confirmButtonColor: '#1890ff'
+                    });
+                } else {
+                    alert(`Fitur ${actionName || 'ini'} memerlukan ID User CEISA. Silakan lengkapi terlebih dahulu di menu Kelola Perusahaan (Tab Akun CEISA & TOTP MFA).`);
+                }
+                return false;
+            }
+            return true;
         }
 
         function toggleFilterPanel() {
@@ -3245,6 +3415,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 if (now - lastSync < syncIntervalMs) {
                     return;
                 }
+            }
+
+            // Lewati jika ID User CEISA belum diset pada profil perusahaan
+            if (!hasIdUserCeisa(cmp)) {
+                if (isManual) {
+                    checkIdUserCeisaOrAlert(cmp, 'Sinkron CEISA');
+                }
+                return;
             }
 
             isCeisaSyncing = true;
@@ -3449,6 +3627,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             });
         }
 
+        function isDocPerekaman(r) {
+            if (!r) return false;
+            const np = (r.namaProses || '').toLowerCase();
+            const kp = String(r.kode_proses || r.kodeProses || '');
+            return np.includes('perekaman') || np.includes('draft') || kp === '001' || kp === '100';
+        }
+
         function filterClientTable() {
             const fBc = (document.getElementById('tblFilterBc')?.value || '').toLowerCase().trim();
             const fAju = (document.getElementById('tblFilterAju')?.value || '').toLowerCase().trim();
@@ -3480,11 +3665,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     if (m !== currentMonthFilter) return false;
                 }
 
+                const isPerekaman = isDocPerekaman(r);
+
                 if (fBc && !('bc ' + r.bc).toLowerCase().includes(fBc)) return false;
                 if (fAju && !r.nomor_aju.toLowerCase().includes(fAju)) return false;
-                if (fDaftar && !(r.nomor_daftar || '').toLowerCase().includes(fDaftar)) return false;
-                if (fRespon && !(r.bcd_namaRespon || (parseInt(r.posted) > 0 ? 'sppb' : '')).toLowerCase().includes(fRespon)) return false;
-                if (fJalur && !(r.bcd_kodeJalur || 'h').toLowerCase().includes(fJalur)) return false;
+                if (fDaftar) {
+                    if (isPerekaman) return false;
+                    if (!(r.nomor_daftar || '').toLowerCase().includes(fDaftar)) return false;
+                }
+                if (fRespon) {
+                    if (isPerekaman) return false;
+                    const rName = (r.bcd_namaRespon || (r.sppb_nomor_respon ? 'sppb' : '')).toLowerCase();
+                    if (!rName.includes(fRespon)) return false;
+                }
+                if (fJalur) {
+                    if (isPerekaman) return false;
+                    const jChar = (r.bcd_kodeJalur || '').toLowerCase();
+                    if (!jChar || !jChar.includes(fJalur)) return false;
+                }
                 if (fPerusahaan && !(r.cmp_name || r.bs || '').toLowerCase().includes(fPerusahaan)) return false;
                 if (fKantor && !(r.bcd_namaKantorPendek || r.kode_kantor || '').toLowerCase().includes(fKantor)) return false;
                 return true;
@@ -3502,13 +3700,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 } else if (currentSortCol === 'nomor_aju') {
                     valA = a.nomor_aju || ''; valB = b.nomor_aju || '';
                 } else if (currentSortCol === 'nomor_daftar') {
-                    valA = (a.nomor_daftar || '') + ' ' + (a.tanggal_daftar || '');
-                    valB = (b.nomor_daftar || '') + ' ' + (b.tanggal_daftar || '');
+                    valA = isDocPerekaman(a) ? '' : ((a.nomor_daftar || '') + ' ' + (a.tanggal_daftar || ''));
+                    valB = isDocPerekaman(b) ? '' : ((b.nomor_daftar || '') + ' ' + (b.tanggal_daftar || ''));
                 } else if (currentSortCol === 'nama_respon') {
-                    valA = a.bcd_namaRespon || (parseInt(a.posted) > 0 ? 'SPPB' : '') || '';
-                    valB = b.bcd_namaRespon || (parseInt(b.posted) > 0 ? 'SPPB' : '') || '';
+                    valA = isDocPerekaman(a) ? '' : (a.bcd_namaRespon || (a.sppb_nomor_respon ? 'SPPB' : '') || '');
+                    valB = isDocPerekaman(b) ? '' : (b.bcd_namaRespon || (b.sppb_nomor_respon ? 'SPPB' : '') || '');
                 } else if (currentSortCol === 'jalur') {
-                    valA = a.bcd_kodeJalur || 'H'; valB = b.bcd_kodeJalur || 'H';
+                    valA = isDocPerekaman(a) ? '' : (a.bcd_kodeJalur || '');
+                    valB = isDocPerekaman(b) ? '' : (b.bcd_kodeJalur || '');
                 } else if (currentSortCol === 'perusahaan') {
                     valA = a.cmp_name || a.bs || ''; valB = b.cmp_name || b.bs || '';
                 } else if (currentSortCol === 'kantor') {
@@ -3627,12 +3826,18 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     tagText = `Terkirim (${(r.posted_waktu || '').substring(0, 10)})`;
                 }
 
-                // Jalur (H / M / K)
-                let jalurChar = (r.bcd_kodeJalur || '').toUpperCase();
-                if (!jalurChar) jalurChar = 'H';
-                let jalurTag = 'ant-tag-green';
-                if (jalurChar === 'M') jalurTag = 'ant-tag-red';
-                if (jalurChar === 'K') jalurTag = 'ant-tag-gold';
+                // Cek apakah masih dalam tahap perekaman dokumen / draft
+                const isPerekaman = isDocPerekaman(r) || tagText.toLowerCase().includes('perekaman') || tagText.toLowerCase().includes('draft');
+
+                // Jalur (H / M / K) - Kosongkan jika masih Perekaman Dokumen atau belum ada jalur
+                let jalurHtml = '<span style="color:#bfbfbf;">-</span>';
+                if (!isPerekaman && r.bcd_kodeJalur) {
+                    const jalurChar = r.bcd_kodeJalur.toUpperCase();
+                    let jalurTag = 'ant-tag-green';
+                    if (jalurChar === 'M') jalurTag = 'ant-tag-red';
+                    else if (jalurChar === 'K') jalurTag = 'ant-tag-gold';
+                    jalurHtml = `<span class="ant-tag ${jalurTag}">${escapeHtml(jalurChar)}</span>`;
+                }
 
                 // Nama Perusahaan & NPWP
                 const companyName = r.cmp_name || r.bs || '-';
@@ -3641,17 +3846,37 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 // Kantor Pabean
                 const kantorName = r.bcd_namaKantorPendek || (r.kode_kantor ? 'KPPBC ' + r.kode_kantor : 'KPPBC TMP A BEKASI');
 
-                // Respon
-                const namaRespon = r.bcd_namaRespon || (r.sppb_nomor_respon ? 'SPPB' : (isPosted ? 'SPPB' : '-'));
-                const noRespon = r.bcd_nomorRespon || r.sppb_nomor_respon || r.sppb || '';
-
-                let responBadgeExtra = '';
-                if (r.bcd_namaRespon && !r.bcd_namaRespon.toUpperCase().includes('SPPB') && r.sppb_nomor_respon) {
-                    responBadgeExtra = ` <span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 3px; margin-left:2px;" title="Telah Terbit SPPB: ${escapeHtml(r.sppb_nomor_respon)}">✓ SPPB</span>`;
+                // Nomor & Tanggal Pendaftaran - Kosongkan jika masih Perekaman Dokumen
+                let nomorDaftarHtml = '<span style="color:#bfbfbf;">-</span>';
+                let tanggalDaftarHtml = '';
+                if (!isPerekaman && r.nomor_daftar && r.nomor_daftar !== '-') {
+                    nomorDaftarHtml = escapeHtml(r.nomor_daftar);
+                    if (r.tanggal_daftar) {
+                        tanggalDaftarHtml = `<p style="margin:0; font-size:11px; color:#8c8c8c;">${escapeHtml(r.tanggal_daftar)}</p>`;
+                    }
                 }
 
-                // PDF Respon (SPPB / NPE / Respon Resmi)
-                const pdfFile = r.pdf || r.sppb_pdf || '';
+                // Respon - Kosongkan jika masih Perekaman Dokumen
+                let namaRespon = '-';
+                let noRespon = '';
+                let responBadgeExtra = '';
+
+                if (!isPerekaman) {
+                    namaRespon = r.bcd_namaRespon || (r.sppb_nomor_respon ? 'SPPB' : '-');
+                    noRespon = r.bcd_nomorRespon || r.sppb_nomor_respon || '';
+                    if (r.bcd_namaRespon && !r.bcd_namaRespon.toUpperCase().includes('SPPB') && r.sppb_nomor_respon) {
+                        responBadgeExtra = ` <span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 3px; margin-left:2px;" title="Telah Terbit SPPB: ${escapeHtml(r.sppb_nomor_respon)}">✓ SPPB</span>`;
+                    }
+                }
+
+                // Tanggal Respon - Kosongkan jika masih Perekaman Dokumen atau belum ada respon
+                let tanggalResponDisplay = '-';
+                if (!isPerekaman && namaRespon !== '-') {
+                    tanggalResponDisplay = r.bcd_tanggalRespon || r.sppb_tanggal_respon || (r.effective_tanggal_respon !== r.posted_waktu ? r.effective_tanggal_respon : '-') || '-';
+                }
+
+                // PDF Respon (SPPB / NPE / Respon Resmi) - Kosongkan jika masih Perekaman Dokumen
+                const pdfFile = isPerekaman ? '' : (r.pdf || r.sppb_pdf || '');
                 let pdfHtml = '<span style="color:#d9d9d9;">-</span>';
                 if (pdfFile) {
                     const pdfUrl = `/pdf.php?aju=${encodeURIComponent(r.nomor_aju)}&pdf=${encodeURIComponent(pdfFile)}&cmp_id=${encodeURIComponent(r.cmp_id || '')}&view=1`;
@@ -3666,7 +3891,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
 
                 // Excel Resmi CEISA 4.0
-                const excelUrl = `/download_ceisa_excel.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}&cmp_id=${encodeURIComponent(r.cmp_id || '')}`;
+                const excelUrl = `/download_ceisa_excel.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}&cmp_id=${encodeURIComponent(r.cmp_id || '')}&kode_dokumen=${encodeURIComponent(r.bc || r.kode_dokumen || '')}`;
                 const excelHtml = `
                     <a href="${excelUrl}" target="_blank" class="excel-btn-badge" title="Unduh Berkas Excel (.xlsx) Resmi dari Portal CEISA 4.0 (${escapeHtml(r.nomor_aju)})">
                         <svg viewBox="64 64 896 896" width="12" height="12" fill="#52c41a" style="vertical-align:-1px;">
@@ -3705,8 +3930,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <p style="margin:4px 0px;"><span class="ant-tag ${tagClass}">${escapeHtml(tagText)}</span></p>
                         </td>
                         <td>
-                            <div>${r.nomor_daftar || '<span style="color:#bfbfbf;">-</span>'}</div>
-                            <p style="margin:0; font-size:11px; color:#8c8c8c;">${r.tanggal_daftar || ''}</p>
+                            <div>${nomorDaftarHtml}</div>
+                            ${tanggalDaftarHtml}
                         </td>
                         <td>
                             <div>${escapeHtml(namaRespon)}${responBadgeExtra}</div>
@@ -3715,9 +3940,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <td style="text-align:center; white-space:nowrap;">
                             ${pdfHtml}
                         </td>
-                        <td style="font-size:10.5px; color:#595959;">${r.effective_tanggal_respon || r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '-'}</td>
+                        <td style="font-size:10.5px; color:#595959;">${tanggalResponDisplay}</td>
                         <td style="text-align:center;">
-                            <span class="ant-tag ${jalurTag}">${jalurChar}</span>
+                            ${jalurHtml}
                         </td>
                         <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">
                             <div style="display:flex; font-size:10px; color:#8c8c8c; font-family:monospace;">${escapeHtml(companyId)}</div>
@@ -3821,9 +4046,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         let isModeSelectActive = false;
         let batchDownloadCancelled = false;
         let batchDownloadPaused = false;
-        let activeContextMenuAju = null;
-        let activeContextMenuCmp = null;
-        let activeContextMenuPdf = null;
         let batchSuccessfulAjus = [];
 
         function toggleModeSelect(forceState) {
@@ -3939,6 +4161,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         function downloadSingleCeisaExcel(nomorAju, cmpId) {
             if (!nomorAju) return;
             const activeCmp = cmpId || document.getElementById('filterCmp')?.value || '';
+            if (!checkIdUserCeisaOrAlert(activeCmp, 'Unduh Excel', nomorAju)) return;
             const url = `download_ceisa_excel.php?nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmp)}`;
             window.open(url, '_blank');
         }
@@ -3986,9 +4209,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (itemDel) itemDel.style.display = isPerekaman ? 'flex' : 'none';
             if (divDel) divDel.style.display = isPerekaman ? 'block' : 'none';
 
+            // Tampilkan seluruh menu klik kanan, beri status is-disabled jika ID User CEISA belum diset
+            const idUserAvailable = hasIdUserCeisa(activeContextMenuCmp, activeContextMenuAju);
+
+            ['ctxItemDownloadExcel', 'ctxItemImportH2H', 'ctxItemCetakDokumen', 'ctxItemViewJson', 'ctxItemTracking', 'ctxItemDeleteDoc'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    if (idUserAvailable) {
+                        el.classList.remove('is-disabled');
+                        el.title = '';
+                    } else {
+                        el.classList.add('is-disabled');
+                        el.title = 'Fitur ini memerlukan ID User CEISA aktif di Kelola Perusahaan';
+                    }
+                }
+            });
+
             // Atur posisi menu agar tidak keluar layar
+            const menuHeight = isPerekaman ? 275 : 235;
             const x = Math.min(e.clientX, window.innerWidth - 210);
-            const y = Math.min(e.clientY, window.innerHeight - (isPerekaman ? 245 : 205));
+            const y = Math.min(e.clientY, window.innerHeight - menuHeight);
 
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
@@ -4007,7 +4247,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
-                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(activeContextMenuAju)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}`;
+                if (!checkIdUserCeisaOrAlert(activeContextMenuCmp, 'Unduh Excel', activeContextMenuAju)) return;
+                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(activeContextMenuAju)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}&kode_dokumen=${encodeURIComponent(activeContextMenuKodeDok || '')}`;
                 window.open(url, '_blank');
             }
         });
@@ -4016,6 +4257,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
+                if (!checkIdUserCeisaOrAlert(activeContextMenuCmp, 'Import ke H2H', activeContextMenuAju)) return;
                 executeImportToH2H(activeContextMenuAju, activeContextMenuCmp);
             }
         });
@@ -4024,8 +4266,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
+                if (!checkIdUserCeisaOrAlert(activeContextMenuCmp, 'Cetak Dokumen', activeContextMenuAju)) return;
                 const url = `daftar_dokumen.php?action=cetak_formulir&nomor_aju=${encodeURIComponent(activeContextMenuAju)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}`;
                 window.open(url, '_blank');
+            }
+        });
+
+        document.getElementById('ctxItemViewJson')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                openJsonViewer(activeContextMenuAju, activeContextMenuCmp, activeContextMenuIdHeader);
             }
         });
 
@@ -4042,6 +4293,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
+                if (!checkIdUserCeisaOrAlert(activeContextMenuCmp, 'Riwayat Status Tracking', activeContextMenuAju)) return;
                 openTrackingHistory(activeContextMenuAju, activeContextMenuCmp);
             }
         });
@@ -4050,6 +4302,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
+                if (!checkIdUserCeisaOrAlert(activeContextMenuCmp, 'Hapus Dokumen', activeContextMenuAju)) return;
                 executeDeleteDocument(activeContextMenuAju, activeContextMenuCmp, activeContextMenuIdHeader, activeContextMenuKodeDok, activeContextMenuKodeProses);
             }
         });
@@ -4120,16 +4373,28 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                 (activeActionNamaProses && activeActionNamaProses.toLowerCase().includes('rekam')) ||
                                 ((!activeActionKodeProses || activeActionKodeProses === '001') && (!activeActionNomorDaftar || activeActionNomorDaftar === '-'));
 
-            if (delBtn) {
-                delBtn.style.display = isPerekaman ? 'flex' : 'none';
-            }
-            if (delDiv) {
-                delDiv.style.display = isPerekaman ? 'block' : 'none';
-            }
+            // Tampilkan seluruh aksi, beri status is-disabled jika ID User CEISA belum diset
+            const idUserAvailable = hasIdUserCeisa(activeActionCmp, activeActionAju);
+
+            if (delBtn) delBtn.style.display = isPerekaman ? 'flex' : 'none';
+            if (delDiv) delDiv.style.display = isPerekaman ? 'block' : 'none';
+
+            ['rowActionExcel', 'rowActionImportH2H', 'rowActionCetak', 'rowActionViewJson', 'rowActionStatus', 'rowActionDelete'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    if (idUserAvailable) {
+                        el.classList.remove('is-disabled');
+                        el.title = '';
+                    } else {
+                        el.classList.add('is-disabled');
+                        el.title = 'Fitur ini memerlukan ID User CEISA aktif di Kelola Perusahaan';
+                    }
+                }
+            });
 
             const rect = activeActionTriggerBtn ? activeActionTriggerBtn.getBoundingClientRect() : { right: window.innerWidth - 100, bottom: 200, left: 100, top: 100 };
             const menuWidth = 165;
-            const menuHeight = isPerekaman ? 195 : 155;
+            const menuHeight = isPerekaman ? 225 : 185;
 
             let left = rect.right - menuWidth;
             if (left < 10) left = Math.max(10, rect.left);
@@ -4175,18 +4440,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (!aju) return;
 
             if (type === 'excel') {
+                if (!checkIdUserCeisaOrAlert(cmp, 'Unduh Excel', aju)) return;
                 // Unduh Excel Resmi CEISA 4.0 via backend action
-                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
+                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}&kode_dokumen=${encodeURIComponent(kodeDok || '')}`;
                 window.open(url, '_blank');
             } else if (type === 'import_h2h') {
+                if (!checkIdUserCeisaOrAlert(cmp, 'Import ke H2H', aju)) return;
                 await executeImportToH2H(aju, cmp);
             } else if (type === 'cetak') {
+                if (!checkIdUserCeisaOrAlert(cmp, 'Cetak Dokumen', aju)) return;
                 // Cetak Dokumen via report-service formulir resmi CEISA 4.0
                 const url = `daftar_dokumen.php?action=cetak_formulir&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
                 window.open(url, '_blank');
+            } else if (type === 'json') {
+                openJsonViewer(aju, cmp, idHeader);
             } else if (type === 'status') {
+                if (!checkIdUserCeisaOrAlert(cmp, 'Riwayat Status Tracking', aju)) return;
                 openTrackingHistory(aju, cmp);
             } else if (type === 'hapus') {
+                if (!checkIdUserCeisaOrAlert(cmp, 'Hapus Dokumen', aju)) return;
                 await executeDeleteDocument(aju, cmp, idHeader, kodeDok, kodeProses);
             }
         }
@@ -4195,6 +4467,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (!aju) return;
 
             const activeCmp = cmp || document.getElementById('filterCmp')?.value || '';
+            if (!checkIdUserCeisaOrAlert(activeCmp, 'Hapus Dokumen', aju)) return;
 
             if (typeof Swal !== 'undefined') {
                 const res = await Swal.fire({
@@ -4282,6 +4555,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
         async function executeImportToH2H(aju, cmp) {
             const activeCmp = cmp || document.getElementById('filterCmp')?.value || '';
+            if (!checkIdUserCeisaOrAlert(activeCmp, 'Import ke H2H', aju)) return;
 
             let confirmed = true;
             if (typeof Swal !== 'undefined') {
@@ -4346,6 +4620,97 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         // =========================================================================
+        // ENGINE VIEWER JSON LNSW (report-parser/v1/lnsw/get-data-doc)
+        // =========================================================================
+        let activeJsonAju = '';
+        let activeJsonIdHeader = '';
+        let activeJsonCmp = '';
+        let activeJsonRawText = '';
+
+        function openJsonViewer(nomorAju, cmpId, idHeader) {
+            const aju = nomorAju || activeActionAju || activeContextMenuAju;
+            const cmp = cmpId || activeActionCmp || activeContextMenuCmp || document.getElementById('filterCmp')?.value || '';
+            const idH = idHeader || activeActionIdHeader || activeContextMenuIdHeader;
+
+            if (!checkIdUserCeisaOrAlert(cmp, 'Lihat JSON LNSW', aju)) return;
+
+            activeJsonAju = aju;
+            activeJsonCmp = cmp;
+            activeJsonIdHeader = idH || '';
+            activeJsonRawText = '';
+
+            const modal = document.getElementById('modalJsonViewer');
+            const pre = document.getElementById('jsonModalContent');
+            const sub = document.getElementById('jsonModalSubtitle');
+            const urlEl = document.getElementById('jsonModalUrl');
+            const badge = document.getElementById('jsonModalStatusBadge');
+            const sizeInfo = document.getElementById('jsonModalSizeInfo');
+
+            if (modal) modal.style.display = 'flex';
+            if (sub) sub.innerText = `No. AJU: ${aju || '-'} | idHeader: ${idH || 'mencari di DB...'}`;
+            if (urlEl) urlEl.innerText = `https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=${idH || '...'}`;
+            if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-orange">Mengambil data...</span>`;
+            if (sizeInfo) sizeInfo.innerText = 'Menghubungi API CEISA 4.0...';
+            if (pre) pre.textContent = '// Menghubungi gateway Bea Cukai https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header...\n// Mohon tunggu...';
+
+            fetch(`daftar_dokumen.php?action=view_json_lnsw&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp)}&id_header=${encodeURIComponent(idH || '')}`)
+                .then(r => r.json())
+                .then(res => {
+                    if (res.status === 'OK') {
+                        activeJsonIdHeader = res.id_header || activeJsonIdHeader;
+                        activeJsonRawText = res.raw_json || JSON.stringify(res.data, null, 2);
+                        if (sub) sub.innerText = `No. AJU: ${aju} | idHeader: ${activeJsonIdHeader}`;
+                        if (urlEl) urlEl.innerText = res.url || `https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=${activeJsonIdHeader}`;
+                        if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-green">HTTP ${res.http_code || 200} OK</span>`;
+                        if (sizeInfo) sizeInfo.innerText = `Ukuran: ${(new Blob([activeJsonRawText]).size / 1024).toFixed(2)} KB`;
+                        if (pre) pre.textContent = activeJsonRawText;
+                    } else {
+                        activeJsonRawText = JSON.stringify(res, null, 2);
+                        if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-red">HTTP ${res.http_code || 400} ERROR</span>`;
+                        if (sizeInfo) sizeInfo.innerText = res.message || 'Gagal memuat JSON';
+                        if (pre) pre.textContent = activeJsonRawText;
+                    }
+                })
+                .catch(err => {
+                    activeJsonRawText = `// Error: ${err.message}`;
+                    if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-red">GAGAL KONEKSI</span>`;
+                    if (sizeInfo) sizeInfo.innerText = err.message;
+                    if (pre) pre.textContent = activeJsonRawText;
+                });
+        }
+
+        function closeJsonModal() {
+            const modal = document.getElementById('modalJsonViewer');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function copyJsonToClipboard() {
+            if (!activeJsonRawText) return;
+            navigator.clipboard.writeText(activeJsonRawText).then(() => {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        toast: true,
+                        position: 'top-end',
+                        icon: 'success',
+                        title: 'JSON disalin ke clipboard!',
+                        showConfirmButton: false,
+                        timer: 2000
+                    });
+                } else {
+                    alert('JSON berhasil disalin ke clipboard!');
+                }
+            }).catch(err => {
+                alert('Gagal menyalin: ' + err.message);
+            });
+        }
+
+        function openJsonInNewTab() {
+            if (!activeJsonAju && !activeJsonIdHeader) return;
+            const url = `daftar_dokumen.php?action=view_json_lnsw&raw=1&nomor_aju=${encodeURIComponent(activeJsonAju)}&cmp_id=${encodeURIComponent(activeJsonCmp)}&id_header=${encodeURIComponent(activeJsonIdHeader)}`;
+            window.open(url, '_blank');
+        }
+
+        // =========================================================================
         // ENGINE BATCH DOWNLOAD DENGAN PROTEKSI WAF & JEDA ACAK
         // =========================================================================
         async function startBatchDownloadExcel() {
@@ -4362,23 +4727,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const ajus = Array.from(selectedAju);
             const total = ajus.length;
 
+            const activeCmp = document.getElementById('filterCmp')?.value || initialCmp || '';
+            if (!checkIdUserCeisaOrAlert(activeCmp, 'Unduh Excel Massal', ajus[0])) return;
+
             const confirmRes = await Swal.fire({
                 icon: 'question',
                 title: '<span style="font-size:15px; font-weight:700;">Unduh Excel Massal CEISA 4.0</span>',
                 html: `
                     <div style="text-align:left; font-size:11.5px; line-height:1.5;">
                         <p>Anda akan mengunduh <b>${total} berkas Excel resmi</b> langsung dari server portal CEISA 4.0.</p>
-                        <div style="background:rgba(82,196,26,0.1); border-left:3px solid #52c41a; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
-                            🛡️ <b>Proteksi Keamanan WAF Bea Cukai Aktif:</b><br>
-                            Sistem akan mengunduh secara berurutan (*sequential*) dengan <b>jeda acak (2.5 – 5.0 detik)</b> antar dokumen untuk menjaga kredibilitas sesi browser dan menghindarkan alamat IP dari deteksi bot atau pemblokiran firewall Bea Cukai.
+                        <div style="background:rgba(24,144,255,0.08); border-left:3px solid #1890ff; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
+                            ℹ️ <b>Proses Berurutan Otomatis:</b><br>
+                            Sistem akan mengunduh berkas secara berurutan satu per satu dengan jeda aman antar dokumen untuk menjaga kestabilan koneksi dan kelancaran unduhan.
                         </div>
-                        <p style="margin:0;">Mulai proses pengunduhan aman sekarang?</p>
+                        <p style="margin:0;">Mulai proses pengunduhan sekarang?</p>
                     </div>
                 `,
                 showCancelButton: true,
-                confirmButtonText: '🚀 Mulai Unduh Aman',
+                confirmButtonText: '🚀 Mulai Unduh',
                 cancelButtonText: 'Batal',
-                confirmButtonColor: '#52c41a',
+                confirmButtonColor: '#1890ff',
                 cancelButtonColor: '#8c8c8c',
                 reverseButtons: true
             });
@@ -4396,7 +4764,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const mTitle = document.getElementById('batchModalTitle');
             if (mTitle) mTitle.innerHTML = '📥 Unduh Excel Massal CEISA 4.0';
             const mSubtitle = document.getElementById('batchModalSubtitle');
-            if (mSubtitle) mSubtitle.innerHTML = 'Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif (Jeda Acak 2.5s - 5.0s)';
+            if (mSubtitle) mSubtitle.innerHTML = 'Proses Sekuensial Otomatis (Jeda Aman Antar Dokumen)';
 
             document.getElementById('batchModalProgressBar').style.width = '0%';
             document.getElementById('batchModalPercent').innerText = '0%';
@@ -4483,7 +4851,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 document.getElementById('batchModalProgressBar').style.width = '100%';
                 document.getElementById('batchModalPercent').innerText = '100%';
                 document.getElementById('batchModalStatusText').innerHTML = `<span style="color:#52c41a; font-weight:700;">✓ Pengunduhan selesai! (${successCount} sukses, ${failedCount} gagal)</span>`;
-                document.getElementById('batchModalSafetyTimer').innerText = `Semua berkas selesai diproses dengan aman tanpa kendala firewall.`;
+                document.getElementById('batchModalSafetyTimer').innerText = `Semua berkas telah selesai diunduh.`;
 
                 if (batchSuccessfulAjus.length > 1) {
                     const btnZip = document.getElementById('btnBatchDownloadZip');
@@ -4511,7 +4879,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
                 const remaining = Math.max(0, ((endTime - Date.now()) / 1000).toFixed(1));
                 if (timerEl) {
-                    timerEl.innerHTML = `🛡️ <b>Proteksi WAF Bea Cukai:</b> Menunggu jeda acak <b>${remaining} detik</b> untuk dokumen berikutnya...`;
+                    timerEl.innerHTML = `⏳ Mempersiapkan dokumen berikutnya dalam <b>${remaining} detik</b>...`;
                 }
                 await new Promise(r => setTimeout(r, 100));
             }
@@ -4580,6 +4948,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const ajus = Array.from(selectedAju);
             const total = ajus.length;
 
+            const activeCmp = document.getElementById('filterCmp')?.value || initialCmp || '';
+            if (!checkIdUserCeisaOrAlert(activeCmp, 'Import Massal ke H2H', ajus[0])) return;
+
             const confirmRes = await Swal.fire({
                 icon: 'question',
                 title: '<span style="font-size:15px; font-weight:700;">Import Massal ke Host to Host</span>',
@@ -4587,14 +4958,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <div style="text-align:left; font-size:11.5px; line-height:1.5;">
                         <p>Anda akan mengimpor <b>${total} dokumen CEISA 4.0</b> ke tabel Staging Host to Host beserta rincian kontainer, kemasan, dokumen, dan barang.</p>
                         <div style="background:rgba(24,144,255,0.08); border-left:3px solid #1890ff; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
-                            🛡️ <b>Proteksi Anti-Blokir WAF Bea Cukai Aktif:</b><br>
-                            Sistem akan memproses secara sekuensial (berurutan satu per satu) dengan <b>jeda aman (2.0 – 4.0 detik)</b> antar dokumen untuk menjaga kestabilan gateway CEISA dan menghindarkan alamat IP dari pemblokiran firewall.
+                            ℹ️ <b>Proses Berurutan Otomatis:</b><br>
+                            Sistem akan memproses dokumen secara sekuensial satu per satu dengan jeda aman antar dokumen untuk menjaga kelancaran dan kestabilan data.
                         </div>
                         <p style="margin:0;">Mulai proses impor massal sekarang?</p>
                     </div>
                 `,
                 showCancelButton: true,
-                confirmButtonText: '⚡ Mulai Import Aman',
+                confirmButtonText: '⚡ Mulai Import',
                 cancelButtonText: 'Batal',
                 confirmButtonColor: '#1890ff',
                 cancelButtonColor: '#8c8c8c',
@@ -4614,7 +4985,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const mTitle = document.getElementById('batchModalTitle');
             if (mTitle) mTitle.innerHTML = '⚡ Import Massal ke Data H2H (CEISA 4.0)';
             const mSubtitle = document.getElementById('batchModalSubtitle');
-            if (mSubtitle) mSubtitle.innerHTML = 'Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif (Jeda Aman 2.0s - 4.0s)';
+            if (mSubtitle) mSubtitle.innerHTML = 'Proses Sekuensial Otomatis (Jeda Aman Antar Dokumen)';
 
             document.getElementById('batchModalProgressBar').style.width = '0%';
             document.getElementById('batchModalPercent').innerText = '0%';
