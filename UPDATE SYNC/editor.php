@@ -12498,6 +12498,76 @@ $isEditMode = !empty($selectedAjuParam);
             return errors;
         }
 
+        function getAllMandatoryErrors(bc) {
+            const allErrors = [];
+            const cleanBc = String(bc || getActiveDocBc()).replace(/[^0-9]/g, '') || '40';
+
+            // 1. Validasi Sheet Header
+            const hdrData = {};
+            headerFields.forEach(f => {
+                const el = document.getElementById('hdr_' + f);
+                if (el) {
+                    let v = el.value !== undefined ? el.value.trim() : '';
+                    if (headerNumberDecimals[f] !== undefined && v !== '') {
+                        v = stripNumberCommas(v);
+                    }
+                    hdrData[f] = v;
+                } else if (currentData && currentData.header && currentData.header[f] !== undefined) {
+                    hdrData[f] = currentData.header[f];
+                }
+            });
+            const hdrErrors = getMandatoryErrors('header', hdrData, cleanBc);
+            allErrors.push(...hdrErrors);
+
+            // Helper untuk mengambil data tab (jika DOM tabel ada barisnya pakai DOM, jika tidak pakai currentData)
+            const getTabData = (tabKey) => {
+                const tbody = document.querySelector(`#table-${tabKey} tbody`);
+                if (tbody) {
+                    const trs = tbody.querySelectorAll('tr:not(.tr-empty)');
+                    if (trs.length > 0) {
+                        const rows = [];
+                        trs.forEach(tr => {
+                            const rowObj = {};
+                            tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                                if (el.dataset.col) {
+                                    let v = el.value !== undefined ? el.value.trim() : '';
+                                    if (el.classList.contains('cell-number') || el.type === 'number') {
+                                        v = stripNumberCommas(v);
+                                    }
+                                    rowObj[el.dataset.col] = v;
+                                }
+                            });
+                            rows.push(rowObj);
+                        });
+                        return rows;
+                    }
+                }
+                return (currentData && Array.isArray(currentData[tabKey])) ? currentData[tabKey] : [];
+            };
+
+            // 2. Validasi Sheet Barang
+            const barangRows = getTabData('barang');
+            allErrors.push(...getMandatoryErrors('barang', barangRows, cleanBc));
+
+            // 3. Validasi Sheet Entitas
+            const entitasRows = getTabData('entitas');
+            allErrors.push(...getMandatoryErrors('entitas', entitasRows, cleanBc));
+
+            // 4. Validasi Sheet Dokumen
+            const dokumenRows = getTabData('dokumen');
+            allErrors.push(...getMandatoryErrors('dokumen', dokumenRows, cleanBc));
+
+            // 5. Validasi Sheet Kemasan
+            const kemasanRows = getTabData('kemasan');
+            allErrors.push(...getMandatoryErrors('kemasan', kemasanRows, cleanBc));
+
+            // 6. Validasi Sheet Pengangkut
+            const pengangkutRows = getTabData('pengangkut');
+            allErrors.push(...getMandatoryErrors('pengangkut', pengangkutRows, cleanBc));
+
+            return allErrors;
+        }
+
         async function promptMandatoryWarning(scopeName, errors, bc) {
             const htmlRows = errors.map((err, idx) => `
                 <tr style="border-bottom:1px solid rgba(255,255,255,0.08); ${idx % 2 === 1 ? 'background:rgba(255,255,255,0.02);' : ''}">
@@ -12516,7 +12586,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <div style="text-align:left; font-size:11px; margin-top:2px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
                             <span style="font-weight:600; color:var(--text-main); font-size:11px;">
-                                Ditemukan <b style="color:#ef4444; font-size:11.5px;">${errors.length} data mandatory</b> belum lengkap:
+                                Ditemukan <b style="color:#ef4444; font-size:11.5px;">${errors.length} data mandatory</b> belum lengkap di seluruh dokumen:
                             </span>
                             <span class="badge" style="background:#2563eb; color:#fff; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:3px;">Dokumen BC ${bc}</span>
                         </div>
@@ -12576,12 +12646,12 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             });
 
-            // Validasi Elemen Mandatory Header
+            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
             if (!force) {
                 const bc = getActiveDocBc();
-                const errors = getMandatoryErrors('header', data, bc);
+                const errors = getAllMandatoryErrors(bc);
                 if (errors.length > 0) {
-                    const proceed = await promptMandatoryWarning('Header', errors, bc);
+                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
                     if (!proceed) return;
                 }
             }
@@ -12651,12 +12721,12 @@ $isEditMode = !empty($selectedAjuParam);
                 currentData.barang = rows;
             }
 
-            // Validasi Elemen Mandatory Tabel
+            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
             if (!force) {
                 const bc = getActiveDocBc();
-                const errors = getMandatoryErrors(tableKey, rows, bc);
+                const errors = getAllMandatoryErrors(bc);
                 if (errors.length > 0) {
-                    const proceed = await promptMandatoryWarning(getTabTitle(tableKey), errors, bc);
+                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
                     if (!proceed) return;
                 }
             }
