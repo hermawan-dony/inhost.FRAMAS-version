@@ -46,3 +46,4 @@ uploads/logos/*
 
 # Shared and external directories
 share/
+bin/

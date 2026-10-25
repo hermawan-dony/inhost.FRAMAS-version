@@ -21,8 +21,8 @@ $VpsUser     = "root"
 $VpsPass     = "K@y010782"
 $VpsPath     = "/var/www/inhost"
 $VpsHostKey  = "SHA256:uCOFAdVGHhaGAWzAEPhrz/ZEmNRxEamt8/89vpVENis"
-$PscpExe     = "C:\Program Files\PuTTY\pscp.exe"
-$PlinkExe    = "C:\Program Files\PuTTY\plink.exe"
+$PscpExe     = if (Test-Path "C:\Program Files\PuTTY\pscp.exe") { "C:\Program Files\PuTTY\pscp.exe" } else { Join-Path $RootDir "bin\pscp.exe" }
+$PlinkExe    = if (Test-Path "C:\Program Files\PuTTY\plink.exe") { "C:\Program Files\PuTTY\plink.exe" } else { Join-Path $RootDir "bin\plink.exe" }
 
 # 2. Konfigurasi cPanel Hosting (inhost.id)
 $FtpHost     = "inhost.id"
