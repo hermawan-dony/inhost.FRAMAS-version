@@ -1519,28 +1519,17 @@ if ($initialTab === 'editor') {
             text-transform: uppercase;
         }
         .sidebar-company-sub {
-            font-size: 8.5px;
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-            font-weight: 700;
-            color: #1890ff;
-            background: rgba(24, 144, 255, 0.08);
-            padding: 1px 5px;
-            border-radius: 3px;
-            line-height: 1.2;
-        }
-        body[data-theme="dark"] .sidebar-company-sub {
-            color: #40a9ff;
-            background: rgba(24, 144, 255, 0.16);
+            display: none !important;
         }
         .sidebar-company-name {
-            font-size: 13.5px;
+            font-size: 14px;
             font-weight: 800;
             color: var(--card-title-color, var(--text-main, #141414));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            line-height: 1.3;
-            letter-spacing: 0.2px;
+            line-height: 1.25;
+            letter-spacing: 0.3px;
         }
         body[data-theme="dark"] .sidebar-company-name {
             color: var(--card-title-color, #f0f0f0);
@@ -3269,7 +3258,7 @@ if ($initialTab === 'editor') {
                     <div class="sidebar-company-meta">
                         <span class="sidebar-company-status-dot" title="Sesi Perusahaan Aktif"></span>
                         <span class="sidebar-company-tag">PERUSAHAAN AKTIF</span>
-                        <span class="sidebar-company-sub" id="sidebarCompanySub">[<?= htmlspecialchars($sessionCmpId) ?>]</span>
+                        <span id="sidebarCompanySub" style="display:none;" aria-hidden="true"></span>
                     </div>
                     <div class="sidebar-company-name" id="sidebarCompanyName" title="<?= htmlspecialchars($sessionCmpName) ?>">
                         <?= htmlspecialchars($sessionCmpName) ?>
