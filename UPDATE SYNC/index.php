@@ -902,7 +902,7 @@ if ($userRole === 'bc') {
     }
 } elseif ($isManifestOnlyCompany) {
     // Jika hanya role manifest, tab pabean standar atau inventory diarahkan ke manifest_ceisa
-    if (in_array($initialTab, ['daftar_dokumen', 'transfer', 'editor', 'import', 'load_erp_odoo', 'dokap', 'tracking']) || strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0) {
+    if (in_array($initialTab, ['daftar_dokumen', 'transfer', 'editor', 'import', 'load_erp_odoo', 'dokap', 'tracking', 'winline_sales_invoice', 'winline_dn_transfer', 'winline_purchase_order']) || strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0 || strpos($initialTab, 'winline_') === 0) {
         $initialTab = 'manifest_ceisa';
     }
 } elseif (!$isInventoryModuleAllowed && (strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0)) {
@@ -933,6 +933,9 @@ $breadcrumbTitlesPhp = [
     'bc11_monitoring' => 'BC 1.1 Monitoring',
     'dokap'           => 'Upload Dokumen Pelengkap',
     'load_erp_odoo'   => 'Load ERP Data - Odoo to CEISA 4.0',
+    'winline_sales_invoice'  => 'Winline ERP — Sales Invoice (BC 2.7, BC 3.0 Customer)',
+    'winline_dn_transfer'    => 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
+    'winline_purchase_order' => 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
     'tracking'        => 'Tracking Respon Pabean',
     'it_inventory_home' => 'Bea Cukai - Home Dashboard',
     'it_inventory_1a' => 'IT Inventory - 1A Pemasukan Barang',
@@ -1055,6 +1058,12 @@ if ($initialTab === 'editor') {
     $initSrc = "/adjust_spp.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'load_erp_odoo') {
     $initSrc = "/load_erp_odoo.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
+} elseif ($initialTab === 'winline_sales_invoice') {
+    $initSrc = "/winline_erp.php?type=sales_invoice&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'winline_dn_transfer') {
+    $initSrc = "/winline_erp.php?type=dn_transfer&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'winline_purchase_order') {
+    $initSrc = "/winline_erp.php?type=purchase_order&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } else {
     $initSrc = "/daftar_dokumen.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 }
@@ -3352,6 +3361,51 @@ if ($initialTab === 'editor') {
                     <?php endif; ?>
                 </div>
 
+                <!-- Group: WINLINE ERP -->
+                <div class="menu-group" id="menu-group-winline-erp" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                    <div class="kt-menu__section">
+                        <h4 class="kt-menu__section-text">WINLINE ERP</h4>
+                    </div>
+                    <?php if (isMenuAllowed('winline_sales_invoice')): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'winline_sales_invoice') ? 'active' : '' ?>" id="nav-item-winline_sales_invoice" onclick="switchMainTab('winline_sales_invoice')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                        <a class="kt-menu__link" title="Sales Invoice (Integrasi Dokumen H2H BC 2.7, BC 3.0 ke Customer)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📑</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M854.6 288.6L657.4 91.4c-9-9-21.2-14.1-33.9-14.1H224c-26.5 0-48 21.5-48 48v768c0 26.5 21.5 48 48 48h576c26.5 0 48-21.5 48-48V322.5c0-12.7-5.1-24.9-14.1-33.9zM648 160.8l119.2 119.2H648V160.8zm136 695.2H240V144h344v168c0 17.7 14.3 32 32 32h168v512zM312 400h400c4.4 0 8 3.6 8 8v16c0 4.4-3.6 8-8 8H312c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8zm0 144h400c4.4 0 8 3.6 8 8v16c0 4.4-3.6 8-8 8H312c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8zm0 144h240c4.4 0 8 3.6 8 8v16c0 4.4-3.6 8-8 8H312c-4.4 0-8-3.6-8-8v-16c0-4.4 3.6-8 8-8z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Sales Invoice</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (isMenuAllowed('winline_dn_transfer')): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'winline_dn_transfer') ? 'active' : '' ?>" id="nav-item-winline_dn_transfer" onclick="switchMainTab('winline_dn_transfer')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                        <a class="kt-menu__link" title="DN Transfer (Integrasi Dokumen H2H BC 2.7 Antar Framas)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🚚</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M892 562l-77.4-154.8A64.08 64.08 0 0 0 757.4 374H640V240c0-17.7-14.3-32-32-32H112c-17.7 0-32 14.3-32 32v464c0 17.7 14.3 32 32 32h52.8c12.2 47.7 55.6 82 107.2 82s95-34.3 107.2-82h229.6c12.2 47.7 55.6 82 107.2 82s95-34.3 107.2-82H896c17.7 0 32-14.3 32-32v-92.4c0-23.7-9.4-46.4-26-63.6zM760 446l54 108H640V446h120zM272 782c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48zm444 0c-26.5 0-48-21.5-48-48s21.5-48 48-48 48 21.5 48 48-21.5 48-48 48z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">DN Transfer</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+
+                    <?php if (isMenuAllowed('winline_purchase_order')): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'winline_purchase_order') ? 'active' : '' ?>" id="nav-item-winline_purchase_order" onclick="switchMainTab('winline_purchase_order')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                        <a class="kt-menu__link" title="Purchase Order (Integrasi Dokumen H2H BC 2.3, BC 4.0, BC 1.6)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🛒</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M832 312H696v-16c0-101.6-82.4-184-184-184s-184 82.4-184 184v16H192c-17.7 0-32 14.3-32 32v536c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V344c0-17.7-14.3-32-32-32zm-436-16c0-68.5 55.5-124 124-124s124 55.5 124 124v16H396v-16zm376 568H232V384h540v480z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Purchase Order</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
+                </div>
+
                 <!-- Group 1B: MANIFES ONLINE (BC 1.1) -->
                 <div class="menu-group" id="menu-group-manifes" style="display: <?= $hasRoleManifest ? '' : 'none' ?>;">
                     <div class="kt-menu__section">
@@ -4218,6 +4272,10 @@ if ($initialTab === 'editor') {
             const grpPabean = document.getElementById('menu-group-dokumen-pabean');
             if (grpPabean) grpPabean.style.display = hasCustoms ? '' : 'none';
 
+            // Section Winline ERP
+            const grpWinline = document.getElementById('menu-group-winline-erp');
+            if (grpWinline) grpWinline.style.display = hasCustoms ? '' : 'none';
+
             // Section Manifes Online
             const grpMan = document.getElementById('menu-group-manifes');
             if (grpMan) grpMan.style.display = hasManifest ? '' : 'none';
@@ -4287,6 +4345,9 @@ if ($initialTab === 'editor') {
             'bc11_monitoring': 'BC 1.1 Monitoring',
             'dokap': 'Upload Dokumen Pelengkap',
             'load_erp_odoo': 'Load ERP Data - Odoo to CEISA 4.0',
+            'winline_sales_invoice': 'Winline ERP — Sales Invoice (BC 2.7, BC 3.0 Customer)',
+            'winline_dn_transfer': 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
+            'winline_purchase_order': 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
             'tracking': 'Tracking Respon Pabean',
             'it_inventory_home': 'Bea Cukai - Home Dashboard',
             'it_inventory_1a': 'IT Inventory - 1A Pemasukan Barang',
@@ -4336,6 +4397,9 @@ if ($initialTab === 'editor') {
             }
             if (tabId === 'import') return `/import_excel.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'load_erp_odoo') return `/load_erp_odoo.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'winline_sales_invoice') return `/winline_erp.php?type=sales_invoice&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'winline_dn_transfer') return `/winline_erp.php?type=dn_transfer&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'winline_purchase_order') return `/winline_erp.php?type=purchase_order&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'manifest_ceisa') return `/manifest_ceisa.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'manifest') {
                 const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;
