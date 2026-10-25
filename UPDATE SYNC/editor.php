@@ -13106,13 +13106,24 @@ $isEditMode = !empty($selectedAjuParam);
                     if (b._origHtml) b.innerHTML = b._origHtml;
                 });
             }
+        }
+
         function downloadCeisaExcel() {
             if (!currentAju) {
                 showWarning('Silakan buat dokumen baru atau pilih nomor AJU terlebih dahulu untuk mengunduh Excel.', 'Pilih Dokumen');
                 return;
             }
-            showToast(`Mengunduh file Excel CEISA 4.0 untuk AJU ${currentAju}...`);
-            window.location.href = `export_ceisa_excel.php?nomor_aju=${encodeURIComponent(currentAju)}`;
+            if (typeof showToast === 'function') {
+                showToast(`Mengunduh file Excel CEISA 4.0 untuk AJU ${currentAju}...`, 'success');
+            }
+            const link = document.createElement('a');
+            link.href = `export_ceisa_excel.php?nomor_aju=${encodeURIComponent(currentAju)}`;
+            link.download = `${currentAju}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                if (link.parentNode) link.parentNode.removeChild(link);
+            }, 100);
         }
 
         async function previewJson() {

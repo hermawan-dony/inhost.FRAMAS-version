@@ -181,7 +181,51 @@ if (empty($idUser)) {
 // Tentukan Api Key
 $apiKey = !empty($activeComp['api_key_ceisa']) ? trim($activeComp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
 
+// Helper Resilient Fallback: Jika API CEISA / MFA tidak dapat dihubungi, gunakan generator lokal 21 Sheet
+function fallbackGenerateCeisaExcel($cleanAju, $cachedFile, $targetCmp, $format) {
+    global $koneksi;
+    if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
+        require_once __DIR__ . '/CeisaXlsxExporter.php';
+        try {
+            $escAju = $koneksi ? $koneksi->real_escape_string($cleanAju) : $cleanAju;
+            $checkAju = $koneksi ? $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1") : null;
+            if ($checkAju && $checkAju->num_rows > 0) {
+                $exporter = new CeisaXlsxExporter($koneksi);
+                $genSuccess = $exporter->generateXlsx($cleanAju, $cachedFile);
+                if ($genSuccess && file_exists($cachedFile) && filesize($cachedFile) > 1000) {
+                    if ($format === 'json') {
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'status'       => 'OK',
+                            'nomor_aju'    => $cleanAju,
+                            'cached'       => true,
+                            'source'       => 'local_database',
+                            'size'         => filesize($cachedFile),
+                            'filename'     => $cleanAju . '.xlsx',
+                            'download_url' => 'download_ceisa_excel.php?nomor_aju=' . urlencode($cleanAju) . '&cmp_id=' . urlencode($targetCmp)
+                        ]);
+                        exit;
+                    }
+
+                    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    header('Content-Disposition: attachment; filename="' . $cleanAju . '.xlsx"');
+                    header('Content-Length: ' . filesize($cachedFile));
+                    header('Cache-Control: public, max-age=86400');
+                    readfile($cachedFile);
+                    exit;
+                }
+            }
+        } catch (Throwable $e) {
+            // fallback error ignored, continue to standard error handling
+        }
+    }
+    return false;
+}
+
 if (empty($activeToken)) {
+    // Coba fallback ke data database lokal
+    fallbackGenerateCeisaExcel($cleanAju, $cachedFile, $targetCmp, $format);
+
     $errMsg = "Token MFA CEISA 4.0 tidak tersedia untuk perusahaan {$targetCmp}. Pastikan kredensial login CEISA dan Secret OTP MFA telah dikonfigurasi.";
     if ($format === 'json') {
         header('Content-Type: application/json; charset=utf-8');
@@ -288,6 +332,9 @@ if (is_string($resp) && strlen($resp) > 500 && substr($resp, 0, 2) === "PK") {
 }
 
 if (!$excelBinary) {
+    // Coba fallback ke generator lokal dari database
+    fallbackGenerateCeisaExcel($cleanAju, $cachedFile, $targetCmp, $format);
+
     // Server mengembalikan error atau bukan file Excel
     $serverMsg = '';
     $json = @json_decode($resp, true);
