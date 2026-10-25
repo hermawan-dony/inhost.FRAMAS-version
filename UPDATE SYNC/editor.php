@@ -10973,6 +10973,13 @@ $isEditMode = !empty($selectedAjuParam);
                 td.dataset.col = col.key;
                 const rawVal = data[col.key] !== null && data[col.key] !== undefined ? data[col.key] : '';
 
+                // Terapkan visibility class pada td berdasarkan aturan varRules aktif (semua tipe kolom: select, text, wrap, date, number)
+                if (tableKey === 'barang' && currentVarRules && currentVarRules.barang && currentVarRules.barang[col.key]) {
+                    if (currentVarRules.barang[col.key].visible === 0) {
+                        td.classList.add('col-hidden');
+                    }
+                }
+
                 if (col.type === 'select') {
                     // Dropdown referensi (e.g. kode_entitas, kode_dokumen, kode_cara_angkut, kode_bendera, kode_jenis_identitas)
                     const sel = document.createElement('select');
@@ -11210,13 +11217,6 @@ $isEditMode = !empty($selectedAjuParam);
                         inp.title = 'Pilih dari ' + col.reff;
                     }
 
-                    // Terapkan visibility class pada td
-                    if (tableKey === 'barang' && currentVarRules.barang && currentVarRules.barang[col.key]) {
-                        if (currentVarRules.barang[col.key].visible === 0) {
-                            td.classList.add('col-hidden');
-                        }
-                    }
-
                     td.appendChild(inp);
                 }
 
@@ -11334,6 +11334,20 @@ $isEditMode = !empty($selectedAjuParam);
 
             const tr = createGridRow(tableKey, newObj, currentCount);
             tbody.appendChild(tr);
+
+            // Pastikan visibilitas kolom pada baris baru disinkronkan dengan varRules aktif
+            if (tableKey === 'barang' && currentVarRules && currentVarRules.barang) {
+                tr.querySelectorAll('td[data-col]').forEach(td => {
+                    const col = td.dataset.col;
+                    const rule = currentVarRules.barang[col];
+                    if (rule && rule.visible === 0) {
+                        td.classList.add('col-hidden');
+                    } else {
+                        td.classList.remove('col-hidden');
+                    }
+                });
+            }
+
             tr.scrollIntoView({ behavior: 'smooth' });
             requestAnimationFrame(() => {
                 autoResizeAllTextareas(tr);
