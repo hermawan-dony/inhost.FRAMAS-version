@@ -1448,22 +1448,17 @@ if ($action === 'erp_preview') {
     exit;
 }
 
-// 8. Eksekusi Integrasi ERP ke Staging CEISA 4.0
+// 8. Eksekusi Integrasi ERP ke Staging CEISA 4.0 (Mendukung Single & Multi-Dokumen)
 if ($action === 'erp_integrate') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? 'FRM-1'));
     $nomorAju    = trim($_POST['nomor_aju'] ?? '');
-    $docId       = trim($_POST['doc_id'] ?? '');
+    $docId       = $_POST['doc_nos'] ?? ($_POST['doc_id'] ?? '');
     $kodeBc      = trim($_POST['kode_dokumen'] ?? '');
+    $docType     = trim($_POST['doc_type'] ?? ($_POST['type'] ?? ''));
 
-    if (empty($nomorAju) || empty($docId)) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU dan ID Dokumen ERP harus diisi.']);
-        exit;
-    }
-
-    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAju) . "'")->fetch_row()[0] ?? 0;
-    if ($chkIt > 0) {
-        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomorAju sudah MASUK IT Inventory! Dokumen terkunci."]);
+    if (empty($docId)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Pilih minimal satu dokumen ERP untuk diintegrasikan.']);
         exit;
     }
 
@@ -1473,7 +1468,34 @@ if ($action === 'erp_integrate') {
         exit;
     }
 
-    $res = $driver->integrate($nomorAju, $docId, $kodeBc);
+    // Jika nomor AJU belum ada, buat otomatis nomor AJU baru
+    if (empty($nomorAju)) {
+        $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
+        if (empty($cleanBc)) $cleanBc = '27';
+        $resC = $koneksi->query("SELECT npwp FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($cmpId) . "' LIMIT 1");
+        $npwpC = ($resC && $rC = $resC->fetch_assoc()) ? $rC['npwp'] : '010816000000000';
+        $kodeDok6 = str_pad($cleanBc, 6, '0', STR_PAD_LEFT);
+        $kdCmp6   = substr(preg_replace('/[^0-9]/', '', $npwpC), 0, 6);
+        if (strlen($kdCmp6) < 6) $kdCmp6 = str_pad($kdCmp6, 6, '0', STR_PAD_RIGHT);
+        $tgl8     = date('Ymd');
+        $prefixAju = $kodeDok6 . $kdCmp6 . $tgl8;
+        $qSeq = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju LIKE '{$prefixAju}%' ORDER BY nomor_aju DESC LIMIT 1");
+        $lastSeq = 0;
+        if ($qSeq && $rSeq = $qSeq->fetch_assoc()) {
+            $lastSeq = (int)substr($rSeq['nomor_aju'], -6);
+        }
+        $newSeq = str_pad($lastSeq + 1, 6, '0', STR_PAD_LEFT);
+        $nomorAju = $prefixAju . $newSeq;
+    } else {
+        $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAju) . "'")->fetch_row()[0] ?? 0;
+        if ($chkIt > 0) {
+            echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomorAju sudah MASUK IT Inventory! Dokumen terkunci."]);
+            exit;
+        }
+    }
+
+    $res = $driver->integrate($nomorAju, $docId, $kodeBc, ['type' => $docType]);
+    $res['nomor_aju'] = $nomorAju;
 
     echo json_encode($res);
     exit;
@@ -7427,106 +7449,134 @@ $isEditMode = !empty($selectedAjuParam);
     </div>
 
     <!-- ERP INTEGRATION MODAL -->
+    <!-- MODAL INTEGRASI WINLINE ERP DENGAN TAB, MULTI-SELECT & SUMMARY BAR -->
     <div class="modal-overlay" id="modalErpIntegration">
-        <div class="modal" style="max-width:920px; width:95vw;">
-            <div class="modal-header" style="background:linear-gradient(135deg, rgba(99, 102, 241, 0.1), transparent);">
-                <div>
-                    <h3 style="color:#6366f1; display:flex; align-items:center; gap:6px;">
-                        <span>🔌 Integrasi Database ERP</span>
-                        <span id="erpModalDriverBadge" class="badge" style="background:#6366f1; color:#fff; font-size:10px;">FRAMAS</span>
-                    </h3>
-                    <div id="erpModalDriverDesc" style="font-size:10px; color:var(--text-muted); margin-top:2px;">
-                        Integrasi sistem ERP ke tabel staging CEISA 4.0 (Header, Barang, Dokumen, Kemasan).
+        <div class="modal" style="max-width:1120px; width:96vw; max-height:92vh; display:flex; flex-direction:column;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(24, 144, 255, 0.12), transparent); padding:8px 14px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <h3 style="color:var(--primary); margin:0; display:flex; align-items:center; gap:6px; font-size:13px;">
+                            <span>🔌 Integrasi Winline ERP</span>
+                            <span id="erpModalDriverBadge" class="badge" style="background:#1890ff; color:#fff; font-size:9.5px;">FRAMAS (Winline)</span>
+                        </h3>
+                        <span style="font-size:10px; color:var(--text-muted); padding-left:8px; border-left:1px solid var(--border);">
+                            Perusahaan: <strong id="erpCompanyLabel" style="color:var(--text-main);">-</strong> | 
+                            AJU: <strong id="erpAjuLabel" style="color:var(--primary);">-</strong>
+                        </span>
                     </div>
+                    <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">✕</button>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">✕</button>
             </div>
-            <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
-                <!-- SETTING PROFIL & DRIVER SELECTOR -->
-                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
-                    <div style="display:flex; gap:12px; align-items:center;">
-                        <span style="font-size:10px; color:var(--text-muted);">Perusahaan: <strong id="erpCompanyLabel" style="color:var(--text-main);">-</strong></span>
-                        <span style="font-size:10px; color:var(--text-muted);">AJU Aktif: <strong id="erpAjuLabel" style="color:var(--primary);">-</strong></span>
+
+            <div class="modal-body" style="padding:10px 14px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px;">
+                <!-- Type Tabs -->
+                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; background:var(--bg-base); padding:6px 10px; border-radius:4px; border:1px solid var(--border);">
+                    <div style="display:inline-flex; gap:4px;" id="erpTypeTabs">
+                        <button type="button" class="btn btn-sm btn-primary erp-tab-btn" data-type="sales_invoice" onclick="switchErpTab('sales_invoice')">
+                            🛒 Sales Invoice (BC 2.7 & BC 3.0)
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary erp-tab-btn" data-type="dn_transfer" onclick="switchErpTab('dn_transfer')">
+                            🚚 DN Transfer (Antar Framas)
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary erp-tab-btn" data-type="purchase_order" onclick="switchErpTab('purchase_order')">
+                            📦 Purchase Order (Pemasukan)
+                        </button>
                     </div>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <span style="font-size:10px; color:var(--text-muted);">Driver ERP:</span>
-                        <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(99, 102, 241, 0.08); border:1px solid rgba(99, 102, 241, 0.25); border-radius:4px; padding:3px 9px;" title="Driver ERP dikonfigurasi melalui Administrator - Kelola Perusahaan">
-                            <span id="erpDriverDisplay" style="font-weight:700; color:#6366f1; font-size:11px;">Memuat...</span>
-                            <span style="font-size:9px; color:var(--text-muted); background:var(--bg-card); border:1px solid var(--border); padding:1px 5px; border-radius:3px; display:inline-flex; align-items:center; gap:3px;">
-                                🔒 Kelola Perusahaan
-                            </span>
-                        </div>
-                    </div>
+                    <span id="erpTabDesc" style="font-size:10px; color:var(--text-muted); font-style:italic;">
+                        Faktur Penjualan (Sales Invoice) Winline ke Customer.
+                    </span>
                 </div>
 
-                <!-- FILTER SEARCH ERP -->
-                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:8px 10px;">
-                    <div style="display:grid; grid-template-columns:1.2fr 1fr 1fr 1fr auto; gap:8px; align-items:end;">
-                        <div>
-                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Jenis Transaksi:</label>
-                            <select id="erpFilterType" style="width:100%; font-weight:600;">
-                                <option value="outbound">Outbound (Delivery Order / Sales Invoice)</option>
-                                <option value="inbound">Inbound (Purchase Order / Goods Receipt)</option>
+                <!-- Filter Controls -->
+                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);" id="erpDateLabel">Tanggal Transaksi:</label>
+                            <input type="date" id="erpFilterDate" class="form-control" value="<?= date('Y-m-d') ?>" style="height:24px; font-size:10.5px; padding:2px 6px;">
+                        </div>
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);">Pencarian:</label>
+                            <input type="text" id="erpFilterQuery" class="form-control" placeholder="No Dokumen / Ref / Partner..." style="height:24px; font-size:10.5px; width:160px;" onkeyup="if(event.key==='Enter') searchErpDocuments()">
+                        </div>
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);">Target BC:</label>
+                            <select id="erpFilterTargetBc" class="form-control" style="height:24px; font-size:10.5px; width:130px;">
+                                <option value="">Semua Target</option>
+                                <option value="27">BC 2.7 (TPB)</option>
+                                <option value="30">BC 3.0 (PEB)</option>
+                                <option value="23">BC 2.3 (Impor)</option>
+                                <option value="40">BC 4.0 (Lokal)</option>
                             </select>
                         </div>
-                        <div>
-                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">No Referensi / DO / PO:</label>
-                            <input type="text" id="erpFilterQuery" placeholder="Cari nomor DO / PO..." style="width:100%;" onkeyup="if(event.key==='Enter') searchErpDocuments()">
-                        </div>
-                        <div>
-                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Tgl Dari:</label>
-                            <input type="date" id="erpFilterDateFrom" value="<?= date('Y-m-01') ?>" style="width:100%;">
-                        </div>
-                        <div>
-                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Tgl Sampai:</label>
-                            <input type="date" id="erpFilterDateTo" value="<?= date('Y-m-d') ?>" style="width:100%;">
-                        </div>
-                        <div>
-                            <button type="button" class="btn btn-primary" onclick="searchErpDocuments()" style="padding:6px 14px;">
-                                🔍 Cari Data
-                            </button>
-                        </div>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="searchErpDocuments()" style="height:24px; font-size:10.5px;">
+                            🔍 Muat Data
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="resetErpFilter()" style="height:24px; font-size:10.5px;">
+                            🔄 Reset
+                        </button>
+                    </div>
+                    <div>
+                        <span id="erpRecordCountText" style="font-size:10px; font-weight:600; color:var(--text-muted);">Memuat...</span>
                     </div>
                 </div>
 
-                <!-- SPLIT VIEW: DAFTAR DOKUMEN & RINCIAN BARANG -->
-                <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:10px; height:320px;">
-                    <!-- LEFT LIST OF ERP DOCUMENTS -->
-                    <div style="border:1px solid var(--border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden;">
-                        <div style="background:var(--bg-base); padding:6px 10px; font-size:10px; font-weight:700; border-bottom:1px solid var(--border); display:flex; justify-content:space-between;">
-                            <span>DAFTAR DOKUMEN ERP</span>
-                            <span id="erpDocCount" style="color:var(--text-muted);">0 dokumen</span>
-                        </div>
-                        <div id="erpDocList" style="flex:1; overflow-y:auto; padding:4px;">
-                            <div style="padding:20px; text-align:center; color:var(--text-muted); font-size:11px;">
-                                Klik tombol <strong>"Cari Data"</strong> untuk memuat transaksi dari ERP.
-                            </div>
+                <!-- Table with Multi-Select Checkboxes -->
+                <div style="border:1px solid var(--border); border-radius:4px; max-height:350px; overflow-y:auto; overflow-x:auto; background:var(--bg-card);">
+                    <table class="datagrid" style="width:100%; font-size:10.5px; border-collapse:collapse;" id="erpTableMain">
+                        <thead>
+                            <tr style="position:sticky; top:0; background:var(--bg-base); z-index:2; border-bottom:1px solid var(--border);">
+                                <th style="width:28px; text-align:center;">
+                                    <input type="checkbox" id="erpCheckAll" onchange="toggleErpCheckAll(this)" title="Pilih Semua">
+                                </th>
+                                <th style="width:25px; text-align:center;">#</th>
+                                <th style="width:75px;">Status H2H</th>
+                                <th style="width:105px;">No Dokumen</th>
+                                <th style="width:95px;">No Ref</th>
+                                <th style="width:75px;">Tanggal</th>
+                                <th>Partner (Customer / Supplier / Plant)</th>
+                                <th style="width:90px;">Target Dokumen</th>
+                                <th style="width:65px; text-align:right;">Total Qty</th>
+                                <th style="width:60px; text-align:right;">Kemasan</th>
+                                <th style="width:65px; text-align:right;">Netto (kg)</th>
+                                <th style="width:65px; text-align:right;">Bruto (kg)</th>
+                                <th style="width:75px; text-align:center;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody id="erpTableBody">
+                            <tr>
+                                <td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">
+                                    Klik tombol <strong>"Muat Data"</strong> untuk mengambil transaksi dari Winline ERP.
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Summary Multi-Select Bar -->
+                <div id="erpMultiBar" style="background:#001529; color:#fff; padding:6px 14px; border-radius:4px; display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:11px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span id="erpMultiCountBadge" style="background:#1890ff; color:#fff; font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:3px;">0 Dokumen Terpilih</span>
+                        <div>
+                            Qty: <strong id="erpMultiTotalQty" style="color:#40a9ff;">0</strong> |
+                            Netto: <strong id="erpMultiTotalNetto" style="color:#40a9ff;">0.00</strong> kg |
+                            Bruto: <strong id="erpMultiTotalBruto" style="color:#40a9ff;">0.00</strong> kg
                         </div>
                     </div>
-
-                    <!-- RIGHT PREVIEW OF ITEMS & DETAILS -->
-                    <div style="border:1px solid var(--border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden;">
-                        <div style="background:var(--bg-base); padding:6px 10px; font-size:10px; font-weight:700; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                            <span>RINCIAN BARANG & DOKUMEN</span>
-                            <span id="erpSelectedDocId" class="badge" style="background:var(--primary); color:#fff; font-size:9px;">Belum Dipilih</span>
-                        </div>
-                        <div id="erpDocPreviewArea" style="flex:1; overflow-y:auto; padding:8px; font-size:10px;">
-                            <div style="padding:40px 20px; text-align:center; color:var(--text-muted);">
-                                Pilih salah satu dokumen di sebelah kiri untuk melihat rincian barang.
-                            </div>
-                        </div>
+                    <div style="display:flex; gap:6px;">
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="clearErpSelection()">Batal</button>
+                        <button type="button" class="btn btn-success btn-xs" id="btnErpExecMulti" onclick="executeErpIntegration()" style="font-weight:700;">
+                            ⚡ Masukkan Terpilih ke Dokumen AJU
+                        </button>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="font-size:10px; color:var(--text-muted);" id="erpIntegrationHelpTip">
-                    💡 Data akan otomatis mengisi <strong>Header</strong>, <strong>Barang</strong>, <strong>Dokumen</strong>, dan <strong>Kemasan</strong>.
+
+            <div class="modal-footer" style="padding:6px 14px; background:var(--bg-base); border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:10px; color:var(--text-muted);">
+                    💡 <strong>Multi-Integrasi:</strong> Centang satu atau banyak dokumen Winline untuk digabungkan ke berkas AJU. Seluruh barang, dokumen pelengkap, kemasan, dan entitas resmi otomatis terisi.
                 </div>
-                <div style="display:flex; gap:6px;">
-                    <button class="btn btn-secondary" onclick="closeModal('modalErpIntegration')">Batal</button>
-                    <button class="btn btn-primary btn-erp" id="btnExecuteIntegration" onclick="executeErpIntegration()" disabled>
-                        ⚡ Masukkan ke Dokumen AJU (Staging)
-                    </button>
+                <div>
+                    <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">Tutup</button>
                 </div>
             </div>
         </div>
@@ -8781,230 +8831,304 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        let currentErpType = 'sales_invoice';
+        let erpSelectedDocNos = new Set();
+        let globalErpData = [];
+
         async function openErpModal() {
-            if (!currentAju) {
-                alert('Silakan pilih atau buat dokumen AJU terlebih dahulu sebelum integrasi ERP!');
-                toggleEntryPanel(true);
-                return;
-            }
             await loadErpProfile();
-            if (!activeErpDriver) {
-                alert('Sistem ERP belum dikonfigurasi untuk perusahaan ini.');
-                return;
-            }
-            document.getElementById('erpAjuLabel').innerText = currentAju;
+            document.getElementById('erpAjuLabel').innerText = currentAju ? currentAju : '(Dokumen AJU Baru)';
 
-            const kodeBc = (currentData.header?.kode_dokumen || document.getElementById('entryDocBc')?.value || '23').replace(/[^0-9]/g, '');
-            const typeSel = document.getElementById('erpFilterType');
-            if (typeSel) {
-                if (['30', '25', '27', '41', '261', '33'].includes(kodeBc)) {
-                    typeSel.value = 'outbound';
-                } else {
-                    typeSel.value = 'inbound';
-                }
+            const kodeBc = (currentData?.header?.kode_dokumen || document.getElementById('entryDocBc')?.value || '27').replace(/[^0-9]/g, '');
+            if (['23', '40', '16'].includes(kodeBc)) {
+                currentErpType = 'purchase_order';
+            } else if (kodeBc === '27') {
+                currentErpType = 'sales_invoice';
+            } else {
+                currentErpType = 'sales_invoice';
             }
 
+            switchErpTab(currentErpType, false);
             document.getElementById('modalErpIntegration').style.display = 'flex';
             searchErpDocuments();
         }
 
-        async function searchErpDocuments() {
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            const docType = document.getElementById('erpFilterType')?.value || 'outbound';
-            const q = document.getElementById('erpFilterQuery')?.value || '';
-            const dt1 = document.getElementById('erpFilterDateFrom')?.value || '';
-            const dt2 = document.getElementById('erpFilterDateTo')?.value || '';
-            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
+        function switchErpTab(type, autoSearch = true) {
+            currentErpType = type;
+            document.querySelectorAll('.erp-tab-btn').forEach(btn => {
+                if (btn.dataset.type === type) {
+                    btn.classList.remove('btn-secondary');
+                    btn.classList.add('btn-primary');
+                } else {
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-secondary');
+                }
+            });
 
-            const listEl = document.getElementById('erpDocList');
-            if (listEl) {
-                listEl.innerHTML = `
-                    <div class="app-loader-container" style="padding:30px 15px;">
-                        <div class="app-loader-icon-wrap" style="width:44px;height:44px;">
-                            <div class="app-loader-spinner spinner-primary" style="width:44px;height:44px;"></div>
-                            <div class="app-loader-center-icon" style="font-size:18px;">🔌</div>
-                        </div>
-                        <div class="app-loader-title" style="font-size:13px; color:#1890ff;">Mencari Dokumen di Database ERP...</div>
-                        <div class="app-loader-progress-track" style="max-width:200px; margin-top:8px;">
-                            <div class="app-loader-progress-bar"></div>
-                        </div>
-                    </div>
-                `;
+            const descEl = document.getElementById('erpTabDesc');
+            const dateLbl = document.getElementById('erpDateLabel');
+            const targetBcSel = document.getElementById('erpFilterTargetBc');
+
+            if (type === 'sales_invoice') {
+                if (descEl) descEl.innerText = 'Faktur Penjualan (Sales Invoice) Winline ke Customer (BC 2.7 & BC 3.0).';
+                if (dateLbl) dateLbl.innerText = 'Tanggal Transaksi:';
+                if (targetBcSel) targetBcSel.value = '27';
+            } else if (type === 'dn_transfer') {
+                if (descEl) descEl.innerText = 'Delivery Note (DN%) Winline Antar Plant Framas (BC 2.7).';
+                if (dateLbl) dateLbl.innerText = 'Tanggal Transaksi:';
+                if (targetBcSel) targetBcSel.value = '27';
+            } else {
+                if (descEl) descEl.innerText = 'Pesanan Pembelian (PO%) Bahan Baku dari Supplier (BC 2.3 & BC 4.0).';
+                if (dateLbl) dateLbl.innerText = 'Tanggal PO:';
+                if (targetBcSel) targetBcSel.value = '23';
             }
 
-            try {
-                const url = `editor.php?action=erp_search&cmp_id=${encodeURIComponent(cmpId)}&doc_type=${encodeURIComponent(docType)}&search_q=${encodeURIComponent(q)}&date_from=${encodeURIComponent(dt1)}&date_to=${encodeURIComponent(dt2)}&kode_dokumen=${encodeURIComponent(kodeBc)}`;
-                const res = await fetch(url);
-                const json = await res.json();
-                if (json.status === 'OK') {
-                    erpSearchResults = json.results || [];
-                    renderErpDocumentList(erpSearchResults);
-                } else {
-                    listEl.innerHTML = `<div style="padding:15px; color:var(--danger);">${json.message || 'Gagal mencari data'}</div>`;
-                }
-            } catch(e) {
-                listEl.innerHTML = `<div style="padding:15px; color:var(--danger);">${e.message}</div>`;
+            clearErpSelection();
+            if (autoSearch) {
+                searchErpDocuments();
             }
         }
 
-        function renderErpDocumentList(docs) {
-            const listEl = document.getElementById('erpDocList');
-            const countEl = document.getElementById('erpDocCount');
-            if (countEl) countEl.innerText = `${docs.length} dokumen`;
+        async function searchErpDocuments() {
+            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            const q = document.getElementById('erpFilterQuery')?.value.trim() || '';
+            const dt = document.getElementById('erpFilterDate')?.value || '<?= date('Y-m-d') ?>';
+            const targetBc = document.getElementById('erpFilterTargetBc')?.value || '';
+            const countText = document.getElementById('erpRecordCountText');
+            const tbody = document.getElementById('erpTableBody');
 
-            if (!docs || docs.length === 0) {
-                listEl.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted);">Tidak ada transaksi yang cocok.</div>';
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);"><div class="spinner"></div> Mengambil data ${currentErpType} dari SQL Server Winline...</td></tr>`;
+            }
+            if (countText) countText.innerText = 'Memuat data...';
+            clearErpSelection();
+
+            try {
+                const url = `editor.php?action=erp_search&cmp_id=${encodeURIComponent(cmpId)}&doc_type=${encodeURIComponent(currentErpType)}&date_from=${encodeURIComponent(dt)}&date_to=${encodeURIComponent(dt)}&search_q=${encodeURIComponent(q)}&kode_dokumen=${encodeURIComponent(targetBc)}`;
+                const res = await fetch(url);
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    globalErpData = json.results || [];
+                    renderErpDocumentTable(globalErpData);
+                } else {
+                    if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:25px; color:var(--danger);">${escapeHtml(json.message || 'Gagal memuat data')}</td></tr>`;
+                    if (countText) countText.innerText = 'Gagal memuat';
+                }
+            } catch(e) {
+                if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:25px; color:var(--danger);">${escapeHtml(e.message)}</td></tr>`;
+                if (countText) countText.innerText = 'Error';
+            }
+        }
+
+        function renderErpDocumentTable(data) {
+            const tbody = document.getElementById('erpTableBody');
+            const countText = document.getElementById('erpRecordCountText');
+            if (countText) countText.innerText = `${data.length} data ditemukan`;
+
+            if (!data || data.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">Tidak ada transaksi ${currentErpType} pada tanggal ini.</td></tr>`;
                 return;
             }
 
-            let html = '<div style="display:flex; flex-direction:column; gap:4px;">';
-            docs.forEach((d, idx) => {
-                const simBadge = d.is_simulated ? '<span style="font-size:8px; background:rgba(234,179,8,0.2); color:#eab308; padding:1px 4px; border-radius:3px; margin-left:4px;">Simulasi ERP</span>' : '';
+            let html = '';
+            data.forEach((r, idx) => {
+                const isIntegrated = (r.status_h2h === 'integrated');
+                const isSelected   = erpSelectedDocNos.has(r.doc_id);
+                const statusBadge  = isIntegrated 
+                    ? `<span style="font-size:9px; background:rgba(82,196,26,0.12); color:#52c41a; padding:1px 5px; border-radius:3px; font-weight:600;" title="AJU: ${escapeHtml(r.nomor_aju)}">Terintegrasi</span>` 
+                    : `<span style="font-size:9px; background:rgba(24,144,255,0.12); color:#1890ff; padding:1px 5px; border-radius:3px; font-weight:600;">Siap H2H</span>`;
+
+                const trClass = isSelected ? 'style="background:rgba(24,144,255,0.06);"' : '';
+
                 html += `
-                    <div class="erp-item-card" id="erp-card-${idx}" onclick="selectErpDoc('${escapeHtml(d.doc_id)}', ${idx})" style="background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:6px 8px; cursor:pointer; transition:all 0.15s ease;">
-                        <div style="display:flex; justify-content:space-between; align-items:center;">
-                            <strong style="color:var(--primary); font-size:11px;">${escapeHtml(d.doc_id)}</strong>
-                            <span style="font-size:9px; color:var(--text-muted);">${escapeHtml(d.doc_date)}</span>
-                        </div>
-                        <div style="font-size:9.5px; margin:2px 0; color:var(--text-main); font-weight:600;">
-                            ${escapeHtml(d.partner_name || '-')} ${simBadge}
-                        </div>
-                        <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--text-muted);">
-                            <span>${d.total_items} items | Net: ${parseFloat(d.total_netto).toFixed(1)} kg</span>
-                            <strong style="color:var(--success);">${escapeHtml(d.valuta)} ${parseFloat(d.total_fob).toLocaleString('id-ID')}</strong>
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-            listEl.innerHTML = html;
-
-            if (docs.length > 0) {
-                selectErpDoc(docs[0].doc_id, 0);
-            }
-        }
-
-        async function selectErpDoc(docId, idx) {
-            selectedErpDocId = docId;
-            document.querySelectorAll('.erp-item-card').forEach(c => {
-                c.style.borderColor = 'var(--border)';
-                c.style.background = 'var(--bg-card)';
-            });
-            const selCard = document.getElementById(`erp-card-${idx}`);
-            if (selCard) {
-                selCard.style.borderColor = 'var(--primary)';
-                selCard.style.background = 'rgba(56, 189, 248, 0.08)';
-            }
-            document.getElementById('erpSelectedDocId').innerText = docId;
-
-            const previewArea = document.getElementById('erpDocPreviewArea');
-            if (previewArea) previewArea.innerHTML = '<div style="padding:30px; text-align:center;"><span class="spinner"></span> Mengambil rincian barang...</div>';
-
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
-
-            try {
-                const res = await fetch(`editor.php?action=erp_preview&cmp_id=${encodeURIComponent(cmpId)}&driver_name=${encodeURIComponent(activeErpDriver)}&doc_id=${encodeURIComponent(docId)}&kode_dokumen=${encodeURIComponent(kodeBc)}`);
-                const json = await res.json();
-                if (json.status === 'OK') {
-                    renderErpPreview(json.preview);
-                    document.getElementById('btnExecuteIntegration').disabled = false;
-                }
-            } catch(e) {
-                previewArea.innerHTML = `<div style="padding:15px; color:var(--danger);">${e.message}</div>`;
-            }
-        }
-
-        function renderErpPreview(preview) {
-            const previewArea = document.getElementById('erpDocPreviewArea');
-            if (!preview) return;
-
-            const hdr = preview.header || {};
-            const items = preview.items || [];
-            const docs = preview.documents || [];
-            const pkgs = preview.packages || [];
-
-            let html = `
-                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px; margin-bottom:8px;">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                        <span>Dokumen Invoice: <strong>${escapeHtml(hdr.invoice_no || '-')}</strong></span>
-                        <span>Valuta: <strong>${escapeHtml(hdr.valuta || 'USD')}</strong></span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; font-weight:700;">
-                        <span>Total Nilai: <span style="color:var(--success);">${escapeHtml(hdr.valuta)} ${parseFloat(hdr.total_fob).toLocaleString('id-ID')}</span></span>
-                        <span>Netto: ${parseFloat(hdr.total_netto).toFixed(2)} kg | Bruto: ${parseFloat(hdr.total_bruto).toFixed(2)} kg</span>
-                    </div>
-                </div>
-
-                <div style="font-weight:700; margin-bottom:4px; font-size:10px;">📦 Rincian Item Barang (${items.length} seri):</div>
-                <div style="border:1px solid var(--border); border-radius:4px; overflow-x:auto; margin-bottom:8px;">
-                    <table class="datagrid" style="width:100%; font-size:9.5px;">
-                        <thead>
-                            <tr>
-                                <th style="width:30px; text-align:center;">#</th>
-                                <th>Kode Barang</th>
-                                <th>Uraian Barang</th>
-                                <th style="text-align:right;">Qty</th>
-                                <th>Satuan</th>
-                                <th style="text-align:right;">Harga Satuan</th>
-                                <th style="text-align:right;">FOB / Nilai</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-
-            items.forEach(it => {
-                html += `
-                    <tr>
-                        <td style="text-align:center;">${it.seri_barang}</td>
-                        <td style="font-family:monospace; font-weight:600;">${escapeHtml(it.kode_barang)}</td>
-                        <td>${escapeHtml(it.uraian)}</td>
-                        <td style="text-align:right; font-weight:600;">${parseFloat(it.jumlah_satuan).toLocaleString('id-ID')}</td>
-                        <td>${escapeHtml(it.kode_satuan)}</td>
-                        <td style="text-align:right;">${parseFloat(it.harga_satuan).toLocaleString('id-ID')}</td>
-                        <td style="text-align:right; font-weight:700; color:var(--success);">${parseFloat(it.fob).toLocaleString('id-ID')}</td>
+                    <tr id="erp-row-${escapeHtml(r.doc_id)}" ${trClass}>
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="erp-doc-chk" value="${escapeHtml(r.doc_id)}" 
+                                ${isSelected ? 'checked' : ''} 
+                                onchange="toggleErpRowSelect('${escapeHtml(r.doc_id)}', this.checked)">
+                        </td>
+                        <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
+                        <td>${statusBadge}</td>
+                        <td style="font-family:monospace; font-weight:700; color:var(--primary);">
+                            ${escapeHtml(r.doc_id)}
+                        </td>
+                        <td style="font-family:monospace; color:var(--text-muted);">${escapeHtml(r.ref_no || '-')}</td>
+                        <td>${escapeHtml(r.doc_date)}</td>
+                        <td>
+                            <div style="font-weight:600;">${escapeHtml(r.partner_name)}</div>
+                            <div style="font-size:9px; color:var(--text-muted);">${escapeHtml(r.partner_addr || '')}</div>
+                        </td>
+                        <td>
+                            <span class="badge" style="background:rgba(24,144,255,0.1); color:#1890ff; font-size:9.5px; font-weight:600;">
+                                BC ${escapeHtml(r.target_bc)}
+                            </span>
+                        </td>
+                        <td style="text-align:right; font-weight:600;">${Number(r.total_qty).toLocaleString()}</td>
+                        <td style="text-align:right;">${Number(r.total_kemas).toLocaleString()}</td>
+                        <td style="text-align:right;">${Number(r.total_netto).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td style="text-align:right;">${Number(r.total_bruto).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                        <td style="text-align:center;">
+                            <button type="button" class="btn btn-secondary btn-xs" onclick="previewErpSingleDoc('${escapeHtml(r.doc_id)}', '${escapeHtml(r.target_bc)}')">
+                                👁 Rincian
+                            </button>
+                        </td>
                     </tr>
                 `;
             });
 
-            html += `
-                        </tbody>
-                    </table>
-                </div>
+            tbody.innerHTML = html;
+            updateErpMultiBar();
+        }
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                    <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px;">
-                        <div style="font-weight:700; margin-bottom:3px;">📄 Dokumen Pelengkap (${docs.length}):</div>
-                        ${docs.map(d => `<div>• Kode ${d.kode_dokumen}: <strong>${escapeHtml(d.nomor_dokumen)}</strong> (${d.tanggal_dokumen})</div>`).join('')}
-                    </div>
-                    <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px;">
-                        <div style="font-weight:700; margin-bottom:3px;">📦 Kemasan (${pkgs.length}):</div>
-                        ${pkgs.map(p => `<div>• ${p.jumlah_kemasan} ${p.kode_kemasan} (Merek: ${escapeHtml(p.merek || '-')})</div>`).join('')}
-                    </div>
-                </div>
-            `;
+        function toggleErpCheckAll(master) {
+            const chks = document.querySelectorAll('.erp-doc-chk');
+            chks.forEach(chk => {
+                chk.checked = master.checked;
+                const docId = chk.value;
+                if (master.checked) {
+                    erpSelectedDocNos.add(docId);
+                    document.getElementById(`erp-row-${docId}`)?.setAttribute('style', 'background:rgba(24,144,255,0.06);');
+                } else {
+                    erpSelectedDocNos.delete(docId);
+                    document.getElementById(`erp-row-${docId}`)?.removeAttribute('style');
+                }
+            });
+            updateErpMultiBar();
+        }
 
-            previewArea.innerHTML = html;
+        function toggleErpRowSelect(docId, isChecked) {
+            if (isChecked) {
+                erpSelectedDocNos.add(docId);
+                document.getElementById(`erp-row-${docId}`)?.setAttribute('style', 'background:rgba(24,144,255,0.06);');
+            } else {
+                erpSelectedDocNos.delete(docId);
+                document.getElementById(`erp-row-${docId}`)?.removeAttribute('style');
+                const chkAll = document.getElementById('erpCheckAll');
+                if (chkAll) chkAll.checked = false;
+            }
+            updateErpMultiBar();
+        }
+
+        function clearErpSelection() {
+            erpSelectedDocNos.clear();
+            document.querySelectorAll('.erp-doc-chk').forEach(c => c.checked = false);
+            document.querySelectorAll('#erpTableBody tr').forEach(r => r.removeAttribute('style'));
+            const chkAll = document.getElementById('erpCheckAll');
+            if (chkAll) chkAll.checked = false;
+            updateErpMultiBar();
+        }
+
+        function updateErpMultiBar() {
+            const bar = document.getElementById('erpMultiBar');
+            const count = erpSelectedDocNos.size;
+            if (count > 0) {
+                bar.style.display = 'flex';
+                document.getElementById('erpMultiCountBadge').innerText = `${count} Dokumen Terpilih`;
+
+                let totQty = 0, totNet = 0, totBrt = 0;
+                globalErpData.forEach(r => {
+                    if (erpSelectedDocNos.has(r.doc_id)) {
+                        totQty += Number(r.total_qty || 0);
+                        totNet += Number(r.total_netto || 0);
+                        totBrt += Number(r.total_bruto || 0);
+                    }
+                });
+                document.getElementById('erpMultiTotalQty').innerText = totQty.toLocaleString();
+                document.getElementById('erpMultiTotalNetto').innerText = totNet.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+                document.getElementById('erpMultiTotalBruto').innerText = totBrt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            } else {
+                bar.style.display = 'none';
+            }
+        }
+
+        function resetErpFilter() {
+            document.getElementById('erpFilterDate').value = '<?= date('Y-m-d') ?>';
+            document.getElementById('erpFilterQuery').value = '';
+            document.getElementById('erpFilterTargetBc').value = '';
+            searchErpDocuments();
+        }
+
+        async function previewErpSingleDoc(docId, targetBc) {
+            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            try {
+                const res = await fetch(`editor.php?action=erp_preview&cmp_id=${encodeURIComponent(cmpId)}&doc_id=${encodeURIComponent(docId)}&kode_dokumen=${encodeURIComponent(targetBc)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && json.preview) {
+                    const p = json.preview;
+                    const items = p.items || [];
+                    let itemHtml = items.map((it, i) => `<tr>
+                        <td style="text-align:center;">${i+1}</td>
+                        <td style="font-family:monospace; font-weight:600;">${escapeHtml(it.kode_barang)}</td>
+                        <td>${escapeHtml(it.uraian)}</td>
+                        <td style="text-align:right;">${Number(it.jumlah_satuan).toLocaleString()} ${escapeHtml(it.kode_satuan)}</td>
+                        <td style="text-align:right;">${Number(it.harga_satuan).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                        <td style="text-align:right; font-weight:600; color:#52c41a;">${Number(it.fob).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
+                    </tr>`).join('');
+
+                    Swal.fire({
+                        title: `Rincian Dokumen: ${escapeHtml(docId)}`,
+                        html: `
+                            <div style="text-align:left; font-size:11px; margin-bottom:10px;">
+                                <strong>Partner:</strong> ${escapeHtml(p.header?.partner_name || '-')}<br>
+                                <strong>Valuta:</strong> ${escapeHtml(p.header?.valuta || 'USD')} | <strong>Total FOB:</strong> ${Number(p.header?.total_fob || 0).toLocaleString(undefined, {minimumFractionDigits:2})}<br>
+                                <strong>Netto:</strong> ${Number(p.header?.total_netto || 0).toFixed(2)} kg | <strong>Bruto:</strong> ${Number(p.header?.total_bruto || 0).toFixed(2)} kg
+                            </div>
+                            <div style="max-height:240px; overflow-y:auto; border:1px solid #d9d9d9; border-radius:4px;">
+                                <table style="width:100%; font-size:10px; border-collapse:collapse;" border="1" bordercolor="#eee">
+                                    <thead><tr style="background:#f5f5f5;"><th>#</th><th>Kode</th><th>Uraian</th><th>Qty</th><th>Harga</th><th>Total</th></tr></thead>
+                                    <tbody>${itemHtml}</tbody>
+                                </table>
+                            </div>
+                        `,
+                        width: '700px',
+                        confirmButtonText: 'Tutup'
+                    });
+                } else {
+                    alert('Gagal mengambil rincian: ' + (json.message || ''));
+                }
+            } catch(e) {
+                alert('Error: ' + e.message);
+            }
         }
 
         async function executeErpIntegration() {
-            if (!currentAju || !selectedErpDocId) return;
+            const arr = Array.from(erpSelectedDocNos);
+            if (arr.length === 0) {
+                alert('Pilih minimal satu dokumen Winline ERP yang ingin diintegrasikan.');
+                return;
+            }
 
-            const btn = document.getElementById('btnExecuteIntegration');
+            const cfm = await Swal.fire({
+                title: 'Konfirmasi Integrasi ERP',
+                html: `Apakah Anda yakin ingin mengintegrasikan <b>${arr.length} dokumen</b> Winline terpilih ke dalam Dokumen AJU?<br><br>Dokumen terpilih:<br><code style="font-size:11px;">${arr.slice(0, 5).join(', ')}${arr.length > 5 ? '...' : ''}</code><br><br><small style="color:var(--text-muted);">Header, Rincian Barang, Dokumen Pendukung, Kemasan, dan Entitas akan otomatis terisi.</small>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#1890ff',
+                cancelButtonColor: '#d9d9d9',
+                confirmButtonText: `⚡ Ya, Masukkan ${arr.length} Dokumen!`,
+                cancelButtonText: 'Batal'
+            });
+
+            if (!cfm.isConfirmed) return;
+
+            const btn = document.getElementById('btnErpExecMulti');
             if (btn) {
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner"></span> Mengintegrasikan ke Staging...';
             }
 
             const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
+            const firstDoc = globalErpData.find(d => d.doc_id === arr[0]);
+            const filterBc = document.getElementById('erpFilterTargetBc')?.value;
+            const targetBc = (firstDoc && firstDoc.target_bc) ? firstDoc.target_bc : (filterBc || (currentData?.header?.kode_dokumen || '27').replace(/[^0-9]/g, ''));
 
             try {
                 const fd = new FormData();
-                fd.append('nomor_aju', currentAju);
-                fd.append('doc_id', selectedErpDocId);
-                fd.append('driver_name', activeErpDriver);
-                fd.append('kode_dokumen', kodeBc);
+                fd.append('nomor_aju', currentAju || '');
+                fd.append('doc_nos', JSON.stringify(arr));
+                fd.append('doc_type', currentErpType);
+                fd.append('kode_dokumen', targetBc);
                 fd.append('cmp_id', cmpId);
 
                 const res = await fetch('editor.php?action=erp_integrate', {
@@ -9012,19 +9136,43 @@ $isEditMode = !empty($selectedAjuParam);
                     body: fd
                 });
                 const json = await res.json();
+
                 if (json.status === 'OK') {
                     closeModal('modalErpIntegration');
-                    await loadAjuData(currentAju);
-                    showToast(json.message || 'Integrasi ERP berhasil! Seluruh data staging terisi.');
+
+                    const resultingAju = json.nomor_aju || currentAju;
+                    if (!currentAju && resultingAju) {
+                        currentAju = resultingAju;
+                        const sel = document.getElementById('selectAju');
+                        if (sel) {
+                            const opt = document.createElement('option');
+                            opt.value = resultingAju;
+                            opt.textContent = `[BC ${targetBc}] ${resultingAju} - BARU`;
+                            sel.prepend(opt);
+                            sel.value = resultingAju;
+                        }
+                        const url = new URL(window.location);
+                        url.searchParams.set('nomor_aju', resultingAju);
+                        window.history.replaceState({}, '', url);
+                    }
+
+                    await loadAjuData(resultingAju);
+
+                    Swal.fire({
+                        title: 'Integrasi ERP Sukses!',
+                        html: `${escapeHtml(json.message)}<br><br><b>Nomor AJU:</b> <code style="font-size:13px; color:#1890ff;">${escapeHtml(resultingAju)}</code>`,
+                        icon: 'success',
+                        confirmButtonText: 'OK'
+                    });
                 } else {
-                    alert('Gagal integrasi ERP: ' + (json.message || ''));
+                    Swal.fire('Gagal Integrasi', escapeHtml(json.message || 'Terjadi kesalahan.'), 'error');
                 }
             } catch(e) {
-                alert('Kesalahan jaringan: ' + e.message);
+                Swal.fire('Error', escapeHtml(e.message), 'error');
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '⚡ Masukkan ke Dokumen AJU (Staging)';
+                    btn.innerHTML = '⚡ Masukkan Terpilih ke Dokumen AJU';
                 }
             }
         }

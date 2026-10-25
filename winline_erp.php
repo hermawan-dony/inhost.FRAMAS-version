@@ -27,11 +27,12 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
+require_once __DIR__ . '/winline_helper.php';
 require_once __DIR__ . '/erp/ErpManager.php';
 
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
-$sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? 'FRM-1');
-$targetType = trim($_GET['type'] ?? 'sales_invoice');
+$sessionCmpId = $_POST['cmp_id'] ?? ($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? 'FRM-1'));
+$targetType = trim($_REQUEST['type'] ?? ($_GET['type'] ?? 'sales_invoice'));
 if (!in_array($targetType, ['sales_invoice', 'dn_transfer', 'purchase_order'])) {
     $targetType = 'sales_invoice';
 }
@@ -788,290 +789,15 @@ if ($action === 'integrate_h2h') {
     $nomorAju = $prefixAju . $newSeq;
     $escAju = $koneksi->real_escape_string($nomorAju);
 
-    $conn = getWinlineDb();
-    $valuta = in_array($cleanBc, ['40']) ? 'IDR' : 'USD';
-    $combinedItems = [];
-    $partnerData = null;
-
     // Cek apakah ada customized items (misal dari edit Qty PO di modal)
     $customItemsRaw = $_POST['items'] ?? '';
-    $hasCustomItems = false;
+    $parsedItems = null;
     if (!empty($customItemsRaw)) {
         $parsedItems = is_array($customItemsRaw) ? $customItemsRaw : json_decode($customItemsRaw, true);
-        if (!empty($parsedItems) && is_array($parsedItems)) {
-            $hasCustomItems = true;
-            $sr = 1;
-            foreach ($parsedItems as $ci) {
-                $actualQty = (float)($ci['jumlah_satuan'] ?? ($ci['qty_actual'] ?? ($ci['qty'] ?? 1)));
-                $origQty   = (float)($ci['qty_po'] ?? $actualQty);
-                $ratio     = ($origQty > 0) ? ($actualQty / $origQty) : 1;
-                $hrg       = (float)($ci['harga_satuan'] ?? ($ci['hrg'] ?? 0));
-                $fob       = isset($ci['total_fob']) ? (float)$ci['total_fob'] : round($actualQty * $hrg, 2);
-                $net       = isset($ci['netto']) ? (float)$ci['netto'] : round(((float)($origQty * 0.2)) * $ratio, 2);
-                $brt       = isset($ci['bruto']) ? (float)$ci['bruto'] : round(((float)($origQty * 0.22)) * $ratio, 2);
-
-                $combinedItems[] = [
-                    'seri'     => $sr++,
-                    'kode'     => trim($ci['kode_barang'] ?? ($ci['kode'] ?? '')),
-                    'uraian'   => trim($ci['uraian'] ?? 'Barang Winline ERP'),
-                    'sat'      => trim($ci['kode_satuan'] ?? ($ci['sat'] ?? 'PCE')),
-                    'qty_po'   => $origQty,
-                    'qty'      => $actualQty,
-                    'kem'      => trim($ci['kode_kemasan'] ?? 'CT'),
-                    'jml_kem'  => max(1, (int)ceil($actualQty / 50)),
-                    'net'      => $net,
-                    'brt'      => $brt,
-                    'hrg'      => $hrg,
-                    'fob'      => $fob
-                ];
-            }
-        }
     }
 
-    // Jika tidak ada custom items, tarik otomatis dari Winline SQL Server untuk setiap docNo yang dipilih
-    if (!$hasCustomItems) {
-        $seri = 1;
-        foreach ($docNos as $docNo) {
-            if ($type === 'purchase_order') {
-                $sqlPoDtl = "SELECT
-                    RIGHT('000000' + CAST(t026.c114 AS VARCHAR(6)), 6) AS srno, 	
-                    t026.c003 AS item_code, 	
-                    t026.c004 AS item_name, 
-                    t026.c005 AS qty,
-                    t026.c007 AS price, 	
-                    t026.c031 AS total, 	
-                    t026.c015 AS uom,
-                    t002.c000 AS valuta,
-                    t025.c010 AS partner_name,
-                    t025.c021 AS partner_cd
-                FROM cwldata..t025 t025 WITH (NOLOCK)
-                JOIN cwldata..t026 t026 WITH (NOLOCK) ON 
-                    t025.c021 = t026.c044 
-                    AND t025.c022 = t026.c045 
-                    AND t025.mesocomp = t026.mesocomp
-                LEFT JOIN cwldata..t002 t002 WITH (NOLOCK) ON 
-                    t002.c001 = t025.c021
-                WHERE t025.c044 = ?
-                  AND t026.c055 <> 13
-                  AND t026.c003 <> 'TEXT'
-                ORDER BY srno ASC";
-
-                $resDtl = @sqlsrv_query($conn, $sqlPoDtl, [$docNo]);
-                if ($resDtl) {
-                    while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
-                        if (!empty($rd['valuta'])) $valuta = trim($rd['valuta']);
-                        if (!$partnerData && !empty($rd['partner_cd'])) {
-                            $partnerData = getWinlinePartnerInfo($conn, 'purchase_order', $rd['partner_cd']);
-                        }
-                        $qVal = (float)$rd['qty'];
-                        $pVal = (float)$rd['price'];
-                        $tVal = (float)$rd['total'];
-                        if ($tVal == 0 && $qVal > 0 && $pVal > 0) $tVal = $qVal * $pVal;
-
-                        $combinedItems[] = [
-                            'seri'     => $seri++,
-                            'kode'     => trim($rd['item_code']),
-                            'uraian'   => trim($rd['item_name']),
-                            'sat'      => trim($rd['uom'] ?: 'PCE'),
-                            'qty_po'   => $qVal,
-                            'qty'      => $qVal,
-                            'kem'      => 'CT',
-                            'jml_kem'  => max(1, (int)ceil($qVal / 50)),
-                            'net'      => round($qVal * 0.2, 2),
-                            'brt'      => round($qVal * 0.22, 2),
-                            'hrg'      => $pVal,
-                            'fob'      => $tVal
-                        ];
-                    }
-                }
-            } else {
-                // Sales Invoice & DN Transfer
-                $sqlDtl = "SELECT 
-                    t26.c003 AS item_code, 
-                    MAX(t26.c004) AS item_name, 
-                    SUM(t26.c005) AS qty, 
-                    t26.c007 AS price, 
-                    SUM(t26.c031) AS total, 
-                    MAX(t26.c015) AS sat,
-                    MAX(t25.c010) AS partner_name,
-                    MAX(t25.c021) AS partner_cd
-                FROM cwldata..t025 t25 WITH (NOLOCK) 
-                JOIN cwldata..t026 t26 WITH (NOLOCK) 
-                    ON t25.c021 = t26.c044 
-                    AND t25.c022 = t26.c045 
-                    AND t25.mesocomp = t26.mesocomp 
-                WHERE (t25.c045 = ? OR t25.c055 = ? OR t25.c044 = ?) 
-                  AND t26.c055 <> 13 
-                  AND t26.c003 <> 'TEXT'
-                GROUP BY t26.c003, t26.c007
-                ORDER BY t26.c003";
-
-                $resDtl = @sqlsrv_query($conn, $sqlDtl, [$docNo, $docNo, $docNo]);
-                if ($resDtl) {
-                    while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
-                        if (!$partnerData && !empty($rd['partner_cd'])) {
-                            $partnerData = getWinlinePartnerInfo($conn, $type, $rd['partner_cd']);
-                        }
-                        $qVal = (float)$rd['qty'];
-                        $pVal = (float)$rd['price'];
-                        $tVal = (float)$rd['total'];
-                        if ($tVal == 0 && $qVal > 0 && $pVal > 0) $tVal = $qVal * $pVal;
-
-                        $combinedItems[] = [
-                            'seri'     => $seri++,
-                            'kode'     => trim($rd['item_code']),
-                            'uraian'   => trim($rd['item_name']),
-                            'sat'      => trim($rd['sat'] ?: ($type === 'sales_invoice' ? 'PR' : 'PCE')),
-                            'qty_po'   => $qVal,
-                            'qty'      => $qVal,
-                            'kem'      => ($type === 'dn_transfer') ? 'BX' : 'CT',
-                            'jml_kem'  => max(1, (int)ceil($qVal / 40)),
-                            'net'      => round($qVal * 0.15, 2),
-                            'brt'      => round($qVal * 0.17, 2),
-                            'hrg'      => $pVal,
-                            'fob'      => $tVal
-                        ];
-                    }
-                }
-            }
-        }
-    }
-
-    // Pastikan informasi partner (Supplier / Customer / Plant) selalu terambil
-    if ($conn && empty($partnerData) && !empty($docNos)) {
-        $partnerData = getWinlinePartnerInfo($conn, $type, '', $docNos[0]);
-    }
-
-    if (empty($combinedItems)) {
-        // Fallback default sample item jika tidak ada koneksi
-        $combinedItems = [
-            ['seri' => 1, 'kode' => 'SH-OUT-001', 'uraian' => 'OUTSOLE TPU ADIDAS PREDATOR FG SIZE 42', 'sat' => 'PR', 'qty_po' => 600, 'qty' => 600, 'kem' => 'CT', 'jml_kem' => 30, 'net' => 180, 'brt' => 195, 'hrg' => ($valuta === 'IDR' ? 75000 : 5.25), 'fob' => ($valuta === 'IDR' ? 45000000 : 3150.00)]
-        ];
-    }
-
-    // Hitung total akumulasi
-    $totFob = 0;
-    $totNet = 0;
-    $totBrt = 0;
-    $totQty = 0;
-    $totKem = 0;
-    foreach ($combinedItems as $it) {
-        $totFob += $it['fob'];
-        $totNet += $it['net'];
-        $totBrt += $it['brt'];
-        $totQty += $it['qty'];
-        $totKem += $it['jml_kem'];
-    }
-
-    $koneksi->begin_transaction();
-    try {
-        $kodeKantor = $company['kode_kantor'] ?? '050900';
-
-        // 1. Insert Header Staging CEISA 4.0
-        $koneksi->query("INSERT INTO bc_ceisa_header (
-            cmp_id, nomor_aju, kode_dokumen, kode_kantor, kode_valuta,
-            fob, cif, harga_penyerahan, netto, bruto,
-            tanggal_pernyataan, user_id, upd_time
-        ) VALUES (
-            '$escCmp', '$escAju', '$cleanBc', '$kodeKantor', '$valuta',
-            $totFob, $totFob, $totFob, $totNet, $totBrt,
-            CURDATE(), 'WINLINE', NOW()
-        )");
-
-        // 2. Insert Barang Staging CEISA 4.0
-        foreach ($combinedItems as $it) {
-            $escKode = $koneksi->real_escape_string($it['kode']);
-            $escUraian = $koneksi->real_escape_string($it['uraian']);
-            $escSat = $koneksi->real_escape_string($it['sat']);
-            $escKem = $koneksi->real_escape_string($it['kem']);
-
-            $koneksi->query("INSERT INTO bc_ceisa_barang (
-                cmp_id, nomor_aju, seri_barang, kode_barang, uraian, kode_satuan, jumlah_satuan,
-                kode_kemasan, jumlah_kemasan, netto, bruto, harga_satuan, fob, cif, cif_rupiah,
-                harga_penyerahan, user_id, upd_time
-            ) VALUES (
-                '$escCmp', '$escAju', {$it['seri']}, '$escKode', '$escUraian', '$escSat', {$it['qty']},
-                '$escKem', {$it['jml_kem']}, {$it['net']}, {$it['brt']}, {$it['hrg']}, {$it['fob']}, {$it['fob']}, {$it['fob']},
-                {$it['fob']}, 'WINLINE', NOW()
-            )");
-
-            // 3. Jika PO, masukkan data penerimaan aktual & prorata ke IT Inventory (tabel bc_1ab2 Pemasukan)
-            if ($type === 'purchase_order') {
-                $chk1ab = $koneksi->query("SHOW TABLES LIKE 'bc_1ab2'");
-                if ($chk1ab && $chk1ab->num_rows > 0) {
-                    $poDocFirst = $docNos[0] ?? '';
-                    $vendorName = $koneksi->real_escape_string($partnerData['name'] ?? 'SUPPLIER WINLINE');
-                    $vendorNpwp = $koneksi->real_escape_string($partnerData['npwp'] ?? '');
-
-                    $koneksi->query("INSERT INTO bc_1ab2 (
-                        cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI,
-                        NOMOR_AJU, NOMOR_PO, SERI_BARANG, KODE_BARANG, URAIAN, UNIT,
-                        QTY, QTY_AKTUAL, NILAI, CIF, NETTO, GROSS, AB, NAMA_BS, NPWP_BS, TGL_PROSES, CRT_DT, CRT_USER
-                    ) VALUES (
-                        '$escCmp', '$cleanBc', '-', CURDATE(), '$poDocFirst', CURDATE(),
-                        '$escAju', '$poDocFirst', {$it['seri']}, '$escKode', '$escUraian', '$escSat',
-                        {$it['qty_po']}, {$it['qty']}, {$it['fob']}, {$it['fob']}, {$it['net']}, {$it['brt']}, 'A',
-                        '$vendorName', '$vendorNpwp', CURDATE(), CURDATE(), 'WINLINE'
-                    ) ON DUPLICATE KEY UPDATE
-                        QTY_AKTUAL = VALUES(QTY_AKTUAL),
-                        NILAI = VALUES(NILAI),
-                        CIF = VALUES(CIF),
-                        NETTO = VALUES(NETTO),
-                        GROSS = VALUES(GROSS),
-                        NOMOR_AJU = VALUES(NOMOR_AJU),
-                        NAMA_BS = VALUES(NAMA_BS),
-                        NPWP_BS = VALUES(NPWP_BS),
-                        TGL_PROSES = VALUES(TGL_PROSES)");
-                }
-            }
-        }
-
-        // 4. Insert Dokumen Pelengkap (Satu baris dokumen untuk setiap doc_no yang digabung)
-        $docSeri = 1;
-        $kodeDokPelengkap = ($type === 'purchase_order') ? '999' : (($type === 'dn_transfer') ? '217' : '380');
-        foreach ($docNos as $dn) {
-            $escDn = $koneksi->real_escape_string($dn);
-            $koneksi->query("INSERT INTO bc_ceisa_dokumen (
-                cmp_id, nomor_aju, seri, kode_dokumen, nomor_dokumen, tanggal_dokumen, user_id, upd_time
-            ) VALUES (
-                '$escCmp', '$escAju', $docSeri, '$kodeDokPelengkap', '$escDn', CURDATE(), 'WINLINE', NOW()
-            )");
-            $docSeri++;
-        }
-
-        // 5. Insert Kemasan Staging
-        $koneksi->query("INSERT INTO bc_ceisa_kemasan (
-            cmp_id, nomor_aju, seri, kode_kemasan, jumlah_kemasan, merek, user_id, upd_time
-        ) VALUES (
-            '$escCmp', '$escAju', 1, 'CT', $totKem, 'FRAMAS', 'WINLINE', NOW()
-        )");
-
-        // 6. GENERATE ENTITAS SECARA OTOMATIS (w_custom_form_trn.srw)
-        autoGenerateCeisaEntitas($nomorAju, $cleanBc, $company, $partnerData ?: ['name' => 'PARTNER WINLINE'], $type, $koneksi);
-
-        // 7. Update nomor_aju balik ke Winline jika Sales Invoice
-        if ($conn && $type === 'sales_invoice') {
-            foreach ($docNos as $dn) {
-                @sqlsrv_query($conn, "UPDATE pur_order2cash_sales SET nomor_aju = ? WHERE inv_no = ? OR dn_no = ?", array($nomorAju, $dn, $dn));
-            }
-        }
-
-        $koneksi->commit();
-
-        $docCount = count($docNos);
-        $docSummary = ($docCount > 1) ? "$docCount dokumen (" . implode(', ', array_slice($docNos, 0, 3)) . "...)" : $docNos[0];
-
-        echo json_encode([
-            'status'    => 'OK',
-            'nomor_aju' => $nomorAju,
-            'kode_bc'   => $cleanBc,
-            'doc_count' => $docCount,
-            'message'   => "Berhasil membuat draft Host to Host BC $cleanBc! Nomor AJU: $nomorAju ($docSummary terintegrasi otomatis dengan " . count($combinedItems) . " item barang & entitas resmi)."
-        ]);
-    } catch (\Throwable $e) {
-        $koneksi->rollback();
-        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal integrasi H2H: ' . $e->getMessage()]);
-    }
+    $res = executeWinlineH2hIntegration($koneksi, $escCmp, $nomorAju, $docNos, $type, $targetBc, $parsedItems, true);
+    echo json_encode($res);
     exit;
 }
 
@@ -1122,7 +848,7 @@ $curCfg = $typeTitles[$targetType];
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Winline ERP — <?= htmlspecialchars($curCfg['title']) ?></title>
-    <link rel="stylesheet" href="assets/css/sweetalert2.min.css">
+    <link rel="stylesheet" href="assets/sweetalert2.min.css">
     <style>
         :root {
             --primary: #1890ff;
@@ -1685,9 +1411,11 @@ $curCfg = $typeTitles[$targetType];
         </div>
     </div>
 
-    <script src="assets/js/sweetalert2.all.min.js"></script>
+    <script src="assets/sweetalert2.all.min.js"></script>
+    <script src="assets/sweetalert-theme.js"></script>
     <script>
         const CURRENT_TYPE = <?= json_encode($targetType) ?>;
+        const CURRENT_CMP_ID = <?= json_encode($sessionCmpId) ?>;
         let globalWinlineData = [];
         let selectedDocNos = new Set();
         let activeModalDocNo = '';
@@ -1713,7 +1441,7 @@ $curCfg = $typeTitles[$targetType];
             const bcVal   = document.getElementById('filterTargetBc').value;
 
             try {
-                const url = `winline_erp.php?action=load_data&type=${encodeURIComponent(CURRENT_TYPE)}&date=${encodeURIComponent(dateVal)}&q=${encodeURIComponent(kwVal)}&target_bc=${encodeURIComponent(bcVal)}`;
+                const url = `winline_erp.php?action=load_data&cmp_id=${encodeURIComponent(CURRENT_CMP_ID)}&type=${encodeURIComponent(CURRENT_TYPE)}&date=${encodeURIComponent(dateVal)}&q=${encodeURIComponent(kwVal)}&target_bc=${encodeURIComponent(bcVal)}`;
                 const res = await fetch(url);
                 const json = await res.json();
 
@@ -1877,6 +1605,7 @@ $curCfg = $typeTitles[$targetType];
             try {
                 const formData = new FormData();
                 formData.append('action', 'integrate_h2h');
+                formData.append('cmp_id', CURRENT_CMP_ID);
                 formData.append('doc_no', docNo);
                 formData.append('target_bc', targetBc);
                 formData.append('type', CURRENT_TYPE);
@@ -1885,12 +1614,19 @@ $curCfg = $typeTitles[$targetType];
                 const json = await res.json();
 
                 if (json.status === 'OK') {
-                    await Swal.fire({
+                    const pop = await Swal.fire({
                         title: 'Integrasi Berhasil!',
                         html: `${escapeHtml(json.message)}<br><br><b>Nomor AJU:</b> <code style="font-size:13px; color:#1890ff;">${escapeHtml(json.nomor_aju)}</code>`,
                         icon: 'success',
-                        confirmButtonText: 'OK'
+                        showCancelButton: true,
+                        confirmButtonColor: '#1890ff',
+                        cancelButtonColor: '#8c8c8c',
+                        confirmButtonText: '📝 Buka di Form Editor',
+                        cancelButtonText: 'Tetap di Sini'
                     });
+                    if (pop.isConfirmed) {
+                        window.open(`editor.php?nomor_aju=${encodeURIComponent(json.nomor_aju)}&cmp_id=${encodeURIComponent(CURRENT_CMP_ID)}`, '_blank');
+                    }
                     loadWinlineData();
                 } else {
                     Swal.fire('Gagal Integrasi', escapeHtml(json.message || 'Terjadi kesalahan sistem.'), 'error');
@@ -1928,21 +1664,32 @@ $curCfg = $typeTitles[$targetType];
             try {
                 const formData = new FormData();
                 formData.append('action', 'integrate_h2h');
+                formData.append('cmp_id', CURRENT_CMP_ID);
                 formData.append('doc_nos', JSON.stringify(arr));
                 formData.append('type', CURRENT_TYPE);
-                // Ambil target BC dari dokumen pertama
+                // Ambil target BC dari dokumen pertama atau filter dropdown
                 const firstDoc = globalWinlineData.find(d => d.doc_no === arr[0]);
-                formData.append('target_bc', firstDoc ? firstDoc.target_bc : '27');
+                const filterBc = document.getElementById('filterTargetBc')?.value;
+                const determinedBc = (firstDoc && firstDoc.target_bc) ? firstDoc.target_bc : (filterBc || '27');
+                formData.append('target_bc', determinedBc);
 
                 const res = await fetch('winline_erp.php', { method: 'POST', body: formData });
                 const json = await res.json();
 
                 if (json.status === 'OK') {
-                    await Swal.fire({
+                    const pop = await Swal.fire({
                         title: 'Multi-Integrasi Sukses!',
                         html: `${escapeHtml(json.message)}<br><br><b>Nomor AJU Gabungan:</b> <code style="font-size:13px; color:#1890ff;">${escapeHtml(json.nomor_aju)}</code>`,
-                        icon: 'success'
+                        icon: 'success',
+                        showCancelButton: true,
+                        confirmButtonColor: '#1890ff',
+                        cancelButtonColor: '#8c8c8c',
+                        confirmButtonText: '📝 Buka di Form Editor',
+                        cancelButtonText: 'Tetap di Sini'
                     });
+                    if (pop.isConfirmed) {
+                        window.open(`editor.php?nomor_aju=${encodeURIComponent(json.nomor_aju)}&cmp_id=${encodeURIComponent(CURRENT_CMP_ID)}`, '_blank');
+                    }
                     clearSelection();
                     loadWinlineData();
                 } else {
@@ -2105,6 +1852,7 @@ $curCfg = $typeTitles[$targetType];
             try {
                 const formData = new FormData();
                 formData.append('action', 'integrate_h2h');
+                formData.append('cmp_id', CURRENT_CMP_ID);
                 formData.append('doc_no', activeModalDocNo);
                 formData.append('target_bc', activeModalTargetBc);
                 formData.append('type', CURRENT_TYPE);
@@ -2115,11 +1863,19 @@ $curCfg = $typeTitles[$targetType];
 
                 if (json.status === 'OK') {
                     closeDetailModal();
-                    await Swal.fire({
+                    const pop = await Swal.fire({
                         title: 'Integrasi Prorata Sukses!',
                         html: `${escapeHtml(json.message)}<br><br><b>Nomor AJU:</b> <code style="font-size:13px; color:#1890ff;">${escapeHtml(json.nomor_aju)}</code>`,
-                        icon: 'success'
+                        icon: 'success',
+                        showCancelButton: true,
+                        confirmButtonColor: '#1890ff',
+                        cancelButtonColor: '#8c8c8c',
+                        confirmButtonText: '📝 Buka di Form Editor',
+                        cancelButtonText: 'Tetap di Sini'
                     });
+                    if (pop.isConfirmed) {
+                        window.open(`editor.php?nomor_aju=${encodeURIComponent(json.nomor_aju)}&cmp_id=${encodeURIComponent(CURRENT_CMP_ID)}`, '_blank');
+                    }
                     loadWinlineData();
                 } else {
                     Swal.fire('Gagal Integrasi', escapeHtml(json.message || 'Terjadi kesalahan.'), 'error');
