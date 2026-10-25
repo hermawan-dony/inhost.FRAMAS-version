@@ -46,6 +46,7 @@ if (!function_exists('getDefaultAppSettings')) {
             'sidebar_icon_style'    => 'colored', // 'colored' | 'monochrome'
             'show_company_card'        => 'auto', // 'auto' (Sembunyikan untuk User Perusahaan, Tampilkan untuk Admin) | '0' (Hide) | '1' (Show)
             'show_login_company_title' => '0', // '0' (Sembunyikan teks nama perush di login card - Default) | '1' (Tampilkan)
+            'show_menu_tracking'       => '0', // '0' (Sembunyikan menu Tracking Respon Pabean - Default Framas) | '1' (Tampilkan)
             'toast_duration'        => '2600', // milidetik
             
             // 6. Audit & Monitoring Pengunjung (Visitor & Menu Activity)

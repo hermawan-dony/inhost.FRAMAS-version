@@ -179,6 +179,8 @@ if ($action === 'save') {
     $showCompCard      = trim($_POST['show_company_card'] ?? 'auto');
     $showLoginCmpTitle = trim($_POST['show_login_company_title'] ?? '0');
     if ($showLoginCmpTitle !== '1') $showLoginCmpTitle = '0';
+    $showMenuTracking  = trim($_POST['show_menu_tracking'] ?? '0');
+    if ($showMenuTracking !== '1') $showMenuTracking = '0';
     $enableVisitorMenuLog = isset($_POST['enable_visitor_menu_log']) ? trim($_POST['enable_visitor_menu_log']) : '1';
     if ($enableVisitorMenuLog !== '0') $enableVisitorMenuLog = '1';
 
@@ -248,6 +250,7 @@ if ($action === 'save') {
         'sidebar_icon_style'       => $sidebarIcon,
         'show_company_card'        => $showCompCard,
         'show_login_company_title' => $showLoginCmpTitle,
+        'show_menu_tracking'       => $showMenuTracking,
         'default_page_size'        => $pageSize,
         'toast_duration'           => $toastDur,
         'enable_visitor_menu_log'  => $enableVisitorMenuLog
@@ -1601,6 +1604,19 @@ if ($isCustomScope) {
                                 <option value="1800" <?= (($currentSettings['toast_duration'] ?? '2600') === '1800') ? 'selected' : '' ?>>1.8 Detik (Cepat)</option>
                                 <option value="2600" <?= (($currentSettings['toast_duration'] ?? '2600') === '2600') ? 'selected' : '' ?>>2.6 Detik (Standar)</option>
                                 <option value="4000" <?= (($currentSettings['toast_duration'] ?? '2600') === '4000') ? 'selected' : '' ?>>4.0 Detik (Santai)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row single">
+                        <div class="form-group">
+                            <label>
+                                <span>Menu Tracking Respon Pabean</span>
+                                <span class="hint">Visibilitas menu Tracking Respon Pabean di sidebar</span>
+                            </label>
+                            <select class="form-control" id="inp_show_menu_tracking" name="show_menu_tracking">
+                                <option value="0" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '0') ? 'selected' : '' ?>>👁️‍🗨️ Sembunyikan (HIDE - Bawaan / Default Framas)</option>
+                                <option value="1" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '1') ? 'selected' : '' ?>>👁️ Tampilkan (SHOW)</option>
                             </select>
                         </div>
                     </div>

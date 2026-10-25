@@ -995,6 +995,8 @@ if ($userRole === 'bc') {
     $initialTab = $hasStandardCustomsDocs ? 'daftar_dokumen' : 'manifest_ceisa';
 } elseif ($initialTab === 'load_erp_odoo' && (!$hasStandardCustomsDocs || !$isOdooErpCompany)) {
     $initialTab = 'daftar_dokumen';
+} elseif ($initialTab === 'tracking' && (($appSettings['show_menu_tracking'] ?? '0') !== '1')) {
+    $initialTab = 'daftar_dokumen';
 }
 $initialAju = trim($_GET['nomor_aju'] ?? '');
 
@@ -3454,7 +3456,10 @@ if ($initialTab === 'editor') {
                     </div>
                     <?php endif; ?>
 
-                    <?php if (isMenuAllowed('tracking')): ?>
+                    <?php 
+                    $showMenuTracking = ($appSettings['show_menu_tracking'] ?? '0') === '1';
+                    if ($showMenuTracking && isMenuAllowed('tracking')): 
+                    ?>
                     <div class="kt-menu__item <?= ($initialTab === 'tracking') ? 'active' : '' ?>" id="nav-item-tracking" onclick="switchMainTab('tracking')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
@@ -4289,6 +4294,7 @@ if ($initialTab === 'editor') {
         const isCompanyAdmin = <?= $isCompanyAdmin ? 'true' : 'false' ?>;
         const isBcRole = <?= ($userRole === 'bc') ? 'true' : 'false' ?>;
         let currentIsInv = <?= (int)$sessionIsInv ?>;
+        let showMenuTracking = <?= (($appSettings['show_menu_tracking'] ?? '0') === '1') ? 'true' : 'false' ?>;
 
         window.tabIframes = {};
         const initMainIframe = document.getElementById('mainFrame');
@@ -4408,7 +4414,7 @@ if ($initialTab === 'editor') {
             if (elDokap) elDokap.style.display = hasCustoms ? '' : 'none';
 
             const elTrack = document.getElementById('nav-item-tracking');
-            if (elTrack) elTrack.style.display = hasCustoms ? '' : 'none';
+            if (elTrack) elTrack.style.display = (hasCustoms && showMenuTracking) ? '' : 'none';
 
             // Item Manifes Online
             const elManCeisa = document.getElementById('nav-item-manifest_ceisa');
@@ -4436,6 +4442,8 @@ if ($initialTab === 'editor') {
                 switchMainTab('daftar_dokumen');
             } else if ((currentTab === 'manifest' || currentTab === 'manifest_ceisa') && !hasManifest) {
                 switchMainTab(hasCustoms ? 'daftar_dokumen' : 'company');
+            } else if (currentTab === 'tracking' && !showMenuTracking) {
+                switchMainTab('daftar_dokumen');
             }
         }
 
@@ -5611,6 +5619,16 @@ if ($initialTab === 'editor') {
                             else if (s.show_company_card === '1') isVis = true;
                             else isVis = isSuperAdmin;
                             card.style.display = isVis ? '' : 'none';
+                        }
+                    }
+                    if (s.show_menu_tracking !== undefined) {
+                        showMenuTracking = (s.show_menu_tracking === '1');
+                        const elTrack = document.getElementById('nav-item-tracking');
+                        if (elTrack) {
+                            elTrack.style.display = showMenuTracking ? '' : 'none';
+                        }
+                        if (!showMenuTracking && currentTab === 'tracking') {
+                            switchMainTab('daftar_dokumen');
                         }
                     }
                 }

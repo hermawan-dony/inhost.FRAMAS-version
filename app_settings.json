@@ -27,6 +27,7 @@
     "sidebar_icon_style": "colored",
     "show_company_card": "auto",
     "show_login_company_title": "0",
+    "show_menu_tracking": "0",
     "toast_duration": "2600",
     "enable_visitor_menu_log": "1",
     "default_page_size": "10",
