@@ -317,8 +317,7 @@ class OdooDriver extends ErpBaseDriver
                       "netto = $netto, " .
                       "bruto = $bruto, " .
                       "volume = $volume, " .
-                      "kode_incoterm = '$inco', " .
-                      "jumlah_barang = " . count($items) . " " .
+                      "kode_incoterm = '$inco' " .
                       "WHERE nomor_aju = '$escAju'";
             $this->db->query($updSql);
 

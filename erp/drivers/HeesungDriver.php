@@ -160,8 +160,7 @@ class HeesungDriver extends ErpBaseDriver
                       "fob = $fob, " .
                       "harga_penyerahan = $fobIdr, " .
                       "netto = $netto, " .
-                      "bruto = $bruto, " .
-                      "jumlah_barang = " . count($items) . " " .
+                      "bruto = $bruto " .
                       "WHERE nomor_aju = '$escAju'";
             $this->db->query($updSql);
 

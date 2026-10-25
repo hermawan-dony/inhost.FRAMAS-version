@@ -277,7 +277,6 @@ if ($action === 'transfer_data') {
                 )");
             }
         }
-        $koneksi->query("UPDATE bc_ceisa_header SET jumlah_barang = $itemCount WHERE nomor_aju = '$escAju'");
 
         // 3. INSERT DOKUMEN PELENGKAP (380 Invoice, 217 Surat Jalan, BL)
         $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' AND kode_dokumen IN ('380', '217', '705')");

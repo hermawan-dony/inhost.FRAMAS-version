@@ -135,7 +135,7 @@ class AccurateDriver extends ErpBaseDriver
             $bruto    = floatval($hdr['total_bruto']);
             $valuta   = $this->db->real_escape_string($hdr['valuta']);
 
-            $this->db->query("UPDATE bc_ceisa_header SET kode_valuta = '$valuta', fob = $fob, harga_penyerahan = $fobIdr, netto = $netto, bruto = $bruto, jumlah_barang = " . count($items) . " WHERE nomor_aju = '$escAju'");
+            $this->db->query("UPDATE bc_ceisa_header SET kode_valuta = '$valuta', fob = $fob, harga_penyerahan = $fobIdr, netto = $netto, bruto = $bruto WHERE nomor_aju = '$escAju'");
             $this->db->query("DELETE FROM bc_ceisa_barang WHERE nomor_aju = '$escAju'");
 
             $seri = 1;
