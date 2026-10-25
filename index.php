@@ -946,6 +946,7 @@ $breadcrumbTitlesPhp = [
     'user_management' => 'Kelola User Perusahaan',
     'docs'            => 'Dokumentasi REST API',
     'db'              => 'Database Browser',
+    'version_log'     => 'Log Update Versi Sistem',
     'inv_material'    => 'Master Data Barang',
     'inv_koreksi_klas'=> 'Koreksi KLAS IT Inventory',
     'inv_bom'         => 'Master BOM',
@@ -1018,6 +1019,8 @@ if ($initialTab === 'editor') {
     $initSrc = "/docs.php?embedded=1{$adminParam}";
 } elseif ($initialTab === 'db' && $isAdmin) {
     $initSrc = "/db.php?embedded=1{$adminParam}";
+} elseif ($initialTab === 'version_log') {
+    $initSrc = "/version_log.php?embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'inv_material') {
     $initSrc = "/material.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } elseif ($initialTab === 'inv_koreksi_klas') {
@@ -3770,6 +3773,7 @@ if ($initialTab === 'editor') {
                             <span class="kt-menu__link-text">Database Browser</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
+                    </div>
                     <div class="kt-menu__item <?= ($initialTab === 'version_log') ? 'active' : '' ?>" id="nav-item-version_log" onclick="switchMainTab('version_log')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">

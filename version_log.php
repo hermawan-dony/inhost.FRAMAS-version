@@ -9,8 +9,16 @@ if (session_status() === PHP_SESSION_NONE) {
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
 
+// Validasi Sesi Login Sesuai Standar index.php
+$sessionUserId   = $_SESSION['user_id'] ?? '';
+$sessionUserName = $_SESSION['user_name'] ?? ($_SESSION['username'] ?? '');
+$sessionUser     = $sessionUserName ?: ($sessionUserId ?: 'Super Administrator');
+$sessionRole     = $_SESSION['user_role'] ?? ($_SESSION['role'] ?? 'user');
+$isSuperAdmin    = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
+$isAdmin         = $isSuperAdmin;
+
 // Pastikan sesi login aktif
-if (empty($_SESSION['username'])) {
+if (empty($sessionUserId) && empty($sessionUserName) && empty($_SESSION['is_admin']) && !isset($_GET['embedded'])) {
     if (isset($_GET['action']) || isset($_POST['action'])) {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['status' => 'ERROR', 'message' => 'Sesi login telah berakhir. Silakan login kembali.']);
@@ -20,12 +28,7 @@ if (empty($_SESSION['username'])) {
     exit;
 }
 
-$sessionUser    = $_SESSION['username'] ?? '';
-$sessionRole    = $_SESSION['role'] ?? 'user';
-$isSuperAdmin   = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['role']));
-$isAdmin        = $isSuperAdmin;
-
-$themeParam     = $_GET['theme'] ?? 'light';
+$themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
 // Pastikan tabel bc_app_version_log selalu ada
@@ -60,9 +63,19 @@ if ($action === 'list') {
         $escQ = $koneksi->real_escape_string($q);
         $where[] = "(version LIKE '%$escQ%' OR title LIKE '%$escQ%' OR changes LIKE '%$escQ%' OR files_modified LIKE '%$escQ%' OR author LIKE '%$escQ%')";
     }
-    if (!empty($category)) {
-        $escCat = $koneksi->real_escape_string($category);
-        $where[] = "category = '$escCat'";
+    if (!empty($category) && $category !== 'Semua') {
+        if ($category === 'Feature & Bugfix') {
+            $where[] = "(category = 'Feature' OR category = 'Bug Fix' OR category = 'Bugfix')";
+        } elseif ($category === 'Bugfix' || $category === 'Bug Fix') {
+            $where[] = "(category = 'Bugfix' OR category = 'Bug Fix')";
+        } elseif ($category === 'UI/UX Refactor' || $category === 'UI/UX') {
+            $where[] = "(category = 'UI/UX' OR category = 'UI/UX Refactor')";
+        } elseif ($category === 'Enhancement') {
+            $where[] = "(category = 'Enhancement' OR category = 'Performance')";
+        } else {
+            $escCat = $koneksi->real_escape_string($category);
+            $where[] = "(category = '$escCat' OR category LIKE '%$escCat%')";
+        }
     }
 
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -71,7 +84,7 @@ if ($action === 'list') {
     $sql = "SELECT id, version, title, category, release_date, changes, files_modified, author, created_at 
             FROM bc_app_version_log 
             $whereSql 
-            ORDER BY release_date $orderDir, id $orderDir";
+            ORDER BY version $orderDir, release_date $orderDir, id $orderDir";
 
     $res = $koneksi->query($sql);
     $data = [];
@@ -134,7 +147,6 @@ if ($action === 'save') {
     $escAuth  = $koneksi->real_escape_string($author);
 
     if ($id > 0) {
-        // Edit Existing
         $sql = "UPDATE bc_app_version_log SET 
                     version = '$escVer',
                     title = '$escTitle',
@@ -150,7 +162,6 @@ if ($action === 'save') {
             exit;
         }
     } else {
-        // Insert New
         $sql = "INSERT INTO bc_app_version_log (version, title, category, release_date, changes, files_modified, author, created_at)
                 VALUES ('$escVer', '$escTitle', '$escCat', '$escRel', '$escChg', '$escFiles', '$escAuth', NOW())
                 ON DUPLICATE KEY UPDATE 
@@ -167,7 +178,6 @@ if ($action === 'save') {
         }
     }
 
-    // Set sebagai versi aktif jika dicentang atau jika ini versi terbaru
     if ($set_active) {
         $vf = __DIR__ . '/version.txt';
         @file_put_contents($vf, $version);
@@ -196,8 +206,7 @@ if ($action === 'delete') {
 
     $koneksi->query("DELETE FROM bc_app_version_log WHERE id = $id LIMIT 1");
     
-    // Perbarui version.txt dengan versi terakhir yang tersisa
-    $resLatest = $koneksi->query("SELECT version FROM bc_app_version_log ORDER BY release_date DESC, id DESC LIMIT 1");
+    $resLatest = $koneksi->query("SELECT version FROM bc_app_version_log ORDER BY version DESC, release_date DESC LIMIT 1");
     if ($resLatest && $rowLatest = $resLatest->fetch_assoc()) {
         $latestVer = trim($rowLatest['version']);
         if (!empty($latestVer)) {
@@ -216,7 +225,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Log Update Versi Aplikasi - CEISA 4.0</title>
+    <title>Log Update Versi Sistem - CEISA 4.0</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <style>
@@ -230,13 +239,13 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             --border-color: <?= ($themeParam === 'dark') ? '#303030' : '#e8e8e8' ?>;
             --border-color-light: <?= ($themeParam === 'dark') ? '#262626' : '#f0f0f0' ?>;
             --text-heading: <?= ($themeParam === 'dark') ? '#e6e6e6' : '#262626' ?>;
-            --text-body: <?= ($themeParam === 'dark') ? '#d9d9d9' : '#595959' ?>;
+            --text-body: <?= ($themeParam === 'dark') ? '#bfbfbf' : '#595959' ?>;
             --text-muted: <?= ($themeParam === 'dark') ? '#8c8c8c' : '#8c8c8c' ?>;
             --input-bg: <?= ($themeParam === 'dark') ? '#262626' : '#ffffff' ?>;
             --input-border: <?= ($themeParam === 'dark') ? '#434343' : '#d9d9d9' ?>;
             --badge-bg: <?= ($themeParam === 'dark') ? '#111b26' : '#e6f7ff' ?>;
             --badge-border: <?= ($themeParam === 'dark') ? '#15395b' : '#91d5ff' ?>;
-            --badge-text: <?= ($themeParam === 'dark') ? '#1890ff' : '#096dd9' ?>;
+            --badge-text: <?= ($themeParam === 'dark') ? '#177ddc' : '#1890ff' ?>;
         }
 
         * {
@@ -251,37 +260,93 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: var(--text-body);
             font-size: 13px;
             line-height: 1.5;
-            padding: 14px;
+            padding: 16px;
         }
 
         .container {
-            max-width: 1180px;
+            max-width: 1240px;
             margin: 0 auto;
         }
 
-        /* CARD HEADER & BANNER */
+        /* 1. HEADER CARD (MIRRORING SCREENSHOT 3) */
         .version-header-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 16px 20px;
-            margin-bottom: 14px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+            border-radius: 8px;
+            padding: 18px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
+            gap: 16px;
+        }
+
+        .version-header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+        }
+
+        .header-icon-box {
+            width: 42px;
+            height: 42px;
+            border-radius: 8px;
+            background: #e6f7ff;
+            color: #1890ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 19px;
+            flex-shrink: 0;
+        }
+        body[data-theme='dark'] .header-icon-box {
+            background: #111b26;
+            color: #177ddc;
+        }
+
+        .version-header-info {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .version-title-row {
+            display: flex;
+            align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .version-header-info h2 {
-            font-size: 17px;
+            font-size: 18px;
             font-weight: 700;
             color: var(--text-heading);
-            display: flex;
+            margin: 0;
+        }
+
+        .badge-active-version {
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            color: #1890ff;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 2px 10px;
+            border-radius: 12px;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            margin-bottom: 4px;
+            gap: 6px;
+        }
+        body[data-theme='dark'] .badge-active-version {
+            background: #111b26;
+            border-color: #15395b;
+            color: #177ddc;
+        }
+        .dot-green {
+            color: #52c41a;
+            font-size: 10px;
+            line-height: 1;
         }
 
         .version-header-info p {
@@ -290,230 +355,203 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             margin: 0;
         }
 
-        .version-chips {
+        .version-header-right {
             display: flex;
             align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
+            gap: 10px;
         }
 
-        .version-chip {
-            background: var(--bg-card-alt);
-            border: 1px solid var(--border-color);
+        /* BUTTONS */
+        .btn-primary-release {
+            background: #1890ff;
+            color: #ffffff;
+            border: 1px solid #1890ff;
             border-radius: 4px;
-            padding: 4px 10px;
-            font-size: 11.5px;
+            padding: 7px 16px;
+            font-size: 12.5px;
+            font-weight: 600;
+            cursor: pointer;
             display: inline-flex;
             align-items: center;
             gap: 6px;
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        .btn-primary-release:hover {
+            background: #40a9ff;
+            border-color: #40a9ff;
         }
 
-        .version-chip.active {
-            background: var(--badge-bg);
-            border-color: var(--badge-border);
-            color: var(--badge-text);
-            font-weight: 700;
-        }
-
-        .version-chip .chip-label {
-            color: var(--text-muted);
+        .btn-default-refresh {
+            background: #ffffff;
+            color: rgba(0, 0, 0, 0.85);
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            padding: 7px 16px;
+            font-size: 12.5px;
             font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .btn-default-refresh:hover {
+            color: #1890ff;
+            border-color: #1890ff;
+        }
+        body[data-theme='dark'] .btn-default-refresh {
+            background: #1f1f1f;
+            border-color: #434343;
+            color: #d9d9d9;
         }
 
-        /* CONTROLS & FILTER TOOLBAR */
+        /* 2. FILTER & SEARCH TOOLBAR (SCREENSHOT 3) */
         .toolbar-panel {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 10px 14px;
-            margin-bottom: 14px;
+            border-radius: 8px;
+            padding: 12px 20px;
+            margin-bottom: 16px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 12px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
         }
 
-        .filter-group {
-            display: flex;
+        .search-wrap {
+            position: relative;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            flex-wrap: wrap;
+            width: 360px;
+            max-width: 100%;
         }
 
-        .filter-input {
+        .search-icon {
+            position: absolute;
+            left: 12px;
+            color: #bfbfbf;
+            font-size: 12px;
+            pointer-events: none;
+        }
+
+        .search-input {
+            width: 100%;
             background: var(--input-bg);
             border: 1px solid var(--input-border);
             border-radius: 4px;
-            padding: 5px 10px;
+            padding: 7px 12px 7px 32px;
             font-size: 12px;
             color: var(--text-heading);
-            min-width: 240px;
             outline: none;
             transition: all 0.2s;
         }
 
-        .filter-input:focus {
-            border-color: var(--primary);
+        .search-input:focus {
+            border-color: #1890ff;
             box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
         }
 
-        .filter-select {
-            background: var(--input-bg);
-            border: 1px solid var(--input-border);
-            border-radius: 4px;
-            padding: 5px 10px;
-            font-size: 12px;
-            color: var(--text-heading);
-            outline: none;
-            cursor: pointer;
-        }
-
-        .filter-select:focus {
-            border-color: var(--primary);
-        }
-
-        /* BUTTONS */
-        .btn {
-            display: inline-flex;
+        .filter-pills-wrap {
+            display: flex;
             align-items: center;
             gap: 6px;
-            padding: 5px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 600;
-            cursor: pointer;
-            border: 1px solid transparent;
-            transition: all 0.2s;
-            text-decoration: none;
+            flex-wrap: wrap;
         }
 
-        .btn-primary {
-            background: var(--primary);
-            border-color: var(--primary);
-            color: #ffffff;
-        }
-        .btn-primary:hover {
-            background: var(--primary-hover);
-            border-color: var(--primary-hover);
-        }
-
-        .btn-default {
-            background: var(--bg-card);
-            border-color: var(--input-border);
-            color: var(--text-heading);
-        }
-        .btn-default:hover {
-            color: var(--primary);
-            border-color: var(--primary);
-        }
-
-        .btn-danger-outline {
+        .filter-pill {
             background: transparent;
-            border-color: #ff4d4f;
-            color: #ff4d4f;
-        }
-        .btn-danger-outline:hover {
-            background: #ff4d4f;
-            color: #ffffff;
-        }
-
-        .btn-sm {
-            padding: 3px 8px;
-            font-size: 11px;
-            border-radius: 3px;
-        }
-
-        /* VIEW TOGGLE (TIMELINE VS TABLE) */
-        .view-toggle {
-            display: inline-flex;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-        .view-toggle-btn {
-            background: var(--bg-card);
             border: none;
-            padding: 5px 10px;
-            font-size: 11px;
+            color: var(--text-body);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 5px 14px;
+            border-radius: 16px;
             cursor: pointer;
-            color: var(--text-muted);
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .filter-pill:hover {
+            color: #1890ff;
+        }
+
+        .filter-pill.active {
+            background: #1890ff;
+            color: #ffffff;
             font-weight: 600;
         }
-        .view-toggle-btn.active {
-            background: var(--primary);
-            color: #ffffff;
-        }
 
-        /* TIMELINE CARDS */
+        /* 3. TIMELINE LAYOUT (SCREENSHOT 3) */
         .timeline-container {
             position: relative;
-            padding-left: 28px;
-            margin-top: 10px;
+            padding-left: 36px;
+            margin-top: 14px;
         }
 
         .timeline-container::before {
             content: '';
             position: absolute;
-            left: 11px;
-            top: 10px;
-            bottom: 20px;
+            left: 14px;
+            top: 24px;
+            bottom: 30px;
             width: 2px;
             background: var(--border-color);
         }
 
         .timeline-item {
             position: relative;
-            margin-bottom: 20px;
+            margin-bottom: 22px;
         }
 
         .timeline-node {
             position: absolute;
-            left: -28px;
-            top: 14px;
+            left: -36px;
+            top: 18px;
             width: 24px;
             height: 24px;
             border-radius: 50%;
             background: var(--bg-card);
-            border: 2px solid var(--primary);
+            border: 2px solid #1890ff;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 10px;
-            color: var(--primary);
-            box-shadow: 0 0 0 3px var(--bg-body);
+            font-size: 12px;
+            color: #1890ff;
+            box-shadow: 0 0 0 4px var(--bg-body);
             z-index: 2;
         }
 
         .timeline-item.is-current .timeline-node {
-            background: var(--primary);
-            color: #ffffff;
-            box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.25);
+            border-color: #52c41a;
+            background: #f6ffed;
+            color: #52c41a;
+            box-shadow: 0 0 0 4px var(--bg-body);
         }
 
+        /* CARD */
         .version-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 16px;
+            border-radius: 8px;
+            padding: 18px 24px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.02);
-            transition: box-shadow 0.2s, border-color 0.2s;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .version-card:hover {
-            border-color: var(--primary-hover);
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            border-color: #91d5ff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         }
 
         .version-card-head {
             display: flex;
             justify-content: space-between;
-            align-items: flex-start;
+            align-items: center;
             flex-wrap: wrap;
-            gap: 8px;
-            padding-bottom: 10px;
-            border-bottom: 1px dashed var(--border-color);
-            margin-bottom: 12px;
+            gap: 10px;
         }
 
         .card-head-left {
@@ -523,130 +561,144 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             flex-wrap: wrap;
         }
 
-        .version-badge {
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
-            font-size: 13px;
+        .badge-version-green {
+            background: #52c41a;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 11.5px;
+            padding: 2px 9px;
+            border-radius: 4px;
+            font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+            letter-spacing: 0.3px;
+        }
+
+        .badge-version-blue {
+            background: #1890ff;
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 11.5px;
+            padding: 2px 9px;
+            border-radius: 4px;
+            font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
+            letter-spacing: 0.3px;
+        }
+
+        .tag-cat {
+            font-size: 10.5px;
             font-weight: 700;
             padding: 2px 8px;
             border-radius: 4px;
-            background: var(--badge-bg);
-            border: 1px solid var(--badge-border);
-            color: var(--badge-text);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+
+        .tag-cat-enhancement { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
+        .tag-cat-feature     { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+        .tag-cat-bugfix      { background: #fff1f0; border: 1px solid #ffa39e; color: #f5222d; }
+        .tag-cat-uiux        { background: #e6fffb; border: 1px solid #87e8de; color: #13c2c2; }
+        .tag-cat-performance { background: #f9f0ff; border: 1px solid #d3adf7; color: #722ed1; }
+        .tag-cat-update      { background: #e6f7ff; border: 1px solid #91d5ff; color: #1890ff; }
+        .tag-cat-security    { background: #fff7e6; border: 1px solid #ffd591; color: #fa8c16; }
+
+        .tag-active-status {
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            color: #52c41a;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
             display: inline-flex;
             align-items: center;
             gap: 4px;
         }
 
-        .category-tag {
-            font-size: 10.5px;
-            font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 10px;
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-
-        .category-feature     { background: rgba(82, 196, 26, 0.15); color: #52c41a; border: 1px solid rgba(82, 196, 26, 0.3); }
-        .category-bugfix      { background: rgba(255, 77, 79, 0.15); color: #ff4d4f; border: 1px solid rgba(255, 77, 79, 0.3); }
-        .category-performance { background: rgba(114, 46, 209, 0.15); color: #722ed1; border: 1px solid rgba(114, 46, 209, 0.3); }
-        .category-uiux        { background: rgba(19, 194, 194, 0.15); color: #13c2c2; border: 1px solid rgba(19, 194, 194, 0.3); }
-        .category-update      { background: rgba(24, 144, 255, 0.15); color: #1890ff; border: 1px solid rgba(24, 144, 255, 0.3); }
-        .category-security    { background: rgba(250, 140, 22, 0.15); color: #fa8c16; border: 1px solid rgba(250, 140, 22, 0.3); }
-
-        .version-title {
-            font-size: 14.5px;
-            font-weight: 700;
-            color: var(--text-heading);
-            margin-top: 4px;
-        }
-
         .card-head-right {
             display: flex;
             align-items: center;
-            gap: 10px;
-            font-size: 11.5px;
+            gap: 6px;
+            font-size: 12px;
             color: var(--text-muted);
         }
 
-        .version-card-body {
+        .card-item-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-heading);
+            margin: 10px 0 12px 0;
+        }
+
+        .changes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+            margin-bottom: 14px;
+        }
+
+        .change-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
             font-size: 12.5px;
             color: var(--text-body);
             line-height: 1.6;
         }
 
-        .version-changes-box {
-            background: var(--bg-card-alt);
-            border: 1px solid var(--border-color-light);
-            border-radius: 4px;
-            padding: 10px 14px;
-            margin-top: 8px;
-            white-space: pre-wrap;
-            font-family: inherit;
+        .change-check {
+            color: #52c41a;
+            font-weight: 700;
+            font-size: 13px;
+            line-height: 1.6;
+            flex-shrink: 0;
         }
 
-        .version-card-footer {
-            margin-top: 12px;
-            padding-top: 10px;
+        .card-footer-row {
             border-top: 1px solid var(--border-color-light);
+            padding-top: 10px;
+            margin-top: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            font-size: 11.5px;
+            color: var(--text-muted);
             flex-wrap: wrap;
             gap: 8px;
-            font-size: 11px;
-            color: var(--text-muted);
         }
 
-        .file-chips-wrap {
+        .footer-left {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 6px;
             flex-wrap: wrap;
         }
 
-        .file-chip {
+        .file-tag {
             background: var(--bg-card-alt);
             border: 1px solid var(--border-color);
             border-radius: 3px;
-            padding: 1px 6px;
+            padding: 2px 7px;
             font-size: 10.5px;
             font-family: 'SFMono-Regular', Consolas, monospace;
             color: var(--text-heading);
         }
 
-        /* TABLE VIEW */
-        .table-responsive {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            overflow-x: auto;
-            display: none;
+        .footer-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
 
-        .version-table {
-            width: 100%;
-            border-collapse: collapse;
+        .action-icon {
+            cursor: pointer;
+            color: var(--text-muted);
             font-size: 12px;
+            transition: color 0.2s;
         }
-
-        .version-table th {
-            background: var(--bg-card-alt);
-            padding: 10px 12px;
-            text-align: left;
-            font-weight: 700;
-            color: var(--text-heading);
-            border-bottom: 1px solid var(--border-color);
-            white-space: nowrap;
+        .action-icon:hover {
+            color: #1890ff;
         }
-
-        .version-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid var(--border-color-light);
-            vertical-align: top;
-        }
-
-        .version-table tr:hover td {
-            background: var(--bg-card-alt);
+        .action-icon.trash:hover {
+            color: #ff4d4f;
         }
 
         /* MODAL STYLES */
@@ -700,7 +752,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .modal-close {
             background: transparent;
             border: none;
-            font-size: 16px;
+            font-size: 18px;
             color: var(--text-muted);
             cursor: pointer;
         }
@@ -738,7 +790,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: var(--input-bg);
             border: 1px solid var(--input-border);
             border-radius: 4px;
-            padding: 6px 10px;
+            padding: 7px 10px;
             font-size: 12px;
             color: var(--text-heading);
             outline: none;
@@ -773,7 +825,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: var(--text-muted);
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border-radius: 8px;
         }
         .empty-state i {
             font-size: 36px;
@@ -786,100 +838,55 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
 <div class="container">
 
-    <!-- 1. HEADER BANNER -->
+    <!-- 1. HEADER CARD (MIRRORING SCREENSHOT 3) -->
     <div class="version-header-card">
-        <div class="version-header-info">
-            <h2>
-                <span>📜 Log Update Versi Aplikasi</span>
-            </h2>
-            <p>Catatan riwayat pembaruan, perbaikan bug, optimasi performa, dan rilis fitur CEISA 4.0</p>
-        </div>
-        <div class="version-chips">
-            <div class="version-chip active" title="Versi Aktif Sistem yang sedang berjalan">
-                <span class="chip-label">Versi Aktif:</span>
-                <span id="headerActiveVersion"><strong><?= htmlspecialchars($currentSystemVersion) ?></strong></span>
+        <div class="version-header-left">
+            <div class="header-icon-box" title="Log Update Versi">
+                <i class="fa-solid fa-clock-rotate-left"></i>
             </div>
-            <div class="version-chip">
-                <span class="chip-label">Total Rilis:</span>
-                <strong id="headerTotalRelease">0</strong>
-            </div>
-            <div class="version-chip">
-                <span class="chip-label">Terakhir:</span>
-                <span id="headerLatestDate">-</span>
+            <div class="version-header-info">
+                <div class="version-title-row">
+                    <h2>Log Update Versi Sistem</h2>
+                    <span class="badge-active-version" title="Versi aktif yang sedang berjalan">
+                        <span class="dot-green">●</span> Versi Aktif : <span id="headerActiveVersion"><?= htmlspecialchars($currentSystemVersion) ?></span>
+                    </span>
+                </div>
+                <p>Catatan riwayat rilis pembaruan, bugfix, dan perbaikan fitur CEISA 4.0</p>
             </div>
         </div>
-    </div>
 
-    <!-- 2. TOOLBAR & CONTROLS -->
-    <div class="toolbar-panel">
-        <div class="filter-group">
-            <input type="text" id="searchFilter" class="filter-input" placeholder="🔍 Cari versi, judul, berkas, atau solusi..." oninput="debounceSearch()">
-            
-            <select id="categoryFilter" class="filter-select" onchange="loadVersionLogs()">
-                <option value="">Semua Kategori</option>
-                <option value="Feature">Feature (Fitur Baru)</option>
-                <option value="Bug Fix">Bug Fix (Perbaikan)</option>
-                <option value="Performance">Performance (Optimasi)</option>
-                <option value="UI/UX">UI/UX (Tampilan)</option>
-                <option value="Update">Update (Umum)</option>
-                <option value="Security">Security (Keamanan)</option>
-            </select>
-
-            <select id="sortFilter" class="filter-select" onchange="loadVersionLogs()">
-                <option value="desc">Terbaru Dahulu</option>
-                <option value="asc">Terlama Dahulu</option>
-            </select>
-
-            <button type="button" class="btn btn-default btn-sm" onclick="loadVersionLogs()" title="Muat Ulang Data">
+        <div class="version-header-right">
+            <?php if ($isAdmin): ?>
+            <button type="button" class="btn-primary-release" onclick="openAddVersionModal()">
+                <i class="fa-solid fa-plus"></i> Tambah Catatan Rilis
+            </button>
+            <?php endif; ?>
+            <button type="button" class="btn-default-refresh" onclick="loadVersionLogs()" title="Muat Ulang Data">
                 <i class="fa-solid fa-rotate"></i> Refresh
             </button>
         </div>
+    </div>
 
-        <div style="display:flex; align-items:center; gap:8px;">
-            <!-- View Toggle -->
-            <div class="view-toggle">
-                <button type="button" class="view-toggle-btn active" id="btnViewTimeline" onclick="setViewMode('timeline')" title="Tampilan Kartu Timeline">
-                    <i class="fa-solid fa-timeline"></i> Timeline
-                </button>
-                <button type="button" class="view-toggle-btn" id="btnViewTable" onclick="setViewMode('table')" title="Tampilan Tabel">
-                    <i class="fa-solid fa-table-list"></i> Tabel
-                </button>
-            </div>
+    <!-- 2. TOOLBAR: SEARCH & CATEGORY PILLS (SCREENSHOT 3) -->
+    <div class="toolbar-panel">
+        <div class="search-wrap">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" id="searchFilter" class="search-input" placeholder="Cari versi, perbaikan, judul, atau file.." oninput="debounceSearch()">
+        </div>
 
-            <?php if ($isAdmin): ?>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openAddVersionModal()">
-                <i class="fa-solid fa-plus"></i> Catat Versi Baru
-            </button>
-            <?php endif; ?>
+        <div class="filter-pills-wrap" id="categoryPillsWrap">
+            <button type="button" class="filter-pill active" data-category="" onclick="setFilterCategory('', this)">Semua</button>
+            <button type="button" class="filter-pill" data-category="Feature & Bugfix" onclick="setFilterCategory('Feature & Bugfix', this)">Feature & Bugfix</button>
+            <button type="button" class="filter-pill" data-category="Bugfix" onclick="setFilterCategory('Bugfix', this)">Bugfix</button>
+            <button type="button" class="filter-pill" data-category="Feature" onclick="setFilterCategory('Feature', this)">Feature</button>
+            <button type="button" class="filter-pill" data-category="Enhancement" onclick="setFilterCategory('Enhancement', this)">Enhancement</button>
+            <button type="button" class="filter-pill" data-category="UI/UX Refactor" onclick="setFilterCategory('UI/UX Refactor', this)">UI/UX Refactor</button>
         </div>
     </div>
 
-    <!-- 3. VIEW 1: TIMELINE CARDS VIEW -->
+    <!-- 3. TIMELINE CARDS LIST (SCREENSHOT 3) -->
     <div class="timeline-container" id="timelineView">
         <!-- Populated via JS -->
-    </div>
-
-    <!-- 4. VIEW 2: TABLE VIEW -->
-    <div class="table-responsive" id="tableView">
-        <table class="version-table">
-            <thead>
-                <tr>
-                    <th style="width: 50px; text-align: center;">#</th>
-                    <th style="width: 130px;">Versi</th>
-                    <th style="width: 140px;">Rilis</th>
-                    <th style="width: 110px;">Kategori</th>
-                    <th>Judul Pembaruan & Rincian Yang Dirubah / Disolve</th>
-                    <th style="width: 180px;">Berkas Dimodifikasi</th>
-                    <th style="width: 120px;">Author</th>
-                    <?php if ($isAdmin): ?>
-                    <th style="width: 90px; text-align: center;">Aksi</th>
-                    <?php endif; ?>
-                </tr>
-            </thead>
-            <tbody id="tableBody">
-                <!-- Populated via JS -->
-            </tbody>
-        </table>
     </div>
 
     <div class="empty-state" id="emptyState" style="display:none;">
@@ -890,7 +897,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
 </div>
 
-<!-- 5. MODAL FORM: TAMBAH / EDIT VERSI (ADMIN ONLY) -->
+<!-- 4. MODAL FORM: TAMBAH / EDIT VERSI (ADMIN ONLY) -->
 <?php if ($isAdmin): ?>
 <div class="modal-overlay" id="versionModal">
     <div class="modal-dialog">
@@ -914,11 +921,12 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
                     <div>
                         <label class="form-label">Kategori Pembaruan:</label>
                         <select id="formCategory" class="form-control">
-                            <option value="Update">Update (Pembaruan Umum)</option>
+                            <option value="Enhancement">Enhancement (Penyempurnaan)</option>
                             <option value="Feature">Feature (Rilis Fitur Baru)</option>
-                            <option value="Bug Fix">Bug Fix (Perbaikan Kendala / Error)</option>
+                            <option value="Bugfix">Bugfix (Perbaikan Kendala / Error)</option>
+                            <option value="UI/UX Refactor">UI/UX Refactor (Penyempurnaan Tampilan)</option>
                             <option value="Performance">Performance (Optimasi Kecepatan)</option>
-                            <option value="UI/UX">UI/UX (Penyempurnaan Tampilan)</option>
+                            <option value="Update">Update (Pembaruan Umum)</option>
                             <option value="Security">Security (Keamanan & Autentikasi)</option>
                         </select>
                     </div>
@@ -931,23 +939,23 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
                     </div>
                     <div>
                         <label class="form-label">Author / Pembuat:</label>
-                        <input type="text" id="formAuthor" class="form-control" value="Super Administrator" required>
+                        <input type="text" id="formAuthor" class="form-control" value="Super Administrator (DP)" required>
                     </div>
                 </div>
 
                 <div class="form-row">
                     <label class="form-label">Judul Pembaruan (Ringkasan):</label>
-                    <input type="text" id="formTitleText" class="form-control" required placeholder="Contoh: Pindahkan Tombol Set H2H ke Menu Klik Kanan & Urutkan Dokumen">
+                    <input type="text" id="formTitleText" class="form-control" required placeholder="Contoh: Pengurutan Descending Log Update Versi Sistem">
                 </div>
 
                 <div class="form-row">
-                    <label class="form-label">Rincian Perubahan / Yang Disolve (Mendukung Bullet Point):</label>
-                    <textarea id="formChanges" class="form-control" required placeholder="• Masalah yang diselesaikan...&#10;• Fitur yang ditambahkan...&#10;• Perilaku baru yang disesuaikan..."></textarea>
+                    <label class="form-label">Rincian Perubahan / Yang Disolve (Pisahkan dengan baris baru):</label>
+                    <textarea id="formChanges" class="form-control" required placeholder="Memperbaiki sorting log rilis menjadi descending...&#10;Versi rilis terbaru selalu tampil paling atas...&#10;Menyelaraskan timestamp release_date..."></textarea>
                 </div>
 
                 <div class="form-row">
                     <label class="form-label">Berkas yang Dimodifikasi (Pisahkan dengan koma):</label>
-                    <input type="text" id="formFiles" class="form-control" placeholder="Contoh: transfer.php, editor.php, daftar_dokumen.php">
+                    <input type="text" id="formFiles" class="form-control" placeholder="Contoh: version_log.php, version.txt">
                 </div>
 
                 <div class="form-row" style="margin-top:10px;">
@@ -958,8 +966,8 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-default" onclick="closeVersionModal()">Batal</button>
-                <button type="submit" class="btn btn-primary" id="btnSubmitForm">
+                <button type="button" class="btn-default-refresh" onclick="closeVersionModal()" style="padding:6px 14px;">Batal</button>
+                <button type="submit" class="btn-primary-release" id="btnSubmitForm" style="padding:6px 14px;">
                     <i class="fa-solid fa-floppy-disk"></i> Simpan Catatan Versi
                 </button>
             </div>
@@ -971,35 +979,21 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 <script>
     let rawVersionData = [];
     let activeSystemVersion = '<?= htmlspecialchars($currentSystemVersion) ?>';
-    let currentViewMode = localStorage.getItem('ceisa_version_view_mode') || 'timeline';
+    let currentCategoryFilter = '';
     let searchTimeout = null;
 
     document.addEventListener('DOMContentLoaded', () => {
-        setViewMode(currentViewMode, false);
         loadVersionLogs();
     });
 
-    function setViewMode(mode, savePref = true) {
-        currentViewMode = mode;
-        if (savePref) {
-            localStorage.setItem('ceisa_version_view_mode', mode);
+    function setFilterCategory(cat, el) {
+        currentCategoryFilter = cat;
+        const pills = document.querySelectorAll('.filter-pill');
+        pills.forEach(p => p.classList.remove('active'));
+        if (el) {
+            el.classList.add('active');
         }
-        const tlBtn = document.getElementById('btnViewTimeline');
-        const tbBtn = document.getElementById('btnViewTable');
-        const tlView = document.getElementById('timelineView');
-        const tbView = document.getElementById('tableView');
-
-        if (mode === 'table') {
-            tlBtn.classList.remove('active');
-            tbBtn.classList.add('active');
-            tlView.style.display = 'none';
-            tbView.style.display = 'block';
-        } else {
-            tbBtn.classList.remove('active');
-            tlBtn.classList.add('active');
-            tbView.style.display = 'none';
-            tlView.style.display = 'block';
-        }
+        loadVersionLogs();
     }
 
     function debounceSearch() {
@@ -1011,15 +1005,12 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
     async function loadVersionLogs() {
         const q = document.getElementById('searchFilter').value.trim();
-        const cat = document.getElementById('categoryFilter').value;
-        const sort = document.getElementById('sortFilter').value;
-
+        const cat = currentCategoryFilter;
         const tlView = document.getElementById('timelineView');
-        const tbBody = document.getElementById('tableBody');
         const emptyState = document.getElementById('emptyState');
 
         try {
-            const res = await fetch(`version_log.php?action=list&q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&sort=${encodeURIComponent(sort)}&_t=${Date.now()}`);
+            const res = await fetch(`version_log.php?action=list&q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&sort=desc&_t=${Date.now()}`);
             const json = await res.json();
 
             if (json.status !== 'OK') {
@@ -1029,23 +1020,20 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             rawVersionData = json.data || [];
             activeSystemVersion = json.active_version || activeSystemVersion;
 
-            // Update stats
-            document.getElementById('headerActiveVersion').innerHTML = `<strong>${escapeHtml(activeSystemVersion)}</strong>`;
-            document.getElementById('headerTotalRelease').innerText = json.count || 0;
-            if (json.latest_release) {
-                document.getElementById('headerLatestDate').innerText = formatDateTime(json.latest_release);
+            // Update stats & chip
+            const headerActiveEl = document.getElementById('headerActiveVersion');
+            if (headerActiveEl) {
+                headerActiveEl.innerText = activeSystemVersion;
             }
 
             if (rawVersionData.length === 0) {
                 tlView.innerHTML = '';
-                tbBody.innerHTML = '';
                 emptyState.style.display = 'block';
                 return;
             }
 
             emptyState.style.display = 'none';
             renderTimelineView(rawVersionData);
-            renderTableView(rawVersionData);
 
         } catch (err) {
             console.error(err);
@@ -1053,14 +1041,30 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         }
     }
 
-    function getCategoryClass(cat) {
-        const c = String(cat || '').toLowerCase().replace(/[^a-z]/g, '');
-        if (c.includes('bug')) return 'category-bugfix';
-        if (c.includes('perf')) return 'category-performance';
-        if (c.includes('feat')) return 'category-feature';
-        if (c.includes('ui') || c.includes('ux')) return 'category-uiux';
-        if (c.includes('sec')) return 'category-security';
-        return 'category-update';
+    function getCategoryTagHtml(cat) {
+        const c = String(cat || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        let cls = 'tag-cat-update';
+        let label = cat || 'UPDATE';
+        if (c.includes('enhanc')) {
+            cls = 'tag-cat-enhancement';
+            label = 'ENHANCEMENT';
+        } else if (c.includes('feat')) {
+            cls = 'tag-cat-feature';
+            label = 'FEATURE';
+        } else if (c.includes('bug')) {
+            cls = 'tag-cat-bugfix';
+            label = 'BUGFIX';
+        } else if (c.includes('ui') || c.includes('ux') || c.includes('refactor')) {
+            cls = 'tag-cat-uiux';
+            label = 'UI/UX REFACTOR';
+        } else if (c.includes('perf')) {
+            cls = 'tag-cat-performance';
+            label = 'PERFORMANCE';
+        } else if (c.includes('sec')) {
+            cls = 'tag-cat-security';
+            label = 'SECURITY';
+        }
+        return `<span class="tag-cat ${cls}">${escapeHtml(label)}</span>`;
     }
 
     function renderTimelineView(list) {
@@ -1069,67 +1073,68 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
         list.forEach((item, idx) => {
             const isCurrent = (item.version === activeSystemVersion) || (idx === 0 && !activeSystemVersion);
-            const catClass = getCategoryClass(item.category);
+            const badgeClass = isCurrent ? 'badge-version-green' : 'badge-version-blue';
+            const catTagHtml = getCategoryTagHtml(item.category);
 
-            // Parse file chips
+            // Parse file tags
             const files = (item.files_modified || '')
                 .split(',')
                 .map(f => f.trim())
                 .filter(f => f !== '');
             const filesHtml = files.length > 0 
-                ? files.map(f => `<span class="file-chip"><i class="fa-regular fa-file-code"></i> ${escapeHtml(f)}</span>`).join('') 
+                ? files.map(f => `<span class="file-tag">${escapeHtml(f)}</span>`).join(' ') 
                 : '<span style="color:var(--text-muted); font-style:italic;">-</span>';
+
+            // Parse lines of changes and render with green checkmark
+            const lines = String(item.changes || '')
+                .split('\n')
+                .map(l => l.trim().replace(/^([•\-\*✓✔\d\.\)]\s*)+/, '').trim())
+                .filter(l => l !== '');
+
+            const changesHtml = lines.map(line => `
+                <div class="change-row">
+                    <span class="change-check">✓</span>
+                    <span class="change-text">${escapeHtml(line)}</span>
+                </div>
+            `).join('');
 
             const itemEl = document.createElement('div');
             itemEl.className = `timeline-item ${isCurrent ? 'is-current' : ''}`;
             itemEl.innerHTML = `
                 <div class="timeline-node">
-                    <i class="fa-solid ${isCurrent ? 'fa-rocket' : 'fa-check'}"></i>
+                    ${isCurrent ? '<i class="fa-solid fa-check"></i>' : '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#1890ff;"></span>'}
                 </div>
                 <div class="version-card">
                     <div class="version-card-head">
-                        <div>
-                            <div class="card-head-left">
-                                <span class="version-badge">
-                                    <i class="fa-solid fa-code-branch"></i> v${escapeHtml(item.version)}
-                                </span>
-                                <span class="category-tag ${catClass}">${escapeHtml(item.category)}</span>
-                                ${isCurrent ? '<span style="background:#52c41a; color:#fff; font-size:10px; font-weight:700; padding:1px 6px; border-radius:3px;">VERSI AKTIF</span>' : ''}
-                            </div>
-                            <div class="version-title">${escapeHtml(item.title)}</div>
+                        <div class="card-head-left">
+                            <span class="${badgeClass}">v${escapeHtml(item.version)}</span>
+                            ${catTagHtml}
+                            ${isCurrent ? '<span class="tag-active-status"><span class="dot-green">●</span> Versi Aktif</span>' : ''}
                         </div>
                         <div class="card-head-right">
-                            <span title="Waktu Rilis"><i class="fa-regular fa-calendar-check"></i> ${formatDateTime(item.release_date)}</span>
-                            <span title="Author"><i class="fa-regular fa-user"></i> ${escapeHtml(item.author)}</span>
+                            <i class="fa-regular fa-calendar"></i>
+                            <span>${formatReleaseDate(item.release_date)}</span>
+                        </div>
+                    </div>
+
+                    <div class="card-item-title">${escapeHtml(item.title)}</div>
+
+                    <div class="changes-list">
+                        ${changesHtml}
+                    </div>
+
+                    <div class="card-footer-row">
+                        <div class="footer-left">
+                            <span>Berkas:</span>
+                            ${filesHtml}
+                        </div>
+                        <div class="footer-right">
+                            <i class="fa-regular fa-user"></i>
+                            <span>${escapeHtml(item.author || 'Super Admin')}</span>
                             <?php if ($isAdmin): ?>
-                            <div style="display:flex; gap:4px; margin-left:6px;">
-                                <button type="button" class="btn btn-default btn-sm" onclick="openEditVersionModal(${item.id})" title="Edit Log Versi">
-                                    <i class="fa-solid fa-pen-to-square"></i>
-                                </button>
-                                <button type="button" class="btn btn-danger-outline btn-sm" onclick="confirmDeleteVersion(${item.id}, '${escapeHtml(item.version)}')" title="Hapus Log Versi">
-                                    <i class="fa-solid fa-trash-can"></i>
-                                </button>
-                            </div>
+                            <i class="fa-solid fa-pencil action-icon" onclick="openEditVersionModal(${item.id})" title="Edit Log Versi"></i>
+                            <i class="fa-regular fa-trash-can action-icon trash" onclick="confirmDeleteVersion(${item.id}, '${escapeHtml(item.version)}')" title="Hapus Log Versi"></i>
                             <?php endif; ?>
-                        </div>
-                    </div>
-
-                    <div class="version-card-body">
-                        <div style="font-weight:600; font-size:11.5px; color:var(--text-heading); margin-bottom:4px;">
-                            <i class="fa-solid fa-list-check" style="color:var(--primary); margin-right:4px;"></i> Rincian Perubahan & Solusi Masalah:
-                        </div>
-                        <div class="version-changes-box">${escapeHtml(item.changes)}</div>
-                    </div>
-
-                    <div class="version-card-footer">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span style="font-weight:600;"><i class="fa-solid fa-folder-tree"></i> Berkas Dimodifikasi:</span>
-                            <div class="file-chips-wrap">${filesHtml}</div>
-                        </div>
-                        <div>
-                            <button type="button" class="btn btn-default btn-sm" onclick="copyVersionSummary(${item.id})" title="Salin Ringkasan Versi Ini">
-                                <i class="fa-regular fa-copy"></i> Salin Log
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -1138,82 +1143,19 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         });
     }
 
-    function renderTableView(list) {
-        const tbody = document.getElementById('tableBody');
-        tbody.innerHTML = '';
-
-        list.forEach((item, idx) => {
-            const isCurrent = (item.version === activeSystemVersion);
-            const catClass = getCategoryClass(item.category);
-
-            const files = (item.files_modified || '')
-                .split(',')
-                .map(f => f.trim())
-                .filter(f => f !== '');
-            const filesHtml = files.length > 0 
-                ? files.map(f => `<span class="file-chip" style="margin-bottom:2px; display:inline-block;">${escapeHtml(f)}</span>`).join(' ') 
-                : '-';
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td style="text-align:center; font-weight:700; color:var(--text-muted);">${idx + 1}</td>
-                <td>
-                    <span class="version-badge" style="font-size:11.5px;">v${escapeHtml(item.version)}</span>
-                    ${isCurrent ? '<div style="color:#52c41a; font-size:9.5px; font-weight:700; margin-top:2px;">● AKTIF</div>' : ''}
-                </td>
-                <td style="white-space:nowrap; font-size:11.5px;">
-                    <div>${formatDate(item.release_date)}</div>
-                    <small style="color:var(--text-muted);">${formatTime(item.release_date)}</small>
-                </td>
-                <td>
-                    <span class="category-tag ${catClass}">${escapeHtml(item.category)}</span>
-                </td>
-                <td>
-                    <div style="font-weight:700; color:var(--text-heading); margin-bottom:4px;">${escapeHtml(item.title)}</div>
-                    <div style="font-size:11.5px; color:var(--text-body); white-space:pre-wrap; max-height:100px; overflow-y:auto; background:var(--bg-card-alt); padding:4px 8px; border-radius:3px;">${escapeHtml(item.changes)}</div>
-                </td>
-                <td>${filesHtml}</td>
-                <td style="white-space:nowrap; font-size:11.5px;">${escapeHtml(item.author)}</td>
-                <?php if ($isAdmin): ?>
-                <td style="text-align:center; white-space:nowrap;">
-                    <button type="button" class="btn btn-default btn-sm" onclick="openEditVersionModal(${item.id})" title="Edit">
-                        <i class="fa-solid fa-pen-to-square"></i>
-                    </button>
-                    <button type="button" class="btn btn-danger-outline btn-sm" onclick="confirmDeleteVersion(${item.id}, '${escapeHtml(item.version)}')" title="Hapus">
-                        <i class="fa-solid fa-trash-can"></i>
-                    </button>
-                </td>
-                <?php endif; ?>
-            `;
-            tbody.appendChild(tr);
-        });
-    }
-
-    function formatDateTime(str) {
+    function formatReleaseDate(str) {
         if (!str) return '-';
         const d = new Date(str.replace(' ', 'T'));
         if (isNaN(d.getTime())) return str;
-        return d.toLocaleDateString('id-ID', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        });
-    }
+        
+        const day = d.getDate();
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+        const month = months[d.getMonth()] || '';
+        const year = d.getFullYear();
+        const hours = String(d.getHours()).padStart(2, '0');
+        const minutes = String(d.getMinutes()).padStart(2, '0');
 
-    function formatDate(str) {
-        if (!str) return '-';
-        const d = new Date(str.replace(' ', 'T'));
-        if (isNaN(d.getTime())) return str;
-        return d.toLocaleDateString('id-ID', { year: 'numeric', month: 'short', day: 'numeric' });
-    }
-
-    function formatTime(str) {
-        if (!str) return '';
-        const d = new Date(str.replace(' ', 'T'));
-        if (isNaN(d.getTime())) return '';
-        return d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' });
+        return `${day} ${month} ${year}, ${hours}:${minutes} WIB`;
     }
 
     function escapeHtml(str) {
@@ -1239,44 +1181,45 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
     <?php if ($isAdmin): ?>
     function openAddVersionModal() {
-        document.getElementById('modalTitle').innerHTML = '➕ Catat Pembaruan Versi Baru';
+        document.getElementById('modalTitle').innerHTML = '➕ Tambah Catatan Rilis Versi';
         document.getElementById('formId').value = '0';
         generateNewVersionNumber();
-        document.getElementById('formCategory').value = 'Update';
+        document.getElementById('formCategory').value = 'Enhancement';
         
         const now = new Date();
         const localIso = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
         document.getElementById('formReleaseDate').value = localIso;
 
+        document.getElementById('formAuthor').value = 'Super Administrator (DP)';
         document.getElementById('formTitleText').value = '';
-        document.getElementById('formChanges').value = "• \n• ";
+        document.getElementById('formChanges').value = '';
         document.getElementById('formFiles').value = '';
-        document.getElementById('formAuthor').value = 'Super Administrator';
         document.getElementById('formSetActive').checked = true;
 
         document.getElementById('versionModal').style.display = 'flex';
-        document.getElementById('formTitleText').focus();
     }
 
     function openEditVersionModal(id) {
-        const item = rawVersionData.find(v => parseInt(v.id, 10) === parseInt(id, 10));
+        const item = rawVersionData.find(x => parseInt(x.id) === parseInt(id));
         if (!item) return;
 
-        document.getElementById('modalTitle').innerHTML = `✏️ Edit Catatan Versi v${escapeHtml(item.version)}`;
+        document.getElementById('modalTitle').innerHTML = `✏️ Edit Catatan Rilis: v${escapeHtml(item.version)}`;
         document.getElementById('formId').value = item.id;
         document.getElementById('formVersion').value = item.version;
-        document.getElementById('formCategory').value = item.category || 'Update';
-
-        let relDate = item.release_date || '';
-        if (relDate.length >= 16) {
-            relDate = relDate.replace(' ', 'T').slice(0, 16);
+        document.getElementById('formCategory').value = item.category || 'Enhancement';
+        
+        if (item.release_date) {
+            const d = new Date(item.release_date.replace(' ', 'T'));
+            if (!isNaN(d.getTime())) {
+                const localIso = new Date(d.getTime() - (d.getTimezoneOffset() * 60000)).toISOString().slice(0, 16);
+                document.getElementById('formReleaseDate').value = localIso;
+            }
         }
-        document.getElementById('formReleaseDate').value = relDate;
 
-        document.getElementById('formTitleText').value = item.title || '';
-        document.getElementById('formChanges').value = item.changes || '';
+        document.getElementById('formAuthor').value = item.author || 'Super Administrator (DP)';
+        document.getElementById('formTitleText').value = item.title;
+        document.getElementById('formChanges').value = item.changes;
         document.getElementById('formFiles').value = item.files_modified || '';
-        document.getElementById('formAuthor').value = item.author || 'Super Administrator';
         document.getElementById('formSetActive').checked = (item.version === activeSystemVersion);
 
         document.getElementById('versionModal').style.display = 'flex';
@@ -1288,130 +1231,98 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
     async function saveVersion(e) {
         e.preventDefault();
-
         const btn = document.getElementById('btnSubmitForm');
-        const origText = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Menyimpan...';
 
-        const id = document.getElementById('formId').value;
-        const version = document.getElementById('formVersion').value.trim();
-        const category = document.getElementById('formCategory').value;
-        const release_date = document.getElementById('formReleaseDate').value;
-        const title = document.getElementById('formTitleText').value.trim();
-        const changes = document.getElementById('formChanges').value.trim();
-        const files_modified = document.getElementById('formFiles').value.trim();
-        const author = document.getElementById('formAuthor').value.trim();
-        const set_active = document.getElementById('formSetActive').checked ? 1 : 0;
-
         const fd = new FormData();
         fd.append('action', 'save');
-        fd.append('id', id);
-        fd.append('version', version);
-        fd.append('category', category);
-        fd.append('release_date', release_date.replace('T', ' '));
-        fd.append('title', title);
-        fd.append('changes', changes);
-        fd.append('files_modified', files_modified);
-        fd.append('author', author);
-        fd.append('set_active', set_active);
+        fd.append('id', document.getElementById('formId').value);
+        fd.append('version', document.getElementById('formVersion').value.trim());
+        fd.append('category', document.getElementById('formCategory').value);
+        fd.append('release_date', document.getElementById('formReleaseDate').value);
+        fd.append('author', document.getElementById('formAuthor').value.trim());
+        fd.append('title', document.getElementById('formTitleText').value.trim());
+        fd.append('changes', document.getElementById('formChanges').value.trim());
+        fd.append('files_modified', document.getElementById('formFiles').value.trim());
+        if (document.getElementById('formSetActive').checked) {
+            fd.append('set_active', '1');
+        }
 
         try {
             const res = await fetch('version_log.php', { method: 'POST', body: fd });
             const json = await res.json();
-            btn.disabled = false;
-            btn.innerHTML = origText;
 
-            if (json.status === 'OK') {
-                closeVersionModal();
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Berhasil!',
-                    text: json.message,
-                    timer: 2000,
-                    showConfirmButton: false
-                });
-                loadVersionLogs();
+            if (json.status !== 'OK') {
+                throw new Error(json.message || 'Gagal menyimpan versi');
+            }
 
-                // Notifikasi parent window jika ada untuk update footer versi
+            closeVersionModal();
+            Swal.fire({
+                icon: 'success',
+                title: 'Berhasil!',
+                text: json.message,
+                timer: 1600,
+                showConfirmButton: false
+            });
+
+            // Update parent sidebar version label if present
+            try {
                 if (window.parent && window.parent.document) {
-                    const footVer = window.parent.document.getElementById('sidebarAppVersion');
-                    if (footVer && set_active) {
-                        footVer.innerText = version;
+                    const parentVerLabel = window.parent.document.getElementById('sidebarAppVersion');
+                    if (parentVerLabel) {
+                        parentVerLabel.innerText = json.version;
                     }
                 }
-            } else {
-                Swal.fire('Gagal!', json.message || 'Terjadi kesalahan sistem', 'error');
-            }
+            } catch(e) {}
+
+            loadVersionLogs();
+
         } catch (err) {
+            Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
+        } finally {
             btn.disabled = false;
-            btn.innerHTML = origText;
-            Swal.fire('Error!', err.message, 'error');
+            btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Simpan Catatan Versi';
         }
     }
 
-    async function confirmDeleteVersion(id, version) {
-        const result = await Swal.fire({
-            title: `Hapus Log Versi ${version}?`,
-            text: 'Catatan pembaruan untuk versi ini akan dihapus dari riwayat sistem.',
+    function confirmDeleteVersion(id, ver) {
+        Swal.fire({
+            title: `Hapus Versi v${ver}?`,
+            text: "Riwayat log versi ini akan dihapus permanen dari sistem.",
             icon: 'warning',
             showCancelButton: true,
             confirmButtonColor: '#ff4d4f',
-            cancelButtonColor: '#8c8c8c',
-            confirmButtonText: 'Ya, Hapus',
+            cancelButtonColor: '#d9d9d9',
+            confirmButtonText: 'Ya, Hapus!',
             cancelButtonText: 'Batal'
-        });
+        }).then(async (result) => {
+            if (result.isConfirmed) {
+                const fd = new FormData();
+                fd.append('action', 'delete');
+                fd.append('id', id);
 
-        if (!result.isConfirmed) return;
-
-        const fd = new FormData();
-        fd.append('action', 'delete');
-        fd.append('id', id);
-
-        try {
-            const res = await fetch('version_log.php', { method: 'POST', body: fd });
-            const json = await res.json();
-            if (json.status === 'OK') {
-                Swal.fire({
-                    icon: 'success',
-                    title: 'Terhapus!',
-                    text: json.message,
-                    timer: 1500,
-                    showConfirmButton: false
-                });
-                loadVersionLogs();
-            } else {
-                Swal.fire('Gagal!', json.message, 'error');
+                try {
+                    const res = await fetch('version_log.php', { method: 'POST', body: fd });
+                    const json = await res.json();
+                    if (json.status !== 'OK') {
+                        throw new Error(json.message || 'Gagal menghapus versi');
+                    }
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Terhapus!',
+                        text: json.message,
+                        timer: 1400,
+                        showConfirmButton: false
+                    });
+                    loadVersionLogs();
+                } catch(err) {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
+                }
             }
-        } catch (err) {
-            Swal.fire('Error!', err.message, 'error');
-        }
+        });
     }
     <?php endif; ?>
-
-    function copyVersionSummary(id) {
-        const item = rawVersionData.find(v => parseInt(v.id, 10) === parseInt(id, 10));
-        if (!item) return;
-
-        const text = `[Log Update CEISA 4.0] v${item.version} (${item.category})\n` +
-                     `Judul: ${item.title}\n` +
-                     `Rilis: ${item.release_date}\n` +
-                     `Rincian Perubahan:\n${item.changes}\n` +
-                     `Berkas: ${item.files_modified || '-'}\n` +
-                     `Author: ${item.author}`;
-
-        navigator.clipboard.writeText(text).then(() => {
-            Swal.fire({
-                icon: 'success',
-                title: 'Tersalin!',
-                text: `Ringkasan log versi v${item.version} berhasil disalin ke clipboard.`,
-                timer: 1500,
-                showConfirmButton: false
-            });
-        }).catch(err => {
-            prompt('Salin teks log versi:', text);
-        });
-    }
 </script>
 
 </body>

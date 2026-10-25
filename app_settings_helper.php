@@ -269,7 +269,7 @@ if (!function_exists('getAppUpdateVersion')) {
         if ($conn && $conn instanceof mysqli) {
             $checkTable = @$conn->query("SHOW TABLES LIKE 'bc_app_version_log'");
             if ($checkTable && $checkTable->num_rows > 0) {
-                $res = @$conn->query("SELECT version FROM bc_app_version_log ORDER BY release_date DESC, id DESC LIMIT 1");
+                $res = @$conn->query("SELECT version FROM bc_app_version_log ORDER BY version DESC, release_date DESC LIMIT 1");
                 if ($res && $row = $res->fetch_assoc()) {
                     $dbVer = trim((string)$row['version']);
                     if (!empty($dbVer)) {
