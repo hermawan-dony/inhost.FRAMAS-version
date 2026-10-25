@@ -4649,7 +4649,7 @@ if ($action === 'ai_inject') {
             box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
         }
 
-        /* Context Menu (DataWindow Style) */
+        /* Context Menu (DataWindow & Excel Interop Style) */
         .context-menu {
             position: fixed;
             z-index: 99999;
@@ -4661,25 +4661,45 @@ if ($action === 'ai_inject') {
             padding: 4px 0;
             font-size: 11px;
             display: none;
+            backdrop-filter: blur(4px);
+        }
+        .context-menu-header {
+            padding: 5px 12px;
+            font-size: 9.5px;
+            font-weight: 700;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 2px;
         }
         .context-menu-item {
-            padding: 7px 14px;
+            padding: 6px 12px;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 8px;
             color: var(--text-main);
-            transition: all .15s;
+            transition: all .12s;
             user-select: none;
         }
         .context-menu-item:hover {
-            background: rgba(56, 189, 248, 0.12);
-            color: var(--primary);
+            background: var(--primary);
+            color: #ffffff;
+        }
+        .context-menu-item .menu-icon {
+            font-size: 13px;
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
         }
         .context-menu-divider {
             height: 1px;
             background: var(--border);
-            margin: 4px 0;
+            margin: 3px 0;
         }
 
         /* ========================================================
@@ -4993,6 +5013,7 @@ if ($action === 'ai_inject') {
             padding: 6px 14px !important;
             border-radius: 4px !important;
         }
+
     </style>
 </head>
 <?php 
@@ -7000,6 +7021,76 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
+
+    <!-- MODAL PASTE DARI EXCEL -->
+    <div class="modal-overlay" id="modalPasteExcel" style="display:none;">
+        <div class="modal" style="max-width:850px; width:95vw; height:85vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">📥</span>
+                    <div>
+                        <h3 style="margin:0; font-size:13.5px; font-weight:700;" id="pasteExcelModalTitle">Paste Data dari Excel</h3>
+                        <span style="font-size:10px; color:var(--text-muted);">Salin (Ctrl+C) data baris dari Microsoft Excel / Spreadsheet lalu tempel (Ctrl+V) di kotak bawah</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalPasteExcel')">✕</button>
+            </div>
+
+            <!-- OPTIONS BAR -->
+            <div style="padding:10px 14px; background:var(--bg-card); border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                    <label style="font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="radio" name="pasteExcelMode" value="append" checked style="cursor:pointer;">
+                        <span>➕ Tambahkan ke Baris yang Ada (Append)</span>
+                    </label>
+                    <label style="font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer; color:#ef4444;">
+                        <input type="radio" name="pasteExcelMode" value="replace" style="cursor:pointer;">
+                        <span>⚠️ Ganti / Kosongkan Baris Sebelumnya (Replace)</span>
+                    </label>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="copyTableHeadersForExcel()" title="Salin daftar nama kolom tabel ini ke clipboard agar bisa dijadikan acuan di Excel">
+                        📋 Copy Header Template
+                    </button>
+                </div>
+            </div>
+
+            <!-- TEXTAREA INPUT & PREVIEW -->
+            <div style="flex:1; display:flex; flex-direction:column; padding:12px 14px; background:var(--bg-base); gap:10px; overflow:hidden;">
+                <div style="flex:1; display:flex; flex-direction:column;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span style="font-size:10.5px; font-weight:700; color:var(--text-muted);">TEMPATKAN HASIL COPY EXCEL DI SINI (TAB-DELIMITED):</span>
+                        <span id="pasteExcelStats" style="font-size:10.5px; color:var(--primary); font-weight:600;">0 baris terdeteksi</span>
+                    </div>
+                    <textarea id="pasteExcelTextarea" class="form-control" placeholder="Contoh format: Sorot baris di Excel -> Ctrl+C -> Klik di sini -> Ctrl+V..." style="flex:1; width:100%; font-family:Consolas, monospace; font-size:11px; white-space:pre; overflow:auto; resize:none; padding:8px;" oninput="parseExcelPreview()"></textarea>
+                </div>
+
+                <div style="height:140px; border:1px solid var(--border); border-radius:4px; background:var(--bg-card); overflow:auto; padding:0;">
+                    <table class="datagrid" id="tablePasteExcelPreview" style="width:100%; font-size:10px;">
+                        <thead style="position:sticky; top:0; z-index:5;">
+                            <tr id="theadPasteExcelPreview">
+                                <th style="width:40px; text-align:center;">#</th>
+                                <th>Preview Kolom</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyPasteExcelPreview">
+                            <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">Belum ada data yang ditempel.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MODAL FOOTER -->
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:10px; color:var(--text-muted);">💡 Nilai koma ribuan/titik otomatis dibersihkan dan disesuaikan tipe kolom (angka, teks, tanggal).</span>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modalPasteExcel')">Batal</button>
+                    <button type="button" class="btn btn-success" onclick="applyParsedExcelData()">📥 Masukkan Data ke Tabel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- PREVIEW MODAL -->
     <div class="modal-overlay" id="modalPreview">
         <div class="modal">
@@ -7981,24 +8072,82 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
-    <!-- CONTEXT MENU (KLIK KANAN) -->
+    <!-- CONTEXT MENU (KLIK KANAN) UNIFIED (EXCEL & ROW ACTIONS) -->
     <div id="editorContextMenu" class="context-menu">
-        <div id="ctxHeaderTitle" style="padding:4px 14px; font-weight:700; color:var(--text-muted); font-size:10px; border-bottom:1px solid var(--border); margin-bottom:2px;">AKSI BARIS</div>
-        <div id="ctxBarangOptions">
-            <div class="context-menu-item" onclick="triggerContextAction('add_material')">📦 Tambah dari Master Barang</div>
-            <div class="context-menu-item" onclick="triggerContextAction('fifo_trace')">⚡ Mulai Trace FIFO Dokumen Asal</div>
-            <div class="context-menu-item" onclick="triggerContextAction('toggle_trace')">🔍 Show / Hide Trace Panel</div>
+        <div id="ctxHeaderTitle" class="context-menu-header">
+            <span id="ctxTitleText">AKSI TABEL</span>
+            <span style="font-size:8.5px; opacity:0.6; font-weight:500;">EXCEL INTEROP</span>
+        </div>
+
+        <!-- EXCEL TOOLS -->
+        <div class="context-menu-item" onclick="execExcelContextMenu('copy_all')">
+            <span class="menu-icon">📑</span>
+            <span>Copy Semua Baris ke Excel</span>
+        </div>
+        <div class="context-menu-item" id="excelMenuCopySelected" onclick="execExcelContextMenu('copy_selected')">
+            <span class="menu-icon">📋</span>
+            <span>Copy Baris Ini ke Excel</span>
+        </div>
+        <div class="context-menu-item" onclick="execExcelContextMenu('paste')">
+            <span class="menu-icon">📥</span>
+            <span>Paste dari Excel...</span>
+        </div>
+        <div class="context-menu-item" onclick="execExcelContextMenu('copy_template')">
+            <span class="menu-icon">📊</span>
+            <span>Copy Header Template Kolom</span>
+        </div>
+
+        <!-- KHUSUS TABEL BARANG -->
+        <div id="ctxBarangOptions" style="display:none;">
             <div class="context-menu-divider"></div>
-            <div class="context-menu-item" onclick="triggerContextAction('fix_hs')">🔍 FIX HS CODE</div>
-            <div class="context-menu-item" onclick="triggerContextAction('fix_netto')">⚖️ FIX NETTO</div>
+            <div class="context-menu-item" onclick="triggerContextAction('add_material')">
+                <span class="menu-icon">📦</span>
+                <span>Tambah dari Master Barang</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('fifo_trace')">
+                <span class="menu-icon">⚡</span>
+                <span>Mulai Trace FIFO Dokumen Asal</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('toggle_trace')">
+                <span class="menu-icon">🔍</span>
+                <span>Show / Hide Trace Panel</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_hs')">
+                <span class="menu-icon">🔍</span>
+                <span>FIX HS CODE</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_netto')">
+                <span class="menu-icon">⚖️</span>
+                <span>FIX NETTO</span>
+            </div>
         </div>
+
+        <!-- KHUSUS TABEL BAHAN BAKU -->
         <div id="ctxBahanBakuOptions" style="display:none;">
-            <div class="context-menu-item" onclick="triggerContextAction('add_incoming')">📥 Tambah dari Dokumen Masuk (Eks BC)</div>
-            <div class="context-menu-item" onclick="triggerContextAction('generate_bbt')">⚡ Generate Bahan Baku Tarif</div>
-            <div class="context-menu-item" onclick="triggerContextAction('seq_bb')">🔢 Urutkan Seri Bahan Baku</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('add_incoming')">
+                <span class="menu-icon">📥</span>
+                <span>Tambah dari Dokumen Masuk (Eks BC)</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('generate_bbt')">
+                <span class="menu-icon">⚡</span>
+                <span>Generate Bahan Baku Tarif</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('seq_bb')">
+                <span class="menu-icon">🔢</span>
+                <span>Urutkan Seri Bahan Baku</span>
+            </div>
         </div>
-        <div class="context-menu-divider"></div>
-        <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">❌ Hapus Baris Ini</div>
+
+        <!-- HAPUS BARIS -->
+        <div id="ctxRowDeleteOption" style="display:none;">
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">
+                <span class="menu-icon">❌</span>
+                <span>Hapus Baris Ini</span>
+            </div>
+        </div>
     </div>
 
     <!-- FLOATING REKAP TARIF WINDOW -->
@@ -14326,6 +14475,342 @@ $isEditMode = !empty($selectedAjuParam);
             setTimeout(() => { t.style.display = 'none'; }, 2500);
         }
 
+        // ============================================================
+        // EXCEL INTEROP: COPY KE EXCEL & PASTE DARI EXCEL (KLIK KANAN)
+        // ============================================================
+        let activeContextMenuTable = null;
+        let activeContextMenuTr = null;
+        let parsedExcelRows = [];
+
+        // Daftar tabel yang mendukung fitur Copy / Paste Excel
+        const EXCEL_SUPPORTED_TABLES = [
+            'barang', 'bahanbaku', 'barangtarif', 'bahanbakutarif',
+            'dokumen', 'barangdokumen', 'bahanbakudokumen', 'kemasan',
+            'pengangkut', 'kontainer', 'komponenbiaya', 'bankdevisa',
+            'jaminan', 'barangvd', 'barangspekkhusus', 'entitas'
+        ];
+
+        function getVisibleGridCols(tableKey) {
+            const conf = gridConfigs[tableKey] || [];
+            return conf.filter(c => {
+                // Sembunyikan kolom jika ada rule visibility = 0
+                if (tableKey === 'barang' && currentVarRules && currentVarRules.barang && currentVarRules.barang[c.key]) {
+                    if (currentVarRules.barang[c.key].visible === 0) return false;
+                }
+                return true;
+            });
+        }
+
+        function cleanExcelNumber(val) {
+            if (val === null || val === undefined) return '';
+            let s = String(val).replace(/[^0-9,.-]/g, '').trim();
+            if (!s) return '';
+
+            const lastDot = s.lastIndexOf('.');
+            const lastComma = s.lastIndexOf(',');
+
+            if (lastDot > -1 && lastComma > -1) {
+                if (lastComma > lastDot) {
+                    // Format Indo/Eropa: 1.250,50 -> ribuan titik, desimal koma
+                    s = s.replace(/\./g, '').replace(',', '.');
+                } else {
+                    // Format US: 1,250.50 -> ribuan koma, desimal titik
+                    s = s.replace(/,/g, '');
+                }
+            } else if (lastComma > -1) {
+                // Misal "1250,50" -> desimal koma
+                s = s.replace(',', '.');
+            }
+            return s;
+        }
+
+        function execExcelContextMenu(action) {
+            const menu = document.getElementById('editorContextMenu');
+            if (menu) menu.style.display = 'none';
+
+            const tblKey = activeContextMenuTable || activeContextTable;
+            if (!tblKey) return;
+
+            if (action === 'copy_all') {
+                copyTableToClipboard(tblKey, false);
+            } else if (action === 'copy_selected') {
+                copyTableToClipboard(tblKey, true);
+            } else if (action === 'paste') {
+                openModalPasteExcel(tblKey);
+            } else if (action === 'copy_template') {
+                copyTableHeadersForExcel(tblKey);
+            }
+        }
+
+        function getRowDataFromDom(tr, cols) {
+            const obj = {};
+            cols.forEach(c => {
+                let v = '';
+                const td = tr.querySelector(`td[data-col="${c.key}"]`);
+                if (td) {
+                    const inp = td.querySelector('input, select, textarea');
+                    if (inp) {
+                        v = inp.value !== undefined ? inp.value.trim() : '';
+                        if (inp.classList.contains('cell-number') || inp.type === 'number') {
+                            v = stripNumberCommas(v);
+                        }
+                    } else {
+                        v = td.innerText ? td.innerText.trim() : '';
+                    }
+                }
+                obj[c.key] = v;
+            });
+            return obj;
+        }
+
+        function copyTableToClipboard(tableKey, onlySelected = false) {
+            const cols = getVisibleGridCols(tableKey);
+            if (cols.length === 0) return;
+
+            const headerRow = cols.map(c => c.label || c.key).join('\t');
+            const dataLines = [];
+
+            const tbody = document.querySelector(`#table-${tableKey} tbody`);
+            let trs = [];
+
+            if (onlySelected && activeContextMenuTr) {
+                trs = [activeContextMenuTr];
+            } else if (tbody) {
+                trs = Array.from(tbody.querySelectorAll('tr:not(.tr-empty)'));
+            }
+
+            if (trs.length === 0) {
+                showWarning(`Tabel ${getTabTitle(tableKey)} masih kosong. Tidak ada data yang bisa disalin.`);
+                return;
+            }
+
+            trs.forEach(tr => {
+                const rowObj = getRowDataFromDom(tr, cols);
+                const lineVals = cols.map(c => {
+                    let val = rowObj[c.key] !== undefined ? String(rowObj[c.key]) : '';
+                    // Bersihkan newline atau tab agar tidak merusak format Excel TSV
+                    val = val.replace(/[\r\n\t]+/g, ' ').trim();
+                    return val;
+                });
+                dataLines.push(lineVals.join('\t'));
+            });
+
+            const fullTsv = headerRow + '\r\n' + dataLines.join('\r\n');
+
+            navigator.clipboard.writeText(fullTsv).then(() => {
+                showToast(`✓ Berhasil menyalin ${dataLines.length} baris ${getTabTitle(tableKey)} ke clipboard (siap paste di Excel)!`);
+            }).catch(err => {
+                // Fallback jika API navigator.clipboard ditolak
+                const ta = document.createElement('textarea');
+                ta.value = fullTsv;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast(`✓ Berhasil menyalin ${dataLines.length} baris ${getTabTitle(tableKey)} ke clipboard!`);
+            });
+        }
+
+        function copyTableHeadersForExcel(customTblKey) {
+            const tblKey = customTblKey || activeContextMenuTable || activeTab;
+            const cols = getVisibleGridCols(tblKey);
+            if (cols.length === 0) return;
+
+            const headerLabels = cols.map(c => c.label || c.key).join('\t');
+            navigator.clipboard.writeText(headerLabels).then(() => {
+                showToast(`✓ Header template kolom ${getTabTitle(tblKey)} berhasil disalin (siap paste di baris 1 Excel)!`);
+            });
+        }
+
+        function openModalPasteExcel(tableKey) {
+            activeContextMenuTable = tableKey;
+            parsedExcelRows = [];
+
+            const titleEl = document.getElementById('pasteExcelModalTitle');
+            if (titleEl) {
+                titleEl.innerText = `Paste Data Excel -> ${getTabTitle(tableKey)} (${tableKey})`;
+            }
+
+            const ta = document.getElementById('pasteExcelTextarea');
+            if (ta) {
+                ta.value = '';
+            }
+
+            const stats = document.getElementById('pasteExcelStats');
+            if (stats) {
+                stats.innerText = '0 baris terdeteksi';
+            }
+
+            // Siapkan header preview
+            const theadTr = document.getElementById('theadPasteExcelPreview');
+            const cols = getVisibleGridCols(tableKey);
+            if (theadTr) {
+                theadTr.innerHTML = '<th style="width:36px; text-align:center;">#</th>' + 
+                    cols.map(c => `<th style="padding:4px 6px; font-size:9.5px; white-space:nowrap;">${escapeHtml(c.label || c.key)}</th>`).join('');
+            }
+
+            const tbody = document.getElementById('tbodyPasteExcelPreview');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" style="text-align:center; color:var(--text-muted); padding:20px;">Silakan tempel (Ctrl+V) data baris dari Excel pada kotak di atas.</td></tr>';
+            }
+
+            document.getElementById('modalPasteExcel').style.display = 'flex';
+            if (ta) setTimeout(() => { ta.focus(); }, 100);
+        }
+
+        function parseExcelPreview() {
+            const tableKey = activeContextMenuTable;
+            if (!tableKey) return;
+
+            const ta = document.getElementById('pasteExcelTextarea');
+            const rawText = ta ? ta.value : '';
+            const cols = getVisibleGridCols(tableKey);
+            const stats = document.getElementById('pasteExcelStats');
+            const tbody = document.getElementById('tbodyPasteExcelPreview');
+
+            parsedExcelRows = [];
+
+            if (!rawText.trim()) {
+                if (stats) stats.innerText = '0 baris terdeteksi';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" style="text-align:center; color:var(--text-muted); padding:20px;">Belum ada data yang ditempel.</td></tr>';
+                return;
+            }
+
+            const lines = rawText.split(/\r?\n/).filter(l => l.trim() !== '');
+            if (lines.length === 0) return;
+
+            // Cek apakah baris pertama adalah Header teks Excel
+            let startIndex = 0;
+            const firstRowCells = lines[0].split('\t').map(c => c.trim().toLowerCase());
+            const colKeysLower = cols.map(c => (c.key || '').toLowerCase());
+            const colLabelsLower = cols.map(c => (c.label || '').toLowerCase());
+
+            let headerMatches = 0;
+            firstRowCells.forEach(cell => {
+                if (colKeysLower.includes(cell) || colLabelsLower.includes(cell) || cell.includes('seri') || cell.includes('uraian') || cell.includes('kode')) {
+                    headerMatches++;
+                }
+            });
+
+            if (headerMatches >= 2 || (firstRowCells.length > 0 && isNaN(firstRowCells[0]) && colKeysLower.includes(firstRowCells[0]))) {
+                startIndex = 1; // Lewati baris pertama karena merupakan header
+            }
+
+            for (let i = startIndex; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.trim()) continue;
+                const cells = line.split('\t');
+                const rowObj = {};
+
+                cols.forEach((col, cIdx) => {
+                    let cellVal = cells[cIdx] !== undefined ? cells[cIdx].trim() : '';
+                    
+                    // Pembersihan angka jika tipe number
+                    if (col.type === 'number') {
+                        cellVal = cleanExcelNumber(cellVal);
+                    } else if (col.type === 'date') {
+                        cellVal = formatDateYmd(cellVal);
+                    }
+                    rowObj[col.key] = cellVal;
+                });
+
+                parsedExcelRows.push(rowObj);
+            }
+
+            if (stats) {
+                stats.innerText = `${parsedExcelRows.length} baris terdeteksi (siap diimpor)`;
+            }
+
+            // Render preview maksimal 10 baris pertama
+            if (tbody) {
+                tbody.innerHTML = '';
+                const previewSlice = parsedExcelRows.slice(0, 15);
+                previewSlice.forEach((r, idx) => {
+                    const tr = document.createElement('tr');
+                    let tds = `<td style="text-align:center; font-weight:700; color:var(--text-muted);">${idx + 1}</td>`;
+                    cols.forEach(c => {
+                        const val = r[c.key] !== undefined ? r[c.key] : '';
+                        tds += `<td style="padding:3px 6px; font-size:10px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(val)}</td>`;
+                    });
+                    tr.innerHTML = tds;
+                    tbody.appendChild(tr);
+                });
+
+                if (parsedExcelRows.length > 15) {
+                    const trMore = document.createElement('tr');
+                    trMore.innerHTML = `<td colspan="${cols.length + 1}" style="text-align:center; font-style:italic; color:var(--text-muted); padding:4px;">... dan ${parsedExcelRows.length - 15} baris lainnya</td>`;
+                    tbody.appendChild(trMore);
+                }
+            }
+        }
+
+        function applyParsedExcelData() {
+            const tableKey = activeContextMenuTable;
+            if (!tableKey || parsedExcelRows.length === 0) {
+                showWarning('Belum ada data valid yang dapat dimasukkan dari Excel.');
+                return;
+            }
+
+            const modeEl = document.querySelector('input[name="pasteExcelMode"]:checked');
+            const mode = modeEl ? modeEl.value : 'append'; // 'append' atau 'replace'
+            const tbody = document.querySelector(`#table-${tableKey} tbody`);
+            if (!tbody) return;
+
+            const cols = gridConfigs[tableKey] || [];
+            let currentCount = 0;
+
+            if (mode === 'replace') {
+                tbody.innerHTML = '';
+                if (currentData) {
+                    currentData[tableKey] = [];
+                }
+            } else {
+                const emptyTr = tbody.querySelector('.tr-empty');
+                if (emptyTr) emptyTr.remove();
+                currentCount = tbody.querySelectorAll('tr:not(.tr-empty)').length;
+            }
+
+            const frag = document.createDocumentFragment();
+
+            parsedExcelRows.forEach((rowObj, idx) => {
+                const finalRow = Object.assign({}, rowObj);
+
+                // Auto numbering seri jika kosong atau mode append
+                const targetSeri = currentCount + idx + 1;
+                if (!finalRow.seri && cols.some(c => c.key === 'seri')) {
+                    finalRow.seri = targetSeri;
+                }
+                if (!finalRow.seri_barang && cols.some(c => c.key === 'seri_barang')) {
+                    finalRow.seri_barang = targetSeri;
+                }
+                if (!finalRow.seri_bahan_baku && cols.some(c => c.key === 'seri_bahan_baku')) {
+                    finalRow.seri_bahan_baku = targetSeri;
+                }
+
+                // Tambahkan ke currentData
+                if (currentData && Array.isArray(currentData[tableKey])) {
+                    currentData[tableKey].push(finalRow);
+                }
+
+                const tr = createGridRow(tableKey, finalRow, currentCount + idx);
+                frag.appendChild(tr);
+            });
+
+            tbody.appendChild(frag);
+
+            // Update badge dan total footer
+            const totalCount = tbody.querySelectorAll('tr:not(.tr-empty)').length;
+            const badge = document.getElementById('count-' + tableKey);
+            if (badge) badge.innerText = totalCount;
+
+            updateTableTotals(tableKey);
+
+            closeModal('modalPasteExcel');
+            showSuccess(`Berhasil memasukkan ${parsedExcelRows.length} baris ke tabel ${getTabTitle(tableKey)}! Total baris sekarang: ${totalCount}.`);
+        }
+
         function escapeHtml(text) {
             if (!text) return '';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -15792,7 +16277,8 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         // =============================================================
-        // CONTEXT MENU (KLIK KANAN) CONTROLLER
+        // =============================================================
+        // CONTEXT MENU (KLIK KANAN) CONTROLLER (EXCEL & ROW ACTIONS)
         // =============================================================
 
         let activeContextRow = null;
@@ -15803,46 +16289,100 @@ $isEditMode = !empty($selectedAjuParam);
             if (!ctx) return;
 
             document.addEventListener('contextmenu', function(e) {
-                const tr = e.target.closest('tr');
-                if (!tr) {
-                    ctx.style.display = 'none';
-                    return;
-                }
-                const table = tr.closest('table');
-                if (!table) {
-                    ctx.style.display = 'none';
+                // Jangan intervensi jika klik kanan di dalam modal
+                if (e.target && (e.target.closest('#modalPasteExcel') || e.target.closest('.modal-overlay') || e.target.closest('button'))) {
                     return;
                 }
 
-                if (table.id === 'table-barang') {
-                    e.preventDefault();
-                    activeContextRow = tr;
-                    activeContextTable = 'barang';
-                    document.getElementById('ctxBarangOptions').style.display = 'block';
-                    document.getElementById('ctxBahanBakuOptions').style.display = 'none';
-                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BARANG';
+                // Cari apakah target berada di dalam table bertaraf datagrid atau panel tabel
+                const table = e.target.closest('table');
+                let tblKey = '';
 
-                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
-                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
-                    ctx.style.display = 'block';
-                } else if (table.id === 'table-bahanbaku') {
-                    e.preventDefault();
-                    activeContextRow = tr;
-                    activeContextTable = 'bahanbaku';
-                    document.getElementById('ctxBarangOptions').style.display = 'none';
-                    document.getElementById('ctxBahanBakuOptions').style.display = 'block';
-                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BAHAN BAKU';
-
-                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
-                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
-                    ctx.style.display = 'block';
+                if (table && table.id && table.id.startsWith('table-')) {
+                    tblKey = table.id.replace('table-', '');
                 } else {
-                    ctx.style.display = 'none';
+                    const panel = e.target.closest('.panel');
+                    if (panel && panel.id && panel.id.startsWith('panel-')) {
+                        const candidate = panel.id.replace('panel-', '');
+                        if (EXCEL_SUPPORTED_TABLES.includes(candidate)) {
+                            tblKey = candidate;
+                        }
+                    }
                 }
+
+                if (!tblKey || !EXCEL_SUPPORTED_TABLES.includes(tblKey)) {
+                    ctx.style.display = 'none';
+                    return;
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                activeContextTable = tblKey;
+                activeContextMenuTable = tblKey;
+
+                // Cek apakah klik spesifik pada sebuah baris data tr di tbody
+                const tr = e.target.closest('tr');
+                const isRealRow = tr && tr.closest('tbody') && !tr.classList.contains('tr-empty');
+                activeContextRow = isRealRow ? tr : null;
+                activeContextMenuTr = activeContextRow;
+
+                // Judul Context Menu
+                const titleTextEl = document.getElementById('ctxTitleText');
+                if (titleTextEl) {
+                    const rowInfo = activeContextRow ? ` (Baris ${activeContextRow.rowIndex || ''})` : '';
+                    titleTextEl.innerText = `${getTabTitle(tblKey)}${rowInfo}`;
+                }
+
+                // Opsi Salin Baris Ini
+                const optSelected = document.getElementById('excelMenuCopySelected');
+                if (optSelected) {
+                    optSelected.style.display = activeContextRow ? 'flex' : 'none';
+                }
+
+                // Opsi Hapus Baris
+                const optDelete = document.getElementById('ctxRowDeleteOption');
+                if (optDelete) {
+                    optDelete.style.display = activeContextRow ? 'block' : 'none';
+                }
+
+                // Opsi Khusus Barang
+                const optBarang = document.getElementById('ctxBarangOptions');
+                if (optBarang) {
+                    optBarang.style.display = (tblKey === 'barang') ? 'block' : 'none';
+                }
+
+                // Opsi Khusus Bahan Baku
+                const optBahanBaku = document.getElementById('ctxBahanBakuOptions');
+                if (optBahanBaku) {
+                    optBahanBaku.style.display = (tblKey === 'bahanbaku') ? 'block' : 'none';
+                }
+
+                // Tampilkan & hitung posisi layar agar tidak terpotong
+                ctx.style.display = 'block';
+                const menuW = ctx.offsetWidth || 220;
+                const menuH = ctx.offsetHeight || 260;
+                const winW = window.innerWidth;
+                const winH = window.innerHeight;
+
+                let left = e.clientX;
+                let top = e.clientY;
+
+                if (left + menuW > winW) left = winW - menuW - 10;
+                if (top + menuH > winH) top = winH - menuH - 10;
+
+                ctx.style.left = Math.max(10, left) + 'px';
+                ctx.style.top = Math.max(10, top) + 'px';
             });
 
             document.addEventListener('click', function(e) {
                 if (!e.target.closest('#editorContextMenu')) {
+                    ctx.style.display = 'none';
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && ctx.style.display === 'block') {
                     ctx.style.display = 'none';
                 }
             });
@@ -15871,7 +16411,14 @@ $isEditMode = !empty($selectedAjuParam);
             } else if (act === 'delete_row') {
                 if (activeContextRow) {
                     activeContextRow.remove();
-                    if (activeContextTable) updateTableTotals(activeContextTable);
+                    const curTbl = activeContextTable || activeContextMenuTable;
+                    if (curTbl) {
+                        updateTableTotals(curTbl);
+                        const curTbody = document.querySelector(`#table-${curTbl} tbody`);
+                        const totalCount = curTbody ? curTbody.querySelectorAll('tr:not(.tr-empty)').length : 0;
+                        const badge = document.getElementById('count-' + curTbl);
+                        if (badge) badge.innerText = totalCount;
+                    }
                     showToast('Baris dihapus. Klik Simpan untuk memperbarui database.');
                 }
             }
