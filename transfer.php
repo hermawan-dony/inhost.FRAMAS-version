@@ -2567,9 +2567,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn ant-btn-insw" id="btnPostingInsw" onclick="postInswActiveAju()" title="Posting / Transfer Dokumen ke Portal INSW (PPKEK 613/611/612 & FTZ)" style="display:none !important;">
                             <span>🌐 Posting INSW</span>
                         </button>
-                        <button type="button" class="ant-btn" onclick="setH2HActiveAju()" title="Set Status Dokumen ke H2H (Siap Kirim)">
-                            <span>&#9889; Set H2H</span>
-                        </button>
                         <button type="button" class="ant-btn ant-btn-success" onclick="postItInventoryActiveAju()" title="Posting Dokumen ke IT Inventory<?= $isAdmin ? ' (bc_1ab2)' : '' ?>">
                             <span>&#128229; Posting IT Inventory</span>
                         </button>
@@ -3064,6 +3061,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="context-menu-item" onclick="contextAction('post_insw')" style="color:#722ed1; font-weight:600; display:none !important;"><i class="fa-solid fa-globe" style="color:#722ed1; width:16px;"></i> Posting INSW</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('sync')"><i class="fa-solid fa-cloud-arrow-down" style="color:#52c41a; width:16px;"></i> Tarik / Sync Respon</div>
+        <div class="context-menu-item" onclick="contextAction('set_h2h')"><i class="fa-solid fa-bolt" style="color:#faad14; width:16px;"></i> Set H2H</div>
         <div class="context-menu-item" onclick="contextAction('reset_posted')"><i class="fa-solid fa-rotate-left" style="color:#fa8c16; width:16px;"></i> Reset Status Kirim (Putih)</div>
         <div class="context-menu-item" onclick="contextAction('manual_respon')" style="font-weight:600; color:#1890ff;"><i class="fa-solid fa-file-pen" style="color:#1890ff; width:16px;"></i> Set Manual Respon</div>
         <div class="context-menu-divider"></div>
@@ -3971,13 +3969,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         }
 
-        async function setH2HActiveAju() {
-            if (!activeAju) {
+        async function setH2HActiveAju(targetAju) {
+            const aju = targetAju || activeAju;
+            if (!aju) {
                 showWarning('Silakan pilih salah satu dokumen terlebih dahulu.');
                 return;
             }
             const ok = await showConfirm(
-                `Apakah Anda yakin ingin mengatur status dokumen AJU <strong>${escapeHtml(activeAju)}</strong> ke H2H (Siap Kirim)?`,
+                `Apakah Anda yakin ingin mengatur status dokumen AJU <strong>${escapeHtml(aju)}</strong> ke H2H (Siap Kirim)?`,
                 'Konfirmasi Set H2H',
                 'Ya, Set H2H',
                 'Batal',
@@ -3994,7 +3993,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <i class="fa-solid fa-bolt app-loader-center-icon" style="font-size:20px; color:#faad14;"></i>
                         </div>
                         <div style="font-size:12px; color:var(--text-muted); line-height:1.5;">
-                            Menandai dokumen <b>${escapeHtml(activeAju)}</b> siap untuk ditransfer ke CEISA...
+                            Menandai dokumen <b>${escapeHtml(aju)}</b> siap untuk ditransfer ke CEISA...
                         </div>
                         <div class="app-loader-progress-track" style="margin-top:12px; max-width:240px;">
                             <div class="app-loader-progress-bar"></div>
@@ -4007,7 +4006,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             const formData = new FormData();
             formData.append('action', 'set_h2h');
-            formData.append('nomor_aju', activeAju);
+            formData.append('nomor_aju', aju);
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
                 const json = await res.json();
@@ -4015,6 +4014,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 if (json.status === 'OK') {
                     showSuccess(json.message);
                     loadList();
+                    if (activeAju === aju) loadActiveDetailTab();
                 } else {
                     showError(json.message);
                 }
@@ -4180,6 +4180,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     break;
                 case 'sync':
                     syncActiveAju(targetAju);
+                    break;
+                case 'set_h2h':
+                    setH2HActiveAju(targetAju);
                     break;
                 case 'reset_posted':
                     resetPostedAju(targetAju);
