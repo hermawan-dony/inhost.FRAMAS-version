@@ -1408,19 +1408,83 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .ant-table-wrapper {
             width: 100%;
             border: 1px solid rgba(0, 0, 0, 0.075);
-            border-radius: 3px;
+            border-radius: 4px;
             background: #fff;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
         body[data-theme="dark"] .ant-table-wrapper {
             border-color: #2b2b40;
             background: #1e1e2d;
         }
+        /* Custom horizontal scrollbar matching user design */
+        .ant-table-wrapper::-webkit-scrollbar {
+            height: 10px;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-track {
+            background: #f0f2f5;
+            border-radius: 5px;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-thumb {
+            background: #b0b8c4;
+            border-radius: 5px;
+            border: 2px solid #f0f2f5;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #1890ff;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-track {
+            background: #151521;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-thumb {
+            background: #3f4254;
+            border-color: #151521;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #52c41a;
+        }
         .ant-table {
             width: 100%;
+            min-width: 1480px;
             border-collapse: collapse;
             font-size: 10px;
             text-align: left;
+        }
+        .ant-table table {
+            width: 100%;
+            min-width: 1480px;
+            border-collapse: collapse;
+        }
+        /* Sticky Column Aksi */
+        .th-col-aksi, .td-col-aksi {
+            position: sticky;
+            right: 0;
+            background: #ffffff;
+            z-index: 5;
+            box-shadow: -3px 0 6px -2px rgba(0, 0, 0, 0.08);
+        }
+        .ant-table-thead > tr > th.th-col-aksi {
+            background: var(--table-head-bg, #fafafa);
+            z-index: 6;
+        }
+        body[data-theme="dark"] .th-col-aksi,
+        body[data-theme="dark"] .td-col-aksi {
+            background: #1e1e2d;
+            box-shadow: -3px 0 6px -2px rgba(0, 0, 0, 0.35);
+        }
+        body[data-theme="dark"] .ant-table-thead > tr > th.th-col-aksi {
+            background: #151521;
+        }
+        .ant-table-tbody > tr:hover > td.td-col-aksi {
+            background: #f0f7ff !important;
+        }
+        body[data-theme="dark"] .ant-table-tbody > tr:hover > td.td-col-aksi {
+            background: #262638 !important;
+        }
+        .ant-table-tbody > tr.selected-row > td.td-col-aksi {
+            background: #e6f7ff !important;
         }
         .ant-table-thead > tr > th {
             color: rgba(0, 0, 0, 0.85);
@@ -2359,7 +2423,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                 <th style="width: 65px; text-align: center;" class="th-sortable" data-sort-col="jalur" onclick="sortTable('jalur')" title="Klik untuk mengurutkan Jalur">Jalur <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 250px;" class="th-sortable" data-sort-col="perusahaan" onclick="sortTable('perusahaan')" title="Klik untuk mengurutkan Nama Perusahaan">Nama Perusahaan <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 180px;" class="th-sortable" data-sort-col="kantor" onclick="sortTable('kantor')" title="Klik untuk mengurutkan Kantor Pabean">Kantor Pabean <span class="th-sort-icon">⇅</span></th>
-                                <th style="width: 85px; text-align: center;">Aksi</th>
+                                <th style="width: 90px; text-align: center;" class="th-col-aksi">Aksi</th>
                             </tr>
                             <!-- Header Row 2: Inline Input Filters -->
                             <tr>
@@ -2423,7 +2487,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                         </span>
                                     </span>
                                 </th>
-                                <th></th>
+                                <th class="th-col-aksi"></th>
                             </tr>
                         </thead>
                         <tbody class="ant-table-tbody" id="ajuTableBody">
@@ -2674,6 +2738,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <iframe id="rekapViewerFrame" src="" style="width:100%; height:100%; border:none;"></iframe>
             </div>
         </div>
+    </div>
+
     <!-- 1. FLOATING BATCH ACTION BAR -->
     <div id="batchActionBar" class="batch-action-bar" style="display:none;">
         <div class="batch-bar-info">
@@ -3435,10 +3501,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <div style="display:flex; font-size:10px; color:#8c8c8c; font-family:monospace;">${escapeHtml(companyId)}</div>
                             <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
                         </td>
-                        <td style="font-size:10.5px; color:#595959;">${escapeHtml(kantorName)}</td>
-                        <td style="text-align:center; white-space:nowrap;">
+                        <td style="text-align:center; white-space:nowrap;" class="td-col-aksi">
                             <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
-                                Aksi
+                                <span>Aksi</span>
+                                <span style="font-size:8px; opacity:0.75; transform:scale(0.85); display:inline-block;">▼</span>
                             </button>
                         </td>
                     </tr>
@@ -3687,7 +3753,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         document.addEventListener('click', closeContextMenu);
-        window.addEventListener('scroll', closeContextMenu, true);
+        window.addEventListener('resize', closeContextMenu);
 
         document.getElementById('ctxItemDownloadExcel')?.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -3748,7 +3814,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         let activeActionTriggerBtn = null;
 
         function openRowActionMenu(event, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen) {
-            event.stopPropagation();
+            if (event) {
+                if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            }
 
             const menu = document.getElementById('rowActionMenu');
             if (menu && menu.style.display === 'block' && activeActionAju === nomorAju) {
@@ -3765,19 +3833,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (activeActionTriggerBtn) {
                 activeActionTriggerBtn.classList.remove('active');
             }
-            activeActionTriggerBtn = event.currentTarget;
+            activeActionTriggerBtn = event ? (event.currentTarget || event.target.closest('.action-btn-ceisa')) : null;
             if (activeActionTriggerBtn) {
                 activeActionTriggerBtn.classList.add('active');
             }
 
             if (!menu) return;
 
-            const rect = event.currentTarget.getBoundingClientRect();
-            const menuWidth = 160;
-            const menuHeight = 145;
+            const rect = activeActionTriggerBtn ? activeActionTriggerBtn.getBoundingClientRect() : { right: window.innerWidth - 100, bottom: 200, left: 100, top: 100 };
+            const menuWidth = 165;
+            const menuHeight = 155;
 
             let left = rect.right - menuWidth;
-            if (left < 10) left = rect.left;
+            if (left < 10) left = Math.max(10, rect.left);
             if (left + menuWidth > window.innerWidth - 10) {
                 left = window.innerWidth - menuWidth - 10;
             }
@@ -3806,7 +3874,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 closeRowActionMenu();
             }
         });
-        window.addEventListener('scroll', closeRowActionMenu, true);
+        window.addEventListener('resize', closeRowActionMenu);
 
         async function triggerRowAction(type) {
             const aju = activeActionAju;
