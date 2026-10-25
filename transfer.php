@@ -1326,7 +1326,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
-    <script src="/assets/sweetalert-theme.js"></script>
+    <script src="/assets/sweetalert-theme.js?v=20261025"></script>
     <style>
         :root, html[data-theme="light"], body[data-theme="light"] {
             --bg-body: #f0f2f5;
@@ -3217,6 +3217,21 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     </div>
 
     <script>
+        if (typeof window.showToast !== 'function') {
+            window.showToast = function(msg, icon = 'info', duration = 2500) {
+                if (typeof Swal !== 'undefined') {
+                    return Swal.fire({
+                        toast: true,
+                        position: 'top-end',
+                        icon: icon,
+                        title: msg,
+                        showConfirmButton: false,
+                        timer: duration,
+                        timerProgressBar: true
+                    });
+                }
+            };
+        }
         const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
         let rawHeaderData = [];
         let activeRowIdx = -1;
@@ -4913,73 +4928,79 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
-            Swal.fire({
-                title: '⚠️ Konfirmasi Hapus Data AJU',
+            const jmlBarang = parseInt(activeItem?.jml_barang ?? activeItem?.jml_brg ?? 0, 10);
+
+            const resetGridAndRefresh = () => {
+                activeAju = null;
+                const gridDetail = document.getElementById('gridDetail');
+                if (gridDetail) gridDetail.innerHTML = '<div class="empty-state">Pilih dokumen pabean untuk melihat rincian</div>';
+                const selBanner = document.getElementById('selectedDocBanner');
+                if (selBanner) selBanner.innerHTML = 'Dokumen Terpilih: <em>Belum ada yang dipilih</em>';
+                loadList();
+            };
+
+            const barangAlertHtml = jmlBarang > 0
+                ? `<div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-size:12px; color:#cf1322;">
+                       ⚠️ Dokumen ini memiliki <strong>${jmlBarang} data barang</strong>.
+                   </div>`
+                : `<div style="background:#f5f5f5; padding:6px 10px; border-radius:4px; margin:10px 0; font-size:12px; color:#595959;">
+                       ℹ️ Dokumen ini tidak memiliki rincian barang (0 barang).
+                   </div>`;
+
+            // Konfirmasi Yes / No tanpa perlu mengetik "YA"
+            const confirmResult = await Swal.fire({
+                title: 'Hapus Data Dokumen AJU?',
                 html: `
                     <div style="font-size:13px; text-align:left; line-height:1.5;">
-                        <p>Anda akan <strong>MENGHAPUS PERMANEN</strong> seluruh data staging dokumen ini:</p>
-                        <div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#ff4d4f;">
+                        <p>Apakah Anda yakin ingin menghapus data dokumen pengajuan ini?</p>
+                        <div style="background:#fffbe6; padding:8px 12px; border-radius:6px; border:1px solid #ffe58f; margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#d46b08;">
                             AJU: ${escapeHtml(activeAju)}
                         </div>
-                        <p style="color:var(--text-muted, #666); font-size:12px;">Data tabel Header, Barang, Entitas, Dokumen, Kemasan, Pengangkut, Kontainer, Pungutan, dan respon pabean terkait akan dibersihkan dari database.</p>
-                        <div style="margin-top:12px; font-weight:600; color:#ff4d4f;">
-                            Ketik <span style="background:#ff4d4f; color:#fff; padding:1px 6px; border-radius:3px; letter-spacing:1px;">YA</span> untuk mengonfirmasi:
-                        </div>
+                        ${barangAlertHtml}
+                        <p style="color:var(--text-muted, #8c8c8c); font-size:11.5px; margin-top:8px;">Data header, barang, entitas, dokumen, dan respon pabean pada staging database akan dibersihkan.</p>
                     </div>
                 `,
-                input: 'text',
-                inputPlaceholder: 'Ketik YA di sini...',
-                inputAttributes: {
-                    autocapitalize: 'characters',
-                    autocomplete: 'off',
-                    spellcheck: 'false'
-                },
-                icon: 'warning',
+                icon: jmlBarang > 0 ? 'warning' : 'question',
                 showCancelButton: true,
                 confirmButtonColor: '#ff4d4f',
                 cancelButtonColor: '#8c8c8c',
-                confirmButtonText: '🗑️ Hapus Data AJU',
+                confirmButtonText: '🗑️ Ya, Hapus',
                 cancelButtonText: 'Batal',
-                showLoaderOnConfirm: true,
-                inputValidator: (val) => {
-                    if (!val || val.trim().toUpperCase() !== 'YA') {
-                        return 'Wajib mengetik "YA" dengan benar untuk konfirmasi penghapusan.';
-                    }
-                },
-                preConfirm: (val) => {
-                    const formData = new FormData();
-                    formData.append('action', 'delete_aju');
-                    formData.append('nomor_aju', activeAju);
-                    formData.append('confirm', val.trim());
+                reverseButtons: true
+            });
 
-                    return fetch('transfer.php', { method: 'POST', body: formData })
-                        .then(r => r.json())
-                        .then(res => {
-                            if (res.status !== 'OK') {
-                                throw new Error(res.message || 'Gagal menghapus data AJU.');
-                            }
-                            return res;
-                        })
-                        .catch(err => {
-                            Swal.showValidationMessage(`${err.message}`);
-                        });
-                }
-            }).then((result) => {
-                if (result.isConfirmed && result.value) {
-                    Swal.fire({
-                        title: 'Berhasil Dihapus',
-                        html: result.value.message || 'Data dokumen AJU berhasil dihapus.',
-                        icon: 'success',
-                        confirmButtonColor: '#1890ff'
-                    });
-                    activeAju = null;
-                    const gridDetail = document.getElementById('gridDetail');
-                    if (gridDetail) gridDetail.innerHTML = '<div class="empty-state">Pilih dokumen pabean untuk melihat rincian</div>';
-                    const selBanner = document.getElementById('selectedDocBanner');
-                    if (selBanner) selBanner.innerHTML = 'Dokumen Terpilih: <em>Belum ada yang dipilih</em>';
-                    loadList();
+            if (!confirmResult.isConfirmed) return;
+
+            Swal.fire({
+                title: 'Menghapus Data AJU...',
+                html: `Menghapus dokumen <strong>${escapeHtml(activeAju)}</strong>...`,
+                allowOutsideClick: false,
+                showConfirmButton: false,
+                didOpen: () => {
+                    Swal.showLoading();
                 }
             });
+
+            try {
+                const formData = new FormData();
+                formData.append('action', 'delete_aju');
+                formData.append('nomor_aju', activeAju);
+                formData.append('confirm', 'YA');
+
+                const r = await fetch('transfer.php', { method: 'POST', body: formData });
+                const res = await r.json();
+                Swal.close();
+
+                if (res.status === 'OK') {
+                    showSuccess(res.message || `Data dokumen AJU ${activeAju} berhasil dihapus.`);
+                    resetGridAndRefresh();
+                } else {
+                    showError(res.message || 'Gagal menghapus data AJU.');
+                }
+            } catch (err) {
+                Swal.close();
+                showError('Terjadi kesalahan saat menghapus: ' + err.message);
+            }
         }
 
         // -------------------------------------------------------------

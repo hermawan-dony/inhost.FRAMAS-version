@@ -490,12 +490,8 @@ if ($action === 'get_alert_notifications') {
 
     // 1. Jumlah Dokumen yang Belum Selesai (CEISA 4.0)
     $whereCmpData = [];
-    if (!empty($cleanCmp)) {
-        if (!empty($cmpNpwpDigits)) {
-            $whereCmpData[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwpDigits%')";
-        } else {
-            $whereCmpData[] = "a.cmp_id = '$cleanCmp'";
-        }
+    if (!empty($cleanCmp) && !empty($cmpNpwpDigits)) {
+        $whereCmpData[] = "a.idPerusahaan LIKE '%$cmpNpwpDigits%'";
     }
     $whereCmpDataSql = !empty($whereCmpData) ? ' AND ' . implode(' AND ', $whereCmpData) : '';
 
@@ -1056,7 +1052,7 @@ if ($initialTab === 'editor') {
 } elseif ($initialTab === 'load_erp_odoo') {
     $initSrc = "/load_erp_odoo.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } else {
-    $initSrc = "/daftar_dokumen.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+    $initSrc = "/daftar_dokumen.php?embedded=1{$adminParam}&_t=" . time();
 }
 ?>
 <!DOCTYPE html>
@@ -1481,11 +1477,11 @@ if ($initialTab === 'editor') {
 
         /* Sidebar Footer (Versi Update) */
         .kt-aside__footer {
-            padding: 4px 8px;
-            font-size: 7.5px;
-            font-weight: 400;
+            padding: 5px 8px;
+            font-size: 8.5px;
+            font-weight: 500;
             color: var(--text-muted);
-            opacity: 0.75;
+            opacity: 0.85;
             border-top: 1px solid var(--border-color);
             background: var(--bg-sidebar);
             flex-shrink: 0;
@@ -1495,6 +1491,18 @@ if ($initialTab === 'editor') {
             text-align: center;
             letter-spacing: 0.2px;
             user-select: none;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+        .kt-aside__footer:hover {
+            color: #1890ff;
+            opacity: 1;
+            background: rgba(24, 144, 255, 0.08);
+            box-shadow: 0 -2px 10px rgba(24, 144, 255, 0.25);
+        }
+        .kt-aside__footer:hover #sidebarAppVersion {
+            color: #1890ff;
+            text-shadow: 0 0 6px rgba(24, 144, 255, 0.5);
         }
 
         .kt-menu__section {
@@ -3779,10 +3787,10 @@ if ($initialTab === 'editor') {
                         </a>
                     </div>
                     <div class="kt-menu__item <?= ($initialTab === 'version_log') ? 'active' : '' ?>" id="nav-item-version_log" onclick="switchMainTab('version_log')">
-                        <a class="kt-menu__link" title="Lihat riwayat rilis, update, dan solve bug sistem">
+                        <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
-                                <span class="icon-colored">📋</span>
-                                <span class="icon-monochrome"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg></span>
+                                <span class="icon-colored">📜</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656zM256 312h400c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0 160h400c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0 160h240c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8z"/></svg></span>
                             </span>
                             <span class="kt-menu__link-text">Log Update Versi</span>
                             <i class="kt-menu__ver-arrow">›</i>
@@ -3855,8 +3863,8 @@ if ($initialTab === 'editor') {
             </div>
 
             <!-- SIDEBAR FOOTER (Versi Update) -->
-            <div class="kt-aside__footer" title="Klik untuk melihat Log Update Versi Sistem" style="cursor:pointer;" onclick="switchMainTab('version_log')">
-                Versi Update : <?= htmlspecialchars($appUpdateVersion) ?>
+            <div class="kt-aside__footer" title="Klik untuk melihat riwayat log update versi sistem" onclick="switchMainTab('version_log')" style="cursor:pointer;">
+                Versi Update : <span id="sidebarAppVersion" style="text-decoration:underline; font-weight:600;"><?= htmlspecialchars($appUpdateVersion) ?></span>
             </div>
         </aside>
 
@@ -4325,7 +4333,7 @@ if ($initialTab === 'editor') {
             const adminParam = isAdmin ? '&is_admin=1' : '&is_admin=0';
             const curTheme = document.body.getAttribute('data-theme') || localStorage.getItem('ceisa_theme') || 'light';
             const themeParam = `&theme=${encodeURIComponent(curTheme)}`;
-            if (tabId === 'daftar_dokumen') return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'daftar_dokumen') return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'transfer') return `/transfer.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'editor') {
                 const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;
@@ -4355,7 +4363,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'tracking') return `/statusaju.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'user_management') return `/user_management.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId.startsWith('it_inventory')) {
-                if (currentIsInv === 0 && !isBcRole) return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+                if (currentIsInv === 0 && !isBcRole) return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
                 if (tabId === 'it_inventory_home') {
                     return `/it_inventory.php?tab=home&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
                 }
@@ -4375,10 +4383,10 @@ if ($initialTab === 'editor') {
                 return `/it_inventory.php?tab=${encodeURIComponent(subtab)}&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             }
             if (tabId === 'reff') return `/reff.php?embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'app_settings') return `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'docs') return `/docs.php?embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'version_log') return `/version_log.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             
             // Inventory Modul URLs
@@ -4397,7 +4405,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'inv_stok_awal') return `/stok_awal_tahun.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'inv_adjust_spp') return `/adjust_spp.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
 
-            return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
         }
 
         function switchMainTab(tabId, extraParam) {

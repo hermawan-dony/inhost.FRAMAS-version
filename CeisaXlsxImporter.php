@@ -440,6 +440,14 @@ class CeisaXlsxImporter {
             throw new Exception("cmp_id (Company ID / NPWP) harus ditentukan untuk multi-company.");
         }
 
+        // Normalisasi $cmpId ke cmp_id resmi terdaftar di bc_ceisa_company
+        if (function_exists('ceisa_get_company')) {
+            $comp = ceisa_get_company($cmpId ?: $primaryAju);
+            if ($comp && !empty($comp['cmp_id'])) {
+                $cmpId = $comp['cmp_id'];
+            }
+        }
+
         // Mulai transaksi database
         if ($this->pdo) {
             $this->pdo->beginTransaction();
@@ -543,6 +551,9 @@ class CeisaXlsxImporter {
                         $filteredRow = [];
                         foreach ($row as $k => $v) {
                             if (isset($tableCols[$k])) {
+                                if (($v === null || $v === '') && in_array($k, ['nilai_bayar', 'nilai_fasilitas', 'nilai_sudah_dilunasi', 'jumlah_satuan', 'jumlah_kemasan', 'seri_barang', 'seri', 'tarif', 'tarif_fasilitas', 'nilai_pungutan'])) {
+                                    $v = 0;
+                                }
                                 $filteredRow[$k] = $v;
                             }
                         }
@@ -649,19 +660,20 @@ class CeisaXlsxImporter {
 
     /**
      * Hapus data AJU lama saat overwrite secara batch (jauh lebih cepat daripada query satu per satu)
+     * Menghapus berdasarkan nomor_aju untuk menjamin tidak ada duplikasi data akibat perbedaan cmp_id / alias
      */
     private function deleteExistingBatch($tableName, $cmpId, array $allAjus) {
         if (empty($allAjus)) return;
         $tableCols = $this->getTableColumns($tableName);
-        if (!isset($tableCols['cmp_id']) || !isset($tableCols['nomor_aju'])) {
+        if (!isset($tableCols['nomor_aju'])) {
             return;
         }
 
         $chunks = array_chunk($allAjus, 150);
         foreach ($chunks as $chunk) {
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-            $deleteSql = "DELETE FROM `$tableName` WHERE cmp_id = ? AND nomor_aju IN ($placeholders)";
-            $params = array_merge([$cmpId], $chunk);
+            $deleteSql = "DELETE FROM `$tableName` WHERE nomor_aju IN ($placeholders)";
+            $params = $chunk;
 
             if ($this->pdo) {
                 $delStmt = $this->pdo->prepare($deleteSql);

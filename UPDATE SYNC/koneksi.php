@@ -21,10 +21,17 @@ if (!function_exists('str_contains')) {
     }
 }
 
-// Deteksi Otomatis Lingkungan Server (VPS Bekasi vs cPanel inhost.id)
+// Deteksi Otomatis Lingkungan Server (Windows lokal / VPS Bekasi / cPanel inhost.id)
+$isWindowsLocal = (
+    strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ||
+    (isset($_SERVER['DOCUMENT_ROOT']) && (
+        stripos($_SERVER['DOCUMENT_ROOT'], 'xampp') !== false ||
+        stripos($_SERVER['DOCUMENT_ROOT'], 'inhost-web-id') !== false
+    ))
+);
 $isVpsBekasi = file_exists('/var/www/inhost');
 $isCpanel    = (
-    !$isVpsBekasi && (
+    !$isVpsBekasi && !$isWindowsLocal && (
         (isset($_SERVER['DOCUMENT_ROOT']) && strpos($_SERVER['DOCUMENT_ROOT'], 'bc2faktur') !== false) ||
         (isset($_SERVER['HTTP_HOST']) && strpos($_SERVER['HTTP_HOST'], 'inhost.id') !== false) ||
         (isset($_SERVER['SERVER_NAME']) && strpos($_SERVER['SERVER_NAME'], 'inhost.id') !== false) ||
@@ -33,7 +40,17 @@ $isCpanel    = (
     )
 );
 
-if ($isVpsBekasi) {
+if ($isWindowsLocal) {
+    // 0. WINDOWS / XAMPP LOKAL: MySQL 8.0.45 (port 3307) database multi-tenant framasbc
+    $user     = 'beacukai';
+    $password = 'beacukai';
+    $database = 'framasbc';
+
+    $koneksi = @mysqli_connect('127.0.0.1', $user, $password, $database, 3307);
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('localhost', $user, $password, $database, 3307);
+    }
+} elseif ($isVpsBekasi) {
     // 1. VPS BEKASI (DCI CIBITUNG): Prioritaskan 'localhost' UNIX Socket untuk latensi 0 ms
     $user     = 'bc2faktur_root';
     $password = '@combro#';
@@ -80,6 +97,13 @@ if ($isVpsBekasi) {
             $database = 'bc2faktur_inhost';
         }
     }
+    // Fallback 2: Windows lokal multi-tenant (MySQL 8.0.45 :3307)
+    if (!$koneksi) {
+        $koneksi = @mysqli_connect('127.0.0.1', 'beacukai', 'beacukai', 'framasbc', 3307);
+        if ($koneksi) {
+            $database = 'framasbc';
+        }
+    }
 }
 
 if (!$koneksi) {
@@ -87,6 +111,7 @@ if (!$koneksi) {
 }
 
 mysqli_set_charset($koneksi, "utf8mb4");
+@mysqli_query($koneksi, "SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci");
 
 // Standarisasi Waktu ke Waktu Indonesia Barat (WIB, Asia/Jakarta / UTC+7)
 if (function_exists('date_default_timezone_set')) {
@@ -100,26 +125,29 @@ if (function_exists('date_default_timezone_set')) {
 if (!function_exists('ceisa_doc_catalog')) {
     function ceisa_doc_catalog() {
         return [
-            // GRUP PEMASUKAN (INBOUND)
-            '16'  => ['label' => 'BC 1.6 — Pemasukan ke PLB',                              'type' => 'inbound',  'group' => 'plb',   'short' => 'BC 1.6',       'color' => '#52c41a'],
-            '20'  => ['label' => 'BC 2.0 — Impor Non-Fasilitas (PIB)',                    'type' => 'inbound',  'group' => 'pib',   'short' => 'BC 2.0',       'color' => '#2f54eb'],
-            '23'  => ['label' => 'BC 2.3 — Impor ke Kawasan Berikat (TPB)',               'type' => 'inbound',  'group' => 'tpb',   'short' => 'BC 2.3',       'color' => '#1890ff'],
-            '262' => ['label' => 'BC 2.6.2 — Pemasukan Subcon Kembali',                   'type' => 'inbound',  'group' => 'tpb',   'short' => 'BC 2.6.2',     'color' => '#a0d911'],
-            '27IN'=> ['label' => 'BC 2.7 IN — Pemasukan dari TPB Lain',                   'type' => 'inbound',  'group' => 'tpb',   'short' => 'BC 2.7 IN',    'color' => '#13c2c2'],
-            '28'  => ['label' => 'BC 2.8 — Impor dari PLB',                               'type' => 'inbound',  'group' => 'plb',   'short' => 'BC 2.8',       'color' => '#13c2c2'],
-            '40'  => ['label' => 'BC 4.0 — Pemasukan dari Lokal ke TPB',                  'type' => 'inbound',  'group' => 'tpb',   'short' => 'BC 4.0',       'color' => '#13c2c2'],
-            '611' => ['label' => 'PPKEK 6.1.1 — Pemasukan ke KEK dari Luar Negeri',        'type' => 'inbound',  'group' => 'ppkek', 'short' => 'PPKEK 6.1.1', 'color' => '#722ed1'],
-            '613' => ['label' => 'PPKEK 6.1.3 — Pemasukan ke KEK dari Lokal',              'type' => 'inbound',  'group' => 'ppkek', 'short' => 'PPKEK 6.1.3', 'color' => '#722ed1'],
+            // PPKEK (Kawasan Ekonomi Khusus)
+            '611' => ['label' => 'PPKEK 6.1.1 (Pemasukan LDP)',       'group' => 'ppkek', 'short' => 'PPKEK 6.1.1', 'color' => '#722ed1'],
+            '613' => ['label' => 'PPKEK 6.1.3 (Pemasukan TLDDP)',     'group' => 'ppkek', 'short' => 'PPKEK 6.1.3', 'color' => '#722ed1'],
+            '631' => ['label' => 'PPKEK 6.3.1 (Pengeluaran ke LDP)', 'group' => 'ppkek', 'short' => 'PPKEK 6.3.1', 'color' => '#722ed1'],
+            
+            // TPB (Tempat Penimbunan Berikat)
+            '25'  => ['label' => 'BC 2.5 (Pengeluaran TPB)',      'group' => 'tpb',   'short' => 'BC 2.5',       'color' => '#fa8c16'],
+            '23'  => ['label' => 'BC 2.3 (Impor TPB)',            'group' => 'tpb',   'short' => 'BC 2.3',       'color' => '#1890ff'],
+            '40'  => ['label' => 'BC 4.0 (Pemasukan TLDDP)',      'group' => 'tpb',   'short' => 'BC 4.0',       'color' => '#13c2c2'],
+            '27'  => ['label' => 'BC 2.7 (TPB ke TPB)',           'group' => 'tpb',   'short' => 'BC 2.7',       'color' => '#2f54eb'],
+            '41'  => ['label' => 'BC 4.1 (Pengeluaran TLDDP)',    'group' => 'tpb',   'short' => 'BC 4.1',       'color' => '#faad14'],
+            '261' => ['label' => 'BC 2.6.1 (Subkon Luar)',        'group' => 'tpb',   'short' => 'BC 2.6.1',     'color' => '#eb2f96'],
+            '262' => ['label' => 'BC 2.6.2 (Subkon Masuk)',       'group' => 'tpb',   'short' => 'BC 2.6.2',     'color' => '#a0d911'],
+            
+            // PLB / PDPLB (Pusat Logistik Berikat - Khusus, Bukan TPB Standar)
+            '16'  => ['label' => 'BC 1.6 (Pemasukan PLB)',        'group' => 'plb',   'short' => 'BC 1.6',       'color' => '#52c41a'],
+            '28'  => ['label' => 'BC 2.8 (Impor PLB)',            'group' => 'plb',   'short' => 'BC 2.8',       'color' => '#13c2c2'],
+            '33'  => ['label' => 'BC 3.3 (Ekspor PLB)',           'group' => 'plb',   'short' => 'BC 3.3',       'color' => '#fa541c'],
+            '331' => ['label' => 'BC 3.3.1 (P3BET PLB)',          'group' => 'plb',   'short' => 'BC 3.3.1',     'color' => '#fa8c16'],
 
-            // GRUP PENGELUARAN (OUTBOUND)
-            '25'  => ['label' => 'BC 2.5 — Pengeluaran ke Lokal (Asal Impor / BC 2.3)',         'type' => 'outbound', 'group' => 'tpb',   'short' => 'BC 2.5',       'color' => '#fa8c16'],
-            '261' => ['label' => 'BC 2.6.1 — Pengeluaran Subcon',                         'type' => 'outbound', 'group' => 'tpb',   'short' => 'BC 2.6.1',     'color' => '#eb2f96'],
-            '27'  => ['label' => 'BC 2.7 — Pengeluaran ke TPB Lain',                       'type' => 'outbound', 'group' => 'tpb',   'short' => 'BC 2.7',       'color' => '#2f54eb'],
-            '30'  => ['label' => 'BC 3.0 — Ekspor Barang (PEB)',                           'type' => 'outbound', 'group' => 'peb',   'short' => 'BC 3.0',       'color' => '#fa8c16'],
-            '33'  => ['label' => 'BC 3.3 — Ekspor dari PLB',                              'type' => 'outbound', 'group' => 'plb',   'short' => 'BC 3.3',       'color' => '#fa541c'],
-            '331' => ['label' => 'BC 3.3.1 — P3BET PLB',                                 'type' => 'outbound', 'group' => 'plb',   'short' => 'BC 3.3.1',     'color' => '#fa8c16'],
-            '41'  => ['label' => 'BC 4.1 — Pengeluaran ke Lokal (Asal Lokal / BC 4.0)',         'type' => 'outbound', 'group' => 'tpb',   'short' => 'BC 4.1',       'color' => '#faad14'],
-            '631' => ['label' => 'PPKEK 6.3.1 — Pengeluaran dari KEK ke Luar Negeri',      'type' => 'outbound', 'group' => 'ppkek', 'short' => 'PPKEK 6.3.1', 'color' => '#722ed1'],
+            // PIB & PEB (Impor / Ekspor Umum)
+            '20'  => ['label' => 'BC 2.0 (Impor PIB)',            'group' => 'pib',   'short' => 'BC 2.0',       'color' => '#2f54eb'],
+            '30'  => ['label' => 'BC 3.0 (Ekspor PEB)',           'group' => 'peb',   'short' => 'BC 3.0',       'color' => '#fa8c16'],
         ];
     }
 }

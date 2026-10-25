@@ -2005,7 +2005,7 @@ if ($action === 'sync_company') {
 
             Swal.fire({
                 title: 'Sinkronisasi Massal CEISA 4.0',
-                html: 'Menghubungi endpoint OpenAPI Status Bea Cukai & memproses seluruh respon...',
+                html: 'Menghubungi server Bea Cukai & memproses seluruh respon...',
                 allowOutsideClick: false,
                 didOpen: () => { Swal.showLoading(); }
             });

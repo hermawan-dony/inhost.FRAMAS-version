@@ -28,7 +28,7 @@ if (!function_exists('getDefaultAppSettings')) {
             // 3. CEISA 4.0 Integration & Environment (Khusus Admin Global)
             'ceisa_env'                   => 'production', // 'production' | 'staging'
             'ceisa_api_url'               => 'https://apis-gw.beacukai.go.id',
-            'ceisa_sync_interval_minutes' => '60', // Interval sinkronisasi background (default 60 menit / 1 jam)
+            'ceisa_sync_interval_minutes' => '120', // Interval sinkronisasi background (default 120 menit / 2 jam)
             'ceisa_sync_batch_size'       => '50', // Jumlah dokumen ditarik per sync (default 50 baris)
             'tracking_refresh'            => '0', // detik (0 = Non-Aktif / Manual Saja)
             'api_timeout'                 => '30', // detik
@@ -259,48 +259,78 @@ if (!function_exists('resetAppSettings')) {
 
 if (!function_exists('getAppUpdateVersion')) {
     /**
-     * Mengambil nomor versi update sistem terkini secara otomatis
-     * Mendeteksi waktu modifikasi terbaru dari berkas aplikasi / version.txt
-     * Format: YYYYMMDD.HHmm (contoh: 20261025.0905)
+     * Mengambil nomor versi update sistem terkini
+     * Mengutamakan record database bc_app_version_log, fallback file version.txt, fallback filemtime index.php
+     * Format: YYYYMMDD.HHmm (contoh: 20261025.0910)
      */
-    function getAppUpdateVersion() {
-        $vf = __DIR__ . '/version.txt';
-        $vTxt = '';
-        $vTxtTs = 0;
-        if (file_exists($vf)) {
-            $vTxt = trim((string)@file_get_contents($vf));
-            $vTxtTs = filemtime($vf);
-        }
-
-        // Periksa filemtime berkas-berkas utama aplikasi
-        $coreFiles = ['index.php', 'transfer.php', 'daftar_dokumen.php', 'editor.php', 'it_inventory.php', 'company.php', 'material.php', 'app_settings_helper.php'];
-        $maxTs = $vTxtTs;
-        foreach ($coreFiles as $cf) {
-            $path = __DIR__ . '/' . $cf;
-            if (file_exists($path)) {
-                $mtime = filemtime($path);
-                if ($mtime > $maxTs) {
-                    $maxTs = $mtime;
+    function getAppUpdateVersion($dbConn = null) {
+        global $koneksi;
+        $conn = $dbConn ?? $koneksi ?? null;
+        if ($conn && $conn instanceof mysqli) {
+            $checkTable = @$conn->query("SHOW TABLES LIKE 'bc_app_version_log'");
+            if ($checkTable && $checkTable->num_rows > 0) {
+                $res = @$conn->query("SELECT version FROM bc_app_version_log ORDER BY version DESC, release_date DESC LIMIT 1");
+                if ($res && $row = $res->fetch_assoc()) {
+                    $dbVer = trim((string)$row['version']);
+                    if (!empty($dbVer)) {
+                        $vf = __DIR__ . '/version.txt';
+                        $fileVer = file_exists($vf) ? trim((string)@file_get_contents($vf)) : '';
+                        if ($fileVer !== $dbVer) {
+                            @file_put_contents($vf, $dbVer);
+                        }
+                        return $dbVer;
+                    }
                 }
             }
         }
-
-        // Jika ada modifikasi berkas yang lebih baru dari version.txt (selisih > 30 detik)
-        if ($maxTs > ($vTxtTs + 30)) {
-            $dt = new DateTime("@$maxTs");
-            $dt->setTimezone(new DateTimeZone('Asia/Jakarta'));
-            $newVer = $dt->format('Ymd.Hi');
-            @file_put_contents($vf, $newVer);
-            return $newVer;
+        $vf = __DIR__ . '/version.txt';
+        if (file_exists($vf)) {
+            $v = trim((string)@file_get_contents($vf));
+            if (!empty($v)) {
+                return $v;
+            }
         }
-
-        if (!empty($vTxt) && preg_match('/^\d{8}\.\d{4}$/', $vTxt)) {
-            return $vTxt;
-        }
-
-        $dt = new DateTime("@$maxTs");
+        $ts = file_exists(__DIR__ . '/index.php') ? filemtime(__DIR__ . '/index.php') : time();
+        $dt = new DateTime("@$ts");
         $dt->setTimezone(new DateTimeZone('Asia/Jakarta'));
         return $dt->format('Ymd.Hi');
+    }
+}
+
+if (!function_exists('recordAppVersionLog')) {
+    /**
+     * Mencatat versi pembaruan aplikasi ke tabel bc_app_version_log dan menyinkronkan file version.txt
+     */
+    function recordAppVersionLog($version, $title, $changes, $filesModified = '', $category = 'Update', $author = 'Super Administrator', $dbConn = null) {
+        global $koneksi;
+        $conn = $dbConn ?? $koneksi ?? null;
+        if (!$conn || !($conn instanceof mysqli)) {
+            return false;
+        }
+
+        $verEsc    = $conn->real_escape_string(trim($version));
+        $titleEsc  = $conn->real_escape_string(trim($title));
+        $catEsc    = $conn->real_escape_string(trim($category));
+        $changeEsc = $conn->real_escape_string(trim($changes));
+        $filesEsc  = $conn->real_escape_string(trim($filesModified));
+        $authEsc   = $conn->real_escape_string(trim($author));
+
+        $sql = "INSERT INTO bc_app_version_log (version, title, category, release_date, changes, files_modified, author, created_at)
+                VALUES ('$verEsc', '$titleEsc', '$catEsc', NOW(), '$changeEsc', '$filesEsc', '$authEsc', NOW())
+                ON DUPLICATE KEY UPDATE 
+                    title = VALUES(title),
+                    category = VALUES(category),
+                    release_date = NOW(),
+                    changes = VALUES(changes),
+                    files_modified = VALUES(files_modified),
+                    author = VALUES(author)";
+
+        $ok = $conn->query($sql);
+        if ($ok) {
+            $vf = __DIR__ . '/version.txt';
+            @file_put_contents($vf, trim($version));
+        }
+        return (bool)$ok;
     }
 }
 

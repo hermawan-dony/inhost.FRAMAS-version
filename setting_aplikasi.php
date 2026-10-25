@@ -156,8 +156,8 @@ if ($action === 'save') {
     if ($ceisaSyncBatch > 1000) $ceisaSyncBatch = 1000;
     $ceisaSyncBatch = (string)$ceisaSyncBatch;
 
-    $ceisaSyncInterval = isset($_POST['ceisa_sync_interval_minutes']) ? (int)$_POST['ceisa_sync_interval_minutes'] : 15;
-    if ($ceisaSyncInterval < 5) $ceisaSyncInterval = 15;
+    $ceisaSyncInterval = isset($_POST['ceisa_sync_interval_minutes']) ? (int)$_POST['ceisa_sync_interval_minutes'] : 60;
+    if ($ceisaSyncInterval < 15) $ceisaSyncInterval = 60;
     $ceisaSyncInterval = (string)$ceisaSyncInterval;
 
     $trackingRef    = trim($_POST['tracking_refresh'] ?? '0');
@@ -1416,7 +1416,7 @@ if ($isCustomScope) {
                         <div class="form-group">
                             <label>
                                 <span>Interval Auto-Refresh Tracking Respon</span>
-                                <span class="hint">Disarankan "Non-Aktif" agar terhindar dari pemblokiran rate-limit IP</span>
+                                <span class="hint">Disarankan "Non-Aktif" untuk menjaga efisiensi dan kestabilan request portal</span>
                             </label>
                             <select class="form-control" id="inp_tracking_refresh" name="tracking_refresh">
                                 <option value="0" <?= ($currentSettings['tracking_refresh'] === '0') ? 'selected' : '' ?>>Non-Aktif (Manual Saja - Direkomendasikan)</option>
@@ -1442,11 +1442,10 @@ if ($isCustomScope) {
                                 <span class="hint">Minimal 15 menit sekali agar penarikan tidak terlalu cepat</span>
                             </label>
                             <select class="form-control" id="inp_ceisa_sync_interval_minutes" name="ceisa_sync_interval_minutes">
-                                <option value="15" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 15) ? 'selected' : '' ?>>15 Menit Sekali</option>
-                                <option value="30" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 30) ? 'selected' : '' ?>>30 Menit Sekali</option>
-                                <option value="60" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 60) ? 'selected' : '' ?>>60 Menit (1 Jam Sekali)</option>
-                                <option value="120" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 120) ? 'selected' : '' ?>>120 Menit (2 Jam Sekali - Rekomendasi)</option>
-                                <option value="240" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 120) === 240) ? 'selected' : '' ?>>240 Menit (4 Jam Sekali)</option>
+                                <option value="60" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 60) === 60) ? 'selected' : '' ?>>60 Menit (1 Jam Sekali - Default &amp; Rekomendasi)</option>
+                                <option value="15" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 60) === 15) ? 'selected' : '' ?>>15 Menit Sekali</option>
+                                <option value="30" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 60) === 30) ? 'selected' : '' ?>>30 Menit Sekali</option>
+                                <option value="120" <?= ((int)($currentSettings['ceisa_sync_interval_minutes'] ?? 60) === 120) ? 'selected' : '' ?>>120 Menit (2 Jam Sekali)</option>
                             </select>
                         </div>
                         <div class="form-group">

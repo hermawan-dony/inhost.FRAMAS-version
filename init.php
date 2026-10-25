@@ -86,6 +86,7 @@ if (empty($activeToken)) {
         $_SESSION["token_" . $cmp_key] = $newToken;
         $_SESSION["token_created_at_" . $cmp_key] = $now;
         $_SESSION["token"] = $newToken; // backward compatibility
+        $activeToken = $newToken;
 
         // Simpan ke shared cache file agar tidak request login ulang
         @file_put_contents($tokenCacheFile, json_encode([
@@ -103,4 +104,8 @@ if (empty($activeToken)) {
     $_SESSION["token"] = $activeToken;
     $_SESSION["token_" . $cmp_key] = $activeToken;
 }
+
+// Pembedaan eksplisit variabel token khusus NLE (terisolasi dari token MFA)
+$nleToken = $activeToken;
+$activeNleToken = $activeToken;
 ?>

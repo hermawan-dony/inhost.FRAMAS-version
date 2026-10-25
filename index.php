@@ -1052,7 +1052,7 @@ if ($initialTab === 'editor') {
 } elseif ($initialTab === 'load_erp_odoo') {
     $initSrc = "/load_erp_odoo.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}";
 } else {
-    $initSrc = "/daftar_dokumen.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+    $initSrc = "/daftar_dokumen.php?embedded=1{$adminParam}&_t=" . time();
 }
 ?>
 <!DOCTYPE html>
@@ -4333,7 +4333,7 @@ if ($initialTab === 'editor') {
             const adminParam = isAdmin ? '&is_admin=1' : '&is_admin=0';
             const curTheme = document.body.getAttribute('data-theme') || localStorage.getItem('ceisa_theme') || 'light';
             const themeParam = `&theme=${encodeURIComponent(curTheme)}`;
-            if (tabId === 'daftar_dokumen') return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'daftar_dokumen') return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'transfer') return `/transfer.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'editor') {
                 const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;
@@ -4363,7 +4363,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'tracking') return `/statusaju.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'user_management') return `/user_management.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId.startsWith('it_inventory')) {
-                if (currentIsInv === 0 && !isBcRole) return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+                if (currentIsInv === 0 && !isBcRole) return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
                 if (tabId === 'it_inventory_home') {
                     return `/it_inventory.php?tab=home&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
                 }
@@ -4383,10 +4383,10 @@ if ($initialTab === 'editor') {
                 return `/it_inventory.php?tab=${encodeURIComponent(subtab)}&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             }
             if (tabId === 'reff') return `/reff.php?embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'company') return isAdmin ? `/company.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}` : `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'app_settings') return `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'docs') return `/docs.php?embedded=1${adminParam}${themeParam}`;
-            if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'version_log') return `/version_log.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             
             // Inventory Modul URLs
@@ -4405,7 +4405,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'inv_stok_awal') return `/stok_awal_tahun.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
             if (tabId === 'inv_adjust_spp') return `/adjust_spp.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
 
-            return `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            return `/daftar_dokumen.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
         }
 
         function switchMainTab(tabId, extraParam) {
