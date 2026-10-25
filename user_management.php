@@ -111,8 +111,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
         $res = $koneksi->query("SELECT l.cmp_id, IFNULL(c.cmp_name, l.cmp_id) AS cmp_name, l.user_id, l.nama_lengkap, l.lvl, l.role, l.allowed_menus, l.allowed_docs, l.is_active, l.created_at, l.updated_at 
                                 FROM bc_ceisa_login l 
                                 LEFT JOIN bc_ceisa_company c ON l.cmp_id = c.cmp_id
-                                WHERE l.cmp_id = '$qCmp' 
-                                ORDER BY l.role ASC, l.user_id ASC");
+                                WHERE (l.cmp_id = '$qCmp' OR l.cmp_id = '*') 
+                                ORDER BY (l.cmp_id = '*') ASC, l.role ASC, l.user_id ASC");
         $users = [];
         if ($res) {
             while ($r = $res->fetch_assoc()) {
@@ -134,8 +134,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
         $stmt = $koneksi->prepare("SELECT l.cmp_id, IFNULL(c.cmp_name, l.cmp_id) AS cmp_name, l.user_id, l.nama_lengkap, l.lvl, l.role, l.allowed_menus, l.allowed_docs, l.is_active 
                                    FROM bc_ceisa_login l 
                                    LEFT JOIN bc_ceisa_company c ON l.cmp_id = c.cmp_id
-                                   WHERE l.cmp_id = ? AND l.user_id = ? LIMIT 1");
-        $stmt->bind_param("ss", $targetCmp, $uid);
+                                   WHERE (l.cmp_id = ? OR l.cmp_id = '*') AND l.user_id = ? ORDER BY (l.cmp_id = ?) DESC LIMIT 1");
+        $stmt->bind_param("sss", $targetCmp, $uid, $targetCmp);
         $stmt->execute();
         $res = $stmt->get_result();
         if ($res && $user = $res->fetch_assoc()) {
@@ -180,6 +180,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
             $allMenus = json_encode(['it_inventory']);
             $allDocs  = !empty($_POST['all_docs']) ? '*' : (isset($_POST['docs']) ? json_encode(array_values((array)$_POST['docs'])) : '*');
             $lvl      = '4';
+        } elseif ($role === 'produksi') {
+            $allMenus = json_encode(['inventory_modul', 'inv_stock_transfer', 'it_inventory']);
+            $allDocs  = !empty($_POST['all_docs']) ? '*' : (isset($_POST['docs']) ? json_encode(array_values((array)$_POST['docs'])) : '*');
+            $lvl      = '3';
+        } elseif ($role === 'warehouse') {
+            $allMenus = json_encode([
+                'daftar_dokumen',
+                'inventory_modul',
+                'inv_material',
+                'inv_bom',
+                'inv_jaminan',
+                'inv_stock_transfer',
+                'inv_warehouse_in',
+                'inv_warehouse_delivery',
+                'inv_transfer_bc27',
+                'inv_scan27',
+                'inv_stok_opname',
+                'inv_unposting_appv',
+                'inv_stok_awal',
+                'inv_adjust_spp',
+                'it_inventory'
+            ]);
+            $allDocs  = !empty($_POST['all_docs']) ? '*' : (isset($_POST['docs']) ? json_encode(array_values((array)$_POST['docs'])) : '*');
+            $lvl      = '3';
+        } elseif ($role === 'exim') {
+            $allMenus = !empty($_POST['all_menus']) ? '*' : (isset($_POST['menus']) ? json_encode(array_values((array)$_POST['menus'])) : '*');
+            $allDocs  = !empty($_POST['all_docs']) ? '*' : (isset($_POST['docs']) ? json_encode(array_values((array)$_POST['docs'])) : '*');
+            $lvl      = '2';
         } else {
             $allMenus  = !empty($_POST['all_menus']) ? '*' : (isset($_POST['menus']) ? json_encode(array_values((array)$_POST['menus'])) : '[]');
             $allDocs   = !empty($_POST['all_docs']) ? '*' : (isset($_POST['docs']) ? json_encode(array_values((array)$_POST['docs'])) : '[]');
@@ -784,8 +812,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                     <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(24, 144, 255, 0.08); border:1px solid rgba(24, 144, 255, 0.35); border-radius:4px; padding:3px 10px;">
                         <span style="font-size:12px;">🏢</span>
                         <label for="modalUserCmpId" style="font-size:9.5px; font-weight:700; color:var(--primary); margin:0; text-transform:uppercase; white-space:nowrap;">Perusahaan:</label>
-                        <?php if ($isSuperAdmin): ?>
+                        <?php if ($isSuperAdmin || in_array($activeCmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])): ?>
                         <select id="modalUserCmpId" class="form-control" style="height:26px; font-size:11px; font-weight:700; color:var(--text-heading); border:1px solid var(--border-input); background:var(--bg-card); padding:2px 8px; border-radius:3px; max-width:320px; cursor:pointer;">
+                            <option value="*">🌐 Semua Perusahaan Framas (*)</option>
                             <?php foreach ($companiesList as $c): ?>
                                 <option value="<?= htmlspecialchars($c['cmp_id']) ?>" <?= ($c['cmp_id'] === $activeCmp) ? 'selected' : '' ?>>
                                     <?= htmlspecialchars($c['cmp_name']) ?> [<?= htmlspecialchars($c['cmp_id']) ?>]
@@ -826,6 +855,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                         <div class="form-col">
                             <label>Peran / Role</label>
                             <select id="userRole" class="form-control" onchange="handleRoleChange(this.value)">
+                                <option value="exim">EXIM (Semua Menu Operasional Pabean & IT Inv)</option>
+                                <option value="warehouse">WAREHOUSE (Menu Warehouse & Modul Inv, Dashboard Ceisa)</option>
+                                <option value="produksi">PRODUKSI (Mutasi Produksi & IT Inventory)</option>
                                 <option value="operator">Operator / Staff (Akses Standar)</option>
                                 <option value="supervisor">Supervisor (Pemeriksa / Verifikator)</option>
                                 <option value="admin">Admin Perusahaan (Akses Penuh Perusahaan)</option>
@@ -945,6 +977,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                 if (u.role === 'admin') roleBadge = '<span class="badge badge-admin">👑 Admin Perusahaan</span>';
                 else if (u.role === 'supervisor') roleBadge = '<span class="badge badge-supervisor">🛡️ Supervisor</span>';
                 else if (u.role === 'bc') roleBadge = '<span class="badge badge-bc">👮 Pejabat Bea Cukai (BC)</span>';
+                else if (u.role === 'exim') roleBadge = '<span class="badge" style="background:rgba(24,144,255,0.15); color:#1890ff; border:1px solid rgba(24,144,255,0.4); font-weight:700;">🌐 EXIM</span>';
+                else if (u.role === 'warehouse') roleBadge = '<span class="badge" style="background:rgba(250,140,22,0.15); color:#fa8c16; border:1px solid rgba(250,140,22,0.4); font-weight:700;">🏬 WAREHOUSE</span>';
+                else if (u.role === 'produksi') roleBadge = '<span class="badge" style="background:rgba(114,46,209,0.15); color:#722ed1; border:1px solid rgba(114,46,209,0.4); font-weight:700;">🏭 PRODUKSI</span>';
 
                 // Menus Display
                 let menusHtml = '';
@@ -1103,7 +1138,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' || !empty($action)) {
                 document.querySelectorAll('.chk-menu').forEach(cb => {
                     cb.checked = (cb.value === 'it_inventory');
                 });
-                // Dokumen pabean tetap bisa diakses untuk laporan read-only
+                document.getElementById('checkAllDocs').checked = true;
+                document.querySelectorAll('.chk-doc').forEach(cb => cb.checked = true);
+            } else if (role === 'produksi') {
+                document.getElementById('checkAllMenus').checked = false;
+                const allowed = ['inventory_modul', 'inv_stock_transfer', 'it_inventory'];
+                document.querySelectorAll('.chk-menu').forEach(cb => {
+                    cb.checked = allowed.includes(cb.value);
+                });
+                document.getElementById('checkAllDocs').checked = true;
+                document.querySelectorAll('.chk-doc').forEach(cb => cb.checked = true);
+            } else if (role === 'warehouse') {
+                document.getElementById('checkAllMenus').checked = false;
+                const allowed = [
+                    'daftar_dokumen', 'inventory_modul', 'inv_material', 'inv_bom', 'inv_jaminan',
+                    'inv_stock_transfer', 'inv_warehouse_in', 'inv_warehouse_delivery', 'inv_transfer_bc27',
+                    'inv_scan27', 'inv_stok_opname', 'inv_unposting_appv', 'inv_stok_awal', 'inv_adjust_spp', 'it_inventory'
+                ];
+                document.querySelectorAll('.chk-menu').forEach(cb => {
+                    cb.checked = allowed.includes(cb.value);
+                });
+                document.getElementById('checkAllDocs').checked = true;
+                document.querySelectorAll('.chk-doc').forEach(cb => cb.checked = true);
+            } else if (role === 'exim') {
+                document.getElementById('checkAllMenus').checked = false;
+                const blocked = ['company', 'app_settings', 'docs', 'db', 'version_log', 'user_management'];
+                document.querySelectorAll('.chk-menu').forEach(cb => {
+                    cb.checked = !blocked.includes(cb.value);
+                });
+                document.getElementById('checkAllDocs').checked = true;
+                document.querySelectorAll('.chk-doc').forEach(cb => cb.checked = true);
+            } else if (role === 'admin') {
+                document.getElementById('checkAllMenus').checked = true;
+                document.querySelectorAll('.chk-menu').forEach(cb => cb.checked = true);
                 document.getElementById('checkAllDocs').checked = true;
                 document.querySelectorAll('.chk-doc').forEach(cb => cb.checked = true);
             }

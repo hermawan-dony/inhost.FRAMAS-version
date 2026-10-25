@@ -163,9 +163,9 @@ if ($action === 'login') {
         if ($res && $comp = $res->fetch_assoc()) {
             $realCmpId = $comp['cmp_id'];
 
-            // B1. Autentikasi Pengguna di tabel bc_ceisa_login
-            $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active FROM bc_ceisa_login WHERE cmp_id = ? AND user_id = ? LIMIT 1");
-            $uStmt->bind_param("ss", $realCmpId, $username);
+            // B1. Autentikasi Pengguna di tabel bc_ceisa_login (Mendukung cmp_id spesifik maupun '*')
+            $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto FROM bc_ceisa_login WHERE (cmp_id = ? OR cmp_id = '*') AND user_id = ? ORDER BY (cmp_id = ?) DESC LIMIT 1");
+            $uStmt->bind_param("sss", $realCmpId, $username, $realCmpId);
             $uStmt->execute();
             $uRes = $uStmt->get_result();
             if ($uRes && $u = $uRes->fetch_assoc()) {
@@ -176,13 +176,22 @@ if ($action === 'login') {
                     exit;
                 }
                 if ($u['password'] === $password) {
-                    $userRole     = $u['role'] ?: 'operator';
+                    $userRole     = strtolower($u['role'] ?: 'operator');
                     $isSuper      = ($u['user_id'] === 'dp' || $userRole === 'superadmin');
                     $isCompAdmin  = ($userRole === 'admin' && !$isSuper);
+
+                    // Multi-Company switching: Superadmin, oto ALL, role exim/warehouse/produksi/supervisor, or Framas companies
+                    $canSwitch = $isSuper 
+                        || $u['cmp_id'] === '*' 
+                        || strtoupper($u['oto'] ?? '') === 'ALL'
+                        || in_array($userRole, ['exim', 'warehouse', 'produksi', 'supervisor'])
+                        || in_array($comp['cmp_id'], ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])
+                        || in_array(strtolower($u['user_id']), ['agret', 'ayu', 'jois', 'shafira', 'fahd', 'suryani', 'maikel']);
 
                     $_SESSION['is_super_admin']   = $isSuper;
                     $_SESSION['is_company_admin'] = $isCompAdmin;
                     $_SESSION['is_admin']         = $isSuper; // STRICT: Hanya Super Administrator yang berhak is_admin = true!
+                    $_SESSION['can_switch_company'] = $canSwitch;
                     $_SESSION['user_id']          = $u['user_id'];
                     $_SESSION['user_name']        = !empty($u['nama_lengkap']) ? $u['nama_lengkap'] : $u['user_id'];
                     $_SESSION['user_role']        = $userRole;
@@ -310,8 +319,8 @@ if ($action === 'login') {
 // -------------------------------------------------------------
 if ($action === 'switch_company') {
     header('Content-Type: application/json; charset=utf-8');
-    if (empty($_SESSION['is_admin'])) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya Administrator yang memiliki hak akses untuk berpindah perusahaan.']);
+    if (empty($_SESSION['is_admin']) && empty($_SESSION['can_switch_company'])) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya pengguna berwenang yang memiliki hak akses untuk berpindah perusahaan.']);
         exit;
     }
 
@@ -864,12 +873,49 @@ if ($isSuperAdmin) {
 // Helper untuk Cek Hak Akses Menu Pengguna
 if (!function_exists('isMenuAllowed')) {
     function isMenuAllowed($menuKey) {
-        $role = $_SESSION['user_role'] ?? 'operator';
+        $role = strtolower($_SESSION['user_role'] ?? 'operator');
         if ($role === 'bc') {
             return ($menuKey === 'it_inventory');
         }
         if (!empty($_SESSION['is_super_admin']) || !empty($_SESSION['is_admin'])) return true;
         if (!empty($_SESSION['is_company_admin']) && in_array($menuKey, ['user_management', 'app_settings'])) return true;
+
+        // Menu Administrator & User Management mutlak hanya untuk Super Administrator / Admin Perusahaan
+        if (in_array($menuKey, ['company', 'app_settings', 'docs', 'db', 'version_log', 'user_management'])) {
+            return false;
+        }
+
+        // Role PRODUKSI: mutasi produksi, it inventory
+        if ($role === 'produksi') {
+            return in_array($menuKey, ['inventory_modul', 'inv_stock_transfer', 'it_inventory']);
+        }
+
+        // Role WAREHOUSE: menu warehouse & modul inventory, bisa akses dashboard ceisa 4.0
+        if ($role === 'warehouse') {
+            return in_array($menuKey, [
+                'daftar_dokumen',
+                'inventory_modul',
+                'inv_material',
+                'inv_bom',
+                'inv_jaminan',
+                'inv_stock_transfer',
+                'inv_warehouse_in',
+                'inv_warehouse_delivery',
+                'inv_transfer_bc27',
+                'inv_scan27',
+                'inv_stok_opname',
+                'inv_unposting_appv',
+                'inv_stok_awal',
+                'inv_adjust_spp',
+                'it_inventory'
+            ]);
+        }
+
+        // Role EXIM: semua menu operasional (kecuali menu administrator yang sudah diblok di atas)
+        if ($role === 'exim') {
+            return true;
+        }
+
         $allowed = $_SESSION['allowed_menus'] ?? ['*'];
         if (empty($allowed) || in_array('*', $allowed) || in_array('ALL', $allowed)) return true;
         return in_array($menuKey, $allowed);
@@ -881,6 +927,8 @@ $initialTab = $_GET['tab'] ?? $_GET['menu'] ?? '';
 if (empty($initialTab)) {
     if ($userRole === 'bc') {
         $initialTab = 'it_inventory_home';
+    } elseif ($userRole === 'produksi') {
+        $initialTab = 'inv_stock_transfer';
     } elseif ($isManifestOnlyCompany) {
         $initialTab = 'manifest_ceisa';
     } elseif (!$hasStandardCustomsDocs) {
@@ -3085,6 +3133,7 @@ if ($initialTab === 'editor') {
 
             <?php
             // Resolusi Visibilitas Kartu Perusahaan di Sidebar
+            $canSwitchCompany = !empty($isAdmin) || !empty($_SESSION['can_switch_company']);
             $cfgShowCompanyCard = $appSettings['show_company_card'] ?? 'auto';
             $isCompanyCardVisible = true;
             if ($cfgShowCompanyCard === '0') {
@@ -3092,13 +3141,13 @@ if ($initialTab === 'editor') {
             } elseif ($cfgShowCompanyCard === '1') {
                 $isCompanyCardVisible = true;
             } else {
-                // Mode 'auto' (Default): Sembunyikan untuk User Perusahaan, Tampilkan untuk Super Admin
-                $isCompanyCardVisible = !empty($isAdmin);
+                // Mode 'auto' (Default): Tampilkan untuk Admin dan User dengan hak switch perusahaan
+                $isCompanyCardVisible = $canSwitchCompany;
             }
             $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
             ?>
-            <!-- Active Company Card (Khusus Admin bisa ganti perusahaan / bisa di-hide via setting) -->
-            <div class="sidebar-company-card <?= $isAdmin ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $isAdmin ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $isAdmin ? 'Klik untuk ganti perusahaan aktif (Admin)' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
+            <!-- Active Company Card (Admin & Authorized User bisa ganti perusahaan / bisa di-hide via setting) -->
+            <div class="sidebar-company-card <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk ganti perusahaan aktif' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
                 <div class="sidebar-company-icon" id="sidebarCompanyLogoBox">
                     <?php if (!empty($sessionLogo)): ?>
                         <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
@@ -3114,9 +3163,9 @@ if ($initialTab === 'editor') {
                         [<?= htmlspecialchars($sessionCmpId) ?>]
                     </div>
                 </div>
-                <?php if ($isAdmin): ?>
+                <?php if ($canSwitchCompany): ?>
                 <div class="sidebar-company-action">
-                    <span class="sidebar-company-btn" title="Ganti Perusahaan (Admin)">
+                    <span class="sidebar-company-btn" title="Ganti Perusahaan">
                         <svg viewBox="64 64 896 896" width="10" height="10" fill="currentColor">
                             <path d="M759.2 383c-4.5-5-10.7-7.9-17.2-7.9H164.8c-13.3 0-24 10.7-24 24v48c0 13.3 10.7 24 24 24h476.3L527.4 584.7c-9.4 9.4-9.4 24.6 0 33.9l33.9 33.9c9.4 9.4 24.6 9.4 33.9 0l221.7-221.7c4.6-4.6 7.1-10.8 7.1-17.3s-2.5-12.7-7.1-17.3l-57.7-53.2z"></path>
                         </svg>
@@ -3882,7 +3931,7 @@ if ($initialTab === 'editor') {
                         </a>
                     </div>
                     <?php endif; ?>
-                    <?php if (!$isAdmin): ?>
+                    <?php if (!$isAdmin && isMenuAllowed('app_settings')): ?>
                     <div class="kt-menu__item <?= ($initialTab === 'app_settings') ? 'active' : '' ?>" id="nav-item-app_settings" onclick="switchMainTab('app_settings')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
@@ -4018,14 +4067,14 @@ if ($initialTab === 'editor') {
 
     </div>
 
-    <?php if ($isAdmin): ?>
-    <!-- 3. MODAL GANTI PERUSAHAAN (ADMIN) -->
+    <?php if ($isAdmin || !empty($_SESSION['can_switch_company'])): ?>
+    <!-- 3. MODAL GANTI PERUSAHAAN (ADMIN & MULTI-COMPANY USER) -->
     <div class="modal" id="modalCompanySwitcher">
         <div class="modal-card" style="max-width: 600px; max-height: 85vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
             <div class="modal-header">
                 <div>
                     <h3 class="modal-title" style="color:#1890ff;">
-                        <span>👑</span> Pilih Perusahaan Aktif (Mode Administrator)
+                        <span>🏢</span> Pilih Perusahaan Aktif <?= $isAdmin ? '(Mode Administrator)' : '' ?>
                     </h3>
                     <p style="font-size:10.5px; color:var(--text-muted); margin:3px 0 0 0;">
                         Pilih perusahaan untuk langsung beralih konteks data tanpa login ulang.
@@ -4185,6 +4234,7 @@ if ($initialTab === 'editor') {
         let currentCmpId = '<?= htmlspecialchars($sessionCmpId) ?>';
         let allCompanies = <?= json_encode($companies) ?>;
         const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
+        const canSwitchCompany = <?= (!empty($isAdmin) || !empty($_SESSION['can_switch_company'])) ? 'true' : 'false' ?>;
         const isSuperAdmin = <?= $isSuperAdmin ? 'true' : 'false' ?>;
         const isCompanyAdmin = <?= $isCompanyAdmin ? 'true' : 'false' ?>;
         const isBcRole = <?= ($userRole === 'bc') ? 'true' : 'false' ?>;
@@ -4983,7 +5033,7 @@ if ($initialTab === 'editor') {
         }
 
         function openCompanyModal() {
-            if (!isAdmin) return;
+            if (!isAdmin && !canSwitchCompany) return;
             const modal = document.getElementById('modalCompanySwitcher');
             if (!modal) return;
             modal.style.display = 'flex';
