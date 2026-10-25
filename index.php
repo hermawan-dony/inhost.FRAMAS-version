@@ -3770,6 +3770,15 @@ if ($initialTab === 'editor') {
                             <span class="kt-menu__link-text">Database Browser</span>
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
+                    <div class="kt-menu__item <?= ($initialTab === 'version_log') ? 'active' : '' ?>" id="nav-item-version_log" onclick="switchMainTab('version_log')">
+                        <a class="kt-menu__link">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📜</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656zM256 312h400c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0 160h400c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8zm0 160h240c4.4 0 8-3.6 8-8v-48c0-4.4-3.6-8-8-8H256c-4.4 0-8 3.6-8 8v48c0 4.4 3.6 8 8 8z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Log Update Versi</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
                     </div>
                 </div>
                 <?php endif; ?>
@@ -3838,8 +3847,8 @@ if ($initialTab === 'editor') {
             </div>
 
             <!-- SIDEBAR FOOTER (Versi Update) -->
-            <div class="kt-aside__footer" title="Versi Update Sistem">
-                Versi Update : <?= htmlspecialchars($appUpdateVersion) ?>
+            <div class="kt-aside__footer" title="Klik untuk melihat riwayat log update versi sistem" onclick="switchMainTab('version_log')" style="cursor:pointer;">
+                Versi Update : <span id="sidebarAppVersion" style="text-decoration:underline; font-weight:600;"><?= htmlspecialchars($appUpdateVersion) ?></span>
             </div>
         </aside>
 
@@ -4287,6 +4296,7 @@ if ($initialTab === 'editor') {
             'user_management': 'Kelola User Perusahaan',
             'docs': 'Dokumentasi REST API',
             'db': 'Database Browser',
+            'version_log': 'Log Update Versi Sistem',
             'inv_material': 'Master Data Barang',
             'inv_koreksi_klas': 'Koreksi Klasifikasi IT Inventory' + (isAdmin ? ' (KLAS)' : ''),
             'inv_bom': 'Master BOM',
@@ -4361,6 +4371,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'app_settings') return `/setting_aplikasi.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'docs') return `/docs.php?embedded=1${adminParam}${themeParam}`;
             if (tabId === 'db') return isAdmin ? `/db.php?embedded=1${adminParam}${themeParam}` : `/daftar_dokumen.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;
+            if (tabId === 'version_log') return `/version_log.php?embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             
             // Inventory Modul URLs
             if (tabId === 'inv_material') return `/material.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}`;

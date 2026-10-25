@@ -260,10 +260,29 @@ if (!function_exists('resetAppSettings')) {
 if (!function_exists('getAppUpdateVersion')) {
     /**
      * Mengambil nomor versi update sistem terkini
-     * Mengutamakan file version.txt, fallback ke filemtime index.php (Asia/Jakarta)
-     * Format: YYYYMMDD.HHmm (contoh: 20261024.1124)
+     * Mengutamakan record database bc_app_version_log, fallback file version.txt, fallback filemtime index.php
+     * Format: YYYYMMDD.HHmm (contoh: 20261025.0910)
      */
-    function getAppUpdateVersion() {
+    function getAppUpdateVersion($dbConn = null) {
+        global $koneksi;
+        $conn = $dbConn ?? $koneksi ?? null;
+        if ($conn && $conn instanceof mysqli) {
+            $checkTable = @$conn->query("SHOW TABLES LIKE 'bc_app_version_log'");
+            if ($checkTable && $checkTable->num_rows > 0) {
+                $res = @$conn->query("SELECT version FROM bc_app_version_log ORDER BY release_date DESC, id DESC LIMIT 1");
+                if ($res && $row = $res->fetch_assoc()) {
+                    $dbVer = trim((string)$row['version']);
+                    if (!empty($dbVer)) {
+                        $vf = __DIR__ . '/version.txt';
+                        $fileVer = file_exists($vf) ? trim((string)@file_get_contents($vf)) : '';
+                        if ($fileVer !== $dbVer) {
+                            @file_put_contents($vf, $dbVer);
+                        }
+                        return $dbVer;
+                    }
+                }
+            }
+        }
         $vf = __DIR__ . '/version.txt';
         if (file_exists($vf)) {
             $v = trim((string)@file_get_contents($vf));
@@ -275,6 +294,43 @@ if (!function_exists('getAppUpdateVersion')) {
         $dt = new DateTime("@$ts");
         $dt->setTimezone(new DateTimeZone('Asia/Jakarta'));
         return $dt->format('Ymd.Hi');
+    }
+}
+
+if (!function_exists('recordAppVersionLog')) {
+    /**
+     * Mencatat versi pembaruan aplikasi ke tabel bc_app_version_log dan menyinkronkan file version.txt
+     */
+    function recordAppVersionLog($version, $title, $changes, $filesModified = '', $category = 'Update', $author = 'Super Administrator', $dbConn = null) {
+        global $koneksi;
+        $conn = $dbConn ?? $koneksi ?? null;
+        if (!$conn || !($conn instanceof mysqli)) {
+            return false;
+        }
+
+        $verEsc    = $conn->real_escape_string(trim($version));
+        $titleEsc  = $conn->real_escape_string(trim($title));
+        $catEsc    = $conn->real_escape_string(trim($category));
+        $changeEsc = $conn->real_escape_string(trim($changes));
+        $filesEsc  = $conn->real_escape_string(trim($filesModified));
+        $authEsc   = $conn->real_escape_string(trim($author));
+
+        $sql = "INSERT INTO bc_app_version_log (version, title, category, release_date, changes, files_modified, author, created_at)
+                VALUES ('$verEsc', '$titleEsc', '$catEsc', NOW(), '$changeEsc', '$filesEsc', '$authEsc', NOW())
+                ON DUPLICATE KEY UPDATE 
+                    title = VALUES(title),
+                    category = VALUES(category),
+                    release_date = NOW(),
+                    changes = VALUES(changes),
+                    files_modified = VALUES(files_modified),
+                    author = VALUES(author)";
+
+        $ok = $conn->query($sql);
+        if ($ok) {
+            $vf = __DIR__ . '/version.txt';
+            @file_put_contents($vf, trim($version));
+        }
+        return (bool)$ok;
     }
 }
 
