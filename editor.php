@@ -52,48 +52,73 @@ $isErpConfigured = (!empty($companyErpName) && $companyErpName !== '-' && strtou
 $companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
 $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 
-// Katalog Dokumen Pabean Berdasarkan Role Perusahaan (Grup Pemasukan dulu, baru Pengeluaran, urut kode)
+// Katalog Dokumen Pabean Berdasarkan Role Perusahaan (Grup Pemasukan dulu baru Pengeluaran, urut kode numerik)
 $allBcCatalog = [
-    // --- PEMASUKAN (INBOUND) ---
-    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'plb',   'group' => 'pemasukan'],
-    '20'  => ['label' => 'BC 2.0 - Impor untuk Dipakai (PIB)',    'role' => 'pib',   'group' => 'pemasukan'],
-    '23'  => ['label' => 'BC 2.3 - Impor TPB / Kawasan Berikat', 'role' => 'tpb',   'group' => 'pemasukan'],
-    '262' => ['label' => 'BC 2.6.2 - Pemasukan Subkontrak',      'role' => 'tpb',   'group' => 'pemasukan'],
-    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'plb',   'group' => 'pemasukan'],
-    '40'  => ['label' => 'BC 4.0 - Pemasukan TLDDP ke TPB',     'role' => 'tpb',   'group' => 'pemasukan'],
-    '611' => ['label' => 'PPKEK 6.1.1 - Pemasukan ke KEK (LDP)',  'role' => 'ppkek', 'group' => 'pemasukan'],
-    '613' => ['label' => 'PPKEK 6.1.3 - Pemasukan ke KEK (TLDDP)','role' => 'ppkek', 'group' => 'pemasukan'],
+    // GRUP PEMASUKAN (INBOUND)
+    '16'  => ['label' => 'BC 1.6 — Pemasukan ke PLB',                              'role' => 'plb',   'type' => 'inbound'],
+    '20'  => ['label' => 'BC 2.0 — Impor Non-Fasilitas (PIB)',                    'role' => 'pib',   'type' => 'inbound'],
+    '23'  => ['label' => 'BC 2.3 — Impor ke Kawasan Berikat (TPB)',               'role' => 'tpb',   'type' => 'inbound'],
+    '262' => ['label' => 'BC 2.6.2 — Pemasukan Subcon Kembali',                   'role' => 'tpb',   'type' => 'inbound'],
+    '27IN'=> ['label' => 'BC 2.7 IN — Pemasukan dari TPB Lain',                   'role' => 'tpb',   'type' => 'inbound'],
+    '28'  => ['label' => 'BC 2.8 — Impor dari PLB',                               'role' => 'plb',   'type' => 'inbound'],
+    '40'  => ['label' => 'BC 4.0 — Pemasukan dari Lokal ke TPB',                  'role' => 'tpb',   'type' => 'inbound'],
+    '611' => ['label' => 'PPKEK 6.1.1 — Pemasukan ke KEK dari Luar Negeri',        'role' => 'ppkek', 'type' => 'inbound'],
+    '613' => ['label' => 'PPKEK 6.1.3 — Pemasukan ke KEK dari Lokal',              'role' => 'ppkek', 'type' => 'inbound'],
 
-    // --- PENGELUARAN (OUTBOUND) ---
-    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb',   'group' => 'pengeluaran'],
-    '261' => ['label' => 'BC 2.6.1 - Pengeluaran Subkontrak',     'role' => 'tpb',   'group' => 'pengeluaran'],
-    '27'  => ['label' => 'BC 2.7 - Pengeluaran Antar TPB',       'role' => 'tpb',   'group' => 'pengeluaran'],
-    '30'  => ['label' => 'BC 3.0 - Pemberitahuan Ekspor (PEB)',   'role' => 'peb',   'group' => 'pengeluaran'],
-    '33'  => ['label' => 'BC 3.3 - Ekspor dari PLB',             'role' => 'plb',   'group' => 'pengeluaran'],
-    '331' => ['label' => 'BC 3.3.1 - P3BET PLB',                 'role' => 'plb',   'group' => 'pengeluaran'],
-    '41'  => ['label' => 'BC 4.1 - Pengeluaran Sementara ke TLDDP', 'role' => 'tpb', 'group' => 'pengeluaran'],
-    '631' => ['label' => 'PPKEK 6.3.1 - Pengeluaran ke LDP',     'role' => 'ppkek', 'group' => 'pengeluaran'],
+    // GRUP PENGELUARAN (OUTBOUND)
+    '25'  => ['label' => 'BC 2.5 — Pengeluaran ke Lokal (Asal Impor / BC 2.3)',         'role' => 'tpb',   'type' => 'outbound'],
+    '261' => ['label' => 'BC 2.6.1 — Pengeluaran Subcon',                         'role' => 'tpb',   'type' => 'outbound'],
+    '27'  => ['label' => 'BC 2.7 — Pengeluaran ke TPB Lain',                       'role' => 'tpb',   'type' => 'outbound'],
+    '30'  => ['label' => 'BC 3.0 — Ekspor Barang (PEB)',                           'role' => 'peb',   'type' => 'outbound'],
+    '33'  => ['label' => 'BC 3.3 — Ekspor dari PLB',                              'role' => 'plb',   'type' => 'outbound'],
+    '331' => ['label' => 'BC 3.3.1 — P3BET PLB',                                 'role' => 'plb',   'type' => 'outbound'],
+    '41'  => ['label' => 'BC 4.1 — Pengeluaran ke Lokal (Asal Lokal / BC 4.0)',         'role' => 'tpb',   'type' => 'outbound'],
+    '631' => ['label' => 'PPKEK 6.3.1 — Pengeluaran dari KEK ke Luar Negeri',      'role' => 'ppkek', 'type' => 'outbound'],
 ];
 
-$allowedBcOptions = [];
+$allowedBcInbound = [];
+$allowedBcOutbound = [];
 foreach ($allBcCatalog as $code => $info) {
-    if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $effectiveAllowedDocs)) {
-        $allowedBcOptions[$code] = $info;
-    }
-}
-if (empty($allowedBcOptions)) {
-    foreach ($allBcCatalog as $code => $info) {
-        if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $companyAllowedDocs)) {
-            $allowedBcOptions[$code] = $info;
+    $codeStr = (string)$code;
+    $isPermitted = !empty($_SESSION['is_super_admin']) || 
+                   in_array('*', $effectiveAllowedDocs) || 
+                   in_array($codeStr, $effectiveAllowedDocs) ||
+                   ($codeStr === '27IN' && in_array('27', $effectiveAllowedDocs));
+    if ($isPermitted) {
+        if (($info['type'] ?? '') === 'inbound') {
+            $allowedBcInbound[$code] = $info['label'];
+        } else {
+            $allowedBcOutbound[$code] = $info['label'];
         }
     }
 }
+if (empty($allowedBcInbound) && empty($allowedBcOutbound)) {
+    foreach ($allBcCatalog as $code => $info) {
+        $codeStr = (string)$code;
+        $isPermitted = !empty($_SESSION['is_super_admin']) || 
+                       in_array('*', $companyAllowedDocs) || 
+                       in_array($codeStr, $companyAllowedDocs) ||
+                       ($codeStr === '27IN' && in_array('27', $companyAllowedDocs));
+        if ($isPermitted) {
+            if (($info['type'] ?? '') === 'inbound') {
+                $allowedBcInbound[$code] = $info['label'];
+            } else {
+                $allowedBcOutbound[$code] = $info['label'];
+            }
+        }
+    }
+}
+$allowedBcOptions = $allowedBcInbound + $allowedBcOutbound;
+
 $whereConditions = [];
 if (!empty($filterCmp)) {
     $whereConditions[] = "a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'";
 }
 if (empty($_SESSION['is_super_admin']) && !empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
-    $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $effectiveAllowedDocs);
+    $filterDocs = array_unique(array_map(function($d) {
+        return $d === '27IN' ? '27' : (string)$d;
+    }, $effectiveAllowedDocs));
+    $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $filterDocs);
     $whereConditions[] = "a.kode_dokumen IN (" . implode(',', $escapedDocs) . ")";
 }
 $whereCmp = !empty($whereConditions) ? "WHERE " . implode(' AND ', $whereConditions) : "";
@@ -224,6 +249,441 @@ if ($action === 'save_config_aju') {
         echo json_encode(['status' => 'OK', 'message' => 'Konfigurasi Penomoran AJU berhasil disimpan!']);
     } else {
         echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan konfigurasi: ' . $koneksi->error]);
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
+// KONFIGURASI URUTAN DEFAULT ENTITAS (bc_ceisa_entidx)
+// -------------------------------------------------------------
+if ($action === 'get_entidx') {
+    header('Content-Type: application/json; charset=utf-8');
+    $bc = preg_replace('/[^0-9]/', '', $_GET['bc'] ?? '40');
+    if (empty($bc)) $bc = '40';
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+
+    $escBc = $koneksi->real_escape_string($bc);
+    $escCmp = $koneksi->real_escape_string($cmpId);
+
+    // Cek apakah ada setting khusus perusahaan, jika tidak fallback ke global (cmp_id = '')
+    $qCheck = $koneksi->query("SELECT COUNT(1) FROM bc_ceisa_entidx WHERE bc = '$escBc' AND cmp_id = '$escCmp'");
+    $hasCmpSetting = ($qCheck && $qCheck->fetch_row()[0] > 0);
+    $targetCmp = $hasCmpSetting ? $escCmp : '';
+
+    $sql = "SELECT a.cmp_id, a.bc, a.kode_entitas, a.idx, IFNULL(r.teks, a.kode_entitas) AS nama_entitas_reff
+            FROM bc_ceisa_entidx a
+            LEFT JOIN bc_ceisa_reff r ON r.reff = 'ENTITAS' AND r.kode = a.kode_entitas
+            WHERE a.bc = '$escBc' AND (a.cmp_id = '$targetCmp' OR a.cmp_id = '' OR a.cmp_id IS NULL)
+            ORDER BY a.idx ASC";
+    $res = $koneksi->query($sql);
+    $list = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $list[] = [
+                'idx'                => intval($r['idx']),
+                'kode_entitas'       => $r['kode_entitas'],
+                'nama_entitas_reff'  => $r['nama_entitas_reff'],
+                'cmp_id'             => $r['cmp_id'] ?? ''
+            ];
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'bc'     => $bc,
+        'cmp_id' => $targetCmp,
+        'is_custom_company' => $hasCmpSetting,
+        'data'   => $list
+    ]);
+    exit;
+}
+
+if ($action === 'save_entidx') {
+    header('Content-Type: application/json; charset=utf-8');
+    $bc = preg_replace('/[^0-9]/', '', $_POST['bc'] ?? '40');
+    if (empty($bc)) $bc = '40';
+    $scope = trim($_POST['scope'] ?? 'global'); // 'global' atau 'company'
+    $cmpId = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $items = json_decode($_POST['items'] ?? '[]', true);
+
+    $escBc = $koneksi->real_escape_string($bc);
+    $targetCmp = ($scope === 'company' && !empty($cmpId)) ? $koneksi->real_escape_string($cmpId) : '';
+
+    $koneksi->begin_transaction();
+    try {
+        $koneksi->query("DELETE FROM bc_ceisa_entidx WHERE bc = '$escBc' AND cmp_id = '$targetCmp'");
+        if (!empty($items) && is_array($items)) {
+            $idx = 1;
+            foreach ($items as $it) {
+                $kd = $koneksi->real_escape_string(trim($it['kode_entitas'] ?? ''));
+                if (!empty($kd)) {
+                    $koneksi->query("INSERT INTO bc_ceisa_entidx (cmp_id, bc, kode_entitas, idx) VALUES ('$targetCmp', '$escBc', '$kd', $idx)");
+                    $idx++;
+                }
+            }
+        }
+        $koneksi->commit();
+        echo json_encode(['status' => 'OK', 'message' => "Setting list entitas default BC $bc berhasil disimpan!"]);
+    } catch (\Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
+// KONFIGURASI URUTAN DEFAULT DOKUMEN LAMPIRAN (bc_ceisa_docidx)
+// -------------------------------------------------------------
+if ($action === 'get_docidx') {
+    header('Content-Type: application/json; charset=utf-8');
+    $bc = preg_replace('/[^0-9]/', '', $_GET['bc'] ?? '40');
+    if (empty($bc)) $bc = '40';
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+
+    $escBc = $koneksi->real_escape_string($bc);
+    $escCmp = $koneksi->real_escape_string($cmpId);
+
+    // Cek apakah ada setting khusus perusahaan, jika tidak fallback ke global (cmp_id = '')
+    $qCheck = $koneksi->query("SELECT COUNT(1) FROM bc_ceisa_docidx WHERE bc = '$escBc' AND cmp_id = '$escCmp'");
+    $hasCmpSetting = ($qCheck && $qCheck->fetch_row()[0] > 0);
+    $targetCmp = $hasCmpSetting ? $escCmp : '';
+
+    $sql = "SELECT a.cmp_id, a.bc, a.kode_dokumen, a.idx, IFNULL(r.teks, a.kode_dokumen) AS nama_dokumen_reff
+            FROM bc_ceisa_docidx a
+            LEFT JOIN bc_ceisa_reff r ON r.reff = 'DOKUMEN' AND r.kode = a.kode_dokumen
+            WHERE a.bc = '$escBc' AND (a.cmp_id = '$targetCmp' OR a.cmp_id = '' OR a.cmp_id IS NULL)
+            ORDER BY a.idx ASC";
+    $res = $koneksi->query($sql);
+    $list = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $list[] = [
+                'idx'                => intval($r['idx']),
+                'kode_dokumen'       => $r['kode_dokumen'],
+                'nama_dokumen_reff'  => $r['nama_dokumen_reff'],
+                'cmp_id'             => $r['cmp_id'] ?? ''
+            ];
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'bc'     => $bc,
+        'cmp_id' => $targetCmp,
+        'is_custom_company' => $hasCmpSetting,
+        'data'   => $list
+    ]);
+    exit;
+}
+
+if ($action === 'save_docidx') {
+    header('Content-Type: application/json; charset=utf-8');
+    $bc = preg_replace('/[^0-9]/', '', $_POST['bc'] ?? '40');
+    if (empty($bc)) $bc = '40';
+    $scope = trim($_POST['scope'] ?? 'global'); // 'global' atau 'company'
+    $cmpId = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $items = json_decode($_POST['items'] ?? '[]', true);
+
+    $escBc = $koneksi->real_escape_string($bc);
+    $targetCmp = ($scope === 'company' && !empty($cmpId)) ? $koneksi->real_escape_string($cmpId) : '';
+
+    $koneksi->begin_transaction();
+    try {
+        $koneksi->query("DELETE FROM bc_ceisa_docidx WHERE bc = '$escBc' AND cmp_id = '$targetCmp'");
+        if (!empty($items) && is_array($items)) {
+            $idx = 1;
+            foreach ($items as $it) {
+                $kd = $koneksi->real_escape_string(trim($it['kode_dokumen'] ?? ''));
+                if (!empty($kd)) {
+                    $koneksi->query("INSERT INTO bc_ceisa_docidx (cmp_id, bc, kode_dokumen, idx) VALUES ('$targetCmp', '$escBc', '$kd', $idx)");
+                    $idx++;
+                }
+            }
+        }
+        $koneksi->commit();
+        echo json_encode(['status' => 'OK', 'message' => "Setting list dokumen default BC $bc berhasil disimpan!"]);
+    } catch (\Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
+// PENCARIAN RIWAYAT ENTITAS (LOOKUP HISTORY)
+// -------------------------------------------------------------
+if ($action === 'search_entitas_history') {
+    header('Content-Type: application/json; charset=utf-8');
+    $q = trim($_GET['q'] ?? '');
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $kodeEntitas = trim($_GET['kode_entitas'] ?? '');
+
+    $whereClauses = ["IFNULL(a.nama_entitas, '') <> ''"];
+    if (!empty($q)) {
+        $escQ = $koneksi->real_escape_string($q);
+        $whereClauses[] = "(a.nama_entitas LIKE '%$escQ%' OR a.nomor_identitas LIKE '%$escQ%' OR a.alamat_entitas LIKE '%$escQ%')";
+    }
+    if (!empty($kodeEntitas)) {
+        $escKd = $koneksi->real_escape_string($kodeEntitas);
+        // Prioritaskan kode entitas yang sama jika diminta
+        $whereClauses[] = "a.kode_entitas = '$escKd'";
+    }
+
+    $whereSql = implode(' AND ', $whereClauses);
+
+    $sql = "SELECT a.kode_entitas,
+                   IFNULL(r.teks, a.kode_entitas) AS peran_entitas,
+                   a.kode_jenis_identitas,
+                   a.nomor_identitas,
+                   a.nama_entitas,
+                   a.alamat_entitas,
+                   a.nib_entitas,
+                   a.nomor_ijin_entitas,
+                   a.tanggal_ijin_entitas,
+                   a.kode_negara,
+                   COUNT(1) as frekuensi,
+                   MAX(a.upd_time) as last_used
+            FROM bc_ceisa_entitas a
+            LEFT JOIN bc_ceisa_reff r ON r.reff = 'ENTITAS' AND r.kode = a.kode_entitas
+            WHERE $whereSql
+            GROUP BY a.nomor_identitas, a.nama_entitas, a.alamat_entitas, a.kode_jenis_identitas, a.nib_entitas, a.kode_negara
+            ORDER BY frekuensi DESC, last_used DESC
+            LIMIT 50";
+
+    $res = $koneksi->query($sql);
+    $data = [];
+    if ($res) {
+        while ($row = $res->fetch_assoc()) {
+            $data[] = $row;
+        }
+    }
+
+    echo json_encode([
+        'status' => 'OK',
+        'data'   => $data
+    ]);
+    exit;
+}
+
+// -------------------------------------------------------------
+// RESET ENTITAS SESUAI DEFAULT DOKUMEN BC (bc_ceisa_entidx)
+// -------------------------------------------------------------
+if ($action === 'reset_entitas_default') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $kodeBc    = trim($_POST['kode_dokumen'] ?? '40');
+    $cmpId     = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+
+    $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
+    $escBc = $koneksi->real_escape_string($cleanBc);
+    $escCmp = $koneksi->real_escape_string($cmpId);
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+
+    // Ambil profil company
+    $comp = [];
+    $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
+    if ($qCmp && $rCmp = $qCmp->fetch_assoc()) {
+        $comp = $rCmp;
+    }
+    $npwp   = $comp['npwp'] ?? '';
+    $nama   = $comp['cmp_name'] ?? '';
+    $alamat = $comp['alamat'] ?? '';
+    $nib    = $comp['nib'] ?? '';
+
+    // Ambil urutan bc_ceisa_entidx
+    $qIdx = $koneksi->query("SELECT kode_entitas, idx FROM bc_ceisa_entidx 
+                             WHERE bc = '$escBc' AND (cmp_id = '$escCmp' OR cmp_id = '' OR cmp_id IS NULL)
+                             ORDER BY IF(cmp_id = '$escCmp', 0, 1) ASC, idx ASC");
+    $entRows = [];
+    $seenIdx = [];
+    if ($qIdx) {
+        while ($rIdx = $qIdx->fetch_assoc()) {
+            $idxNum = intval($rIdx['idx']);
+            if (isset($seenIdx[$idxNum])) continue;
+            $seenIdx[$idxNum] = true;
+            $entRows[] = $rIdx;
+        }
+    }
+
+    if (empty($entRows)) {
+        // Fallback default jika di entidx belum ada
+        if ($cleanBc === '30') {
+            $entRows = [
+                ['kode_entitas' => '2', 'idx' => 1],
+                ['kode_entitas' => '7', 'idx' => 2],
+                ['kode_entitas' => '8', 'idx' => 3],
+                ['kode_entitas' => '6', 'idx' => 4],
+                ['kode_entitas' => '4', 'idx' => 5],
+                ['kode_entitas' => '23', 'idx' => 6]
+            ];
+        } else {
+            $entRows = [
+                ['kode_entitas' => '3', 'idx' => 1],
+                ['kode_entitas' => '7', 'idx' => 2],
+                ['kode_entitas' => '9', 'idx' => 3]
+            ];
+        }
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        $koneksi->query("DELETE FROM bc_ceisa_entitas WHERE nomor_aju = '$escAju'");
+        $seri = 1;
+        $insertedData = [];
+        foreach ($entRows as $er) {
+            $kd = $er['kode_entitas'];
+            // Apakah entitas ini adalah perusahaan sendiri?
+            // 3 = Pengusaha TPB, 7 = Pemilik Barang, 2 = Importir / Eksportir
+            $isOwnCompany = in_array($kd, ['3', '7', '2']);
+            $nomorId = $isOwnCompany ? $npwp : '';
+            $namaEnt = $isOwnCompany ? $nama : '';
+            $almtEnt = $isOwnCompany ? $alamat : '';
+            $nibEnt  = $isOwnCompany ? $nib : '';
+            $jenisId = $isOwnCompany ? '5' : '5'; // 5 = NPWP 16 Digit / NITKU
+            $kdNegara= $isOwnCompany ? 'ID' : '';
+
+            $escNomorId = $koneksi->real_escape_string($nomorId);
+            $escNamaEnt = $koneksi->real_escape_string($namaEnt);
+            $escAlmtEnt = $koneksi->real_escape_string($almtEnt);
+            $escNibEnt  = $koneksi->real_escape_string($nibEnt);
+            $escKdNeg   = $koneksi->real_escape_string($kdNegara);
+
+            $sqlIns = "INSERT INTO bc_ceisa_entitas (
+                cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
+                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara
+            ) VALUES (
+                '$escCmp', '$escAju', $seri, '$kd', '$jenisId',
+                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg'
+            )";
+            $koneksi->query($sqlIns);
+
+            $insertedData[] = [
+                'seri'                  => $seri,
+                'kode_entitas'          => $kd,
+                'kode_jenis_identitas'  => $jenisId,
+                'nomor_identitas'       => $nomorId,
+                'nama_entitas'          => $namaEnt,
+                'alamat_entitas'        => $almtEnt,
+                'nib_entitas'           => $nibEnt,
+                'nomor_ijin_entitas'    => '',
+                'tanggal_ijin_entitas'  => '',
+                'kode_negara'           => $kdNegara
+            ];
+            $seri++;
+        }
+        $koneksi->commit();
+
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Entitas berhasil direset sesuai default dokumen BC $cleanBc!",
+            'data'    => $insertedData
+        ]);
+    } catch (\Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mereset entitas: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
+// RESET DOKUMEN SESUAI DEFAULT DOKUMEN BC (bc_ceisa_docidx)
+// -------------------------------------------------------------
+if ($action === 'reset_dokumen_default') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $kodeBc    = trim($_POST['kode_dokumen'] ?? '40');
+    $cmpId     = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak valid.']);
+        exit;
+    }
+
+    $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
+    $escBc = $koneksi->real_escape_string($cleanBc);
+    $escCmp = $koneksi->real_escape_string($cmpId);
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+
+    // Ambil tanggal hari ini untuk default tanggal dokumen
+    $todayDate = date('Y-m-d');
+
+    // Ambil urutan bc_ceisa_docidx
+    $qIdx = $koneksi->query("SELECT kode_dokumen, idx FROM bc_ceisa_docidx 
+                             WHERE bc = '$escBc' AND (cmp_id = '$escCmp' OR cmp_id = '' OR cmp_id IS NULL)
+                             ORDER BY IF(cmp_id = '$escCmp', 0, 1) ASC, idx ASC");
+    $docRows = [];
+    $seenIdx = [];
+    if ($qIdx) {
+        while ($rIdx = $qIdx->fetch_assoc()) {
+            $idxNum = intval($rIdx['idx']);
+            if (isset($seenIdx[$idxNum])) continue;
+            $seenIdx[$idxNum] = true;
+            $docRows[] = $rIdx;
+        }
+    }
+
+    if (empty($docRows)) {
+        // Fallback default jika di docidx belum ada
+        if ($cleanBc === '40') {
+            $docRows = [
+                ['kode_dokumen' => '630', 'idx' => 1],
+                ['kode_dokumen' => '388', 'idx' => 2],
+                ['kode_dokumen' => '380', 'idx' => 3],
+                ['kode_dokumen' => '217', 'idx' => 4],
+                ['kode_dokumen' => '315', 'idx' => 5]
+            ];
+        } else {
+            $docRows = [
+                ['kode_dokumen' => '380', 'idx' => 1],
+                ['kode_dokumen' => '217', 'idx' => 2]
+            ];
+        }
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju'");
+        $seri = 1;
+        $insertedData = [];
+        foreach ($docRows as $dr) {
+            $kd = $dr['kode_dokumen'];
+            $nomorDok = '';
+            $tglDok = $todayDate;
+
+            $escKd = $koneksi->real_escape_string($kd);
+            $escNomorDok = $koneksi->real_escape_string($nomorDok);
+            $escTglDok = $koneksi->real_escape_string($tglDok);
+
+            $sqlIns = "INSERT INTO bc_ceisa_dokumen (
+                cmp_id, nomor_aju, seri, kode_dokumen, nomor_dokumen, tanggal_dokumen
+            ) VALUES (
+                '$escCmp', '$escAju', $seri, '$escKd', '$escNomorDok', '$escTglDok'
+            )";
+            $koneksi->query($sqlIns);
+
+            $insertedData[] = [
+                'seri'            => $seri,
+                'kode_dokumen'    => $kd,
+                'nomor_dokumen'   => $nomorDok,
+                'tanggal_dokumen' => $tglDok
+            ];
+            $seri++;
+        }
+        $koneksi->commit();
+
+        echo json_encode([
+            'status'  => 'OK',
+            'message' => "Dokumen lampiran berhasil disesuaikan dengan default dokumen BC $cleanBc!",
+            'data'    => $insertedData
+        ]);
+    } catch (\Exception $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mereset dokumen lampiran: ' . $e->getMessage()]);
     }
     exit;
 }
@@ -661,21 +1121,110 @@ if ($action === 'create_new_aju') {
         // 3. Insert Kemasan Seri 1
         $koneksi->query("INSERT INTO bc_ceisa_kemasan (cmp_id, nomor_aju, seri, jumlah_kemasan, kode_kemasan) VALUES ('$escCmp', '$escAju', 1, 1, 'PX')");
 
-        // 4. Insert Entitas Default (Pengusaha / Pemilik TPB)
+        // 4. Insert Entitas Default berdasarkan Urutan Konfigurasi Dokumen BC (bc_ceisa_entidx)
         $npwp   = $koneksi->real_escape_string($comp['npwp'] ?? '');
         $nama   = $koneksi->real_escape_string($comp['cmp_name'] ?? '');
         $alamat = $koneksi->real_escape_string($comp['alamat'] ?? '');
         $nib    = $koneksi->real_escape_string($comp['nib'] ?? '');
 
-        $kodeEntitas1 = ($cleanBc === '30') ? '2' : '3';
-        $koneksi->query("INSERT INTO bc_ceisa_entitas (cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas, nomor_identitas, nama_entitas, alamat_entitas, nib_entitas)
-                         VALUES ('$escCmp', '$escAju', 1, '$kodeEntitas1', '5', '$npwp', '$nama', '$alamat', '$nib')");
+        $qIdx = $koneksi->query("SELECT kode_entitas, idx FROM bc_ceisa_entidx 
+                                 WHERE bc = '$escBc' AND (cmp_id = '$escCmp' OR cmp_id = '' OR cmp_id IS NULL)
+                                 ORDER BY IF(cmp_id = '$escCmp', 0, 1) ASC, idx ASC");
+        $entRows = [];
+        $seenIdx = [];
+        if ($qIdx) {
+            while ($rIdx = $qIdx->fetch_assoc()) {
+                $idxNum = intval($rIdx['idx']);
+                if (isset($seenIdx[$idxNum])) continue;
+                $seenIdx[$idxNum] = true;
+                $entRows[] = $rIdx;
+            }
+        }
 
-        $koneksi->query("INSERT INTO bc_ceisa_entitas (cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas, nomor_identitas, nama_entitas, alamat_entitas, nib_entitas)
-                         VALUES ('$escCmp', '$escAju', 2, '7', '5', '$npwp', '$nama', '$alamat', '$nib')");
+        if (empty($entRows)) {
+            if ($cleanBc === '30') {
+                $entRows = [
+                    ['kode_entitas' => '2', 'idx' => 1],
+                    ['kode_entitas' => '7', 'idx' => 2],
+                    ['kode_entitas' => '8', 'idx' => 3],
+                    ['kode_entitas' => '6', 'idx' => 4],
+                    ['kode_entitas' => '4', 'idx' => 5],
+                    ['kode_entitas' => '23', 'idx' => 6]
+                ];
+            } else {
+                $entRows = [
+                    ['kode_entitas' => '3', 'idx' => 1],
+                    ['kode_entitas' => '7', 'idx' => 2],
+                    ['kode_entitas' => '9', 'idx' => 3]
+                ];
+            }
+        }
 
-        $koneksi->query("INSERT INTO bc_ceisa_entitas (cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas, nomor_identitas, nama_entitas, alamat_entitas)
-                         VALUES ('$escCmp', '$escAju', 3, '5', '5', '$npwp', '$nama', '$alamat')");
+        $seriEnt = 1;
+        foreach ($entRows as $er) {
+            $kd = $er['kode_entitas'];
+            $isOwn = in_array($kd, ['3', '7', '2']);
+            $nomorId = $isOwn ? $npwp : '';
+            $namaEnt = $isOwn ? $nama : '';
+            $almtEnt = $isOwn ? $alamat : '';
+            $nibEnt  = $isOwn ? $nib : '';
+            $jenisId = '5';
+            $kdNeg   = $isOwn ? 'ID' : '';
+
+            $escNomorId = $koneksi->real_escape_string($nomorId);
+            $escNamaEnt = $koneksi->real_escape_string($namaEnt);
+            $escAlmtEnt = $koneksi->real_escape_string($almtEnt);
+            $escNibEnt  = $koneksi->real_escape_string($nibEnt);
+            $escKdNeg   = $koneksi->real_escape_string($kdNeg);
+
+            $koneksi->query("INSERT INTO bc_ceisa_entitas (
+                cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
+                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara
+            ) VALUES (
+                '$escCmp', '$escAju', $seriEnt, '$kd', '$jenisId',
+                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg'
+            )");
+            $seriEnt++;
+        }
+
+        // 5. Insert Dokumen Default berdasarkan Urutan Konfigurasi Dokumen BC (bc_ceisa_docidx)
+        $qDocIdx = $koneksi->query("SELECT kode_dokumen, idx FROM bc_ceisa_docidx 
+                                    WHERE bc = '$escBc' AND (cmp_id = '$escCmp' OR cmp_id = '' OR cmp_id IS NULL)
+                                    ORDER BY IF(cmp_id = '$escCmp', 0, 1) ASC, idx ASC");
+        $docRows = [];
+        $seenDocIdx = [];
+        if ($qDocIdx) {
+            while ($rDocIdx = $qDocIdx->fetch_assoc()) {
+                $idxNum = intval($rDocIdx['idx']);
+                if (isset($seenDocIdx[$idxNum])) continue;
+                $seenDocIdx[$idxNum] = true;
+                $docRows[] = $rDocIdx;
+            }
+        }
+        if (empty($docRows)) {
+            if ($cleanBc === '40') {
+                $docRows = [
+                    ['kode_dokumen' => '630', 'idx' => 1],
+                    ['kode_dokumen' => '388', 'idx' => 2],
+                    ['kode_dokumen' => '380', 'idx' => 3],
+                    ['kode_dokumen' => '217', 'idx' => 4],
+                    ['kode_dokumen' => '315', 'idx' => 5]
+                ];
+            } else {
+                $docRows = [
+                    ['kode_dokumen' => '380', 'idx' => 1],
+                    ['kode_dokumen' => '217', 'idx' => 2]
+                ];
+            }
+        }
+        $seriDoc = 1;
+        $todayDate = date('Y-m-d');
+        foreach ($docRows as $dr) {
+            $kdDoc = $koneksi->real_escape_string($dr['kode_dokumen']);
+            $koneksi->query("INSERT INTO bc_ceisa_dokumen (cmp_id, nomor_aju, seri, kode_dokumen, nomor_dokumen, tanggal_dokumen) 
+                             VALUES ('$escCmp', '$escAju', $seriDoc, '$kdDoc', '', '$todayDate')");
+            $seriDoc++;
+        }
 
         if ($cleanBc === '30') {
             $koneksi->query("INSERT INTO bc_ceisa_kontainer (cmp_id, nomor_aju, seri, kode_tipe_kontainer, kode_ukuran_kontainer) VALUES ('$escCmp', '$escAju', 1, '1', '20')");
@@ -1144,7 +1693,7 @@ if ($action === 'delete_aju') {
     // Cek apakah dokumen ada
     $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
     $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
     $hasData = ($chkData && $chkData->num_rows > 0);
 
     if (!$hasHdr && !$hasData) {
@@ -1605,7 +2154,7 @@ if ($action === 'calc_pungutan') {
         exit;
     }
 
-    // Akumulasi tarif CEISA 4.0 tanpa pembulatan ribuan (sinkron dengan portal CEISA 4.0)
+    // Nilai pungutan adalah akumulasi riil dari Barang Tarif / Bahan Baku Tarif (persis sesuai kalkulasi CEISA 4.0)
     $newPungutan = [];
     foreach ($finalSummary as $item) {
         $kp = strtoupper($item['kode_pungutan']);
@@ -3216,6 +3765,46 @@ if ($action === 'ai_inject') {
             cursor: pointer;
         }
 
+        /* Modal Lookup Entitas Table Styling - Clean, Compact & No Header Overlap */
+        #tableLookupEntitas {
+            border-collapse: separate !important;
+            border-spacing: 0 !important;
+            width: 100%;
+        }
+        #tableLookupEntitas thead {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+        }
+        #tableLookupEntitas thead th {
+            position: sticky !important;
+            top: 0 !important;
+            z-index: 30 !important;
+            background: var(--bg-card) !important;
+            color: var(--text-muted) !important;
+            font-size: 9.5px !important;
+            font-weight: 700 !important;
+            padding: 6px 8px !important;
+            border: none !important;
+            border-bottom: 1px solid var(--border) !important;
+            box-shadow: inset 0 -1px 0 var(--border), 0 1px 2px rgba(0,0,0,0.06);
+            white-space: nowrap;
+        }
+        #tableLookupEntitas tbody tr {
+            transition: background 0.1s;
+        }
+        #tableLookupEntitas tbody tr:hover {
+            background-color: rgba(24, 144, 255, 0.08) !important;
+        }
+        #tableLookupEntitas tbody td {
+            padding: 4px 6px !important;
+            font-size: 10.5px;
+            border: none !important;
+            border-bottom: 1px solid var(--border) !important;
+            vertical-align: middle;
+            background: transparent;
+        }
+
         /* Standar input di dalam cell (Full Width 100% sesuai lebar kolom) */
         table.datagrid td input.cell-input {
             width: 100% !important;
@@ -4060,7 +4649,7 @@ if ($action === 'ai_inject') {
             box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5);
         }
 
-        /* Context Menu (DataWindow Style) */
+        /* Context Menu (DataWindow & Excel Interop Style) */
         .context-menu {
             position: fixed;
             z-index: 99999;
@@ -4072,25 +4661,45 @@ if ($action === 'ai_inject') {
             padding: 4px 0;
             font-size: 11px;
             display: none;
+            backdrop-filter: blur(4px);
+        }
+        .context-menu-header {
+            padding: 5px 12px;
+            font-size: 9.5px;
+            font-weight: 700;
+            color: var(--text-muted);
+            border-bottom: 1px solid var(--border);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 2px;
         }
         .context-menu-item {
-            padding: 7px 14px;
+            padding: 6px 12px;
             cursor: pointer;
             display: flex;
             align-items: center;
             gap: 8px;
             color: var(--text-main);
-            transition: all .15s;
+            transition: all .12s;
             user-select: none;
         }
         .context-menu-item:hover {
-            background: rgba(56, 189, 248, 0.12);
-            color: var(--primary);
+            background: var(--primary);
+            color: #ffffff;
+        }
+        .context-menu-item .menu-icon {
+            font-size: 13px;
+            width: 16px;
+            text-align: center;
+            flex-shrink: 0;
         }
         .context-menu-divider {
             height: 1px;
             background: var(--border);
-            margin: 4px 0;
+            margin: 3px 0;
         }
 
         /* ========================================================
@@ -4366,6 +4975,45 @@ if ($action === 'ai_inject') {
             font-weight: 700;
             letter-spacing: 0.2px;
         }
+
+        /* Modal Validasi Mandatory Swal2 Compact Styling */
+        div.swal2-popup.swal2-mandatory-modal {
+            width: 680px !important;
+            max-width: 95vw !important;
+            padding: 16px 20px 18px 20px !important;
+            border-radius: 8px !important;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-icon {
+            width: 48px !important;
+            height: 48px !important;
+            margin: 4px auto 10px auto !important;
+            border-width: 2.5px !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-icon .swal2-icon-content {
+            font-size: 26px !important;
+            line-height: 48px !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-title {
+            padding: 0 !important;
+            margin: 0 0 8px 0 !important;
+            line-height: 1.25 !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-html-container {
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-actions {
+            margin: 12px 0 0 0 !important;
+            gap: 8px !important;
+        }
+        div.swal2-popup.swal2-mandatory-modal .swal2-actions button {
+            font-size: 11px !important;
+            font-weight: 600 !important;
+            padding: 6px 14px !important;
+            border-radius: 4px !important;
+        }
+
     </style>
 </head>
 <?php 
@@ -4484,6 +5132,7 @@ $isEditMode = !empty($selectedAjuParam);
                 <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')">🌙 Dark</button>
                 <button class="theme-btn" data-theme="light" onclick="setTheme('light')">☀️ Light</button>
             </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="downloadCeisaExcel()" title="Unduh file Excel 21 sheet resmi CEISA 4.0">📥 Unduh Excel</button>
             <button class="btn btn-secondary btn-sm" onclick="previewJson()">👁️ Preview JSON</button>
             <button class="btn btn-success btn-sm" onclick="saveCurrentTab()">💾 Simpan Perubahan</button>
             <button class="btn btn-primary btn-sm" id="btnTopTransferCeisa" onclick="transferCeisa()">🚀 Transfer ke CEISA</button>
@@ -4538,34 +5187,24 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
                 <select id="entryDocBc" onchange="onEntryBcChange(this.value)" style="font-weight:700; color:var(--primary);">
                     <?php 
-                    $pemasukanOpts = [];
-                    $pengeluaranOpts = [];
-                    foreach ($allowedBcOptions as $bcCode => $bcInfo) {
-                        $label = is_array($bcInfo) ? $bcInfo['label'] : $bcInfo;
-                        $grp = is_array($bcInfo) ? ($bcInfo['group'] ?? 'pengeluaran') : 'pengeluaran';
-                        if ($grp === 'pemasukan') {
-                            $pemasukanOpts[$bcCode] = $label;
-                        } else {
-                            $pengeluaranOpts[$bcCode] = $label;
-                        }
-                    }
-                    $isFirst = true;
-                    ?>
-                    <?php if (!empty($pemasukanOpts)): ?>
-                        <optgroup label="─── PEMASUKAN (INBOUND) ───">
-                            <?php foreach ($pemasukanOpts as $bcCode => $bcLabel): ?>
-                                <option value="<?= htmlspecialchars($bcCode) ?>" <?= $isFirst ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
-                                <?php $isFirst = false; ?>
-                            <?php endforeach; ?>
-                        </optgroup>
+                    $firstBc = true;
+                    if (!empty($allowedBcInbound)): ?>
+                    <optgroup label="── PEMASUKAN (INBOUND) ──">
+                        <?php foreach ($allowedBcInbound as $bcCode => $bcLabel): ?>
+                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                        <?php 
+                            $firstBc = false;
+                        endforeach; ?>
+                    </optgroup>
                     <?php endif; ?>
-                    <?php if (!empty($pengeluaranOpts)): ?>
-                        <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
-                            <?php foreach ($pengeluaranOpts as $bcCode => $bcLabel): ?>
-                                <option value="<?= htmlspecialchars($bcCode) ?>" <?= $isFirst ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
-                                <?php $isFirst = false; ?>
-                            <?php endforeach; ?>
-                        </optgroup>
+                    <?php if (!empty($allowedBcOutbound)): ?>
+                    <optgroup label="── PENGELUARAN (OUTBOUND) ──">
+                        <?php foreach ($allowedBcOutbound as $bcCode => $bcLabel): ?>
+                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                        <?php 
+                            $firstBc = false;
+                        endforeach; ?>
+                    </optgroup>
                     <?php endif; ?>
                 </select>
                 <div style="display:flex; gap:4px; margin-top:2px;">
@@ -4677,26 +5316,26 @@ $isEditMode = !empty($selectedAjuParam);
             <!-- TAB NAVIGATION BAR -->
             <div class="tab-bar">
                 <button class="tab-btn active" data-tab="header" onclick="switchTab('header')">📋 Header</button>
-        <button class="tab-btn" data-tab="barang" onclick="switchTab('barang')">📦 Barang <span class="tab-count" id="count-barang">0</span></button>
-        <button class="tab-btn" data-tab="entitas" onclick="switchTab('entitas')">🏢 Entitas <span class="tab-count" id="count-entitas">0</span></button>
-        <button class="tab-btn" data-tab="dokumen" onclick="switchTab('dokumen')">📄 Dokumen <span class="tab-count" id="count-dokumen">0</span></button>
-        <button class="tab-btn" data-tab="bahanbaku" onclick="switchTab('bahanbaku')">🏭 Bahan Baku <span class="tab-count" id="count-bahanbaku">0</span></button>
-        <button class="tab-btn" data-tab="barangtarif" onclick="switchTab('barangtarif')">🏷️ Barang Tarif <span class="tab-count" id="count-barangtarif">0</span></button>
-        <button class="tab-btn" data-tab="bahanbakutarif" onclick="switchTab('bahanbakutarif')">🏷️ Bahan Baku Tarif <span class="tab-count" id="count-bahanbakutarif">0</span></button>
-        <button class="tab-btn" data-tab="kemasan" onclick="switchTab('kemasan')">📦 Kemasan <span class="tab-count" id="count-kemasan">0</span></button>
-        <button class="tab-btn" data-tab="pengangkut" onclick="switchTab('pengangkut')">🚢 Pengangkut <span class="tab-count" id="count-pengangkut">0</span></button>
-        <button class="tab-btn" data-tab="kontainer" onclick="switchTab('kontainer')">🚛 Kontainer <span class="tab-count" id="count-kontainer">0</span></button>
-        <button class="tab-btn" data-tab="pungutan" onclick="switchTab('pungutan')">💰 Pungutan <span class="tab-count" id="count-pungutan">0</span></button>
-        <button class="tab-btn" data-tab="bankdevisa" onclick="switchTab('bankdevisa')">🏦 Bank Devisa <span class="tab-count" id="count-bankdevisa">0</span></button>
-        <button class="tab-btn" data-tab="jaminan" onclick="switchTab('jaminan')">🛡️ Jaminan <span class="tab-count" id="count-jaminan">0</span></button>
-        <button class="tab-btn" data-tab="komponenbiaya" onclick="switchTab('komponenbiaya')">💰 Biaya <span class="tab-count" id="count-komponenbiaya">0</span></button>
-        <button class="tab-btn" data-tab="barangdokumen" onclick="switchTab('barangdokumen')">📑 Barang Dokumen <span class="tab-count" id="count-barangdokumen">0</span></button>
-        <button class="tab-btn" data-tab="barangentitas" onclick="switchTab('barangentitas')">👥 Barang Entitas <span class="tab-count" id="count-barangentitas">0</span></button>
-        <button class="tab-btn" data-tab="barangspekkhusus" onclick="switchTab('barangspekkhusus')">🔬 Spek Khusus <span class="tab-count" id="count-barangspekkhusus">0</span></button>
-        <button class="tab-btn" data-tab="barangvd" onclick="switchTab('barangvd')">⚖️ Nilai VD <span class="tab-count" id="count-barangvd">0</span></button>
-        <button class="tab-btn" data-tab="bahanbakudokumen" onclick="switchTab('bahanbakudokumen')">📑 BB Dokumen <span class="tab-count" id="count-bahanbakudokumen">0</span></button>
-        <button class="tab-btn" data-tab="kesiapanbarang" onclick="switchTab('kesiapanbarang')">⏱️ Kesiapan Barang</button>
-    </div>
+                <button class="tab-btn" data-tab="entitas" onclick="switchTab('entitas')">🏢 Entitas <span class="tab-count" id="count-entitas">0</span></button>
+                <button class="tab-btn" data-tab="dokumen" onclick="switchTab('dokumen')">📄 Dokumen <span class="tab-count" id="count-dokumen">0</span></button>
+                <button class="tab-btn" data-tab="barang" onclick="switchTab('barang')">📦 Barang <span class="tab-count" id="count-barang">0</span></button>
+                <button class="tab-btn" data-tab="bahanbaku" onclick="switchTab('bahanbaku')">🏭 Bahan Baku <span class="tab-count" id="count-bahanbaku">0</span></button>
+                <button class="tab-btn" data-tab="barangtarif" onclick="switchTab('barangtarif')">🏷️ Barang Tarif <span class="tab-count" id="count-barangtarif">0</span></button>
+                <button class="tab-btn" data-tab="bahanbakutarif" onclick="switchTab('bahanbakutarif')">🏷️ Bahan Baku Tarif <span class="tab-count" id="count-bahanbakutarif">0</span></button>
+                <button class="tab-btn" data-tab="kemasan" onclick="switchTab('kemasan')">📦 Kemasan <span class="tab-count" id="count-kemasan">0</span></button>
+                <button class="tab-btn" data-tab="pengangkut" onclick="switchTab('pengangkut')">🚢 Pengangkut <span class="tab-count" id="count-pengangkut">0</span></button>
+                <button class="tab-btn" data-tab="kontainer" onclick="switchTab('kontainer')">🚛 Kontainer <span class="tab-count" id="count-kontainer">0</span></button>
+                <button class="tab-btn" data-tab="pungutan" onclick="switchTab('pungutan')">💰 Pungutan <span class="tab-count" id="count-pungutan">0</span></button>
+                <button class="tab-btn" data-tab="bankdevisa" onclick="switchTab('bankdevisa')">🏦 Bank Devisa <span class="tab-count" id="count-bankdevisa">0</span></button>
+                <button class="tab-btn" data-tab="jaminan" onclick="switchTab('jaminan')">🛡️ Jaminan <span class="tab-count" id="count-jaminan">0</span></button>
+                <button class="tab-btn" data-tab="komponenbiaya" onclick="switchTab('komponenbiaya')">💰 Biaya <span class="tab-count" id="count-komponenbiaya">0</span></button>
+                <button class="tab-btn" data-tab="barangdokumen" onclick="switchTab('barangdokumen')">📑 Barang Dokumen <span class="tab-count" id="count-barangdokumen">0</span></button>
+                <button class="tab-btn" data-tab="barangentitas" onclick="switchTab('barangentitas')">👥 Barang Entitas <span class="tab-count" id="count-barangentitas">0</span></button>
+                <button class="tab-btn" data-tab="barangspekkhusus" onclick="switchTab('barangspekkhusus')">🔬 Spek Khusus <span class="tab-count" id="count-barangspekkhusus">0</span></button>
+                <button class="tab-btn" data-tab="barangvd" onclick="switchTab('barangvd')">⚖️ Nilai VD <span class="tab-count" id="count-barangvd">0</span></button>
+                <button class="tab-btn" data-tab="bahanbakudokumen" onclick="switchTab('bahanbakudokumen')">📑 BB Dokumen <span class="tab-count" id="count-bahanbakudokumen">0</span></button>
+                <button class="tab-btn" data-tab="kesiapanbarang" onclick="switchTab('kesiapanbarang')">⏱️ Kesiapan Barang</button>
+            </div>
 
     <!-- WORKSPACE PANELS -->
     <div class="workspace">
@@ -5119,13 +5758,13 @@ $isEditMode = !empty($selectedAjuParam);
                         <table class="datagrid" id="table-barangbom">
                             <thead>
                                 <tr>
-                                    <th style="width:50px;">Seri</th>
-                                    <th style="width:120px;">Kd Brg Induk</th>
-                                    <th style="width:120px;">Kd Komponen</th>
-                                    <th>Uraian Komponen</th>
-                                    <th style="width:70px;">Satuan</th>
-                                    <th style="width:100px;">Qty Dibutuhkan</th>
-                                    <th style="width:40px; text-align:center;">Hapus</th>
+                                    <th style="width:50px;" data-col="seri">Seri</th>
+                                    <th style="width:120px;" data-col="kode_barang_parent">Kd Brg Induk</th>
+                                    <th style="width:120px;" data-col="kode_barang">Kd Komponen</th>
+                                    <th data-col="uraian">Uraian Komponen</th>
+                                    <th style="width:70px;" data-col="kode_satuan">Satuan</th>
+                                    <th style="width:100px;" data-col="qty">Qty Dibutuhkan</th>
+                                    <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -5151,17 +5790,17 @@ $isEditMode = !empty($selectedAjuParam);
                         <table class="datagrid" id="table-tracebb">
                             <thead>
                                 <tr>
-                                    <th style="width:50px;">Seri Brg</th>
-                                    <th style="width:110px;">Kd Barang</th>
-                                    <th>Nama Barang</th>
-                                    <th style="width:80px;">Qty Use</th>
-                                    <th style="width:60px;">Sat</th>
-                                    <th style="width:60px;">BC</th>
-                                    <th style="width:150px;">No AJU Asal</th>
-                                    <th style="width:100px;">No Daftar</th>
-                                    <th style="width:90px;">Tgl Daftar</th>
-                                    <th style="width:90px;">HS Code</th>
-                                    <th style="width:40px; text-align:center;">Hapus</th>
+                                    <th style="width:50px;" data-col="seri_barang">Seri Brg</th>
+                                    <th style="width:110px;" data-col="kode_barang">Kd Barang</th>
+                                    <th data-col="nama_barang">Nama Barang</th>
+                                    <th style="width:80px;" data-col="qty_use">Qty Use</th>
+                                    <th style="width:60px;" data-col="satuan">Sat</th>
+                                    <th style="width:60px;" data-col="jenis_bc">BC</th>
+                                    <th style="width:150px;" data-col="nomor_aju">No AJU Asal</th>
+                                    <th style="width:100px;" data-col="no_daftar">No Daftar</th>
+                                    <th style="width:90px;" data-col="tgl_daftar">Tgl Daftar</th>
+                                    <th style="width:90px;" data-col="hs">HS Code</th>
+                                    <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -5173,11 +5812,13 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 3. TAB ENTITAS -->
         <div class="panel" id="panel-entitas">
-            <div class="grid-toolbar">
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Entitas Terlibat <span class="tbl-tech-name">(<code>bc_ceisa_entitas</code>)</span></span>
-                <div style="display:flex; gap:8px;">
-                    <button class="btn btn-secondary btn-sm" onclick="addRow('entitas')">➕ Tambah Entitas</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('entitas')">💾 Simpan Entitas</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openModalSettingEntidx()" style="font-weight:600; border:1px solid var(--primary); color:var(--primary); background:transparent;" title="Pengaturan urutan default entitas per dokumen BC (bc_ceisa_entidx)">⚙️ Setting List Entitas Default</button>
+                    <button type="button" class="btn btn-info btn-sm" onclick="resetEntitasToDefault()" style="font-weight:600; color:#fff;" title="Susun ulang entitas dokumen ini sesuai setting default urutan entitas BC">⚡ Reset Entitas Default</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addRow('entitas')">➕ Tambah Entitas</button>
+                    <button type="button" class="btn btn-success btn-sm" onclick="saveTable('entitas')">💾 Simpan Entitas</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -5186,15 +5827,15 @@ $isEditMode = !empty($selectedAjuParam);
                         <tr>
                             <th style="width:45px;" data-col="seri">Seri</th>
                             <th style="width:130px; max-width:130px;" data-col="kode_entitas">Kode Entitas</th>
-                            <th style="min-width:180px;">Nama Entitas</th>
-                            <th style="min-width:140px;">Nomor Identitas (NPWP)</th>
+                            <th style="min-width:180px;" data-col="nama_entitas">Nama Entitas</th>
+                            <th style="width:195px; min-width:185px;" data-col="nomor_identitas">Nomor Identitas (NPWP)</th>
                             <th style="width:125px; max-width:125px;" data-col="kode_jenis_identitas">Jenis Identitas</th>
-                            <th style="min-width:200px;">Alamat Entitas</th>
-                            <th style="min-width:110px;">NIB</th>
-                            <th style="min-width:110px;">No Ijin</th>
+                            <th style="min-width:200px;" data-col="alamat_entitas">Alamat Entitas</th>
+                            <th style="min-width:110px;" data-col="nib_entitas">NIB</th>
+                            <th style="min-width:110px;" data-col="nomor_ijin_entitas">No Ijin</th>
                             <th style="width:105px; max-width:105px;" data-col="tanggal_ijin_entitas">Tgl Ijin</th>
                             <th style="width:135px; max-width:135px;" data-col="kode_negara">Negara</th>
-                            <th style="width:40px; text-align:center;">Hapus</th>
+                            <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -5204,9 +5845,11 @@ $isEditMode = !empty($selectedAjuParam);
 
         <!-- 4. TAB DOKUMEN -->
         <div class="panel" id="panel-dokumen">
-            <div class="grid-toolbar">
+            <div class="grid-toolbar" style="flex-wrap:wrap; gap:8px;">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Dokumen Lampiran <span class="tbl-tech-name">(<code>bc_ceisa_dokumen</code>)</span></span>
-                <div style="display:flex; gap:8px;">
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="openModalSettingDocidx()" style="font-weight:600; border:1px solid var(--primary); color:var(--primary); background:transparent;" title="Pengaturan urutan default dokumen lampiran per dokumen BC (bc_ceisa_docidx)">⚙️ Setting List Dokumen Default</button>
+                    <button type="button" class="btn btn-info btn-sm" onclick="resetDokumenToDefault()" style="font-weight:600; color:#fff;" title="Susun ulang dokumen lampiran dokumen ini sesuai setting default urutan dokumen BC">⚡ Reset Dokumen Default</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('dokumen')">➕ Tambah Dokumen</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('dokumen')">💾 Simpan Dokumen</button>
                 </div>
@@ -5392,8 +6035,8 @@ $isEditMode = !empty($selectedAjuParam);
                             <th style="width:45px;" data-col="seri">Seri</th>
                             <th style="width:110px; max-width:110px;" data-col="jumlah_kemasan">Jumlah Kemasan</th>
                             <th style="width:125px; max-width:125px;" data-col="kode_kemasan">Kode Kemasan</th>
-                            <th style="min-width:140px;">Merek Kemasan</th>
-                            <th style="width:40px; text-align:center;">Hapus</th>
+                            <th style="min-width:140px;" data-col="merek">Merek Kemasan</th>
+                            <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -5402,7 +6045,7 @@ $isEditMode = !empty($selectedAjuParam);
                             <td data-col="seri" class="tfoot-label">TOTAL</td>
                             <td data-col="jumlah_kemasan" class="td-number">0.00</td>
                             <td data-col="kode_kemasan"></td>
-                            <td></td>
+                            <td data-col="merek"></td>
                             <td style="text-align:center;"></td>
                         </tr>
                     </tfoot>
@@ -5429,7 +6072,7 @@ $isEditMode = !empty($selectedAjuParam);
                             <th style="min-width:140px;" data-col="nomor_pengangkut">Nomor Pengangkut / Voyage</th>
                             <th style="width:135px; max-width:135px;" data-col="kode_bendera">Bendera</th>
                             <th style="min-width:100px;" data-col="call_sign">Call Sign</th>
-                            <th style="width:40px; text-align:center;">Hapus</th>
+                            <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -5451,11 +6094,11 @@ $isEditMode = !empty($selectedAjuParam);
                     <thead>
                         <tr>
                             <th style="width:45px;" data-col="seri">Seri</th>
-                            <th style="min-width:130px;">Nomor Kontainer</th>
+                            <th style="min-width:130px;" data-col="nomor_kontainer">Nomor Kontainer</th>
                             <th style="width:105px; max-width:105px;" data-col="kode_ukuran_kontainer">Ukuran</th>
                             <th style="width:115px; max-width:115px;" data-col="kode_jenis_kontainer">Jenis</th>
                             <th style="width:120px; max-width:120px;" data-col="kode_tipe_kontainer">Tipe</th>
-                            <th style="width:40px; text-align:center;">Hapus</th>
+                            <th style="width:40px; text-align:center;" class="th-action no-sort">Hapus</th>
                         </tr>
                     </thead>
                     <tbody></tbody>
@@ -5468,7 +6111,7 @@ $isEditMode = !empty($selectedAjuParam);
             <div class="grid-toolbar">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Pungutan <span class="tbl-tech-name">(<code>bc_ceisa_pungutan</code>)</span></span>
                 <div style="display:flex; gap:8px;">
-                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen (sesuai akumulasi tarif CEISA 4.0)">⚡ Hitung Pungutan</button>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen sesuai aturan CEISA 4.0">⚡ Hitung Pungutan</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('pungutan')">➕ Tambah Pungutan</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('pungutan')">💾 Simpan Pungutan</button>
                 </div>
@@ -5867,25 +6510,25 @@ $isEditMode = !empty($selectedAjuParam);
                     <div>
                         <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">DOKUMEN BC:</label>
                         <select id="cfgFilterDocBc" onchange="loadFilterSettingsData()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main);">
-                            <optgroup label="─── PEMASUKAN (INBOUND) ───">
-                                <option value="16">BC 1.6 - Pemasukan ke PLB</option>
-                                <option value="20">BC 2.0 - Impor untuk Dipakai (PIB)</option>
-                                <option value="23">BC 2.3 - Impor TPB / Kawasan Berikat</option>
-                                <option value="262">BC 2.6.2 - Pemasukan Subkontrak</option>
-                                <option value="28">BC 2.8 - Impor dari PLB</option>
-                                <option value="40">BC 4.0 - Pemasukan TLDDP ke TPB</option>
-                                <option value="611">PPKEK 6.1.1 - Pemasukan ke KEK (LDP)</option>
-                                <option value="613">PPKEK 6.1.3 - Pemasukan ke KEK (TLDDP)</option>
+                            <optgroup label="── PEMASUKAN (INBOUND) ──">
+                                <option value="16">BC 1.6 — Pemasukan ke PLB</option>
+                                <option value="20">BC 2.0 — Impor Non-Fasilitas (PIB)</option>
+                                <option value="23" selected>BC 2.3 — Impor ke Kawasan Berikat (TPB)</option>
+                                <option value="262">BC 2.6.2 — Pemasukan Subcon Kembali</option>
+                                <option value="28">BC 2.8 — Impor dari PLB</option>
+                                <option value="40">BC 4.0 — Pemasukan dari Lokal ke TPB</option>
+                                <option value="611">PPKEK 6.1.1 — Pemasukan ke KEK dari Luar Negeri</option>
+                                <option value="613">PPKEK 6.1.3 — Pemasukan ke KEK dari Lokal</option>
                             </optgroup>
-                            <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
-                                <option value="25">BC 2.5 - Pengeluaran TPB ke TLDDP</option>
-                                <option value="261">BC 2.6.1 - Pengeluaran Subkontrak</option>
-                                <option value="27">BC 2.7 - Pengeluaran Antar TPB</option>
-                                <option value="30">BC 3.0 - Pemberitahuan Ekspor (PEB)</option>
-                                <option value="33">BC 3.3 - Ekspor dari PLB</option>
-                                <option value="331">BC 3.3.1 - P3BET PLB</option>
-                                <option value="41">BC 4.1 - Pengeluaran Sementara ke TLDDP</option>
-                                <option value="631">PPKEK 6.3.1 - Pengeluaran ke LDP</option>
+                            <optgroup label="── PENGELUARAN (OUTBOUND) ──">
+                                <option value="25">BC 2.5 — Pengeluaran ke Lokal (Asal Impor / BC 2.3)</option>
+                                <option value="261">BC 2.6.1 — Pengeluaran Subcon</option>
+                                <option value="27">BC 2.7 — Pengeluaran ke TPB Lain</option>
+                                <option value="30">BC 3.0 — Ekspor Barang (PEB)</option>
+                                <option value="33">BC 3.3 — Ekspor dari PLB</option>
+                                <option value="331">BC 3.3.1 — P3BET PLB</option>
+                                <option value="41">BC 4.1 — Pengeluaran ke Lokal (Asal Lokal / BC 4.0)</option>
+                                <option value="631">PPKEK 6.3.1 — Pengeluaran dari KEK ke Luar Negeri</option>
                             </optgroup>
                         </select>
                     </div>
@@ -6145,6 +6788,310 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
+    <!-- MODAL SETTING LIST ENTITAS DEFAULT (bc_ceisa_entidx) -->
+    <div class="modal-overlay" id="modalSettingEntidx" style="display:none;">
+        <div class="modal" style="max-width:760px; width:95vw; height:85vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">⚙️</span>
+                    <div>
+                        <h3 style="margin:0; font-size:14px; font-weight:700;">Setting List Entitas Default Dokumen BC</h3>
+                        <span style="font-size:10px; color:var(--text-muted);">Atur urutan default entitas yang otomatis dibuat saat AJU Baru (tabel <code>bc_ceisa_entidx</code>)</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalSettingEntidx')">✕</button>
+            </div>
+
+            <!-- CONTROLS BAR: BC SELECTOR, SCOPE SELECTOR -->
+            <div style="padding:10px 14px; background:var(--bg-card); border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div>
+                        <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">DOKUMEN BC:</label>
+                        <select id="selEntidxBc" onchange="loadEntidxList()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main);">
+                            <optgroup label="── PEMASUKAN ──">
+                                <option value="16">BC 1.6 — Pemasukan ke PLB</option>
+                                <option value="20">BC 2.0 — Impor Non-Fasilitas (PIB)</option>
+                                <option value="23">BC 2.3 — Impor ke Kawasan Berikat</option>
+                                <option value="262">BC 2.6.2 — Pemasukan Subcon Kembali</option>
+                                <option value="27">BC 2.7 — Pemasukan Antar TPB</option>
+                                <option value="28">BC 2.8 — Impor dari PLB</option>
+                                <option value="40" selected>BC 4.0 — Pemasukan dari Lokal</option>
+                                <option value="611">PPKEK 6.1.1 — Pemasukan ke KEK</option>
+                            </optgroup>
+                            <optgroup label="── PENGELUARAN ──">
+                                <option value="25">BC 2.5 — Pengeluaran ke Lokal</option>
+                                <option value="261">BC 2.6.1 — Pengeluaran Subkontrak</option>
+                                <option value="30">BC 3.0 — Ekspor</option>
+                                <option value="33">BC 3.3 — Ekspor dari PLB</option>
+                                <option value="331">BC 3.3.1 — P3BET PLB</option>
+                                <option value="41">BC 4.1 — Pengeluaran ke Lokal (Asal BC 4.0)</option>
+                                <option value="613">PPKEK 6.1.3 — Pengeluaran dari KEK</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">LINGKUP (TARGET):</label>
+                        <select id="selEntidxScope" onchange="loadEntidxList()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main); min-width:240px;">
+                            <option value="global">🌐 GLOBAL (Semua Perusahaan)</option>
+                            <option value="company" id="optEntidxCmpScope">🏢 PERUSAHAAN AKTIF</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addEntidxRow()">➕ Tambah Baris</button>
+                </div>
+            </div>
+
+            <!-- TABLE WRAPPER -->
+            <div style="flex:1; overflow-y:auto; padding:12px 14px; background:var(--bg-base);">
+                <table class="datagrid" id="tableEntidxSetting" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:50px; text-align:center;">Urutan</th>
+                            <th style="width:280px;">Role / Kode Entitas</th>
+                            <th>Keterangan / Peran</th>
+                            <th style="width:110px; text-align:center;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyEntidxSetting">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- MODAL FOOTER -->
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="entidxStatusInfo" style="font-size:11px; color:var(--text-muted);">Memuat setting...</span>
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modalSettingEntidx')">Tutup</button>
+                    <button type="button" class="btn btn-primary" onclick="saveEntidxSetting()">💾 Simpan Setting Entitas</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL SETTING LIST DOKUMEN DEFAULT (bc_ceisa_docidx) -->
+    <div class="modal-overlay" id="modalSettingDocidx" style="display:none;">
+        <div class="modal" style="max-width:760px; width:95vw; height:85vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">⚙️</span>
+                    <div>
+                        <h3 style="margin:0; font-size:14px; font-weight:700;">Setting List Dokumen Lampiran Default Dokumen BC</h3>
+                        <span style="font-size:10px; color:var(--text-muted);">Atur urutan default dokumen lampiran yang otomatis dibuat saat AJU Baru (tabel <code>bc_ceisa_docidx</code>)</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalSettingDocidx')">✕</button>
+            </div>
+
+            <!-- CONTROLS BAR: BC SELECTOR, SCOPE SELECTOR -->
+            <div style="padding:10px 14px; background:var(--bg-card); border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:12px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <div>
+                        <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">DOKUMEN BC:</label>
+                        <select id="selDocidxBc" onchange="loadDocidxList()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main);">
+                            <optgroup label="── PEMASUKAN ──">
+                                <option value="16">BC 1.6 — Pemasukan ke PLB</option>
+                                <option value="20">BC 2.0 — Impor Non-Fasilitas (PIB)</option>
+                                <option value="23">BC 2.3 — Impor ke Kawasan Berikat</option>
+                                <option value="262">BC 2.6.2 — Pemasukan Subcon Kembali</option>
+                                <option value="27">BC 2.7 — Pemasukan Antar TPB</option>
+                                <option value="28">BC 2.8 — Impor dari PLB</option>
+                                <option value="40" selected>BC 4.0 — Pemasukan dari Lokal</option>
+                                <option value="611">PPKEK 6.1.1 — Pemasukan ke KEK</option>
+                            </optgroup>
+                            <optgroup label="── PENGELUARAN ──">
+                                <option value="25">BC 2.5 — Pengeluaran ke Lokal</option>
+                                <option value="261">BC 2.6.1 — Pengeluaran Subkontrak</option>
+                                <option value="30">BC 3.0 — Ekspor</option>
+                                <option value="33">BC 3.3 — Ekspor dari PLB</option>
+                                <option value="331">BC 3.3.1 — P3BET PLB</option>
+                                <option value="41">BC 4.1 — Pengeluaran ke Lokal (Asal BC 4.0)</option>
+                                <option value="613">PPKEK 6.1.3 — Pengeluaran dari KEK</option>
+                            </optgroup>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">LINGKUP (TARGET):</label>
+                        <select id="selDocidxScope" onchange="loadDocidxList()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main); min-width:240px;">
+                            <option value="global">🌐 GLOBAL (Semua Perusahaan)</option>
+                            <option value="company" id="optDocidxCmpScope">🏢 PERUSAHAAN AKTIF</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="addDocidxRow()">➕ Tambah Baris</button>
+                </div>
+            </div>
+
+            <!-- TABLE WRAPPER -->
+            <div style="flex:1; overflow-y:auto; padding:12px 14px; background:var(--bg-base);">
+                <table class="datagrid" id="tableDocidxSetting" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:50px; text-align:center;">Urutan</th>
+                            <th style="width:320px;">Jenis / Kode Dokumen Lampiran</th>
+                            <th>Keterangan / Fungsi Dokumen</th>
+                            <th style="width:110px; text-align:center;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyDocidxSetting">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- MODAL FOOTER -->
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span id="docidxStatusInfo" style="font-size:11px; color:var(--text-muted);">Memuat setting...</span>
+                <div style="display:flex; gap:6px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modalSettingDocidx')">Tutup</button>
+                    <button type="button" class="btn btn-primary" onclick="saveDocidxSetting()">💾 Simpan Setting Dokumen</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CARI ENTITAS DARI HISTORY (LOOKUP ENTITAS) -->
+    <div class="modal-overlay" id="modalLookupEntitas" style="display:none;">
+        <div class="modal" style="max-width:980px; width:95vw; height:85vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:6px;">
+                    <span style="font-size:13px;">🔍</span>
+                    <div>
+                        <h3 style="margin:0; font-size:11.5px; font-weight:700; color:var(--text-main);">Cari Entitas dari History Dokumen</h3>
+                        <span style="font-size:9.5px; color:var(--text-muted);">Pilih data entitas (Partner / Pemasok / Pengirim / Penerima) yang pernah digunakan sebelumnya</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalLookupEntitas')">✕</button>
+            </div>
+
+            <!-- SEARCH BAR -->
+            <div style="padding:8px 12px; background:var(--bg-card); border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:8px; align-items:center; flex:1; min-width:300px;">
+                    <div style="position:relative; flex:1;">
+                        <input type="text" id="lookupEntitasQuery" class="form-control" placeholder="🔍 Ketik Nama PT, NPWP, atau Alamat..." oninput="debounceLookupEntitas()" style="padding-left:26px; font-size:11px; height:28px; width:100%;">
+                        <span style="position:absolute; left:7px; top:6px; font-size:11px; opacity:0.5;">🔎</span>
+                    </div>
+                    <select id="lookupEntitasRoleFilter" onchange="fetchLookupEntitas()" style="padding:3px 6px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main); height:28px;">
+                        <option value="">Semua Role Entitas</option>
+                        <option value="9">Pengirim (9)</option>
+                        <option value="5">Pemasok / Supplier (5)</option>
+                        <option value="8">Penerima (8)</option>
+                        <option value="6">Pembeli / Buyer (6)</option>
+                        <option value="3">Pengusaha TPB (3)</option>
+                        <option value="7">Pemilik Barang (7)</option>
+                        <option value="2">Importir (2)</option>
+                        <option value="4">PPJK (4)</option>
+                    </select>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="fetchLookupEntitas()" style="height:28px; padding:2px 10px; font-size:11px;">Cari</button>
+                </div>
+                <span id="lookupEntitasCount" style="font-size:10.5px; color:var(--text-muted); font-weight:600;">0 entitas ditemukan</span>
+            </div>
+
+            <!-- RESULT TABLE -->
+            <div style="flex:1; overflow-y:auto; overflow-x:auto; background:var(--bg-card); position:relative;">
+                <table class="datagrid" id="tableLookupEntitas" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <th style="width:36px; text-align:center;">No</th>
+                            <th style="width:220px;">Nama Entitas</th>
+                            <th style="width:160px;">NPWP / NITKU</th>
+                            <th style="width:85px;">Role</th>
+                            <th>Alamat Entitas</th>
+                            <th style="width:100px;">NIB</th>
+                            <th style="width:50px; text-align:center;">Negara</th>
+                            <th style="width:65px; text-align:center;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tbodyLookupEntitas">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- MODAL FOOTER -->
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:11px; color:var(--text-muted);">💡 Tip: Klik tombol "Pilih" atau Dobel Klik pada baris untuk langsung mengisi form entitas aktif.</span>
+                <button type="button" class="btn btn-secondary" onclick="closeModal('modalLookupEntitas')">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- MODAL PASTE DARI EXCEL -->
+    <div class="modal-overlay" id="modalPasteExcel" style="display:none;">
+        <div class="modal" style="max-width:850px; width:95vw; height:85vh; display:flex; flex-direction:column;">
+            <div class="modal-header">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:18px;">📥</span>
+                    <div>
+                        <h3 style="margin:0; font-size:13.5px; font-weight:700;" id="pasteExcelModalTitle">Paste Data dari Excel</h3>
+                        <span style="font-size:10px; color:var(--text-muted);">Salin (Ctrl+C) data baris dari Microsoft Excel / Spreadsheet lalu tempel (Ctrl+V) di kotak bawah</span>
+                    </div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalPasteExcel')">✕</button>
+            </div>
+
+            <!-- OPTIONS BAR -->
+            <div style="padding:10px 14px; background:var(--bg-card); border-bottom:1px solid var(--border); display:flex; flex-wrap:wrap; gap:14px; align-items:center; justify-content:space-between;">
+                <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+                    <label style="font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer;">
+                        <input type="radio" name="pasteExcelMode" value="append" checked style="cursor:pointer;">
+                        <span>➕ Tambahkan ke Baris yang Ada (Append)</span>
+                    </label>
+                    <label style="font-size:11px; font-weight:600; display:flex; align-items:center; gap:6px; cursor:pointer; color:#ef4444;">
+                        <input type="radio" name="pasteExcelMode" value="replace" style="cursor:pointer;">
+                        <span>⚠️ Ganti / Kosongkan Baris Sebelumnya (Replace)</span>
+                    </label>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="copyTableHeadersForExcel()" title="Salin daftar nama kolom tabel ini ke clipboard agar bisa dijadikan acuan di Excel">
+                        📋 Copy Header Template
+                    </button>
+                </div>
+            </div>
+
+            <!-- TEXTAREA INPUT & PREVIEW -->
+            <div style="flex:1; display:flex; flex-direction:column; padding:12px 14px; background:var(--bg-base); gap:10px; overflow:hidden;">
+                <div style="flex:1; display:flex; flex-direction:column;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span style="font-size:10.5px; font-weight:700; color:var(--text-muted);">TEMPATKAN HASIL COPY EXCEL DI SINI (TAB-DELIMITED):</span>
+                        <span id="pasteExcelStats" style="font-size:10.5px; color:var(--primary); font-weight:600;">0 baris terdeteksi</span>
+                    </div>
+                    <textarea id="pasteExcelTextarea" class="form-control" placeholder="Contoh format: Sorot baris di Excel -> Ctrl+C -> Klik di sini -> Ctrl+V..." style="flex:1; width:100%; font-family:Consolas, monospace; font-size:11px; white-space:pre; overflow:auto; resize:none; padding:8px;" oninput="parseExcelPreview()"></textarea>
+                </div>
+
+                <div style="height:140px; border:1px solid var(--border); border-radius:4px; background:var(--bg-card); overflow:auto; padding:0;">
+                    <table class="datagrid" id="tablePasteExcelPreview" style="width:100%; font-size:10px;">
+                        <thead style="position:sticky; top:0; z-index:5;">
+                            <tr id="theadPasteExcelPreview">
+                                <th style="width:40px; text-align:center;">#</th>
+                                <th>Preview Kolom</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyPasteExcelPreview">
+                            <tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">Belum ada data yang ditempel.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- MODAL FOOTER -->
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:10px; color:var(--text-muted);">💡 Nilai koma ribuan/titik otomatis dibersihkan dan disesuaikan tipe kolom (angka, teks, tanggal).</span>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('modalPasteExcel')">Batal</button>
+                    <button type="button" class="btn btn-success" onclick="applyParsedExcelData()">📥 Masukkan Data ke Tabel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- PREVIEW MODAL -->
     <div class="modal-overlay" id="modalPreview">
         <div class="modal">
@@ -6237,7 +7184,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <div>
                         <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">Jenis Dokumen BC:</label>
                         <select id="cfgBc" onchange="loadConfigAjuForBc(this.value)" style="width:100%;">
-                            <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                            <optgroup label="── PEMASUKAN (INBOUND) ──">
                                 <option value="16">BC 1.6</option>
                                 <option value="20">BC 2.0</option>
                                 <option value="23" selected>BC 2.3</option>
@@ -6247,7 +7194,7 @@ $isEditMode = !empty($selectedAjuParam);
                                 <option value="611">PPKEK 6.1.1</option>
                                 <option value="613">PPKEK 6.1.3</option>
                             </optgroup>
-                            <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                            <optgroup label="── PENGELUARAN (OUTBOUND) ──">
                                 <option value="25">BC 2.5</option>
                                 <option value="261">BC 2.6.1</option>
                                 <option value="27">BC 2.7</option>
@@ -6442,11 +7389,15 @@ $isEditMode = !empty($selectedAjuParam);
                         <div>
                             <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">JENIS DOKUMEN PABEAN:</label>
                             <select id="aiKodeBc" class="form-control" style="font-size:11px; font-weight:600; padding:4px 8px; min-width:200px;">
-                                <option value="20" selected>BC 2.0 - Impor untuk Dipakai</option>
-                                <option value="23">BC 2.3 - Impor ke TPB (Kawasan Berikat)</option>
-                                <option value="16">BC 1.6 - Pemasukan LDP ke TPB</option>
-                                <option value="40">BC 4.0 - Pemasukan Barang ke TPB</option>
-                                <option value="30">BC 3.0 - Ekspor Barang</option>
+                                <optgroup label="── PEMASUKAN (INBOUND) ──">
+                                    <option value="16">BC 1.6 - Pemasukan ke PLB</option>
+                                    <option value="20" selected>BC 2.0 - Impor untuk Dipakai (PIB)</option>
+                                    <option value="23">BC 2.3 - Impor ke TPB (Kawasan Berikat)</option>
+                                    <option value="40">BC 4.0 - Pemasukan TLDDP ke TPB</option>
+                                </optgroup>
+                                <optgroup label="── PENGELUARAN (OUTBOUND) ──">
+                                    <option value="30">BC 3.0 - Pemberitahuan Ekspor Barang (PEB)</option>
+                                </optgroup>
                             </select>
                         </div>
                     </div>
@@ -6978,11 +7929,13 @@ $isEditMode = !empty($selectedAjuParam);
                         <input type="text" id="searchIncomingPicker" placeholder="Cari No AJU / No Daftar / Kode Barang / Supplier..." onkeyup="debounceSearchIncoming()" style="flex:1; font-size:11px; padding:6px 10px;">
                         <select id="filterBcIncomingPicker" onchange="loadIncomingPickerList()" style="width:110px; font-size:11px;">
                             <option value="">-- Semua BC --</option>
-                            <option value="23">BC 2.3</option>
-                            <option value="40">BC 4.0</option>
-                            <option value="27">BC 2.7</option>
+                            <option value="16">BC 1.6</option>
                             <option value="20">BC 2.0</option>
+                            <option value="23">BC 2.3</option>
                             <option value="262">BC 2.6.2</option>
+                            <option value="27">BC 2.7 IN</option>
+                            <option value="28">BC 2.8</option>
+                            <option value="40">BC 4.0</option>
                         </select>
                     </div>
                     <div style="display:flex; gap:6px; align-items:center;">
@@ -7120,24 +8073,82 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
-    <!-- CONTEXT MENU (KLIK KANAN) -->
+    <!-- CONTEXT MENU (KLIK KANAN) UNIFIED (EXCEL & ROW ACTIONS) -->
     <div id="editorContextMenu" class="context-menu">
-        <div id="ctxHeaderTitle" style="padding:4px 14px; font-weight:700; color:var(--text-muted); font-size:10px; border-bottom:1px solid var(--border); margin-bottom:2px;">AKSI BARIS</div>
-        <div id="ctxBarangOptions">
-            <div class="context-menu-item" onclick="triggerContextAction('add_material')">📦 Tambah dari Master Barang</div>
-            <div class="context-menu-item" onclick="triggerContextAction('fifo_trace')">⚡ Mulai Trace FIFO Dokumen Asal</div>
-            <div class="context-menu-item" onclick="triggerContextAction('toggle_trace')">🔍 Show / Hide Trace Panel</div>
+        <div id="ctxHeaderTitle" class="context-menu-header">
+            <span id="ctxTitleText">AKSI TABEL</span>
+            <span style="font-size:8.5px; opacity:0.6; font-weight:500;">EXCEL INTEROP</span>
+        </div>
+
+        <!-- EXCEL TOOLS -->
+        <div class="context-menu-item" onclick="execExcelContextMenu('copy_all')">
+            <span class="menu-icon">📑</span>
+            <span>Copy Semua Baris ke Excel</span>
+        </div>
+        <div class="context-menu-item" id="excelMenuCopySelected" onclick="execExcelContextMenu('copy_selected')">
+            <span class="menu-icon">📋</span>
+            <span>Copy Baris Ini ke Excel</span>
+        </div>
+        <div class="context-menu-item" onclick="execExcelContextMenu('paste')">
+            <span class="menu-icon">📥</span>
+            <span>Paste dari Excel...</span>
+        </div>
+        <div class="context-menu-item" onclick="execExcelContextMenu('copy_template')">
+            <span class="menu-icon">📊</span>
+            <span>Copy Header Template Kolom</span>
+        </div>
+
+        <!-- KHUSUS TABEL BARANG -->
+        <div id="ctxBarangOptions" style="display:none;">
             <div class="context-menu-divider"></div>
-            <div class="context-menu-item" onclick="triggerContextAction('fix_hs')">🔍 FIX HS CODE</div>
-            <div class="context-menu-item" onclick="triggerContextAction('fix_netto')">⚖️ FIX NETTO</div>
+            <div class="context-menu-item" onclick="triggerContextAction('add_material')">
+                <span class="menu-icon">📦</span>
+                <span>Tambah dari Master Barang</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('fifo_trace')">
+                <span class="menu-icon">⚡</span>
+                <span>Mulai Trace FIFO Dokumen Asal</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('toggle_trace')">
+                <span class="menu-icon">🔍</span>
+                <span>Show / Hide Trace Panel</span>
+            </div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_hs')">
+                <span class="menu-icon">🔍</span>
+                <span>FIX HS CODE</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('fix_netto')">
+                <span class="menu-icon">⚖️</span>
+                <span>FIX NETTO</span>
+            </div>
         </div>
+
+        <!-- KHUSUS TABEL BAHAN BAKU -->
         <div id="ctxBahanBakuOptions" style="display:none;">
-            <div class="context-menu-item" onclick="triggerContextAction('add_incoming')">📥 Tambah dari Dokumen Masuk (Eks BC)</div>
-            <div class="context-menu-item" onclick="triggerContextAction('generate_bbt')">⚡ Generate Bahan Baku Tarif</div>
-            <div class="context-menu-item" onclick="triggerContextAction('seq_bb')">🔢 Urutkan Seri Bahan Baku</div>
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('add_incoming')">
+                <span class="menu-icon">📥</span>
+                <span>Tambah dari Dokumen Masuk (Eks BC)</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('generate_bbt')">
+                <span class="menu-icon">⚡</span>
+                <span>Generate Bahan Baku Tarif</span>
+            </div>
+            <div class="context-menu-item" onclick="triggerContextAction('seq_bb')">
+                <span class="menu-icon">🔢</span>
+                <span>Urutkan Seri Bahan Baku</span>
+            </div>
         </div>
-        <div class="context-menu-divider"></div>
-        <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">❌ Hapus Baris Ini</div>
+
+        <!-- HAPUS BARIS -->
+        <div id="ctxRowDeleteOption" style="display:none;">
+            <div class="context-menu-divider"></div>
+            <div class="context-menu-item" onclick="triggerContextAction('delete_row')" style="color:#ef4444;">
+                <span class="menu-icon">❌</span>
+                <span>Hapus Baris Ini</span>
+            </div>
+        </div>
     </div>
 
     <!-- FLOATING REKAP TARIF WINDOW -->
@@ -8905,14 +9916,27 @@ $isEditMode = !empty($selectedAjuParam);
 
             const savedWidths = tableKey ? getSavedColumnWidths(tableKey) : {};
 
-            ths.forEach(th => {
-                const colKey = th.dataset.col;
+            ths.forEach((th, idx) => {
                 const txt = th.innerText.trim().toLowerCase();
-                const isAction = !colKey || txt === 'hapus' || txt === 'aksi' || txt === 'pilih' || th.classList.contains('no-sort') || th.querySelector('input[type="checkbox"]');
+                const isAction = txt === 'hapus' || txt === 'aksi' || txt === 'pilih' || th.classList.contains('th-action') || !!th.querySelector('input[type="checkbox"]');
 
                 if (isAction) {
                     th.classList.add('no-sort', 'th-action');
                     return;
+                }
+
+                // Bersihkan th-action jika bukan kolom aksi sesungguhnya
+                th.classList.remove('th-action');
+
+                // Dapatkan atau turunkan colKey
+                let colKey = th.dataset.col;
+                if (!colKey && tableKey && gridConfigs[tableKey] && gridConfigs[tableKey][idx]) {
+                    colKey = gridConfigs[tableKey][idx].key;
+                    th.dataset.col = colKey;
+                }
+                if (!colKey) {
+                    colKey = txt.replace(/[^a-z0-9_]/g, '_').toLowerCase() || ('col_' + idx);
+                    th.dataset.col = colKey;
                 }
 
                 // Restore saved width if present
@@ -8923,16 +9947,18 @@ $isEditMode = !empty($selectedAjuParam);
                     th.style.maxWidth = sw;
                 }
 
-                // Ensure sort icon exists
-                let sortIcon = th.querySelector('.th-sort-icon');
-                if (!sortIcon) {
-                    sortIcon = document.createElement('span');
-                    sortIcon.className = 'th-sort-icon';
-                    sortIcon.innerHTML = '⇅';
-                    th.appendChild(sortIcon);
+                // Ensure sort icon exists (kecuali jika eksplisit no-sort)
+                if (!th.classList.contains('no-sort')) {
+                    let sortIcon = th.querySelector('.th-sort-icon');
+                    if (!sortIcon) {
+                        sortIcon = document.createElement('span');
+                        sortIcon.className = 'th-sort-icon';
+                        sortIcon.innerHTML = '⇅';
+                        th.appendChild(sortIcon);
+                    }
                 }
 
-                // Ensure resizer handle exists
+                // Ensure resizer handle exists untuk semua kolom non-aksi
                 let resizer = th.querySelector('.col-resizer');
                 if (!resizer) {
                     resizer = document.createElement('div');
@@ -8993,7 +10019,7 @@ $isEditMode = !empty($selectedAjuParam);
                 }
 
                 // Sorting click on th (idempotent listener)
-                if (!th._hasSortListener) {
+                if (!th._hasSortListener && !th.classList.contains('no-sort')) {
                     th._hasSortListener = true;
                     th.addEventListener('click', function(e) {
                         if (_isGridResizing) return;
@@ -9043,7 +10069,7 @@ $isEditMode = !empty($selectedAjuParam);
                 { key: 'seri', type: 'number', label: 'Seri', decimals: 0, width: '45px', minWidth: '45px', maxWidth: '45px' },
                 { key: 'kode_entitas', type: 'select', label: 'Kode Entitas', reff: 'ENTITAS', width: '130px', minWidth: '130px', maxWidth: '130px' },
                 { key: 'nama_entitas', type: 'wrap_text', label: 'Nama Entitas' },
-                { key: 'nomor_identitas', type: 'text', label: 'Nomor Identitas (NPWP)' },
+                { key: 'nomor_identitas', type: 'text', label: 'Nomor Identitas (NPWP)', width: '195px', minWidth: '185px' },
                 { key: 'kode_jenis_identitas', type: 'select', label: 'Jenis Identitas', reff: 'JENIS IDENTITAS', width: '125px', minWidth: '125px', maxWidth: '125px' },
                 { key: 'alamat_entitas', type: 'wrap_text', label: 'Alamat Entitas' },
                 { key: 'nib_entitas', type: 'text', label: 'NIB' },
@@ -9932,6 +10958,14 @@ $isEditMode = !empty($selectedAjuParam);
                 tr.dataset.idBom = data.id_bom || (activeBomId || '');
                 tr.dataset.seriBarang = data.seri_barang || data.seri || (activeBarangSeri || 1);
                 tr.dataset.kodeBarang = data.kode_barang || data.kode_brg || activeBomKode;
+            } else if (tableKey === 'entitas') {
+                tr.dataset.seri = data.seri || (idx + 1);
+                tr.title = 'Dobel-klik baris ini untuk mencari entitas dari history transaksi sebelumnya';
+                tr.style.cursor = 'pointer';
+                tr.addEventListener('dblclick', function(e) {
+                    if (e.target && (e.target.closest('.btn-danger') || e.target.closest('button'))) return;
+                    openLookupEntitasModal(this);
+                });
             }
 
             conf.forEach(col => {
@@ -10032,6 +11066,27 @@ $isEditMode = !empty($selectedAjuParam);
                     setTimeout(resizeTa, 10);
 
                     td.appendChild(ta);
+
+                    if (tableKey === 'entitas' && col.key === 'nama_entitas') {
+                        ta.placeholder = '(Dobel-klik cari history...)';
+                        const btnLookup = document.createElement('button');
+                        btnLookup.type = 'button';
+                        btnLookup.className = 'btn btn-secondary btn-xs';
+                        btnLookup.style.position = 'absolute';
+                        btnLookup.style.right = '2px';
+                        btnLookup.style.top = '2px';
+                        btnLookup.style.padding = '1px 4px';
+                        btnLookup.style.fontSize = '10px';
+                        btnLookup.style.opacity = '0.7';
+                        btnLookup.innerText = '🔍';
+                        btnLookup.title = 'Cari data entitas dari history transaksi';
+                        btnLookup.onclick = (e) => {
+                            e.stopPropagation();
+                            openLookupEntitasModal(tr);
+                        };
+                        td.style.position = 'relative';
+                        td.appendChild(btnLookup);
+                    }
 
                 } else if (col.type === 'date') {
                     // Input tanggal bersih yyyy-mm-dd (jika kosong, tampil blank tanpa placeholder dd/mm/yyyy)
@@ -11279,14 +12334,461 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
-        async function saveHeader() {
-            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"]');
-            saveBtns.forEach(b => {
-                b.disabled = true;
-                b._origHtml = b.innerHTML;
-                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
+        // ============================================================
+        // VALIDASI ELEMEN MANDATORY SESUAI SKEMA CEISA 4.0
+        // ============================================================
+        function getActiveDocBc() {
+            let bc = '40';
+            if (currentData && currentData.header && currentData.header.kode_dokumen) {
+                bc = String(currentData.header.kode_dokumen).trim();
+            } else {
+                const hdrBc = document.getElementById('hdr_kode_dokumen');
+                if (hdrBc && hdrBc.value) bc = hdrBc.value.trim();
+                else {
+                    const selBc = document.getElementById('selectBc');
+                    if (selBc && selBc.value) bc = selBc.value.trim();
+                }
+            }
+            return bc.replace(/[^0-9]/g, '') || '40';
+        }
+
+        function getMandatoryErrors(scope, dataOrRows, bc) {
+            const errors = [];
+            const cleanBc = String(bc || '40').replace(/[^0-9]/g, '') || '40';
+
+            if (scope === 'header') {
+                const d = dataOrRows || {};
+
+                // 1. Kantor Pabean (Semua BC)
+                if (!d.kode_kantor || d.kode_kantor.trim() === '') {
+                    errors.push({ section: 'Header', field: 'Kantor Bea Cukai', message: 'Kode Kantor Pabean wajib dipilih.' });
+                }
+
+                // 2. Pernyataan / TTD (Semua BC)
+                if (!d.nama_pernyataan || d.nama_pernyataan.trim() === '') {
+                    errors.push({ section: 'Header', field: 'Nama Pernyataan (TTD)', message: 'Nama penandatangan dokumen wajib diisi.' });
+                }
+                if (!d.kota_pernyataan || d.kota_pernyataan.trim() === '') {
+                    errors.push({ section: 'Header', field: 'Kota Pernyataan', message: 'Kota tempat penandatanganan wajib diisi.' });
+                }
+                if (!d.tanggal_pernyataan || d.tanggal_pernyataan.trim() === '') {
+                    errors.push({ section: 'Header', field: 'Tanggal Pernyataan', message: 'Tanggal pernyataan / aju wajib diisi (yyyy-mm-dd).' });
+                }
+
+                // 3. Aturan Khusus Dokumen TPB (BC 4.0, 2.3, 2.5, 2.6.1, 2.6.2, 2.7)
+                if (['40', '23', '25', '261', '262', '27'].includes(cleanBc)) {
+                    if (!d.kode_jenis_tpb || d.kode_jenis_tpb.trim() === '') {
+                        errors.push({ section: 'Header', field: 'Jenis TPB', message: 'Jenis TPB wajib dipilih (misal: Kawasan Berikat).' });
+                    }
+                }
+
+                // 4. Tujuan Pengiriman / Pemasukan / Pengeluaran
+                if (['40', '27', '261', '262'].includes(cleanBc)) {
+                    if (!d.kode_tujuan_pengiriman || d.kode_tujuan_pengiriman.trim() === '') {
+                        errors.push({ section: 'Header', field: 'Tujuan Pengiriman', message: 'Kode tujuan pengiriman wajib dipilih.' });
+                    }
+                } else if (cleanBc === '23') {
+                    if (!d.kode_tujuan_pemasukan || d.kode_tujuan_pemasukan.trim() === '') {
+                        errors.push({ section: 'Header', field: 'Tujuan Pemasukan', message: 'Kode tujuan pemasukan wajib dipilih.' });
+                    }
+                } else if (cleanBc === '25') {
+                    if (!d.kode_tujuan_pengeluaran || d.kode_tujuan_pengeluaran.trim() === '') {
+                        errors.push({ section: 'Header', field: 'Tujuan Pengeluaran', message: 'Kode tujuan pengeluaran wajib dipilih.' });
+                    }
+                }
+
+                // 5. Kantor Tujuan untuk BC 2.7
+                if (cleanBc === '27' && (!d.kode_kantor_tujuan || d.kode_kantor_tujuan.trim() === '')) {
+                    errors.push({ section: 'Header', field: 'Kantor Pabean Tujuan', message: 'Kode Kantor Tujuan wajib dipilih untuk BC 2.7.' });
+                }
+
+                // 6. Berat Bruto & Netto
+                const bruto = parseFloat(d.bruto || 0);
+                const netto = parseFloat(d.netto || 0);
+                if (bruto <= 0) {
+                    errors.push({ section: 'Header', field: 'Berat Kotor (Bruto)', message: 'Nilai Bruto harus lebih besar dari 0 kg.' });
+                }
+                if (netto <= 0) {
+                    errors.push({ section: 'Header', field: 'Berat Bersih (Netto)', message: 'Nilai Netto harus lebih besar dari 0 kg.' });
+                }
+                if (bruto > 0 && netto > 0 && netto > bruto) {
+                    errors.push({ section: 'Header', field: 'Validasi Netto vs Bruto', message: `Berat Netto (${netto} kg) tidak boleh melebihi Bruto (${bruto} kg).` });
+                }
+
+                // 7. Nilai Transaksi Sesuai Jenis BC
+                if (['40', '25', '27', '41'].includes(cleanBc)) {
+                    const hp = parseFloat(d.harga_penyerahan || 0);
+                    if (hp <= 0 && currentData && Array.isArray(currentData.barang) && currentData.barang.length > 0) {
+                        errors.push({ section: 'Header', field: 'Harga Penyerahan', message: 'Harga Penyerahan total harus lebih besar dari 0.' });
+                    }
+                } else if (['20', '23', '28'].includes(cleanBc)) {
+                    const cif = parseFloat(d.cif || 0);
+                    if (cif <= 0 && currentData && Array.isArray(currentData.barang) && currentData.barang.length > 0) {
+                        errors.push({ section: 'Header', field: 'Nilai CIF', message: 'Nilai CIF total harus lebih besar dari 0.' });
+                    }
+                    if (!d.kode_valuta || d.kode_valuta.trim() === '') {
+                        errors.push({ section: 'Header', field: 'Valuta / Mata Uang', message: 'Kode valuta wajib dipilih.' });
+                    }
+                    if (parseFloat(d.ndpbm || 0) <= 0) {
+                        errors.push({ section: 'Header', field: 'Kurs NDPBM', message: 'Kurs NDPBM harus lebih besar dari 0.' });
+                    }
+                } else if (cleanBc === '30') {
+                    const fob = parseFloat(d.fob || 0);
+                    if (fob <= 0 && currentData && Array.isArray(currentData.barang) && currentData.barang.length > 0) {
+                        errors.push({ section: 'Header', field: 'Nilai FOB', message: 'Nilai FOB ekspor harus lebih besar dari 0.' });
+                    }
+                }
+
+            } else if (scope === 'barang') {
+                const rows = Array.isArray(dataOrRows) ? dataOrRows : [];
+                if (rows.length === 0) {
+                    errors.push({
+                        section: 'Rincian Barang',
+                        field: 'Tabel Barang Kosong',
+                        message: `Tabel Barang masih 0 baris. Dokumen BC ${cleanBc} mewajibkan minimal 1 item barang.`
+                    });
+                    return errors;
+                }
+
+                rows.forEach((r, idx) => {
+                    const seri = r.seri || r.seri_barang || (idx + 1);
+                    const kode = (r.kode_barang && r.kode_barang.trim()) ? r.kode_barang.trim() : `Baris #${seri}`;
+                    const sec = `Barang #${seri} (${kode})`;
+
+                    if (!r.kode_barang || r.kode_barang.trim() === '') {
+                        errors.push({ section: sec, field: 'Kode Barang', message: 'Kode barang / part number tidak boleh kosong.' });
+                    }
+                    if (!r.uraian || r.uraian.trim() === '') {
+                        errors.push({ section: sec, field: 'Uraian Barang', message: 'Uraian / deskripsi barang tidak boleh kosong.' });
+                    }
+                    const cleanHs = String(r.hs || '').replace(/[^0-9]/g, '');
+                    if (!cleanHs) {
+                        errors.push({ section: sec, field: 'Pos Tarif (HS Code)', message: 'Pos Tarif (HS Code) wajib diisi 8 digit angka.' });
+                    } else if (cleanHs.length !== 8) {
+                        errors.push({ section: sec, field: 'Pos Tarif (HS Code)', message: `HS Code harus tepat 8 digit angka (saat ini: ${cleanHs.length} digit: '${r.hs}').` });
+                    }
+                    if (parseFloat(r.jumlah_satuan || 0) <= 0) {
+                        errors.push({ section: sec, field: 'Jumlah Satuan', message: 'Jumlah satuan barang harus lebih besar dari 0.' });
+                    }
+                    if (!r.kode_satuan || r.kode_satuan.trim() === '' || r.kode_satuan.trim() === '-') {
+                        errors.push({ section: sec, field: 'Satuan Barang', message: 'Kode satuan barang wajib diisi (misal: KGM, PCE, SET).' });
+                    }
+                    if (parseFloat(r.netto || 0) <= 0) {
+                        errors.push({ section: sec, field: 'Netto Barang', message: 'Berat bersih (netto) barang harus lebih besar dari 0.' });
+                    }
+                    if (parseFloat(r.jumlah_kemasan || 0) <= 0) {
+                        errors.push({ section: sec, field: 'Jumlah Kemasan', message: 'Jumlah kemasan barang harus lebih besar dari 0.' });
+                    }
+                    if (!r.kode_kemasan || r.kode_kemasan.trim() === '' || r.kode_kemasan.trim() === '-') {
+                        errors.push({ section: sec, field: 'Jenis Kemasan', message: 'Kode kemasan barang wajib diisi (misal: PK, CT, BX).' });
+                    }
+
+                    // Nilai Transaksi per Barang
+                    if (['40', '25', '27', '41'].includes(cleanBc)) {
+                        if (parseFloat(r.harga_penyerahan || 0) <= 0) {
+                            errors.push({ section: sec, field: 'Harga Penyerahan', message: 'Harga penyerahan barang harus lebih besar dari 0.' });
+                        }
+                    } else if (['20', '23', '28'].includes(cleanBc)) {
+                        if (parseFloat(r.cif || 0) <= 0) {
+                            errors.push({ section: sec, field: 'Nilai CIF', message: 'Nilai CIF barang harus lebih besar dari 0.' });
+                        }
+                    } else if (cleanBc === '30') {
+                        if (parseFloat(r.fob || 0) <= 0) {
+                            errors.push({ section: sec, field: 'Nilai FOB', message: 'Nilai FOB barang harus lebih besar dari 0.' });
+                        }
+                    }
+                });
+
+            } else if (scope === 'entitas') {
+                const rows = Array.isArray(dataOrRows) ? dataOrRows : [];
+                if (rows.length === 0) {
+                    errors.push({
+                        section: 'Entitas Dokumen',
+                        field: 'Tabel Entitas Kosong',
+                        message: `Tabel Entitas masih 0 baris. Dokumen BC ${cleanBc} mewajibkan pengisian entitas terkait.`
+                    });
+                    return errors;
+                }
+
+                // Cek Peran Wajib (Mandatory Roles) sesuai jenis BC
+                const roleDict = {
+                    '1': 'Importir [1]',
+                    '2': 'Eksportir [2]',
+                    '3': 'Pengusaha TPB [3]',
+                    '4': 'PPJK [4]',
+                    '5': 'Pemasok / Supplier [5]',
+                    '6': 'Pembeli / Buyer [6]',
+                    '7': 'Pemilik Barang [7]',
+                    '8': 'Penerima Barang [8]',
+                    '9': 'Pengirim Barang [9]',
+                    '10': 'Penjual [10]'
+                };
+
+                let requiredRoles = [];
+                if (cleanBc === '40') {
+                    requiredRoles = ['3', '7', '9']; // Pengusaha TPB, Pemilik Barang, Pengirim
+                } else if (cleanBc === '20') {
+                    requiredRoles = ['1', '7', '9']; // Importir, Pemilik, Pengirim
+                } else if (cleanBc === '23') {
+                    requiredRoles = ['3', '7', '9']; // Pengusaha, Pemilik, Pengirim
+                } else if (cleanBc === '27') {
+                    requiredRoles = ['3', '8', '7']; // Pengirim TPB, Penerima TPB, Pemilik
+                } else if (cleanBc === '30') {
+                    requiredRoles = ['2', '7', '6']; // Eksportir, Pemilik, Pembeli
+                } else if (cleanBc === '25') {
+                    requiredRoles = ['3', '7', '6']; // Pengusaha TPB, Pemilik, Pembeli
+                } else if (cleanBc === '261' || cleanBc === '262') {
+                    requiredRoles = ['3', '7'];      // Pengusaha TPB, Pemilik
+                }
+
+                const existingRoles = rows.map(r => String(r.kode_entitas || '').trim());
+                requiredRoles.forEach(reqRole => {
+                    if (!existingRoles.includes(reqRole)) {
+                        errors.push({
+                            section: 'Entitas Wajib',
+                            field: roleDict[reqRole] || `Role [${reqRole}]`,
+                            message: `Dokumen BC ${cleanBc} mewajibkan adanya entitas ${roleDict[reqRole] || reqRole}.`
+                        });
+                    }
+                });
+
+                // Cek Isian Field Tiap Baris
+                rows.forEach((r, idx) => {
+                    const seri = r.seri || (idx + 1);
+                    const roleName = roleDict[r.kode_entitas] || `Role ${r.kode_entitas || '-'}`;
+                    const sec = `Entitas #${seri} (${roleName})`;
+
+                    if (!r.kode_entitas || r.kode_entitas.trim() === '') {
+                        errors.push({ section: sec, field: 'Kode Entitas', message: 'Kode / Peran entitas wajib dipilih.' });
+                    }
+                    if (!r.nama_entitas || r.nama_entitas.trim() === '') {
+                        errors.push({ section: sec, field: 'Nama Entitas', message: 'Nama perusahaan / pihak terlibat wajib diisi.' });
+                    }
+                    if (!r.alamat_entitas || r.alamat_entitas.trim() === '') {
+                        errors.push({ section: sec, field: 'Alamat Entitas', message: 'Alamat entitas wajib diisi.' });
+                    }
+                    if (!r.nomor_identitas || r.nomor_identitas.trim() === '' || r.nomor_identitas.trim() === '-') {
+                        errors.push({ section: sec, field: 'Nomor Identitas (NPWP)', message: 'Nomor NPWP / NIK / Identitas wajib diisi.' });
+                    }
+                    if (!r.kode_jenis_identitas || r.kode_jenis_identitas.trim() === '') {
+                        errors.push({ section: sec, field: 'Jenis Identitas', message: 'Jenis identitas wajib dipilih (NPWP 15/16 Digit, NIK, dll).' });
+                    }
+                });
+
+            } else if (scope === 'dokumen') {
+                const rows = Array.isArray(dataOrRows) ? dataOrRows : [];
+                if (rows.length === 0) {
+                    errors.push({
+                        section: 'Dokumen Pelengkap',
+                        field: 'Tabel Dokumen Kosong',
+                        message: `Tabel Dokumen masih 0 baris. Minimal wajib melampirkan 1 dokumen pelengkap (Invoice, Packing List, atau Surat Jalan).`
+                    });
+                    return errors;
+                }
+
+                rows.forEach((r, idx) => {
+                    const seri = r.seri || (idx + 1);
+                    const sec = `Dokumen #${seri}`;
+                    if (!r.kode_dokumen || r.kode_dokumen.trim() === '') {
+                        errors.push({ section: sec, field: 'Kode Dokumen', message: 'Jenis dokumen pelengkap wajib dipilih.' });
+                    }
+                    if (!r.nomor_dokumen || r.nomor_dokumen.trim() === '' || r.nomor_dokumen.trim() === '-') {
+                        errors.push({ section: sec, field: 'Nomor Dokumen', message: 'Nomor dokumen pelengkap wajib diisi.' });
+                    }
+                    if (!r.tanggal_dokumen || r.tanggal_dokumen.trim() === '') {
+                        errors.push({ section: sec, field: 'Tanggal Dokumen', message: 'Tanggal dokumen pelengkap wajib diisi (yyyy-mm-dd).' });
+                    }
+                });
+
+            } else if (scope === 'kemasan') {
+                const rows = Array.isArray(dataOrRows) ? dataOrRows : [];
+                if (rows.length === 0) {
+                    errors.push({
+                        section: 'Kemasan',
+                        field: 'Tabel Kemasan Kosong',
+                        message: `Tabel Kemasan masih 0 baris. Wajib memiliki minimal 1 data kemasan pengangkutan.`
+                    });
+                    return errors;
+                }
+
+                rows.forEach((r, idx) => {
+                    const seri = r.seri || (idx + 1);
+                    const sec = `Kemasan #${seri}`;
+                    if (parseFloat(r.jumlah_kemasan || 0) <= 0) {
+                        errors.push({ section: sec, field: 'Jumlah Kemasan', message: 'Jumlah kemasan harus lebih besar dari 0.' });
+                    }
+                    if (!r.kode_kemasan || r.kode_kemasan.trim() === '' || r.kode_kemasan.trim() === '-') {
+                        errors.push({ section: sec, field: 'Jenis Kemasan', message: 'Kode jenis kemasan wajib dipilih (misal PK, CT, BX).' });
+                    }
+                });
+
+            } else if (scope === 'pengangkut') {
+                const rows = Array.isArray(dataOrRows) ? dataOrRows : [];
+                if (rows.length === 0) {
+                    errors.push({
+                        section: 'Sarana Pengangkut',
+                        field: 'Tabel Pengangkut Kosong',
+                        message: `Tabel Pengangkut masih 0 baris. Wajib mencantumkan minimal 1 sarana pengangkut.`
+                    });
+                    return errors;
+                }
+
+                rows.forEach((r, idx) => {
+                    const seri = r.seri || (idx + 1);
+                    const sec = `Pengangkut #${seri}`;
+                    if (!r.nama_pengangkut || r.nama_pengangkut.trim() === '' || r.nama_pengangkut.trim() === '-') {
+                        errors.push({ section: sec, field: 'Nama Pengangkut', message: 'Nama sarana pengangkut / nomor polisi wajib diisi.' });
+                    }
+                    if (!r.kode_cara_angkut || r.kode_cara_angkut.trim() === '') {
+                        errors.push({ section: sec, field: 'Cara Pengangkutan', message: 'Cara pengangkutan wajib dipilih (Darat, Laut, Udara).' });
+                    }
+                });
+            }
+
+            return errors;
+        }
+
+        function getAllMandatoryErrors(bc) {
+            const allErrors = [];
+            const cleanBc = String(bc || getActiveDocBc()).replace(/[^0-9]/g, '') || '40';
+
+            // 1. Validasi Sheet Header
+            const hdrData = {};
+            headerFields.forEach(f => {
+                const el = document.getElementById('hdr_' + f);
+                if (el) {
+                    let v = el.value !== undefined ? el.value.trim() : '';
+                    if (headerNumberDecimals[f] !== undefined && v !== '') {
+                        v = stripNumberCommas(v);
+                    }
+                    hdrData[f] = v;
+                } else if (currentData && currentData.header && currentData.header[f] !== undefined) {
+                    hdrData[f] = currentData.header[f];
+                }
+            });
+            const hdrErrors = getMandatoryErrors('header', hdrData, cleanBc);
+            allErrors.push(...hdrErrors);
+
+            // Helper untuk mengambil data tab (jika DOM tabel ada barisnya pakai DOM, jika tidak pakai currentData)
+            const getTabData = (tabKey) => {
+                const tbody = document.querySelector(`#table-${tabKey} tbody`);
+                if (tbody) {
+                    const trs = tbody.querySelectorAll('tr:not(.tr-empty)');
+                    if (trs.length > 0) {
+                        const rows = [];
+                        trs.forEach(tr => {
+                            const rowObj = {};
+                            tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                                if (el.dataset.col) {
+                                    let v = el.value !== undefined ? el.value.trim() : '';
+                                    if (el.classList.contains('cell-number') || el.type === 'number') {
+                                        v = stripNumberCommas(v);
+                                    }
+                                    rowObj[el.dataset.col] = v;
+                                }
+                            });
+                            rows.push(rowObj);
+                        });
+                        return rows;
+                    }
+                }
+                return (currentData && Array.isArray(currentData[tabKey])) ? currentData[tabKey] : [];
+            };
+
+            // 2. Validasi Sheet Barang
+            const barangRows = getTabData('barang');
+            allErrors.push(...getMandatoryErrors('barang', barangRows, cleanBc));
+
+            // 3. Validasi Sheet Entitas
+            const entitasRows = getTabData('entitas');
+            allErrors.push(...getMandatoryErrors('entitas', entitasRows, cleanBc));
+
+            // 4. Validasi Sheet Dokumen
+            const dokumenRows = getTabData('dokumen');
+            allErrors.push(...getMandatoryErrors('dokumen', dokumenRows, cleanBc));
+
+            // 5. Validasi Sheet Kemasan
+            const kemasanRows = getTabData('kemasan');
+            allErrors.push(...getMandatoryErrors('kemasan', kemasanRows, cleanBc));
+
+            // 6. Validasi Sheet Pengangkut
+            const pengangkutRows = getTabData('pengangkut');
+            allErrors.push(...getMandatoryErrors('pengangkut', pengangkutRows, cleanBc));
+
+            return allErrors;
+        }
+
+        async function promptMandatoryWarning(scopeName, errors, bc) {
+            const htmlRows = errors.map((err, idx) => `
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.06); ${idx % 2 === 1 ? 'background:rgba(255,255,255,0.02);' : ''}">
+                    <td title="${escapeHtml(err.section)}" style="padding:4px 8px; font-weight:600; color:var(--primary); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; border-right:1px solid rgba(255,255,255,0.05);">${escapeHtml(err.section)}</td>
+                    <td title="${escapeHtml(err.field)}" style="padding:4px 8px; font-weight:600; color:#ef4444; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; border-right:1px solid rgba(255,255,255,0.05);">✕ ${escapeHtml(err.field)}</td>
+                    <td style="padding:4px 8px; color:var(--text-main); font-size:10px; line-height:1.35; vertical-align:middle; word-break:break-word;">${escapeHtml(err.message)}</td>
+                </tr>
+            `).join('');
+
+            const swalBase = (typeof getSwalThemeOptions === 'function') ? getSwalThemeOptions() : {};
+            const res = await Swal.fire({
+                ...swalBase,
+                icon: 'warning',
+                title: `<span style="font-size:13.5px; font-weight:700; letter-spacing:0.2px;">Validasi Kolom Mandatory Belum Lengkap</span>`,
+                html: `
+                    <div style="text-align:left; font-size:10.5px; margin-top:2px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                            <span style="font-weight:600; color:var(--text-main); font-size:10.5px;">
+                                Ditemukan <b style="color:#ef4444; font-size:11px;">${errors.length} data mandatory</b> belum lengkap di seluruh dokumen:
+                            </span>
+                            <span class="badge" style="background:#2563eb; color:#fff; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:3px;">Dokumen BC ${bc}</span>
+                        </div>
+                        
+                        <div style="max-height:230px; overflow-y:auto; overflow-x:hidden; border:1px solid var(--border); border-radius:4px; margin-bottom:8px; background:var(--bg-input);">
+                            <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+                                <colgroup>
+                                    <col style="width:165px;">
+                                    <col style="width:175px;">
+                                    <col style="width:auto;">
+                                </colgroup>
+                                <thead style="background:var(--bg-card); position:sticky; top:0; z-index:10; border-bottom:1px solid var(--border);">
+                                    <tr>
+                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); border-right:1px solid rgba(255,255,255,0.05);">Bagian</th>
+                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); border-right:1px solid rgba(255,255,255,0.05);">Kolom Mandatory</th>
+                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted);">Keterangan Masalah</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${htmlRows}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div style="background:rgba(239, 68, 68, 0.08); border-left:3px solid #ef4444; padding:5px 8px; border-radius:3px; font-size:9.5px; color:var(--text-main); margin-bottom:8px; line-height:1.4;">
+                            ⚠️ <b>Peringatan CEISA 4.0:</b> Dokumen dengan kolom mandatory kosong berisiko ditolak (<i>Reject 1028</i>) saat proses transfer.
+                        </div>
+
+                        <p style="margin:0; text-align:center; font-weight:600; color:var(--text-main); font-size:10.5px;">
+                            Apakah Anda tetap ingin <b>melanjutkan penyimpanan</b> data ini?
+                        </p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '⚠️ Tetap Lanjut Simpan',
+                cancelButtonText: '✕ Perbaiki Dulu',
+                confirmButtonColor: '#d97706',
+                cancelButtonColor: '#2563eb',
+                reverseButtons: true,
+                focusCancel: true,
+                width: '680px',
+                customClass: {
+                    popup: 'swal2-mandatory-modal',
+                    confirmButton: 'btn-sm',
+                    cancelButton: 'btn-sm'
+                }
             });
 
+            return res.isConfirmed;
+        }
+
+        async function saveHeader(force = false) {
             const data = {};
             headerFields.forEach(f => {
                 const el = document.getElementById('hdr_' + f);
@@ -11297,6 +12799,23 @@ $isEditMode = !empty($selectedAjuParam);
                     }
                     data[f] = v;
                 }
+            });
+
+            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
+            if (!force) {
+                const bc = getActiveDocBc();
+                const errors = getAllMandatoryErrors(bc);
+                if (errors.length > 0) {
+                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
+                    if (!proceed) return;
+                }
+            }
+
+            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"]');
+            saveBtns.forEach(b => {
+                b.disabled = true;
+                b._origHtml = b.innerHTML;
+                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
             });
 
             const formData = new FormData();
@@ -11324,17 +12843,10 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
-        async function saveTable(tableKey) {
+        async function saveTable(tableKey, force = false) {
             if (!currentAju) return;
             const tbody = document.querySelector(`#table-${tableKey} tbody`);
             if (!tbody) return;
-
-            const saveBtns = document.querySelectorAll(`button[onclick="saveCurrentTab()"], button[onclick="saveTable('${tableKey}')"]`);
-            saveBtns.forEach(b => {
-                b.disabled = true;
-                b._origHtml = b.innerHTML;
-                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
-            });
 
             let rows = [];
             if (tableKey === 'barangbom') {
@@ -11363,6 +12875,23 @@ $isEditMode = !empty($selectedAjuParam);
             if (tableKey === 'barang') {
                 currentData.barang = rows;
             }
+
+            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
+            if (!force) {
+                const bc = getActiveDocBc();
+                const errors = getAllMandatoryErrors(bc);
+                if (errors.length > 0) {
+                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
+                    if (!proceed) return;
+                }
+            }
+
+            const saveBtns = document.querySelectorAll(`button[onclick="saveCurrentTab()"], button[onclick="saveTable('${tableKey}')"]`);
+            saveBtns.forEach(b => {
+                b.disabled = true;
+                b._origHtml = b.innerHTML;
+                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
+            });
 
             const formData = new FormData();
             formData.append('action', 'save_table');
@@ -11577,6 +13106,13 @@ $isEditMode = !empty($selectedAjuParam);
                     if (b._origHtml) b.innerHTML = b._origHtml;
                 });
             }
+        function downloadCeisaExcel() {
+            if (!currentAju) {
+                showWarning('Silakan buat dokumen baru atau pilih nomor AJU terlebih dahulu untuk mengunduh Excel.', 'Pilih Dokumen');
+                return;
+            }
+            showToast(`Mengunduh file Excel CEISA 4.0 untuk AJU ${currentAju}...`);
+            window.location.href = `export_ceisa_excel.php?nomor_aju=${encodeURIComponent(currentAju)}`;
         }
 
         async function previewJson() {
@@ -12085,6 +13621,859 @@ $isEditMode = !empty($selectedAjuParam);
             document.getElementById(id).style.display = 'none';
         }
 
+        // ============================================================
+        // MODAL 1: SETTING LIST ENTITAS DEFAULT (bc_ceisa_entidx)
+        // ============================================================
+        let entidxMasterOpts = [];
+
+        function openModalSettingEntidx() {
+            // Ambil opsi entitas dari master jika tersedia
+            entidxMasterOpts = currentReffOptions['ENTITAS'] || [];
+            
+            // Set dokumen terpilih sesuai dokumen aktif
+            const activeBc = currentData && currentData.header && currentData.header.kode_dokumen 
+                ? String(currentData.header.kode_dokumen).trim() 
+                : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
+            const cleanBc = activeBc.replace(/[^0-9]/g, '');
+            const selBc = document.getElementById('selEntidxBc');
+            if (selBc && cleanBc) {
+                selBc.value = cleanBc;
+            }
+
+            // Atur pilihan scope perusahaan
+            const optCmp = document.getElementById('optEntidxCmpScope');
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            if (optCmp) {
+                if (currentCmp) {
+                    optCmp.textContent = `🏢 Perusahaan: ${currentCmp}`;
+                    optCmp.disabled = false;
+                } else {
+                    optCmp.textContent = `🏢 Perusahaan: (Tidak ada cmp_id)`;
+                    optCmp.disabled = true;
+                }
+            }
+
+            document.getElementById('modalSettingEntidx').style.display = 'flex';
+            loadEntidxList();
+        }
+
+        async function loadEntidxList() {
+            const bc = document.getElementById('selEntidxBc').value;
+            const scope = document.getElementById('selEntidxScope').value;
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const cmpId = (scope === 'company') ? currentCmp : '';
+
+            const statusEl = document.getElementById('entidxStatusInfo');
+            statusEl.innerText = 'Memuat konfigurasi...';
+
+            const tbody = document.getElementById('tbodyEntidxSetting');
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:15px;">⏳ Mengambil data setting...</td></tr>';
+
+            try {
+                const res = await fetch(`editor.php?action=get_entidx&bc=${encodeURIComponent(bc)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+                tbody.innerHTML = '';
+
+                if (json.status !== 'OK' || !json.data || json.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:15px;">Belum ada urutan default untuk dokumen ini. Silakan klik <b>➕ Tambah Baris</b>.</td></tr>';
+                    statusEl.innerText = 'Daftar kosong.';
+                    return;
+                }
+
+                statusEl.innerText = json.is_custom_company 
+                    ? `Status: Menggunakan setting khusus perusahaan (${json.cmp_id}).` 
+                    : `Status: Menggunakan setting Global.`;
+
+                json.data.forEach((item, i) => {
+                    renderEntidxRow(item.idx || (i + 1), item.kode_entitas);
+                });
+                renumberEntidxRows();
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#ff4d4f; padding:15px;">Gagal memuat: ${e.message}</td></tr>`;
+                statusEl.innerText = 'Error koneksi.';
+            }
+        }
+
+        function renderEntidxRow(idx, selectedKode = '') {
+            const tbody = document.getElementById('tbodyEntidxSetting');
+            if (tbody.querySelector('td[colspan]')) {
+                tbody.innerHTML = '';
+            }
+
+            const tr = document.createElement('tr');
+            tr.className = 'entidx-row';
+
+            // Col 1: Seri / idx
+            const tdIdx = document.createElement('td');
+            tdIdx.style.textAlign = 'center';
+            tdIdx.style.fontWeight = '700';
+            tdIdx.className = 'entidx-num';
+            tdIdx.innerText = idx;
+            tr.appendChild(tdIdx);
+
+            // Col 2: Dropdown Kode Entitas
+            const tdKode = document.createElement('td');
+            const sel = document.createElement('select');
+            sel.className = 'cell-select entidx-kode-sel';
+            sel.style.width = '100%';
+            sel.style.fontWeight = '600';
+
+            const optEmpty = document.createElement('option');
+            optEmpty.value = '';
+            optEmpty.innerText = '-- Pilih Kode Entitas --';
+            sel.appendChild(optEmpty);
+
+            const opts = entidxMasterOpts.length > 0 ? entidxMasterOpts : [
+                { kode: '1', teks: 'IMPORTIR' },
+                { kode: '2', teks: 'EKSPORTIR / IMPORTIR' },
+                { kode: '3', teks: 'PENGUSAHA TPB' },
+                { kode: '4', teks: 'PPJK' },
+                { kode: '5', teks: 'PEMASOK / SUPPLIER' },
+                { kode: '6', teks: 'PEMBELI / BUYER' },
+                { kode: '7', teks: 'PEMILIK BARANG' },
+                { kode: '8', teks: 'PENERIMA BARANG' },
+                { kode: '9', teks: 'PENGIRIM BARANG' },
+                { kode: '10', teks: 'PENJUAL' },
+                { kode: '11', teks: 'PEMUSATAN' },
+                { kode: '12', teks: 'PENGANGKUT' },
+                { kode: '23', teks: 'PENERIMA FASILITAS' }
+            ];
+
+            let matched = false;
+            opts.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.kode;
+                opt.innerText = `[${o.kode}] ${o.teks}`;
+                if (String(o.kode).trim() === String(selectedKode).trim()) {
+                    opt.selected = true;
+                    matched = true;
+                }
+                sel.appendChild(opt);
+            });
+
+            if (selectedKode && !matched) {
+                const optExtra = document.createElement('option');
+                optExtra.value = selectedKode;
+                optExtra.innerText = `[${selectedKode}] Entitas ${selectedKode}`;
+                optExtra.selected = true;
+                sel.appendChild(optExtra);
+            }
+
+            tdKode.appendChild(sel);
+            tr.appendChild(tdKode);
+
+            // Col 3: Keterangan / Peran
+            const tdKet = document.createElement('td');
+            tdKet.className = 'entidx-desc';
+            const updateKet = () => {
+                const v = sel.value;
+                if (v === '3' || v === '7' || v === '2') {
+                    tdKet.innerHTML = '<span style="color:#059669; font-weight:600;">🏢 Perusahaan Sendiri</span> <span style="font-size:10px; color:var(--text-muted);">(Otomatis ambil Profil Perusahaan)</span>';
+                } else if (v === '9' || v === '5' || v === '8' || v === '6') {
+                    tdKet.innerHTML = '<span style="color:#2563eb; font-weight:600;">🤝 Mitra / Partner</span> <span style="font-size:10px; color:var(--text-muted);">(Bisa dobel-klik cari history)</span>';
+                } else {
+                    tdKet.innerHTML = '<span style="color:var(--text-muted);">(Kosong siap diisi)</span>';
+                }
+            };
+            sel.addEventListener('change', updateKet);
+            updateKet();
+            tr.appendChild(tdKet);
+
+            // Col 4: Action (Naik, Turun, Hapus)
+            const tdAct = document.createElement('td');
+            tdAct.style.textAlign = 'center';
+            tdAct.innerHTML = `
+                <div style="display:inline-flex; gap:3px;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="moveEntidxRow(this, -1)" title="Pindah Naik">⬆️</button>
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="moveEntidxRow(this, 1)" title="Pindah Turun">⬇️</button>
+                    <button type="button" class="btn btn-danger btn-xs" onclick="deleteEntidxRow(this)" title="Hapus Baris">✕</button>
+                </div>
+            `;
+            tr.appendChild(tdAct);
+
+            tbody.appendChild(tr);
+        }
+
+        function addEntidxRow() {
+            const tbody = document.getElementById('tbodyEntidxSetting');
+            const count = tbody.querySelectorAll('tr.entidx-row').length;
+            renderEntidxRow(count + 1, '');
+            renumberEntidxRows();
+        }
+
+        function moveEntidxRow(btn, dir) {
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            if (dir === -1 && tr.previousElementSibling) {
+                tr.parentNode.insertBefore(tr, tr.previousElementSibling);
+            } else if (dir === 1 && tr.nextElementSibling) {
+                tr.parentNode.insertBefore(tr.nextElementSibling, tr);
+            }
+            renumberEntidxRows();
+        }
+
+        function deleteEntidxRow(btn) {
+            const tr = btn.closest('tr');
+            if (tr) {
+                tr.remove();
+                renumberEntidxRows();
+            }
+        }
+
+        function renumberEntidxRows() {
+            const tbody = document.getElementById('tbodyEntidxSetting');
+            const rows = tbody.querySelectorAll('tr.entidx-row');
+            rows.forEach((r, idx) => {
+                const numEl = r.querySelector('.entidx-num');
+                if (numEl) numEl.innerText = idx + 1;
+            });
+        }
+
+        async function saveEntidxSetting() {
+            const bc = document.getElementById('selEntidxBc').value;
+            const scope = document.getElementById('selEntidxScope').value;
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+
+            const rows = document.querySelectorAll('#tbodyEntidxSetting tr.entidx-row');
+            const items = [];
+            rows.forEach((r, idx) => {
+                const sel = r.querySelector('.entidx-kode-sel');
+                if (sel && sel.value) {
+                    items.push({
+                        idx: idx + 1,
+                        kode_entitas: sel.value.trim()
+                    });
+                }
+            });
+
+            if (items.length === 0) {
+                Swal.fire('Perhatian', 'Tambahkan minimal satu baris entitas sebelum menyimpan.', 'warning');
+                return;
+            }
+
+            try {
+                const fd = new FormData();
+                fd.append('bc', bc);
+                fd.append('scope', scope);
+                fd.append('cmp_id', currentCmp);
+                fd.append('items', JSON.stringify(items));
+
+                const res = await fetch('editor.php?action=save_entidx', {
+                    method: 'POST',
+                    body: fd
+                });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    showToast('✓ ' + json.message);
+                    closeModal('modalSettingEntidx');
+                } else {
+                    Swal.fire('Gagal Simpan', json.message || 'Terjadi kesalahan.', 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // ============================================================
+        // RESET ENTITAS DEFAULT PADA DOKUMEN AKTIF
+        // ============================================================
+        async function resetEntitasToDefault() {
+            const activeAju = (currentData && currentData.header && currentData.header.nomor_aju)
+                ? currentData.header.nomor_aju
+                : (document.getElementById('entryAjuDisplay') ? document.getElementById('entryAjuDisplay').innerText.trim() : '');
+            const activeBc = (currentData && currentData.header && currentData.header.kode_dokumen)
+                ? String(currentData.header.kode_dokumen).trim()
+                : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+
+            if (!activeAju || activeAju === 'MEMUAT...' || activeAju.length < 10) {
+                Swal.fire('Perhatian', 'Silakan pilih atau muat dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+
+            const confirmRes = await Swal.fire({
+                title: 'Reset Entitas Default?',
+                html: `Baris entitas pada AJU <b>${activeAju}</b> akan dikosongkan dan disusun ulang sesuai urutan setting default dokumen <b>BC ${activeBc}</b>.<br><br>Lanjutkan?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#2563eb',
+                cancelButtonColor: '#6b7280',
+                confirmButtonText: 'Ya, Susun Ulang',
+                cancelButtonText: 'Batal'
+            });
+
+            if (!confirmRes.isConfirmed) return;
+
+            try {
+                const fd = new FormData();
+                fd.append('nomor_aju', activeAju);
+                fd.append('kode_dokumen', activeBc);
+                fd.append('cmp_id', currentCmp);
+
+                const res = await fetch('editor.php?action=reset_entitas_default', {
+                    method: 'POST',
+                    body: fd
+                });
+                const json = await res.json();
+                if (json.status === 'OK' && json.data) {
+                    currentData.entitas = json.data;
+                    renderTable('entitas', json.data);
+                    showToast('✓ ' + json.message);
+                } else {
+                    Swal.fire('Gagal Reset', json.message || 'Terjadi kesalahan.', 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // ============================================================
+        // MODAL SETTING LIST DOKUMEN DEFAULT (bc_ceisa_docidx)
+        // ============================================================
+        let docidxMasterOpts = [];
+
+        function openModalSettingDocidx() {
+            // Ambil opsi dokumen lampiran dari master jika tersedia
+            docidxMasterOpts = currentReffOptions['DOKUMEN'] || [];
+            
+            // Set dokumen terpilih sesuai dokumen aktif
+            const activeBc = currentData && currentData.header && currentData.header.kode_dokumen 
+                ? String(currentData.header.kode_dokumen).trim() 
+                : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
+            const cleanBc = activeBc.replace(/[^0-9]/g, '');
+            const selBc = document.getElementById('selDocidxBc');
+            if (selBc && cleanBc) {
+                selBc.value = cleanBc;
+            }
+
+            // Atur pilihan scope perusahaan
+            const optCmp = document.getElementById('optDocidxCmpScope');
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            if (optCmp) {
+                if (currentCmp) {
+                    optCmp.textContent = `🏢 Perusahaan: ${currentCmp}`;
+                    optCmp.disabled = false;
+                } else {
+                    optCmp.textContent = `🏢 Perusahaan: (Tidak ada cmp_id)`;
+                    optCmp.disabled = true;
+                }
+            }
+
+            document.getElementById('modalSettingDocidx').style.display = 'flex';
+            loadDocidxList();
+        }
+
+        async function loadDocidxList() {
+            const bc = document.getElementById('selDocidxBc').value;
+            const scope = document.getElementById('selDocidxScope').value;
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const cmpId = (scope === 'company') ? currentCmp : '';
+
+            const statusEl = document.getElementById('docidxStatusInfo');
+            statusEl.innerText = 'Memuat konfigurasi...';
+
+            const tbody = document.getElementById('tbodyDocidxSetting');
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:15px;">⏳ Mengambil data setting...</td></tr>';
+
+            try {
+                const res = await fetch(`editor.php?action=get_docidx&bc=${encodeURIComponent(bc)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+                tbody.innerHTML = '';
+
+                if (json.status !== 'OK' || !json.data || json.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:15px;">Belum ada urutan default dokumen lampiran untuk BC ini. Silakan klik <b>➕ Tambah Baris</b>.</td></tr>';
+                    statusEl.innerText = 'Daftar kosong.';
+                    return;
+                }
+
+                statusEl.innerText = json.is_custom_company 
+                    ? `Status: Menggunakan setting khusus perusahaan (${json.cmp_id}).` 
+                    : `Status: Menggunakan setting Global.`;
+
+                json.data.forEach((item, i) => {
+                    renderDocidxRow(item.idx || (i + 1), item.kode_dokumen);
+                });
+                renumberDocidxRows();
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; color:#ff4d4f; padding:15px;">Gagal memuat: ${e.message}</td></tr>`;
+                statusEl.innerText = 'Error koneksi.';
+            }
+        }
+
+        function renderDocidxRow(idx, selectedKode = '') {
+            const tbody = document.getElementById('tbodyDocidxSetting');
+            if (tbody.querySelector('td[colspan]')) {
+                tbody.innerHTML = '';
+            }
+
+            const tr = document.createElement('tr');
+            tr.className = 'docidx-row';
+
+            // Col 1: Seri / idx
+            const tdIdx = document.createElement('td');
+            tdIdx.style.textAlign = 'center';
+            tdIdx.style.fontWeight = '700';
+            tdIdx.className = 'docidx-num';
+            tdIdx.innerText = idx;
+            tr.appendChild(tdIdx);
+
+            // Col 2: Dropdown Kode Dokumen
+            const tdKode = document.createElement('td');
+            const sel = document.createElement('select');
+            sel.className = 'cell-select docidx-kode-sel';
+            sel.style.width = '100%';
+            sel.style.fontWeight = '600';
+
+            const optEmpty = document.createElement('option');
+            optEmpty.value = '';
+            optEmpty.innerText = '-- Pilih Kode Dokumen --';
+            sel.appendChild(optEmpty);
+
+            const opts = docidxMasterOpts.length > 0 ? docidxMasterOpts : [
+                { kode: '630', teks: 'Surat Jalan' },
+                { kode: '388', teks: 'FAKTUR PAJAK' },
+                { kode: '380', teks: 'INVOICE' },
+                { kode: '217', teks: 'PACKING LIST' },
+                { kode: '315', teks: 'KONTRAK' },
+                { kode: '705', teks: 'B/L (BILL OF LADING)' },
+                { kode: '740', teks: 'AWB (AIR WAYBILL)' },
+                { kode: '741', teks: 'MASTER AWB' },
+                { kode: '999', teks: 'DOKUMEN LAINNYA' }
+            ];
+
+            let matched = false;
+            opts.forEach(o => {
+                const opt = document.createElement('option');
+                opt.value = o.kode;
+                opt.innerText = `[${o.kode}] ${o.teks}`;
+                if (String(o.kode).trim() === String(selectedKode).trim()) {
+                    opt.selected = true;
+                    matched = true;
+                }
+                sel.appendChild(opt);
+            });
+
+            if (selectedKode && !matched) {
+                const optExtra = document.createElement('option');
+                optExtra.value = selectedKode;
+                optExtra.innerText = `[${selectedKode}] Dokumen ${selectedKode}`;
+                optExtra.selected = true;
+                sel.appendChild(optExtra);
+            }
+
+            tdKode.appendChild(sel);
+            tr.appendChild(tdKode);
+
+            // Col 3: Keterangan / Fungsi Dokumen
+            const tdKet = document.createElement('td');
+            tdKet.className = 'docidx-desc';
+            const updateKet = () => {
+                const v = sel.value;
+                if (v === '630') {
+                    tdKet.innerHTML = '<span style="color:#059669; font-weight:600;">🚚 Dokumen Pengangkutan / Delivery</span> <span style="font-size:10px; color:var(--text-muted);">(Surat Jalan / Delivery Order)</span>';
+                } else if (v === '380') {
+                    tdKet.innerHTML = '<span style="color:#2563eb; font-weight:600;">💰 Dokumen Komersial</span> <span style="font-size:10px; color:var(--text-muted);">(Commercial Invoice)</span>';
+                } else if (v === '388') {
+                    tdKet.innerHTML = '<span style="color:#7c3aed; font-weight:600;">🧾 Dokumen Perpajakan</span> <span style="font-size:10px; color:var(--text-muted);">(Faktur Pajak Pertambahan Nilai)</span>';
+                } else if (v === '217') {
+                    tdKet.innerHTML = '<span style="color:#0284c7; font-weight:600;">📦 Dokumen Pengepakan</span> <span style="font-size:10px; color:var(--text-muted);">(Packing List Rincian Barang)</span>';
+                } else if (v === '315') {
+                    tdKet.innerHTML = '<span style="color:#d97706; font-weight:600;">📑 Perjanjian / Kontrak Kerja</span> <span style="font-size:10px; color:var(--text-muted);">(Sales Contract / PO)</span>';
+                } else if (v === '705' || v === '740') {
+                    tdKet.innerHTML = '<span style="color:#059669; font-weight:600;">🚢 Sarana Transportasi</span> <span style="font-size:10px; color:var(--text-muted);">(Konosemen B/L atau AWB)</span>';
+                } else {
+                    tdKet.innerHTML = '<span style="color:var(--text-muted);">(Dokumen Pelengkap Pabean)</span>';
+                }
+            };
+            sel.addEventListener('change', updateKet);
+            updateKet();
+            tr.appendChild(tdKet);
+
+            // Col 4: Action (Naik, Turun, Hapus)
+            const tdAct = document.createElement('td');
+            tdAct.style.textAlign = 'center';
+            tdAct.innerHTML = `
+                <div style="display:inline-flex; gap:3px;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="moveDocidxRow(this, -1)" title="Pindah Naik">⬆️</button>
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="moveDocidxRow(this, 1)" title="Pindah Turun">⬇️</button>
+                    <button type="button" class="btn btn-danger btn-xs" onclick="deleteDocidxRow(this)" title="Hapus Baris">✕</button>
+                </div>
+            `;
+            tr.appendChild(tdAct);
+
+            tbody.appendChild(tr);
+        }
+
+        function addDocidxRow() {
+            const tbody = document.getElementById('tbodyDocidxSetting');
+            const count = tbody.querySelectorAll('tr.docidx-row').length;
+            renderDocidxRow(count + 1, '');
+            renumberDocidxRows();
+        }
+
+        function moveDocidxRow(btn, dir) {
+            const tr = btn.closest('tr');
+            if (!tr) return;
+            if (dir === -1 && tr.previousElementSibling) {
+                tr.parentNode.insertBefore(tr, tr.previousElementSibling);
+            } else if (dir === 1 && tr.nextElementSibling) {
+                tr.parentNode.insertBefore(tr.nextElementSibling, tr);
+            }
+            renumberDocidxRows();
+        }
+
+        function deleteDocidxRow(btn) {
+            const tr = btn.closest('tr');
+            if (tr) {
+                tr.remove();
+                renumberDocidxRows();
+            }
+        }
+
+        function renumberDocidxRows() {
+            const tbody = document.getElementById('tbodyDocidxSetting');
+            const rows = tbody.querySelectorAll('tr.docidx-row');
+            rows.forEach((r, idx) => {
+                const numEl = r.querySelector('.docidx-num');
+                if (numEl) numEl.innerText = idx + 1;
+            });
+        }
+
+        async function saveDocidxSetting() {
+            const bc = document.getElementById('selDocidxBc').value;
+            const scope = document.getElementById('selDocidxScope').value;
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+
+            const rows = document.querySelectorAll('#tbodyDocidxSetting tr.docidx-row');
+            const items = [];
+            rows.forEach((r, idx) => {
+                const sel = r.querySelector('.docidx-kode-sel');
+                if (sel && sel.value) {
+                    items.push({
+                        idx: idx + 1,
+                        kode_dokumen: sel.value.trim()
+                    });
+                }
+            });
+
+            if (items.length === 0) {
+                Swal.fire('Perhatian', 'Tambahkan minimal satu baris dokumen lampiran sebelum menyimpan.', 'warning');
+                return;
+            }
+
+            try {
+                const fd = new FormData();
+                fd.append('bc', bc);
+                fd.append('scope', scope);
+                fd.append('cmp_id', currentCmp);
+                fd.append('items', JSON.stringify(items));
+
+                const res = await fetch('editor.php?action=save_docidx', {
+                    method: 'POST',
+                    body: fd
+                });
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    showToast('✓ ' + json.message);
+                    closeModal('modalSettingDocidx');
+                } else {
+                    Swal.fire('Gagal Simpan', json.message || 'Terjadi kesalahan.', 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // ============================================================
+        // RESET DOKUMEN DEFAULT PADA DOKUMEN AKTIF
+        // ============================================================
+        async function resetDokumenToDefault() {
+            const activeAju = (currentData && currentData.header && currentData.header.nomor_aju)
+                ? currentData.header.nomor_aju
+                : (document.getElementById('entryAjuDisplay') ? document.getElementById('entryAjuDisplay').innerText.trim() : '');
+            const activeBc = (currentData && currentData.header && currentData.header.kode_dokumen)
+                ? String(currentData.header.kode_dokumen).trim()
+                : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+
+            if (!activeAju || activeAju === 'MEMUAT...' || activeAju.length < 10) {
+                Swal.fire('Perhatian', 'Silakan pilih atau muat dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+
+            const confirmRes = await Swal.fire({
+                title: 'Reset Dokumen Lampiran Default?',
+                html: `Baris dokumen lampiran pada AJU <b>${activeAju}</b> akan dikosongkan dan disusun ulang sesuai urutan setting default dokumen <b>BC ${activeBc}</b>.<br><br>Lanjutkan?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#2563eb',
+                cancelButtonColor: '#6b7280',
+                confirmButtonText: 'Ya, Susun Ulang',
+                cancelButtonText: 'Batal'
+            });
+
+            if (!confirmRes.isConfirmed) return;
+
+            try {
+                const fd = new FormData();
+                fd.append('nomor_aju', activeAju);
+                fd.append('kode_dokumen', activeBc);
+                fd.append('cmp_id', currentCmp);
+
+                const res = await fetch('editor.php?action=reset_dokumen_default', {
+                    method: 'POST',
+                    body: fd
+                });
+                const json = await res.json();
+                if (json.status === 'OK' && json.data) {
+                    currentData.dokumen = json.data;
+                    renderTable('dokumen', json.data);
+                    showToast('✓ ' + json.message);
+                } else {
+                    Swal.fire('Gagal Reset', json.message || 'Terjadi kesalahan.', 'error');
+                }
+            } catch (e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // ============================================================
+        // MODAL 2: CARI ENTITAS DARI HISTORY (LOOKUP ENTITAS)
+        // ============================================================
+        let activeEntitasTr = null;
+        let lookupEntitasDebounceTimer = null;
+
+        function openLookupEntitasModal(tr) {
+            activeEntitasTr = tr;
+            const selKode = tr.querySelector('select[data-col="kode_entitas"]');
+            const rowKode = selKode && selKode.value ? selKode.value.trim() : '';
+            const filterRole = document.getElementById('lookupEntitasRoleFilter');
+
+            if (filterRole) {
+                // Sinkronkan daftar opsi dari master referensi ENTITAS jika tersedia
+                const entMaster = currentReffOptions['ENTITAS'] || [];
+                if (entMaster.length > 0) {
+                    const prevVal = rowKode || filterRole.value;
+                    filterRole.innerHTML = '<option value="">Semua Role Entitas</option>';
+                    entMaster.forEach(o => {
+                        const opt = document.createElement('option');
+                        opt.value = o.kode;
+                        opt.innerText = `${o.teks} (${o.kode})`;
+                        filterRole.appendChild(opt);
+                    });
+                } else if (rowKode) {
+                    let optExists = Array.from(filterRole.options).some(o => String(o.value).trim() === rowKode);
+                    if (!optExists) {
+                        const opt = document.createElement('option');
+                        opt.value = rowKode;
+                        opt.innerText = `Role (${rowKode})`;
+                        filterRole.appendChild(opt);
+                    }
+                }
+
+                // Otomatis pilih role sesuai kode_entitas baris aktif
+                if (rowKode) {
+                    filterRole.value = rowKode;
+                } else {
+                    filterRole.value = '';
+                }
+            }
+
+            const inpQuery = document.getElementById('lookupEntitasQuery');
+            if (inpQuery) {
+                inpQuery.value = '';
+            }
+
+            document.getElementById('modalLookupEntitas').style.display = 'flex';
+            fetchLookupEntitas();
+            if (inpQuery) setTimeout(() => { inpQuery.focus(); }, 100);
+        }
+
+        function debounceLookupEntitas() {
+            clearTimeout(lookupEntitasDebounceTimer);
+            lookupEntitasDebounceTimer = setTimeout(fetchLookupEntitas, 300);
+        }
+
+        async function fetchLookupEntitas() {
+            const q = document.getElementById('lookupEntitasQuery') ? document.getElementById('lookupEntitasQuery').value.trim() : '';
+            const role = document.getElementById('lookupEntitasRoleFilter') ? document.getElementById('lookupEntitasRoleFilter').value.trim() : '';
+            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
+                ? currentCompanyCmpId 
+                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+
+            const tbody = document.getElementById('tbodyLookupEntitas');
+            const countEl = document.getElementById('lookupEntitasCount');
+            tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:15px;">⏳ Mencari data entitas dari history...</td></tr>';
+
+            try {
+                const url = `editor.php?action=search_entitas_history&q=${encodeURIComponent(q)}&kode_entitas=${encodeURIComponent(role)}&cmp_id=${encodeURIComponent(currentCmp)}`;
+                const res = await fetch(url);
+                const json = await res.json();
+                tbody.innerHTML = '';
+
+                if (json.status !== 'OK' || !json.data || json.data.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:15px;">Tidak ada riwayat entitas yang cocok dengan pencarian.</td></tr>';
+                    countEl.innerText = '0 entitas ditemukan';
+                    return;
+                }
+
+                countEl.innerText = `${json.data.length} entitas ditemukan`;
+
+                json.data.forEach((row, i) => {
+                    const tr = document.createElement('tr');
+                    tr.style.cursor = 'pointer';
+                    tr.title = 'Dobel-klik untuk memilih';
+                    tr.innerHTML = `
+                        <td style="text-align:center; font-weight:600; font-size:10px; color:var(--text-muted);">${i + 1}</td>
+                        <td style="font-weight:700; font-size:10.5px; color:var(--primary);">${escapeHtml(row.nama_entitas)}</td>
+                        <td style="font-family:monospace; font-size:10.5px; font-weight:600;">${escapeHtml(row.nomor_identitas || '-')}</td>
+                        <td><span class="badge" style="background:var(--bg-secondary); border:1px solid var(--border); font-size:9.5px; padding:1px 5px; font-weight:600;">${escapeHtml(row.peran_entitas || row.kode_entitas || '-')}</span></td>
+                        <td style="font-size:10px; max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(row.alamat_entitas || '')}">${escapeHtml(row.alamat_entitas || '-')}</td>
+                        <td style="font-size:10px; font-family:monospace;">${escapeHtml(row.nib_entitas || '-')}</td>
+                        <td style="text-align:center; font-weight:700; font-size:10px;">${escapeHtml(row.kode_negara || '-')}</td>
+                        <td style="text-align:center;">
+                            <button type="button" class="btn btn-primary btn-xs" style="font-weight:600; padding:1px 8px; font-size:10px; border-radius:3px;">Pilih</button>
+                        </td>
+                    `;
+
+                    // Klik tombol pilih
+                    const btnPilih = tr.querySelector('button');
+                    btnPilih.onclick = (e) => {
+                        e.stopPropagation();
+                        applySelectedLookupEntitas(row);
+                    };
+
+                    // Dobel klik baris
+                    tr.ondblclick = () => {
+                        applySelectedLookupEntitas(row);
+                    };
+
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#ff4d4f; padding:15px;">Error: ${e.message}</td></tr>`;
+                countEl.innerText = 'Error';
+            }
+        }
+
+        function applySelectedLookupEntitas(item) {
+            if (!activeEntitasTr) {
+                closeModal('modalLookupEntitas');
+                return;
+            }
+
+            const setFieldVal = (col, val) => {
+                // Cari elemen form (input, textarea, select) baik yang memiliki data-col langsung atau berada dalam td[data-col]
+                let el = activeEntitasTr.querySelector(`input[data-col="${col}"], textarea[data-col="${col}"], select[data-col="${col}"]`);
+                if (!el) {
+                    const td = activeEntitasTr.querySelector(`td[data-col="${col}"]`);
+                    if (td) {
+                        el = td.querySelector('input, textarea, select');
+                    }
+                }
+                if (!el) return;
+
+                const cleanVal = (val !== null && val !== undefined) ? String(val).trim() : '';
+
+                if (el.tagName === 'TEXTAREA') {
+                    el.value = cleanVal;
+                    if (typeof autoResizeTextarea === 'function') {
+                        autoResizeTextarea(el);
+                    }
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (el.tagName === 'SELECT') {
+                    if (cleanVal !== '') {
+                        let optFound = Array.from(el.options).some(o => String(o.value).trim() === cleanVal);
+                        if (!optFound) {
+                            const opt = document.createElement('option');
+                            opt.value = cleanVal;
+                            opt.innerText = `${cleanVal} | (Kode ${cleanVal})`;
+                            el.appendChild(opt);
+                        }
+                        el.value = cleanVal;
+                    } else {
+                        el.value = '';
+                    }
+                    if (typeof autoSizeSelect === 'function') {
+                        autoSizeSelect(el);
+                    }
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                } else if (el.tagName === 'INPUT') {
+                    if (el.classList.contains('cell-date-input')) {
+                        const cleanDate = (typeof formatDateYmd === 'function') ? formatDateYmd(cleanVal) : cleanVal;
+                        el.value = cleanDate;
+                        const td = el.closest('td');
+                        if (td) {
+                            const nativeInp = td.querySelector('.cell-date-native');
+                            if (nativeInp) nativeInp.value = cleanDate;
+                        }
+                    } else {
+                        el.value = cleanVal;
+                        if (typeof autoSizeCellInput === 'function') {
+                            autoSizeCellInput(el, '', false);
+                        }
+                    }
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            };
+
+            // Timpa field entitas aktif dengan data hasil history
+            setFieldVal('nama_entitas', item.nama_entitas);
+            setFieldVal('nomor_identitas', item.nomor_identitas);
+            setFieldVal('alamat_entitas', item.alamat_entitas);
+            setFieldVal('nib_entitas', item.nib_entitas);
+            if (item.kode_jenis_identitas) {
+                setFieldVal('kode_jenis_identitas', item.kode_jenis_identitas);
+            }
+            if (item.nomor_ijin_entitas) {
+                setFieldVal('nomor_ijin_entitas', item.nomor_ijin_entitas);
+            }
+            if (item.tanggal_ijin_entitas) {
+                setFieldVal('tanggal_ijin_entitas', item.tanggal_ijin_entitas);
+            }
+            if (item.kode_negara) {
+                setFieldVal('kode_negara', item.kode_negara);
+            }
+
+            // Jika kode_entitas pada baris masih belum ada/kosong, isi dengan kode_entitas dari history
+            const currentKodeEnt = activeEntitasTr.querySelector('select[data-col="kode_entitas"]');
+            if (currentKodeEnt && (!currentKodeEnt.value || currentKodeEnt.value.trim() === '') && item.kode_entitas) {
+                setFieldVal('kode_entitas', item.kode_entitas);
+            }
+
+            // Beri efek highlight visual pada baris yang baru saja diisi
+            try {
+                activeEntitasTr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                const origBg = activeEntitasTr.style.backgroundColor;
+                activeEntitasTr.style.transition = 'background-color 0.4s ease';
+                activeEntitasTr.style.backgroundColor = 'rgba(37, 99, 235, 0.25)';
+                setTimeout(() => {
+                    activeEntitasTr.style.backgroundColor = origBg || '';
+                }, 1200);
+            } catch(e) {}
+
+            closeModal('modalLookupEntitas');
+            showToast(`✓ Entitas '${item.nama_entitas}' berhasil diterapkan!`);
+        }
+
         function copyPreviewText() {
             const txt = document.getElementById('previewContent').innerText;
             navigator.clipboard.writeText(txt).then(() => {
@@ -12097,6 +14486,342 @@ $isEditMode = !empty($selectedAjuParam);
             t.innerText = msg;
             t.style.display = 'flex';
             setTimeout(() => { t.style.display = 'none'; }, 2500);
+        }
+
+        // ============================================================
+        // EXCEL INTEROP: COPY KE EXCEL & PASTE DARI EXCEL (KLIK KANAN)
+        // ============================================================
+        let activeContextMenuTable = null;
+        let activeContextMenuTr = null;
+        let parsedExcelRows = [];
+
+        // Daftar tabel yang mendukung fitur Copy / Paste Excel
+        const EXCEL_SUPPORTED_TABLES = [
+            'barang', 'bahanbaku', 'barangtarif', 'bahanbakutarif',
+            'dokumen', 'barangdokumen', 'bahanbakudokumen', 'kemasan',
+            'pengangkut', 'kontainer', 'komponenbiaya', 'bankdevisa',
+            'jaminan', 'barangvd', 'barangspekkhusus', 'entitas'
+        ];
+
+        function getVisibleGridCols(tableKey) {
+            const conf = gridConfigs[tableKey] || [];
+            return conf.filter(c => {
+                // Sembunyikan kolom jika ada rule visibility = 0
+                if (tableKey === 'barang' && currentVarRules && currentVarRules.barang && currentVarRules.barang[c.key]) {
+                    if (currentVarRules.barang[c.key].visible === 0) return false;
+                }
+                return true;
+            });
+        }
+
+        function cleanExcelNumber(val) {
+            if (val === null || val === undefined) return '';
+            let s = String(val).replace(/[^0-9,.-]/g, '').trim();
+            if (!s) return '';
+
+            const lastDot = s.lastIndexOf('.');
+            const lastComma = s.lastIndexOf(',');
+
+            if (lastDot > -1 && lastComma > -1) {
+                if (lastComma > lastDot) {
+                    // Format Indo/Eropa: 1.250,50 -> ribuan titik, desimal koma
+                    s = s.replace(/\./g, '').replace(',', '.');
+                } else {
+                    // Format US: 1,250.50 -> ribuan koma, desimal titik
+                    s = s.replace(/,/g, '');
+                }
+            } else if (lastComma > -1) {
+                // Misal "1250,50" -> desimal koma
+                s = s.replace(',', '.');
+            }
+            return s;
+        }
+
+        function execExcelContextMenu(action) {
+            const menu = document.getElementById('editorContextMenu');
+            if (menu) menu.style.display = 'none';
+
+            const tblKey = activeContextMenuTable || activeContextTable;
+            if (!tblKey) return;
+
+            if (action === 'copy_all') {
+                copyTableToClipboard(tblKey, false);
+            } else if (action === 'copy_selected') {
+                copyTableToClipboard(tblKey, true);
+            } else if (action === 'paste') {
+                openModalPasteExcel(tblKey);
+            } else if (action === 'copy_template') {
+                copyTableHeadersForExcel(tblKey);
+            }
+        }
+
+        function getRowDataFromDom(tr, cols) {
+            const obj = {};
+            cols.forEach(c => {
+                let v = '';
+                const td = tr.querySelector(`td[data-col="${c.key}"]`);
+                if (td) {
+                    const inp = td.querySelector('input, select, textarea');
+                    if (inp) {
+                        v = inp.value !== undefined ? inp.value.trim() : '';
+                        if (inp.classList.contains('cell-number') || inp.type === 'number') {
+                            v = stripNumberCommas(v);
+                        }
+                    } else {
+                        v = td.innerText ? td.innerText.trim() : '';
+                    }
+                }
+                obj[c.key] = v;
+            });
+            return obj;
+        }
+
+        function copyTableToClipboard(tableKey, onlySelected = false) {
+            const cols = getVisibleGridCols(tableKey);
+            if (cols.length === 0) return;
+
+            const headerRow = cols.map(c => c.label || c.key).join('\t');
+            const dataLines = [];
+
+            const tbody = document.querySelector(`#table-${tableKey} tbody`);
+            let trs = [];
+
+            if (onlySelected && activeContextMenuTr) {
+                trs = [activeContextMenuTr];
+            } else if (tbody) {
+                trs = Array.from(tbody.querySelectorAll('tr:not(.tr-empty)'));
+            }
+
+            if (trs.length === 0) {
+                showWarning(`Tabel ${getTabTitle(tableKey)} masih kosong. Tidak ada data yang bisa disalin.`);
+                return;
+            }
+
+            trs.forEach(tr => {
+                const rowObj = getRowDataFromDom(tr, cols);
+                const lineVals = cols.map(c => {
+                    let val = rowObj[c.key] !== undefined ? String(rowObj[c.key]) : '';
+                    // Bersihkan newline atau tab agar tidak merusak format Excel TSV
+                    val = val.replace(/[\r\n\t]+/g, ' ').trim();
+                    return val;
+                });
+                dataLines.push(lineVals.join('\t'));
+            });
+
+            const fullTsv = headerRow + '\r\n' + dataLines.join('\r\n');
+
+            navigator.clipboard.writeText(fullTsv).then(() => {
+                showToast(`✓ Berhasil menyalin ${dataLines.length} baris ${getTabTitle(tableKey)} ke clipboard (siap paste di Excel)!`);
+            }).catch(err => {
+                // Fallback jika API navigator.clipboard ditolak
+                const ta = document.createElement('textarea');
+                ta.value = fullTsv;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+                showToast(`✓ Berhasil menyalin ${dataLines.length} baris ${getTabTitle(tableKey)} ke clipboard!`);
+            });
+        }
+
+        function copyTableHeadersForExcel(customTblKey) {
+            const tblKey = customTblKey || activeContextMenuTable || activeTab;
+            const cols = getVisibleGridCols(tblKey);
+            if (cols.length === 0) return;
+
+            const headerLabels = cols.map(c => c.label || c.key).join('\t');
+            navigator.clipboard.writeText(headerLabels).then(() => {
+                showToast(`✓ Header template kolom ${getTabTitle(tblKey)} berhasil disalin (siap paste di baris 1 Excel)!`);
+            });
+        }
+
+        function openModalPasteExcel(tableKey) {
+            activeContextMenuTable = tableKey;
+            parsedExcelRows = [];
+
+            const titleEl = document.getElementById('pasteExcelModalTitle');
+            if (titleEl) {
+                titleEl.innerText = `Paste Data Excel -> ${getTabTitle(tableKey)} (${tableKey})`;
+            }
+
+            const ta = document.getElementById('pasteExcelTextarea');
+            if (ta) {
+                ta.value = '';
+            }
+
+            const stats = document.getElementById('pasteExcelStats');
+            if (stats) {
+                stats.innerText = '0 baris terdeteksi';
+            }
+
+            // Siapkan header preview
+            const theadTr = document.getElementById('theadPasteExcelPreview');
+            const cols = getVisibleGridCols(tableKey);
+            if (theadTr) {
+                theadTr.innerHTML = '<th style="width:36px; text-align:center;">#</th>' + 
+                    cols.map(c => `<th style="padding:4px 6px; font-size:9.5px; white-space:nowrap;">${escapeHtml(c.label || c.key)}</th>`).join('');
+            }
+
+            const tbody = document.getElementById('tbodyPasteExcelPreview');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" style="text-align:center; color:var(--text-muted); padding:20px;">Silakan tempel (Ctrl+V) data baris dari Excel pada kotak di atas.</td></tr>';
+            }
+
+            document.getElementById('modalPasteExcel').style.display = 'flex';
+            if (ta) setTimeout(() => { ta.focus(); }, 100);
+        }
+
+        function parseExcelPreview() {
+            const tableKey = activeContextMenuTable;
+            if (!tableKey) return;
+
+            const ta = document.getElementById('pasteExcelTextarea');
+            const rawText = ta ? ta.value : '';
+            const cols = getVisibleGridCols(tableKey);
+            const stats = document.getElementById('pasteExcelStats');
+            const tbody = document.getElementById('tbodyPasteExcelPreview');
+
+            parsedExcelRows = [];
+
+            if (!rawText.trim()) {
+                if (stats) stats.innerText = '0 baris terdeteksi';
+                if (tbody) tbody.innerHTML = '<tr><td colspan="' + (cols.length + 1) + '" style="text-align:center; color:var(--text-muted); padding:20px;">Belum ada data yang ditempel.</td></tr>';
+                return;
+            }
+
+            const lines = rawText.split(/\r?\n/).filter(l => l.trim() !== '');
+            if (lines.length === 0) return;
+
+            // Cek apakah baris pertama adalah Header teks Excel
+            let startIndex = 0;
+            const firstRowCells = lines[0].split('\t').map(c => c.trim().toLowerCase());
+            const colKeysLower = cols.map(c => (c.key || '').toLowerCase());
+            const colLabelsLower = cols.map(c => (c.label || '').toLowerCase());
+
+            let headerMatches = 0;
+            firstRowCells.forEach(cell => {
+                if (colKeysLower.includes(cell) || colLabelsLower.includes(cell) || cell.includes('seri') || cell.includes('uraian') || cell.includes('kode')) {
+                    headerMatches++;
+                }
+            });
+
+            if (headerMatches >= 2 || (firstRowCells.length > 0 && isNaN(firstRowCells[0]) && colKeysLower.includes(firstRowCells[0]))) {
+                startIndex = 1; // Lewati baris pertama karena merupakan header
+            }
+
+            for (let i = startIndex; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.trim()) continue;
+                const cells = line.split('\t');
+                const rowObj = {};
+
+                cols.forEach((col, cIdx) => {
+                    let cellVal = cells[cIdx] !== undefined ? cells[cIdx].trim() : '';
+                    
+                    // Pembersihan angka jika tipe number
+                    if (col.type === 'number') {
+                        cellVal = cleanExcelNumber(cellVal);
+                    } else if (col.type === 'date') {
+                        cellVal = formatDateYmd(cellVal);
+                    }
+                    rowObj[col.key] = cellVal;
+                });
+
+                parsedExcelRows.push(rowObj);
+            }
+
+            if (stats) {
+                stats.innerText = `${parsedExcelRows.length} baris terdeteksi (siap diimpor)`;
+            }
+
+            // Render preview maksimal 10 baris pertama
+            if (tbody) {
+                tbody.innerHTML = '';
+                const previewSlice = parsedExcelRows.slice(0, 15);
+                previewSlice.forEach((r, idx) => {
+                    const tr = document.createElement('tr');
+                    let tds = `<td style="text-align:center; font-weight:700; color:var(--text-muted);">${idx + 1}</td>`;
+                    cols.forEach(c => {
+                        const val = r[c.key] !== undefined ? r[c.key] : '';
+                        tds += `<td style="padding:3px 6px; font-size:10px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escapeHtml(val)}</td>`;
+                    });
+                    tr.innerHTML = tds;
+                    tbody.appendChild(tr);
+                });
+
+                if (parsedExcelRows.length > 15) {
+                    const trMore = document.createElement('tr');
+                    trMore.innerHTML = `<td colspan="${cols.length + 1}" style="text-align:center; font-style:italic; color:var(--text-muted); padding:4px;">... dan ${parsedExcelRows.length - 15} baris lainnya</td>`;
+                    tbody.appendChild(trMore);
+                }
+            }
+        }
+
+        function applyParsedExcelData() {
+            const tableKey = activeContextMenuTable;
+            if (!tableKey || parsedExcelRows.length === 0) {
+                showWarning('Belum ada data valid yang dapat dimasukkan dari Excel.');
+                return;
+            }
+
+            const modeEl = document.querySelector('input[name="pasteExcelMode"]:checked');
+            const mode = modeEl ? modeEl.value : 'append'; // 'append' atau 'replace'
+            const tbody = document.querySelector(`#table-${tableKey} tbody`);
+            if (!tbody) return;
+
+            const cols = gridConfigs[tableKey] || [];
+            let currentCount = 0;
+
+            if (mode === 'replace') {
+                tbody.innerHTML = '';
+                if (currentData) {
+                    currentData[tableKey] = [];
+                }
+            } else {
+                const emptyTr = tbody.querySelector('.tr-empty');
+                if (emptyTr) emptyTr.remove();
+                currentCount = tbody.querySelectorAll('tr:not(.tr-empty)').length;
+            }
+
+            const frag = document.createDocumentFragment();
+
+            parsedExcelRows.forEach((rowObj, idx) => {
+                const finalRow = Object.assign({}, rowObj);
+
+                // Auto numbering seri jika kosong atau mode append
+                const targetSeri = currentCount + idx + 1;
+                if (!finalRow.seri && cols.some(c => c.key === 'seri')) {
+                    finalRow.seri = targetSeri;
+                }
+                if (!finalRow.seri_barang && cols.some(c => c.key === 'seri_barang')) {
+                    finalRow.seri_barang = targetSeri;
+                }
+                if (!finalRow.seri_bahan_baku && cols.some(c => c.key === 'seri_bahan_baku')) {
+                    finalRow.seri_bahan_baku = targetSeri;
+                }
+
+                // Tambahkan ke currentData
+                if (currentData && Array.isArray(currentData[tableKey])) {
+                    currentData[tableKey].push(finalRow);
+                }
+
+                const tr = createGridRow(tableKey, finalRow, currentCount + idx);
+                frag.appendChild(tr);
+            });
+
+            tbody.appendChild(frag);
+
+            // Update badge dan total footer
+            const totalCount = tbody.querySelectorAll('tr:not(.tr-empty)').length;
+            const badge = document.getElementById('count-' + tableKey);
+            if (badge) badge.innerText = totalCount;
+
+            updateTableTotals(tableKey);
+
+            closeModal('modalPasteExcel');
+            showSuccess(`Berhasil memasukkan ${parsedExcelRows.length} baris ke tabel ${getTabTitle(tableKey)}! Total baris sekarang: ${totalCount}.`);
         }
 
         function escapeHtml(text) {
@@ -12149,7 +14874,7 @@ $isEditMode = !empty($selectedAjuParam);
                     <div style="text-align:left; font-size:12px; margin-top:8px; line-height:1.7;">
                     1. <b>Barang Tarif</b> untuk seluruh seri barang (BM, PPH, PPN).<br>
                     2. <b>Bahan Baku Tarif</b> (BM, PPN, PPH) untuk seluruh bahan baku impor/lokal.<br>
-                    3. <b>Pungutan Dokumen</b> (bc_ceisa_pungutan) dengan pembulatan ribuan CEISA.<br>
+                    3. <b>Pungutan Dokumen</b> (bc_ceisa_pungutan) sesuai akumulasi tarif CEISA 4.0.<br>
                     4. <b>Sinkronisasi CIF & Total Header</b> (mencegah error Header CIF tidak sama dengan Barang).
                     </div><br>
                     Lanjutkan kalkulasi otomatis?`,
@@ -13565,7 +16290,8 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         // =============================================================
-        // CONTEXT MENU (KLIK KANAN) CONTROLLER
+        // =============================================================
+        // CONTEXT MENU (KLIK KANAN) CONTROLLER (EXCEL & ROW ACTIONS)
         // =============================================================
 
         let activeContextRow = null;
@@ -13576,46 +16302,100 @@ $isEditMode = !empty($selectedAjuParam);
             if (!ctx) return;
 
             document.addEventListener('contextmenu', function(e) {
-                const tr = e.target.closest('tr');
-                if (!tr) {
-                    ctx.style.display = 'none';
-                    return;
-                }
-                const table = tr.closest('table');
-                if (!table) {
-                    ctx.style.display = 'none';
+                // Jangan intervensi jika klik kanan di dalam modal
+                if (e.target && (e.target.closest('#modalPasteExcel') || e.target.closest('.modal-overlay') || e.target.closest('button'))) {
                     return;
                 }
 
-                if (table.id === 'table-barang') {
-                    e.preventDefault();
-                    activeContextRow = tr;
-                    activeContextTable = 'barang';
-                    document.getElementById('ctxBarangOptions').style.display = 'block';
-                    document.getElementById('ctxBahanBakuOptions').style.display = 'none';
-                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BARANG';
+                // Cari apakah target berada di dalam table bertaraf datagrid atau panel tabel
+                const table = e.target.closest('table');
+                let tblKey = '';
 
-                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
-                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
-                    ctx.style.display = 'block';
-                } else if (table.id === 'table-bahanbaku') {
-                    e.preventDefault();
-                    activeContextRow = tr;
-                    activeContextTable = 'bahanbaku';
-                    document.getElementById('ctxBarangOptions').style.display = 'none';
-                    document.getElementById('ctxBahanBakuOptions').style.display = 'block';
-                    document.getElementById('ctxHeaderTitle').innerText = 'AKSI BARIS BAHAN BAKU';
-
-                    ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 230)}px`;
-                    ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 250)}px`;
-                    ctx.style.display = 'block';
+                if (table && table.id && table.id.startsWith('table-')) {
+                    tblKey = table.id.replace('table-', '');
                 } else {
-                    ctx.style.display = 'none';
+                    const panel = e.target.closest('.panel');
+                    if (panel && panel.id && panel.id.startsWith('panel-')) {
+                        const candidate = panel.id.replace('panel-', '');
+                        if (EXCEL_SUPPORTED_TABLES.includes(candidate)) {
+                            tblKey = candidate;
+                        }
+                    }
                 }
+
+                if (!tblKey || !EXCEL_SUPPORTED_TABLES.includes(tblKey)) {
+                    ctx.style.display = 'none';
+                    return;
+                }
+
+                e.preventDefault();
+                e.stopPropagation();
+
+                activeContextTable = tblKey;
+                activeContextMenuTable = tblKey;
+
+                // Cek apakah klik spesifik pada sebuah baris data tr di tbody
+                const tr = e.target.closest('tr');
+                const isRealRow = tr && tr.closest('tbody') && !tr.classList.contains('tr-empty');
+                activeContextRow = isRealRow ? tr : null;
+                activeContextMenuTr = activeContextRow;
+
+                // Judul Context Menu
+                const titleTextEl = document.getElementById('ctxTitleText');
+                if (titleTextEl) {
+                    const rowInfo = activeContextRow ? ` (Baris ${activeContextRow.rowIndex || ''})` : '';
+                    titleTextEl.innerText = `${getTabTitle(tblKey)}${rowInfo}`;
+                }
+
+                // Opsi Salin Baris Ini
+                const optSelected = document.getElementById('excelMenuCopySelected');
+                if (optSelected) {
+                    optSelected.style.display = activeContextRow ? 'flex' : 'none';
+                }
+
+                // Opsi Hapus Baris
+                const optDelete = document.getElementById('ctxRowDeleteOption');
+                if (optDelete) {
+                    optDelete.style.display = activeContextRow ? 'block' : 'none';
+                }
+
+                // Opsi Khusus Barang
+                const optBarang = document.getElementById('ctxBarangOptions');
+                if (optBarang) {
+                    optBarang.style.display = (tblKey === 'barang') ? 'block' : 'none';
+                }
+
+                // Opsi Khusus Bahan Baku
+                const optBahanBaku = document.getElementById('ctxBahanBakuOptions');
+                if (optBahanBaku) {
+                    optBahanBaku.style.display = (tblKey === 'bahanbaku') ? 'block' : 'none';
+                }
+
+                // Tampilkan & hitung posisi layar agar tidak terpotong
+                ctx.style.display = 'block';
+                const menuW = ctx.offsetWidth || 220;
+                const menuH = ctx.offsetHeight || 260;
+                const winW = window.innerWidth;
+                const winH = window.innerHeight;
+
+                let left = e.clientX;
+                let top = e.clientY;
+
+                if (left + menuW > winW) left = winW - menuW - 10;
+                if (top + menuH > winH) top = winH - menuH - 10;
+
+                ctx.style.left = Math.max(10, left) + 'px';
+                ctx.style.top = Math.max(10, top) + 'px';
             });
 
             document.addEventListener('click', function(e) {
                 if (!e.target.closest('#editorContextMenu')) {
+                    ctx.style.display = 'none';
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && ctx.style.display === 'block') {
                     ctx.style.display = 'none';
                 }
             });
@@ -13644,7 +16424,14 @@ $isEditMode = !empty($selectedAjuParam);
             } else if (act === 'delete_row') {
                 if (activeContextRow) {
                     activeContextRow.remove();
-                    if (activeContextTable) updateTableTotals(activeContextTable);
+                    const curTbl = activeContextTable || activeContextMenuTable;
+                    if (curTbl) {
+                        updateTableTotals(curTbl);
+                        const curTbody = document.querySelector(`#table-${curTbl} tbody`);
+                        const totalCount = curTbody ? curTbody.querySelectorAll('tr:not(.tr-empty)').length : 0;
+                        const badge = document.getElementById('count-' + curTbl);
+                        if (badge) badge.innerText = totalCount;
+                    }
                     showToast('Baris dihapus. Klik Simpan untuk memperbarui database.');
                 }
             }

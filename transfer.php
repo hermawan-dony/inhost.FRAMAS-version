@@ -41,19 +41,15 @@ $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
         global $isAdmin, $sessionCmpId, $companyAllowedDocs, $effectiveAllowedDocs;
-        if ($d === '27IN') {
-            return isDocPermitted('27');
-        }
         // Jika Super Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
         if (!empty($isAdmin) && empty($sessionCmpId)) {
             return true;
         }
-        // Jika Super Admin memilih perusahaan tertentu, batasi sesuai dokumen perusahaan
-        if (!empty($isAdmin)) {
-            return in_array((string)$d, (array)$companyAllowedDocs);
+        $targetAllowed = !empty($isAdmin) ? (array)$companyAllowedDocs : (array)$effectiveAllowedDocs;
+        if ($d === '27IN') {
+            return in_array('27', $targetAllowed) || in_array('27IN', $targetAllowed);
         }
-        // Pengguna standar (operator/admin perusahaan): batasi ketat sesuai izin efektif
-        return in_array((string)$d, (array)$effectiveAllowedDocs);
+        return in_array((string)$d, $targetAllowed);
     }
 }
 
@@ -61,6 +57,107 @@ if (!function_exists('isDocPermitted')) {
 // AJAX API ENDPOINTS
 // -------------------------------------------------------------
 $action = $_REQUEST['action'] ?? '';
+
+// DOWNLOAD EXCEL RESMI CEISA 4.0 (21 SHEET PERSIS PORTAL CEISA)
+if ($action === 'download_excel' || $action === 'export_excel') {
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        die('Nomor AJU wajib disertakan.');
+    }
+    require_once __DIR__ . '/CeisaXlsxExporter.php';
+    $exporter = new CeisaXlsxExporter($koneksi);
+    $exporter->streamDownload($nomorAju);
+    exit;
+}
+
+// 1. REKAP JUMLAH DOKUMEN PER PERIODE (POPUP REKAP DOKUMEN)
+if ($action === 'rekap_dokumen') {
+    header('Content-Type: application/json; charset=utf-8');
+    $filter_cmp   = trim($_GET['cmp_id'] ?? '');
+    $filter_per   = trim($_GET['periode'] ?? '');
+    $filter_tgl1  = trim($_GET['tgl_awal'] ?? '');
+    $filter_tgl2  = trim($_GET['tgl_akhir'] ?? '');
+
+    if ((!$isAdmin || empty($filter_cmp)) && !empty($sessionCmpId)) {
+        $filter_cmp = $sessionCmpId;
+    }
+
+    $whereKiri = [];
+    if (!empty($filter_cmp)) {
+        $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
+    }
+    $whereKiri[] = "(a.user_id != 'CEISA_PORTAL' OR a.user_id IS NULL OR a.user_id = '')";
+
+    // Penegakan Izin Jenis Dokumen Bea Cukai Pengguna
+    if (!$isAdmin) {
+        if (!empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
+            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $effectiveAllowedDocs);
+            $whereKiri[] = "a.kode_dokumen IN (" . implode(',', $escapedDocs) . ")";
+        } elseif (empty($effectiveAllowedDocs)) {
+            $whereKiri[] = "1=0";
+        }
+    }
+
+    // Filter tanggal / periode
+    if (!empty($filter_tgl1) && !empty($filter_tgl2)) {
+        $t1 = $koneksi->real_escape_string($filter_tgl1);
+        $t2 = $koneksi->real_escape_string($filter_tgl2);
+        $whereKiri[] = "((a.tanggal_pernyataan >= '$t1' AND a.tanggal_pernyataan <= '$t2') OR (a.tanggal_daftar >= '$t1' AND a.tanggal_daftar <= '$t2'))";
+    } elseif (!empty($filter_per)) {
+        $per = $koneksi->real_escape_string($filter_per);
+        $whereKiri[] = "(a.tanggal_pernyataan LIKE '$per%' OR a.tanggal_daftar LIKE '$per%')";
+    }
+
+    $whereKiriSql = !empty($whereKiri) ? 'WHERE ' . implode(' AND ', $whereKiri) : '';
+
+    $sql = "SELECT 
+                a.kode_dokumen AS bc, 
+                COUNT(1) AS jml 
+            FROM bc_ceisa_header a
+            $whereKiriSql
+            GROUP BY a.kode_dokumen
+            ORDER BY 
+                CASE 
+                    -- GRUP PEMASUKAN (INBOUND)
+                    WHEN a.kode_dokumen = '16' THEN 10
+                    WHEN a.kode_dokumen = '20' THEN 20
+                    WHEN a.kode_dokumen = '23' THEN 30
+                    WHEN a.kode_dokumen = '262' THEN 40
+                    WHEN a.kode_dokumen = '27IN' THEN 50
+                    WHEN a.kode_dokumen = '28' THEN 60
+                    WHEN a.kode_dokumen = '40' THEN 70
+                    WHEN a.kode_dokumen = '611' THEN 80
+                    WHEN a.kode_dokumen = '613' THEN 90
+
+                    -- GRUP PENGELUARAN (OUTBOUND)
+                    WHEN a.kode_dokumen = '25' THEN 110
+                    WHEN a.kode_dokumen = '261' THEN 120
+                    WHEN a.kode_dokumen = '27' THEN 130
+                    WHEN a.kode_dokumen = '30' THEN 140
+                    WHEN a.kode_dokumen = '33' THEN 150
+                    WHEN a.kode_dokumen = '331' THEN 160
+                    WHEN a.kode_dokumen = '41' THEN 170
+                    WHEN a.kode_dokumen = '631' THEN 180
+                    ELSE 900
+                END,
+                a.kode_dokumen ASC";
+
+    $res = $koneksi->query($sql);
+    $rekap = [];
+    $total = 0;
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $jml = (int)$r['jml'];
+            $total += $jml;
+            $rekap[] = [
+                'bc' => (string)$r['bc'],
+                'jml' => $jml
+            ];
+        }
+    }
+    echo json_encode(['status' => 'OK', 'data' => $rekap, 'total' => $total]);
+    exit;
+}
 
 // 1. LIST DOKUMEN HEADER (MASTER DATAWINDOW)
 if ($action === 'list') {
@@ -84,10 +181,8 @@ if ($action === 'list') {
         $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
     }
     if (!empty($filter_bc)) {
-        if ($filter_bc === '27') {
-            $whereKiri[] = "(a.kode_dokumen = '27' OR a.kode_dokumen = '27OUT')";
-        } elseif ($filter_bc === '27IN') {
-            $whereKiri[] = "a.kode_dokumen = '27IN'";
+        if ($filter_bc === '27IN') {
+            $whereKiri[] = "(a.kode_dokumen = '27IN' OR (a.kode_dokumen = '27' AND a.kode_jenis_prosedur = '1'))";
         } else {
             $whereKiri[] = "a.kode_dokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
         }
@@ -98,11 +193,7 @@ if ($action === 'list') {
     // Penegakan Izin Jenis Dokumen Bea Cukai Pengguna
     if (!$isAdmin) {
         if (!empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
-            $allowedForSql = (array)$effectiveAllowedDocs;
-            if (in_array('27', $allowedForSql) && !in_array('27IN', $allowedForSql)) {
-                $allowedForSql[] = '27IN';
-            }
-            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $allowedForSql);
+            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $effectiveAllowedDocs);
             $whereKiri[] = "a.kode_dokumen IN (" . implode(',', $escapedDocs) . ")";
         } elseif (empty($effectiveAllowedDocs)) {
             $whereKiri[] = "1=0";
@@ -120,87 +211,47 @@ if ($action === 'list') {
     }
 
     if ($filter_stat === 'posted') {
-        $whereOuter[] = "kiri.posted > 0";
+        $whereOuter[] = "posted.jml > 0";
     } elseif ($filter_stat === 'unposted') {
-        $whereOuter[] = "(kiri.posted IS NULL OR kiri.posted = 0)";
+        $whereOuter[] = "(posted.jml IS NULL OR posted.jml = 0)";
     } elseif ($filter_stat === 'it_inv') {
-        $whereOuter[] = "kiri.cekit > 0";
+        $whereOuter[] = "cekit.jml > 0";
     } elseif ($filter_stat === 'not_it_inv') {
-        $whereOuter[] = "(kiri.cekit IS NULL OR kiri.cekit = 0) AND (kiri.nomor_daftar IS NOT NULL AND kiri.nomor_daftar != '' AND kiri.nomor_daftar != '-')";
+        $whereOuter[] = "(cekit.jml IS NULL OR cekit.jml = 0) AND (kiri.nomor_daftar IS NOT NULL AND kiri.nomor_daftar != '' AND kiri.nomor_daftar != '-')";
     }
 
     if (!empty($search)) {
         $s = $koneksi->real_escape_string($search);
-        $whereOuter[] = "(kiri.nomor_aju LIKE '%$s%' OR kiri.bs LIKE '%$s%' OR kiri.id_bs LIKE '%$s%' OR kiri.nomor_daftar LIKE '%$s%' OR kiri.invoice LIKE '%$s%')";
+        $whereOuter[] = "(kiri.nomor_aju LIKE '%$s%' OR kiri.bs LIKE '%$s%' OR kiri.id_bs LIKE '%$s%' OR kiri.nomor_daftar LIKE '%$s%' OR doc_inv.nomor_dokumen LIKE '%$s%')";
     }
 
     $whereKiriSql = !empty($whereKiri) ? 'WHERE ' . implode(' AND ', $whereKiri) : '';
     $whereOuterSql = !empty($whereOuter) ? 'WHERE ' . implode(' AND ', $whereOuter) : '';
 
-    // Hitung Rekap Dokumen per Jenis BC untuk periode / tanggal / cmp aktif (tanpa filter_bc)
-    $rekapBc = [];
-    $totRekap = 0;
-    $whereRekap = [];
-    if (!empty($filter_cmp)) {
-        $whereRekap[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
-    }
-    $whereRekap[] = "(a.user_id != 'CEISA_PORTAL' OR a.user_id IS NULL OR a.user_id = '')";
-    if (!empty($filter_tgl1) && !empty($filter_tgl2)) {
-        $t1 = $koneksi->real_escape_string($filter_tgl1);
-        $t2 = $koneksi->real_escape_string($filter_tgl2);
-        $whereRekap[] = "((a.tanggal_pernyataan >= '$t1' AND a.tanggal_pernyataan <= '$t2') OR (a.tanggal_daftar >= '$t1' AND a.tanggal_daftar <= '$t2'))";
-    } elseif (!empty($filter_per)) {
-        $per = $koneksi->real_escape_string($filter_per);
-        $whereRekap[] = "(a.tanggal_pernyataan LIKE '$per%' OR a.tanggal_daftar LIKE '$per%')";
-    }
-    if (!$isAdmin) {
-        if (!empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
-            $allowedForSql = (array)$effectiveAllowedDocs;
-            if (in_array('27', $allowedForSql) && !in_array('27IN', $allowedForSql)) {
-                $allowedForSql[] = '27IN';
-            }
-            $escapedDocs = array_map(function($d) use ($koneksi) { return "'" . $koneksi->real_escape_string($d) . "'"; }, $allowedForSql);
-            $whereRekap[] = "a.kode_dokumen IN (" . implode(',', $escapedDocs) . ")";
-        } elseif (empty($effectiveAllowedDocs)) {
-            $whereRekap[] = "1=0";
-        }
-    }
-    $whereRekapSql = !empty($whereRekap) ? 'WHERE ' . implode(' AND ', $whereRekap) : '';
-    $sqlRekap = "SELECT a.kode_dokumen AS bc, COUNT(1) AS jml 
-                 FROM bc_ceisa_header a 
-                 $whereRekapSql 
-                 GROUP BY a.kode_dokumen 
-                 ORDER BY a.kode_dokumen ASC";
-    $resRekap = $koneksi->query($sqlRekap);
-    if ($resRekap) {
-        while ($rk = $resRekap->fetch_assoc()) {
-            $rekapBc[] = [
-                'bc'  => $rk['bc'],
-                'jml' => (int)$rk['jml']
-            ];
-            $totRekap += (int)$rk['jml'];
-        }
-    }
-    // Urutkan rekap: Pemasukan lebih dulu, kemudian Pengeluaran, masing-masing urut kode dokumen numerik
-    $docSortWeight = [
-        '16' => 10, '20' => 20, '23' => 30, '262' => 40, '27IN' => 50, '28' => 60, '40' => 70, '611' => 80, '613' => 90,
-        '25' => 110, '261' => 120, '27' => 130, '27OUT' => 131, '30' => 140, '33' => 150, '331' => 160, '41' => 170, '631' => 180
-    ];
-    usort($rekapBc, function($a, $b) use ($docSortWeight) {
-        $wA = $docSortWeight[$a['bc']] ?? 999;
-        $wB = $docSortWeight[$b['bc']] ?? 999;
-        if ($wA === $wB) return strcmp((string)$a['bc'], (string)$b['bc']);
-        return $wA - $wB;
-    });
-
-    $sql = "SELECT * FROM (
+    $sql = "SELECT
+        kiri.*,
+        IFNULL(jml_barang.jml, 0) AS jml_barang,
+        IFNULL(posted.jml, 0) AS posted,
+        IFNULL(posted.waktu, '') AS posted_waktu,
+        IFNULL(posted.sppb, '') AS sppb,
+        IFNULL(cekit.jml, 0) AS cekit,
+        IFNULL(doc_inv.nomor_dokumen, '-') AS invoice,
+        IFNULL(bcd.namaProses, '') AS namaProses,
+        IFNULL(bcd.namaRespon, '') AS bcd_namaRespon,
+        IFNULL(bcd.nomorRespon, '') AS bcd_nomorRespon,
+        IFNULL(bcd.tanggalRespon, '') AS bcd_tanggalRespon,
+        IFNULL(bcd.kodeJalur, '') AS bcd_kodeJalur,
+        IFNULL(bcd.namaKantorPendek, '') AS bcd_namaKantorPendek,
+        IFNULL(bcd.namaPerusahaan, '') AS bcd_namaPerusahaan,
+        IFNULL(bcd.idPerusahaan, '') AS bcd_idPerusahaan
+    FROM (
         SELECT
             a.kode_dokumen AS bc,
             a.nomor_aju,
             a.nomor_daftar,
             a.tanggal_daftar,
-            COALESCE(c.nama_entitas, (SELECT MIN(e.nama_entitas) FROM bc_ceisa_entitas e WHERE e.nomor_aju = a.nomor_aju AND e.kode_entitas IN ('5', '6', '8', '9', '7', '3')), '-') AS bs,
-            COALESCE(c.nomor_identitas, (SELECT MIN(e.nomor_identitas) FROM bc_ceisa_entitas e WHERE e.nomor_aju = a.nomor_aju AND e.kode_entitas IN ('5', '6', '8', '9', '7', '3')), '') AS id_bs,
+            IFNULL(c.nama_entitas, IFNULL(c_fb.nama_entitas, '-')) AS bs,
+            IFNULL(c.nomor_identitas, IFNULL(c_fb.nomor_identitas, '')) AS id_bs,
             IFNULL(a.kode_valuta, 'USD') AS kode_valuta,
             IFNULL(a.bruto, 0) AS bruto,
             IFNULL(a.user_id, 'USER') AS user_id,
@@ -210,28 +261,45 @@ if ($action === 'list') {
             IFNULL(a.kode_kantor, '') AS kode_kantor,
             IFNULL(cmp.cmp_name, '') AS cmp_name,
             IFNULL(cmp.npwp, '') AS cmp_npwp,
-            IFNULL(cmp.IS_INV, 1) AS is_inv,
-            (SELECT COUNT(1) FROM bc_ceisa_barang b WHERE b.nomor_aju = a.nomor_aju) AS jml_barang,
-            (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted,
-            IFNULL((SELECT MAX(p.waktu) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju), '') AS posted_waktu,
-            IFNULL((SELECT MAX(p.sppb) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju), '') AS sppb,
-            CASE WHEN EXISTS (SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomor_aju) THEN 1 ELSE 0 END AS cekit,
-            IFNULL((SELECT doc.nomor_dokumen FROM bc_ceisa_dokumen doc WHERE doc.nomor_aju = a.nomor_aju AND doc.kode_dokumen = '380' LIMIT 1), '-') AS invoice,
-            IFNULL(bcd.namaProses, '') AS namaProses,
-            IFNULL(bcd.namaRespon, '') AS bcd_namaRespon,
-            IFNULL(bcd.nomorRespon, '') AS bcd_nomorRespon,
-            IFNULL(bcd.tanggalRespon, '') AS bcd_tanggalRespon,
-            IFNULL(bcd.kodeJalur, '') AS bcd_kodeJalur,
-            IFNULL(bcd.namaKantorPendek, '') AS bcd_namaKantorPendek,
-            IFNULL(bcd.namaPerusahaan, '') AS bcd_namaPerusahaan,
-            IFNULL(bcd.idPerusahaan, '') AS bcd_idPerusahaan
+            IFNULL(cmp.IS_INV, 1) AS is_inv
         FROM bc_ceisa_header a
         LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
-        LEFT JOIN bc_ceisa_bs_entitas b ON a.kode_dokumen = b.kode_dokumen AND a.cmp_id = b.cmp_id
-        LEFT JOIN bc_ceisa_entitas c    ON b.kode_entitas = c.kode_entitas AND a.nomor_aju = c.nomor_aju
-        LEFT JOIN bc_ceisa_data bcd     ON a.nomor_aju = bcd.nomorAju
+        LEFT JOIN bc_ceisa_bs_entitas b ON a.kode_dokumen = b.kode_dokumen AND (b.cmp_id = a.cmp_id OR b.cmp_id = '' OR b.cmp_id IS NULL)
+        LEFT JOIN (
+            SELECT cmp_id, nomor_aju, kode_entitas, MIN(nama_entitas) AS nama_entitas, MIN(nomor_identitas) AS nomor_identitas
+            FROM bc_ceisa_entitas
+            GROUP BY cmp_id, nomor_aju, kode_entitas
+        ) c ON a.cmp_id = c.cmp_id AND a.nomor_aju = c.nomor_aju AND b.kode_entitas = c.kode_entitas
+        LEFT JOIN (
+            SELECT cmp_id, nomor_aju, MIN(nama_entitas) AS nama_entitas, MIN(nomor_identitas) AS nomor_identitas
+            FROM bc_ceisa_entitas
+            WHERE kode_entitas IN ('5', '6', '8', '9', '7', '3')
+            GROUP BY cmp_id, nomor_aju
+        ) c_fb ON a.cmp_id = c_fb.cmp_id AND a.nomor_aju = c_fb.nomor_aju
         $whereKiriSql
     ) AS kiri
+    LEFT JOIN (
+        SELECT cmp_id, nomor_aju, COUNT(1) AS jml
+        FROM bc_ceisa_barang
+        GROUP BY cmp_id, nomor_aju
+    ) jml_barang ON kiri.cmp_id = jml_barang.cmp_id AND kiri.nomor_aju = jml_barang.nomor_aju
+    LEFT JOIN (
+        SELECT cmp_id, nomor_aju, COUNT(1) AS jml, MAX(waktu) AS waktu, MAX(sppb) AS sppb
+        FROM bc_ceisa_aju_posted
+        GROUP BY cmp_id, nomor_aju
+    ) posted ON kiri.cmp_id = posted.cmp_id AND kiri.nomor_aju = posted.nomor_aju
+    LEFT JOIN (
+        SELECT cmp_id, nomor_aju, MIN(nomor_dokumen) AS nomor_dokumen
+        FROM bc_ceisa_dokumen
+        WHERE kode_dokumen = '380'
+        GROUP BY cmp_id, nomor_aju
+    ) doc_inv ON kiri.cmp_id = doc_inv.cmp_id AND kiri.nomor_aju = doc_inv.nomor_aju
+    LEFT JOIN (
+        SELECT cmp_id, nomor_aju, COUNT(1) AS jml
+        FROM bc_1ab2
+        GROUP BY cmp_id, nomor_aju
+    ) cekit ON kiri.cmp_id = cekit.cmp_id AND kiri.nomor_aju = cekit.nomor_aju
+    LEFT JOIN bc_ceisa_data bcd ON kiri.cmp_id = bcd.cmp_id AND kiri.nomor_aju = bcd.nomorAju
     $whereOuterSql
     ORDER BY kiri.tanggal_pernyataan DESC, kiri.nomor_aju DESC";
 
@@ -253,15 +321,7 @@ if ($action === 'list') {
             $activeCompanyAlertItInv = (int)$rc['alert_it_inv'];
         }
     }
-    echo json_encode([
-        'status' => 'OK',
-        'count' => count($data),
-        'data' => $data,
-        'is_inv' => $activeCompanyIsInv,
-        'alert_it_inv' => $activeCompanyAlertItInv,
-        'rekap_bc' => $rekapBc,
-        'total_rekap' => $totRekap
-    ]);
+    echo json_encode(['status' => 'OK', 'count' => count($data), 'data' => $data, 'is_inv' => $activeCompanyIsInv, 'alert_it_inv' => $activeCompanyAlertItInv]);
     exit;
 }
 
@@ -270,6 +330,7 @@ if ($action === 'detail_tab') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_GET['nomor_aju'] ?? '');
     $tab       = trim($_GET['tab'] ?? 'barang');
+    $cmp_id    = trim($_GET['cmp_id'] ?? $sessionCmpId);
 
     if (empty($nomor_aju)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
@@ -277,6 +338,9 @@ if ($action === 'detail_tab') {
     }
 
     $escaped = "'" . $koneksi->real_escape_string($nomor_aju) . "'";
+    $escCmp  = $koneksi->real_escape_string($cmp_id);
+    $cmpFilterA = !empty($escCmp) ? "AND a.cmp_id = '$escCmp'" : "";
+    $cmpFilter  = !empty($escCmp) ? "AND cmp_id = '$escCmp'" : "";
 
     if ($tab === 'barang') {
         $sql = "SELECT 
@@ -285,14 +349,14 @@ if ($action === 'detail_tab') {
             a.uraian, 
             IFNULL(a.jumlah_satuan, 0) AS jumlah_satuan, 
             IFNULL(a.kode_satuan, '') AS kode_satuan, 
-            IFNULL((SELECT klas FROM bc_material m WHERE m.kode_barang = a.kode_barang LIMIT 1), 'Finished Goods') AS klas,
+            IFNULL((SELECT klas FROM bc_material m WHERE m.kode_barang = a.kode_barang AND (m.cmp_id = a.cmp_id OR m.cmp_id = '' OR m.cmp_id IS NULL) LIMIT 1), 'Finished Goods') AS klas,
             0.00 AS stok,
             IFNULL(a.harga_penyerahan, 0) AS harga_penyerahan, 
             IFNULL(a.cif, 0) AS cif, 
             IFNULL(a.netto, 0) AS netto,
             1 AS cek
         FROM bc_ceisa_barang a
-        WHERE a.nomor_aju = $escaped
+        WHERE a.nomor_aju = $escaped $cmpFilterA
         ORDER BY a.seri_barang ASC";
 
         $res = $koneksi->query($sql);
@@ -338,7 +402,7 @@ if ($action === 'detail_tab') {
 
         $sql = "SELECT seri, kode_dokumen, nomor_dokumen, tanggal_dokumen 
                 FROM bc_ceisa_dokumen 
-                WHERE nomor_aju = $escaped 
+                WHERE nomor_aju = $escaped $cmpFilter
                 ORDER BY seri ASC";
         $res = $koneksi->query($sql);
         $rows = [];
@@ -779,6 +843,13 @@ if ($action === 'save_manual_respon') {
     $tanggal_daftar= trim($_POST['tanggal_daftar'] ?? '');
     $sppb          = trim($_POST['sppb'] ?? '');
 
+    // Normalisasi format tanggal agar selalu tersimpan sebagai YYYY-MM-DD
+    if (preg_match('/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/', $tanggal_daftar, $m)) {
+        $tanggal_daftar = $m[3] . '-' . $m[2] . '-' . $m[1];
+    } elseif (preg_match('/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/', $tanggal_daftar, $m)) {
+        $tanggal_daftar = $m[1] . '-' . $m[2] . '-' . $m[3];
+    }
+
     if (empty($nomor_aju)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
         exit;
@@ -1096,7 +1167,7 @@ if ($action === 'delete_aju') {
     // Cek apakah dokumen ada
     $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
     $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
     $hasData = ($chkData && $chkData->num_rows > 0);
 
     if (!$hasHdr && !$hasData) {
@@ -2386,148 +2457,192 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             border-top-color: #ffffff;
         }
 
-        /* FLOATING REKAP DOKUMEN MODAL (POWERBUILDER / ANT DESIGN STYLE) */
-        .rekap-floating-window {
-            position: fixed;
-            top: 145px;
-            right: 28px;
-            width: 210px;
-            background: #ffffff;
+        /* -------------------------------------------------------------
+           FLOATING WIDGET REKAP DOKUMEN (PowerBuilder Style)
+           ------------------------------------------------------------- */
+        .rekap-doc-popup {
+            position: absolute;
+            top: 48px;
+            left: 14px;
+            width: 195px;
+            background: var(--bg-card, #ffffff);
             border: 1px solid #91d5ff;
             border-radius: 4px;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.12);
-            z-index: 1040;
-            display: flex;
-            flex-direction: column;
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.22);
+            z-index: 1050;
             overflow: hidden;
             user-select: none;
             font-family: inherit;
+            animation: rekapDocFadeIn 0.15s ease-out;
         }
-        [data-theme="dark"] .rekap-floating-window {
-            background: #141414;
+
+        @keyframes rekapDocFadeIn {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        html[data-theme="dark"] .rekap-doc-popup {
+            background: #1f1f1f;
             border-color: #177ddc;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+            box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
         }
-        .rekap-window-header {
-            background: linear-gradient(180deg, #e6f7ff 0%, #bae7ff 100%);
-            border-bottom: 1px solid #91d5ff;
-            padding: 5px 8px;
+
+        .rekap-doc-header {
             display: flex;
             align-items: center;
             justify-content: space-between;
+            padding: 6px 10px;
+            background: #e6f7ff;
+            border-bottom: 1px solid #bae7ff;
             cursor: move;
         }
-        [data-theme="dark"] .rekap-window-header {
-            background: linear-gradient(180deg, #112a45 0%, #173f67 100%);
-            border-bottom: 1px solid #177ddc;
+
+        html[data-theme="dark"] .rekap-doc-header {
+            background: #111d2c;
+            border-bottom-color: #177ddc;
         }
-        .rekap-window-title {
-            font-size: 11.5px;
+
+        .rekap-doc-title {
+            font-size: 12px;
             font-weight: 700;
             color: #003a8c;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
-        [data-theme="dark"] .rekap-window-title {
-            color: #e6f7ff;
+
+        html[data-theme="dark"] .rekap-doc-title {
+            color: #69c0ff;
         }
-        .rekap-window-close {
+
+        .rekap-doc-close {
             background: transparent;
             border: none;
-            font-size: 15px;
+            font-size: 13px;
             line-height: 1;
             color: #595959;
             cursor: pointer;
-            padding: 0 4px;
+            padding: 2px 4px;
             border-radius: 3px;
-            font-weight: 700;
+            transition: all 0.2s;
         }
-        .rekap-window-close:hover {
+
+        .rekap-doc-close:hover {
             background: #ff4d4f;
             color: #ffffff;
         }
-        .rekap-window-body {
-            max-height: 280px;
+
+        .rekap-doc-body {
+            max-height: 290px;
             overflow-y: auto;
-            background: #ffffff;
+            overflow-x: hidden;
         }
-        [data-theme="dark"] .rekap-window-body {
-            background: #141414;
-        }
-        .rekap-table {
+
+        .rekap-doc-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11.5px;
+            font-size: 12px;
         }
-        .rekap-table thead th {
-            background: linear-gradient(180deg, #e6f7ff 0%, #bae7ff 100%);
+
+        .rekap-doc-table thead th {
+            background: #bae7ff;
             color: #003a8c;
             font-weight: 700;
             padding: 5px 8px;
-            border-bottom: 1px solid #91d5ff;
-            position: sticky;
-            top: 0;
-            z-index: 1;
+            border: 1px solid #91d5ff;
+            font-size: 12px;
         }
-        [data-theme="dark"] .rekap-table thead th {
-            background: #112a45;
-            color: #e6f7ff;
-            border-bottom: 1px solid #177ddc;
+
+        html[data-theme="dark"] .rekap-doc-table thead th {
+            background: #177ddc;
+            color: #ffffff;
+            border-color: #0958d9;
         }
-        .rekap-table tbody tr {
+
+        .rekap-doc-table tbody tr {
             cursor: pointer;
-            transition: background 0.15s;
-            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.15s ease;
+            border-bottom: 1px solid var(--border-color, #f0f0f0);
         }
-        [data-theme="dark"] .rekap-table tbody tr {
-            border-bottom-color: #262626;
+
+        .rekap-doc-table tbody tr:hover {
+            background: #e6f7ff !important;
         }
-        .rekap-table tbody tr:hover {
-            background: #e6f7ff;
+
+        html[data-theme="dark"] .rekap-doc-table tbody tr:hover {
+            background: #112a45 !important;
         }
-        [data-theme="dark"] .rekap-table tbody tr:hover {
-            background: #111d2c;
-        }
-        .rekap-table tbody tr.active-bc-row {
-            background: #bae7ff !important;
+
+        .rekap-doc-table tbody tr.active-rekap-row {
+            background: #fffb8f !important;
             font-weight: 700;
         }
-        [data-theme="dark"] .rekap-table tbody tr.active-bc-row {
-            background: #173f67 !important;
-            color: #ffffff;
+
+        html[data-theme="dark"] .rekap-doc-table tbody tr.active-rekap-row {
+            background: #433800 !important;
+            color: #ffec3d;
         }
-        .rekap-table td {
-            padding: 5px 12px;
+
+        .rekap-doc-table tbody td {
+            padding: 5px 10px;
+            border-right: 1px solid var(--border-color, #f0f0f0);
+            color: var(--text-heading, #262626);
         }
-        .rekap-window-footer {
-            padding: 6px 8px;
-            background: #fafafa;
-            border-top: 1px solid #e8e8e8;
+
+        .rekap-doc-footer {
             display: flex;
             justify-content: center;
             align-items: center;
+            padding: 7px 10px;
+            background: var(--bg-card, #ffffff);
+            border-top: 1px solid var(--border-color, #f0f0f0);
         }
-        [data-theme="dark"] .rekap-window-footer {
+
+        html[data-theme="dark"] .rekap-doc-footer {
             background: #1f1f1f;
             border-top-color: #303030;
         }
-        .rekap-total-chip {
-            background: linear-gradient(180deg, #fffb8f 0%, #ffe58f 100%);
-            border: 1px solid #d4b106;
-            color: #595959;
-            font-weight: 800;
-            font-size: 13.5px;
-            padding: 2px 24px;
-            border-radius: 3px;
+
+        .rekap-doc-total-badge {
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            min-width: 82px;
+            padding: 3px 14px;
+            background: #fffb8f;
+            border: 1px solid #1890ff;
+            border-radius: 4px;
+            font-size: 12.5px;
+            font-weight: 700;
+            color: #262626;
             cursor: pointer;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.1);
-            transition: all 0.2s;
-            text-align: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            transition: all 0.2s ease;
         }
-        .rekap-total-chip:hover {
+
+        .rekap-doc-total-badge:hover {
             background: #fff566;
-            transform: scale(1.04);
+            border-color: #096dd9;
+            box-shadow: 0 2px 8px rgba(24, 144, 255, 0.25);
+            transform: scale(1.03);
+        }
+
+        html[data-theme="dark"] .rekap-doc-total-badge {
+            background: #faad14;
+            color: #141414;
+            border-color: #fa8c16;
+        }
+
+        .btn-rekap-active {
+            border-color: #1890ff !important;
+            color: #1890ff !important;
+            background: #e6f7ff !important;
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2) !important;
+        }
+
+        html[data-theme="dark"] .btn-rekap-active {
+            background: #111d2c !important;
+            color: #69c0ff !important;
         }
     </style>
 </head>
@@ -2576,7 +2691,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <button type="button" class="ant-btn" onclick="openEditorForm()" title="Buka Form Entri AJU Baru">
                             <span>&#10133; Entri AJU Baru</span>
                         </button>
-                        <button type="button" class="ant-btn" id="btnRekapDok" onclick="toggleRekapModal()" title="Tampilkan Rekap Dokumen (Filter Cepat Jenis BC)">
+                        <button type="button" class="ant-btn" id="btnRekapDokumen" onclick="toggleRekapDokumen()" title="Tampilkan Rekapitulasi Dokumen">
                             <span>📊 Rekap Dokumen</span>
                         </button>
                         <button type="button" class="ant-btn" onclick="loadList()" title="Muat Ulang Data">
@@ -2589,38 +2704,65 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 </div>
 
                 <!-- Card Body -->
-                <div class="ant-card-body" style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+                <div class="ant-card-body" style="flex:1; display:flex; flex-direction:column; min-height:0; overflow:hidden; position:relative;">
+                    <!-- Floating Rekap Dokumen Widget (PowerBuilder Style) -->
+                    <div id="rekapDokumenWidget" class="rekap-doc-popup" style="display:none;">
+                        <div class="rekap-doc-header" id="rekapDocHeader" title="Seret untuk memindahkan posisi widget">
+                            <div class="rekap-doc-title">
+                                <i class="fa-solid fa-file-lines text-primary me-1"></i> Rekap Dokumen
+                            </div>
+                            <button type="button" class="rekap-doc-close" onclick="toggleRekapDokumen(false)" title="Tutup Rekap">✕</button>
+                        </div>
+                        <div class="rekap-doc-body">
+                            <table class="rekap-doc-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width:50%; text-align:center;">BC</th>
+                                        <th style="width:50%; text-align:center;">Jml</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="rekapDocTbody">
+                                    <tr>
+                                        <td colspan="2" style="text-align:center; padding:12px; color:var(--text-muted); font-size:11px;">
+                                            Memuat rekap...
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="rekap-doc-footer">
+                            <button type="button" class="rekap-doc-total-badge" id="rekapDocTotalBtn" onclick="filterByRekapDoc('')" title="Klik untuk menampilkan Semua Dokumen (Reset Filter)">
+                                <span id="rekapDocTotalNum">0</span>
+                            </button>
+                        </div>
+                    </div>
+
                     <!-- Filter Bar -->
                     <div class="filter-panel">
                         <div class="filter-col">
-                            <div style="display:flex; justify-content:space-between; align-items:center;">
-                                <label style="margin:0;">Dokumen BC</label>
-                                <a href="javascript:void(0)" onclick="toggleRekapModal()" style="font-size:10.5px; color:#1890ff; font-weight:600; text-decoration:none;" title="Tampilkan Rekap Dokumen">
-                                    📊 Rekap
-                                </a>
-                            </div>
-                            <select id="filterBc" class="filter-control" onchange="onBcFilterChange()">
+                            <label>Dokumen BC</label>
+                            <select id="filterBc" class="filter-control" onchange="onFilterBcChange(this.value)">
                                 <option value="">Semua Dokumen</option>
-                                <optgroup label="─── PEMASUKAN (INBOUND) ───">
-                                    <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN (Pemasukan TPB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                                <optgroup label="── PEMASUKAN (INBOUND) ──">
+                                    <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 — Pemasukan ke PLB</option><?php endif; ?>
+                                    <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 — Impor Non-Fasilitas (PIB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 — Impor ke Kawasan Berikat (TPB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 — Pemasukan Subcon Kembali</option><?php endif; ?>
+                                    <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN — Pemasukan dari TPB Lain</option><?php endif; ?>
+                                    <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 — Impor dari PLB</option><?php endif; ?>
+                                    <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 — Pemasukan dari Lokal ke TPB</option><?php endif; ?>
+                                    <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 — Pemasukan ke KEK dari Luar Negeri</option><?php endif; ?>
+                                    <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 — Pemasukan ke KEK dari Lokal</option><?php endif; ?>
                                 </optgroup>
-                                <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
-                                    <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
-                                    <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                                <optgroup label="── PENGELUARAN (OUTBOUND) ──">
+                                    <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 — Pengeluaran ke Lokal (Asal Impor / BC 2.3)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 — Pengeluaran Subcon</option><?php endif; ?>
+                                    <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 — Pengeluaran ke TPB Lain</option><?php endif; ?>
+                                    <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 — Ekspor Barang (PEB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 — Ekspor dari PLB</option><?php endif; ?>
+                                    <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 — P3BET PLB</option><?php endif; ?>
+                                    <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 — Pengeluaran ke Lokal (Asal Lokal / BC 4.0)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 — Pengeluaran dari KEK ke Luar Negeri</option><?php endif; ?>
                                 </optgroup>
                                 <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
                                     <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
@@ -3069,36 +3211,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="context-menu-item" onclick="contextAction('unpost_it')"><i class="fa-solid fa-rotate-left" style="color:#ff7a45; width:16px;"></i> Unposting IT Inventory</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('view_json')"><i class="fa-solid fa-code" style="color:#722ed1; width:16px;"></i> View JSON</div>
+        <div class="context-menu-item" onclick="contextAction('download_excel')"><i class="fa-solid fa-file-excel" style="color:#107c41; width:16px;"></i> Unduh Excel</div>
         <div class="context-menu-item" onclick="contextAction('copy_aju')"><i class="fa-solid fa-copy" style="color:#13c2c2; width:16px;"></i> Copy AJU</div>
-    </div>
-
-    <!-- FLOATING MODAL: REKAP DOKUMEN (POWERBUILDER STYLE) -->
-    <div id="rekapDokumenModal" class="rekap-floating-window" style="display:none;">
-        <div class="rekap-window-header" id="rekapWindowHeader">
-            <div class="rekap-window-title">
-                <i class="fa-regular fa-file-lines" style="color:#096dd9;"></i>
-                <span>Rekap Dokumen</span>
-            </div>
-            <button type="button" class="rekap-window-close" onclick="closeRekapModal()" title="Tutup Rekap Dokumen">&times;</button>
-        </div>
-        <div class="rekap-window-body">
-            <table class="rekap-table">
-                <thead>
-                    <tr>
-                        <th style="width: 50%; text-align: center;">BC</th>
-                        <th style="width: 50%; text-align: center;">Jml</th>
-                    </tr>
-                </thead>
-                <tbody id="rekapModalTbody">
-                    <!-- Populated dynamically via JS -->
-                </tbody>
-            </table>
-        </div>
-        <div class="rekap-window-footer">
-            <div class="rekap-total-chip" id="rekapModalTotal" onclick="filterByBcFromRekap('')" title="Klik untuk menampilkan SEMUA dokumen">
-                0
-            </div>
-        </div>
+        <div class="context-menu-item" onclick="contextAction('rename_aju')"><i class="fa-solid fa-i-cursor" style="color:#fa8c16; width:16px;"></i> Rename AJU</div>
     </div>
 
     <script>
@@ -3251,7 +3366,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             window.dispatchEvent(new Event('resize'));
         }
 
-        // Double-click splitbar toggles maximize & init draggable rekap modal
+        // Double-click splitbar toggles maximize
         document.addEventListener('DOMContentLoaded', function() {
             const sb = document.getElementById('splitbar');
             if (sb) {
@@ -3260,185 +3375,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     toggleMaximizePane('top');
                 });
             }
-
-            // Init draggable Rekap Dokumen modal
-            const rekapModal = document.getElementById('rekapDokumenModal');
-            const rekapHeader = document.getElementById('rekapWindowHeader');
-            if (rekapModal && rekapHeader) {
-                makeDraggable(rekapModal, rekapHeader);
-                if (localStorage.getItem('inhost_rekap_modal_open') === '1') {
-                    rekapModal.style.display = 'flex';
-                }
-            }
         });
 
-        // Esc key restores maximized view or closes rekap modal
+        // Esc key restores maximized view
         window.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') {
-                if (currentMaximizedPane) {
-                    toggleMaximizePane(currentMaximizedPane);
-                } else {
-                    const rm = document.getElementById('rekapDokumenModal');
-                    if (rm && rm.style.display !== 'none') {
-                        closeRekapModal();
-                    }
-                }
+            if (e.key === 'Escape' && currentMaximizedPane) {
+                toggleMaximizePane(currentMaximizedPane);
             }
         });
-
-        // -------------------------------------------------------------
-        // REKAP DOKUMEN MODAL & FILTER (POWERBUILDER STYLE)
-        // -------------------------------------------------------------
-        let currentRekapData = [];
-
-        function toggleRekapModal() {
-            const modal = document.getElementById('rekapDokumenModal');
-            if (!modal) return;
-            if (modal.style.display === 'none' || modal.style.display === '') {
-                modal.style.display = 'flex';
-                renderRekapModal();
-                localStorage.setItem('inhost_rekap_modal_open', '1');
-            } else {
-                closeRekapModal();
-            }
-        }
-
-        function closeRekapModal() {
-            const modal = document.getElementById('rekapDokumenModal');
-            if (modal) {
-                modal.style.display = 'none';
-                localStorage.setItem('inhost_rekap_modal_open', '0');
-            }
-        }
-
-        function filterByBcFromRekap(bc) {
-            const selBc = document.getElementById('filterBc');
-            if (selBc) {
-                if (bc && !selBc.querySelector(`option[value="${bc}"]`)) {
-                    const opt = document.createElement('option');
-                    opt.value = bc;
-                    opt.textContent = `BC ${bc}`;
-                    selBc.appendChild(opt);
-                }
-
-                if (selBc.value === bc && bc !== '') {
-                    selBc.value = '';
-                } else {
-                    selBc.value = bc;
-                }
-            }
-            updateRekapModalActiveRow();
-            loadList();
-        }
-
-        function onBcFilterChange() {
-            updateRekapModalActiveRow();
-            loadList();
-        }
-
-        function updateRekapModalActiveRow() {
-            const selBc = document.getElementById('filterBc')?.value || '';
-            const rows = document.querySelectorAll('#rekapModalTbody tr');
-            rows.forEach(tr => {
-                if (tr.dataset.bc === selBc) {
-                    tr.classList.add('active-bc-row');
-                } else {
-                    tr.classList.remove('active-bc-row');
-                }
-            });
-            const totEl = document.getElementById('rekapModalTotal');
-            if (totEl) {
-                if (!selBc) {
-                    totEl.style.outline = '2px solid #1890ff';
-                } else {
-                    totEl.style.outline = 'none';
-                }
-            }
-        }
-
-        function renderRekapModal() {
-            const tbody = document.getElementById('rekapModalTbody');
-            const totalEl = document.getElementById('rekapModalTotal');
-            if (!tbody) return;
-
-            const currentBcFilter = document.getElementById('filterBc')?.value || '';
-            tbody.innerHTML = '';
-
-            if (!currentRekapData || currentRekapData.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="2" style="text-align:center; padding:12px; color:#8c8c8c;">Tidak ada data</td></tr>';
-                if (totalEl) totalEl.innerText = '0';
-                return;
-            }
-
-            const docOrder = {
-                '16': 10, '20': 20, '23': 30, '262': 40, '27IN': 50, '28': 60, '40': 70, '611': 80, '613': 90,
-                '25': 110, '261': 120, '27': 130, '27OUT': 131, '30': 140, '33': 150, '331': 160, '41': 170, '631': 180
-            };
-            currentRekapData.sort((a, b) => {
-                const wA = docOrder[a.bc] !== undefined ? docOrder[a.bc] : 999;
-                const wB = docOrder[b.bc] !== undefined ? docOrder[b.bc] : 999;
-                if (wA === wB) return String(a.bc).localeCompare(String(b.bc));
-                return wA - wB;
-            });
-
-            let tot = 0;
-            currentRekapData.forEach(item => {
-                tot += parseInt(item.jml || 0, 10);
-                const tr = document.createElement('tr');
-                tr.dataset.bc = item.bc;
-                if (item.bc === currentBcFilter) {
-                    tr.classList.add('active-bc-row');
-                }
-                tr.onclick = function() {
-                    filterByBcFromRekap(item.bc);
-                };
-                tr.innerHTML = `
-                    <td style="text-align:center; font-weight:700;">${escapeHtml(item.bc)}</td>
-                    <td style="text-align:center; font-weight:700;">${item.jml}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-
-            if (totalEl) {
-                totalEl.innerText = tot;
-                if (!currentBcFilter) {
-                    totalEl.style.outline = '2px solid #1890ff';
-                } else {
-                    totalEl.style.outline = 'none';
-                }
-            }
-        }
-
-        function makeDraggable(element, handle) {
-            if (!element || !handle) return;
-            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            handle.onmousedown = dragMouseDown;
-
-            function dragMouseDown(e) {
-                if (e.target.closest('.rekap-window-close')) return;
-                e.preventDefault();
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                document.onmouseup = closeDragElement;
-                document.onmousemove = elementDrag;
-            }
-
-            function elementDrag(e) {
-                e.preventDefault();
-                pos1 = pos3 - e.clientX;
-                pos2 = pos4 - e.clientY;
-                pos3 = e.clientX;
-                pos4 = e.clientY;
-                element.style.top = (element.offsetTop - pos2) + "px";
-                element.style.left = (element.offsetLeft - pos1) + "px";
-                element.style.right = 'auto';
-            }
-
-            function closeDragElement() {
-                document.onmouseup = null;
-                document.onmousemove = null;
-            }
-        }
 
         // Sinkronisasi tema & interaksi parent
         window.addEventListener('message', function(e) {
@@ -3470,6 +3414,164 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         });
 
+        // -------------------------------------------------------------
+        // FLOATING WIDGET REKAP DOKUMEN (PowerBuilder Style)
+        // -------------------------------------------------------------
+        let isRekapLoading = false;
+
+        function toggleRekapDokumen(forceState) {
+            const widget = document.getElementById('rekapDokumenWidget');
+            const btn = document.getElementById('btnRekapDokumen');
+            if (!widget) return;
+
+            const shouldShow = (typeof forceState === 'boolean') ? forceState : (widget.style.display === 'none' || widget.style.display === '');
+            if (shouldShow) {
+                widget.style.display = 'block';
+                if (btn) btn.classList.add('btn-rekap-active');
+                loadRekapDokumen(true);
+            } else {
+                widget.style.display = 'none';
+                if (btn) btn.classList.remove('btn-rekap-active');
+            }
+        }
+
+        async function loadRekapDokumen(showLoading = false) {
+            const tbody = document.getElementById('rekapDocTbody');
+            const totalNum = document.getElementById('rekapDocTotalNum');
+            if (!tbody) return;
+
+            if (showLoading) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="2" style="text-align:center; padding:12px; color:var(--text-muted); font-size:11px;">
+                            <i class="fa-solid fa-spinner fa-spin text-primary"></i> Memuat rekap...
+                        </td>
+                    </tr>
+                `;
+            }
+
+            const tgl1 = document.getElementById('filterTgl1')?.value || '';
+            const tgl2 = document.getElementById('filterTgl2')?.value || '';
+            const periode = document.getElementById('filterPeriode')?.value || '';
+            const cmpId = document.getElementById('filterCmp')?.value || '';
+            const activeBc = document.getElementById('filterBc')?.value || '';
+
+            const params = new URLSearchParams({
+                action: 'rekap_dokumen',
+                tgl_awal: tgl1,
+                tgl_akhir: tgl2,
+                periode: periode,
+                cmp_id: cmpId
+            });
+
+            try {
+                isRekapLoading = true;
+                const res = await fetch(`transfer.php?${params.toString()}`);
+                const json = await res.json();
+                isRekapLoading = false;
+
+                if (json.status !== 'OK') {
+                    tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#ff4d4f; padding:8px; font-size:11px;">Gagal memuat rekap</td></tr>`;
+                    return;
+                }
+
+                const list = json.data || [];
+                if (totalNum) {
+                    totalNum.innerText = (json.total !== undefined) ? json.total : list.reduce((acc, cur) => acc + (parseInt(cur.jml, 10) || 0), 0);
+                }
+
+                if (list.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; padding:12px; color:var(--text-muted); font-size:11px;">Tidak ada dokumen</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = '';
+                list.forEach(row => {
+                    const tr = document.createElement('tr');
+                    tr.dataset.bc = String(row.bc);
+                    if (String(activeBc) === String(row.bc)) {
+                        tr.classList.add('active-rekap-row');
+                    }
+                    tr.title = `Klik untuk memfilter dokumen BC ${escapeHtml(row.bc)}`;
+                    tr.innerHTML = `
+                        <td style="text-align:center; font-weight:700;">${escapeHtml(row.bc)}</td>
+                        <td style="text-align:center; font-weight:700;">${parseInt(row.jml, 10) || 0}</td>
+                    `;
+                    tr.addEventListener('click', () => filterByRekapDoc(row.bc));
+                    tbody.appendChild(tr);
+                });
+
+                updateRekapActiveHighlight(activeBc);
+            } catch (err) {
+                isRekapLoading = false;
+                tbody.innerHTML = `<tr><td colspan="2" style="text-align:center; color:#ff4d4f; padding:8px; font-size:11px;">Error koneksi rekap</td></tr>`;
+            }
+        }
+
+        function filterByRekapDoc(bcCode) {
+            const filterBc = document.getElementById('filterBc');
+            if (filterBc) {
+                filterBc.value = bcCode;
+            }
+            updateRekapActiveHighlight(bcCode);
+            loadList();
+        }
+
+        function onFilterBcChange(bcCode) {
+            updateRekapActiveHighlight(bcCode);
+            loadList();
+        }
+
+        function updateRekapActiveHighlight(activeBc) {
+            const rows = document.querySelectorAll('#rekapDocTbody tr');
+            rows.forEach(tr => {
+                if (activeBc && tr.dataset.bc === String(activeBc)) {
+                    tr.classList.add('active-rekap-row');
+                } else {
+                    tr.classList.remove('active-rekap-row');
+                }
+            });
+
+            const totalBtn = document.getElementById('rekapDocTotalBtn');
+            if (totalBtn) {
+                if (!activeBc) {
+                    totalBtn.style.outline = '2px solid #1890ff';
+                    totalBtn.style.outlineOffset = '1px';
+                } else {
+                    totalBtn.style.outline = 'none';
+                }
+            }
+        }
+
+        function initRekapDraggable() {
+            const widget = document.getElementById('rekapDokumenWidget');
+            const header = document.getElementById('rekapDocHeader');
+            if (!widget || !header) return;
+
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            header.onmousedown = function(e) {
+                if (e.target.closest('button')) return;
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = function() {
+                    document.onmouseup = null;
+                    document.onmousemove = null;
+                };
+                document.onmousemove = function(ev) {
+                    ev.preventDefault();
+                    pos1 = pos3 - ev.clientX;
+                    pos2 = pos4 - ev.clientY;
+                    pos3 = ev.clientX;
+                    pos4 = ev.clientY;
+                    const newTop = widget.offsetTop - pos2;
+                    const newLeft = widget.offsetLeft - pos1;
+                    widget.style.top = Math.max(10, newTop) + 'px';
+                    widget.style.left = Math.max(10, newLeft) + 'px';
+                };
+            };
+        }
+
         function onPeriodChange(periodStr) {
             if (!periodStr) return;
             const parts = periodStr.split('-');
@@ -3480,6 +3582,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const padM = String(m).padStart(2, '0');
                 document.getElementById('filterTgl1').value = `${y}-${padM}-01`;
                 document.getElementById('filterTgl2').value = `${y}-${padM}-${String(lastDay).padStart(2, '0')}`;
+                const widget = document.getElementById('rekapDokumenWidget');
+                if (widget && widget.style.display !== 'none') {
+                    loadRekapDokumen(false);
+                }
                 loadList();
             }
         }
@@ -3489,6 +3595,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             document.getElementById('filterBc').value = '';
             document.getElementById('filterStatus').value = '';
             document.getElementById('filterSearch').value = '';
+            updateRekapActiveHighlight('');
             const now = new Date();
             const y = now.getFullYear();
             const m = String(now.getMonth() + 1).padStart(2, '0');
@@ -3543,12 +3650,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 rawHeaderData = json.data || [];
                 activeCompanyIsInv = (json.is_inv !== undefined) ? parseInt(json.is_inv, 10) : 1;
                 activeCompanyAlertItInv = (json.alert_it_inv !== undefined) ? parseInt(json.alert_it_inv, 10) : 0;
-                
-                if (json.rekap_bc !== undefined) {
-                    currentRekapData = json.rekap_bc || [];
-                    renderRekapModal();
-                }
-
                 renderHeaderTable();
             } catch (err) {
                 tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding: 20px; color:#f5222d;">Gagal memuat data: ${err.message}</td></tr>`;
@@ -3798,7 +3899,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
 
             try {
-                const res = await fetch(`transfer.php?action=detail_tab&nomor_aju=${encodeURIComponent(activeAju)}&tab=${encodeURIComponent(activeTab)}`);
+                const cmpId = document.getElementById('filterCmp')?.value || '';
+                const res = await fetch(`transfer.php?action=detail_tab&nomor_aju=${encodeURIComponent(activeAju)}&tab=${encodeURIComponent(activeTab)}&cmp_id=${encodeURIComponent(cmpId)}`);
                 const json = await res.json();
                 if (json.status !== 'OK') return;
 
@@ -4014,7 +4116,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 if (json.status === 'OK') {
                     showSuccess(json.message);
                     loadList();
-                    if (activeAju === aju) loadActiveDetailTab();
                 } else {
                     showError(json.message);
                 }
@@ -4199,6 +4300,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 case 'view_json':
                     viewJsonActiveAju();
                     break;
+                case 'download_excel':
+                    downloadCeisaExcel(targetAju);
+                    break;
                 case 'copy_aju':
                     openCopyModal();
                     break;
@@ -4206,6 +4310,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     openRenameModal();
                     break;
             }
+        }
+
+        function downloadCeisaExcel(targetAju) {
+            const aju = targetAju || activeAju;
+            if (!aju) {
+                showWarning('Silakan pilih salah satu dokumen terlebih dahulu.');
+                return;
+            }
+            showToast(`Mengunduh Excel CEISA 4.0 untuk AJU ${aju}...`);
+            window.location.href = `transfer.php?action=download_excel&nomor_aju=${encodeURIComponent(aju)}`;
         }
 
         async function resetPostedAju(targetAju) {
@@ -5592,6 +5706,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         window.onload = function() {
+            initRekapDraggable();
             loadList();
         };
     </script>
