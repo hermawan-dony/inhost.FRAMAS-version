@@ -533,7 +533,6 @@ if ($action === 'view_json_lnsw') {
     echo json_encode([
         'status'    => ($httpCode === 200) ? 'OK' : 'ERROR',
         'http_code' => $httpCode,
-        'url'       => $url,
         'nomor_aju' => $nomor_aju,
         'id_header' => $idHeader,
         'cmp_id'    => $cmp_id,
@@ -3194,16 +3193,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:16px;">🔍</span>
                     <div>
-                        <h3 id="jsonModalTitle" style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Payload JSON LNSW CEISA 4.0 (report-parser)</h3>
-                        <div id="jsonModalSubtitle" style="font-size:10.5px; color:#1890ff; font-family:monospace; margin-top:2px;">idHeader: -</div>
+                        <h3 id="jsonModalTitle" style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Data Dokumen CEISA 4.0 (JSON)</h3>
+                        <div id="jsonModalSubtitle" style="font-size:10.5px; color:#1890ff; font-family:monospace; margin-top:2px;">-</div>
                     </div>
                 </div>
                 <button type="button" class="ant-btn ant-btn-sm" onclick="closeJsonModal()">✕</button>
             </div>
             <div class="modal-body" style="padding:14px 18px; flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:10px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted); background:var(--bg-input); padding:6px 12px; border-radius:6px; border:1px solid var(--border-card);">
-                    <div style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:70%;">Endpoint: <code id="jsonModalUrl" style="color:#722ed1; font-size:10px;">-</code></div>
-                    <div id="jsonModalStatusBadge"><span class="ant-tag ant-tag-blue">HTTP 200</span></div>
+                    <div style="font-weight:600; color:var(--text-main); font-size:11px;">Struktur Data Dokumen Pabean</div>
+                    <div id="jsonModalStatusBadge"><span class="ant-tag ant-tag-blue">HTTP 200 OK</span></div>
                 </div>
                 <div style="position:relative; flex:1; min-height:300px;">
                     <pre id="jsonModalContent" style="margin:0; padding:12px; background:#1e1e1e; color:#d4d4d4; font-family:Consolas, 'Courier New', monospace; font-size:11px; line-height:1.5; border-radius:6px; height:100%; min-height:300px; max-height:55vh; overflow:auto; white-space:pre-wrap; word-break:break-all;"></pre>
@@ -4642,16 +4641,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const modal = document.getElementById('modalJsonViewer');
             const pre = document.getElementById('jsonModalContent');
             const sub = document.getElementById('jsonModalSubtitle');
-            const urlEl = document.getElementById('jsonModalUrl');
             const badge = document.getElementById('jsonModalStatusBadge');
             const sizeInfo = document.getElementById('jsonModalSizeInfo');
 
             if (modal) modal.style.display = 'flex';
-            if (sub) sub.innerText = `No. AJU: ${aju || '-'} | idHeader: ${idH || 'mencari di DB...'}`;
-            if (urlEl) urlEl.innerText = `https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=${idH || '...'}`;
+            if (sub) sub.innerText = `No. AJU: ${aju || '-'} | idHeader: ${idH || '-'}`;
             if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-orange">Mengambil data...</span>`;
-            if (sizeInfo) sizeInfo.innerText = 'Menghubungi API CEISA 4.0...';
-            if (pre) pre.textContent = '// Menghubungi gateway Bea Cukai https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header...\n// Mohon tunggu...';
+            if (sizeInfo) sizeInfo.innerText = 'Memuat data dokumen...';
+            if (pre) pre.textContent = '// Memuat data dokumen CEISA 4.0...\n// Mohon tunggu...';
 
             fetch(`daftar_dokumen.php?action=view_json_lnsw&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp)}&id_header=${encodeURIComponent(idH || '')}`)
                 .then(r => r.json())
@@ -4660,7 +4657,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         activeJsonIdHeader = res.id_header || activeJsonIdHeader;
                         activeJsonRawText = res.raw_json || JSON.stringify(res.data, null, 2);
                         if (sub) sub.innerText = `No. AJU: ${aju} | idHeader: ${activeJsonIdHeader}`;
-                        if (urlEl) urlEl.innerText = res.url || `https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=${activeJsonIdHeader}`;
                         if (badge) badge.innerHTML = `<span class="ant-tag ant-tag-green">HTTP ${res.http_code || 200} OK</span>`;
                         if (sizeInfo) sizeInfo.innerText = `Ukuran: ${(new Blob([activeJsonRawText]).size / 1024).toFixed(2)} KB`;
                         if (pre) pre.textContent = activeJsonRawText;
