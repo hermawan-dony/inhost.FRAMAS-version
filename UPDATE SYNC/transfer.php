@@ -4913,11 +4913,58 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 return;
             }
 
+            const jmlBarang = parseInt(activeItem?.jml_barang ?? activeItem?.jml_brg ?? 0, 10);
+
+            const resetGridAndRefresh = () => {
+                activeAju = null;
+                const gridDetail = document.getElementById('gridDetail');
+                if (gridDetail) gridDetail.innerHTML = '<div class="empty-state">Pilih dokumen pabean untuk melihat rincian</div>';
+                const selBanner = document.getElementById('selectedDocBanner');
+                if (selBanner) selBanner.innerHTML = 'Dokumen Terpilih: <em>Belum ada yang dipilih</em>';
+                loadList();
+            };
+
+            // JIKA JUMLAH BARANG = 0: Langsung hapus tanpa perlu konfirmasi
+            if (jmlBarang === 0) {
+                Swal.fire({
+                    title: 'Menghapus Data AJU...',
+                    html: `Menghapus dokumen <strong>${escapeHtml(activeAju)}</strong> (tanpa data barang)...`,
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+
+                try {
+                    const formData = new FormData();
+                    formData.append('action', 'delete_aju');
+                    formData.append('nomor_aju', activeAju);
+                    formData.append('confirm', 'YA');
+
+                    const r = await fetch('transfer.php', { method: 'POST', body: formData });
+                    const res = await r.json();
+                    Swal.close();
+
+                    if (res.status === 'OK') {
+                        showToast(res.message || `Dokumen AJU ${activeAju} berhasil dihapus.`, 'success');
+                        resetGridAndRefresh();
+                    } else {
+                        showError(res.message || 'Gagal menghapus data AJU.');
+                    }
+                } catch (err) {
+                    Swal.close();
+                    showError('Terjadi kesalahan saat menghapus: ' + err.message);
+                }
+                return;
+            }
+
+            // JIKA JUMLAH BARANG > 0: Wajib konfirmasi ketik YA
             Swal.fire({
                 title: '⚠️ Konfirmasi Hapus Data AJU',
                 html: `
                     <div style="font-size:13px; text-align:left; line-height:1.5;">
-                        <p>Anda akan <strong>MENGHAPUS PERMANEN</strong> seluruh data staging dokumen ini:</p>
+                        <p>Dokumen ini memiliki <strong>${jmlBarang} data barang</strong>. Anda akan <strong>MENGHAPUS PERMANEN</strong> seluruh data staging dokumen ini:</p>
                         <div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#ff4d4f;">
                             AJU: ${escapeHtml(activeAju)}
                         </div>
@@ -4972,12 +5019,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         icon: 'success',
                         confirmButtonColor: '#1890ff'
                     });
-                    activeAju = null;
-                    const gridDetail = document.getElementById('gridDetail');
-                    if (gridDetail) gridDetail.innerHTML = '<div class="empty-state">Pilih dokumen pabean untuk melihat rincian</div>';
-                    const selBanner = document.getElementById('selectedDocBanner');
-                    if (selBanner) selBanner.innerHTML = 'Dokumen Terpilih: <em>Belum ada yang dipilih</em>';
-                    loadList();
+                    resetGridAndRefresh();
                 }
             });
         }
