@@ -55,7 +55,7 @@ if ($action === 'list') {
     $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
 
     $escCmp = $koneksi->real_escape_string($filter_cmp);
-    $allInboundCodes = ['23', '40', '262', '27', '611', '20', '16', '28'];
+    $allInboundCodes = ['16', '20', '23', '262', '27', '28', '40', '611', '613'];
     $allowedInboundWh = (!empty($isAdmin) && (empty($filter_cmp) || $filter_cmp === 'ALL')) 
         ? $allInboundCodes 
         : array_values(array_filter($allInboundCodes, 'isWhDocPermitted'));
@@ -955,14 +955,15 @@ if ($action === 'detail_tab') {
                             <label>Dokumen Pemasukan</label>
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen Masuk</option>
+                                <?php if (isWhDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
                                 <?php if (isWhDocPermitted('23')): ?><option value="23">BC 2.3 (Impor Kawasan Berikat)</option><?php endif; ?>
-                                <?php if (isWhDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
                                 <?php if (isWhDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
                                 <?php if (isWhDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB IN)</option><?php endif; ?>
-                                <?php if (isWhDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan KEK)</option><?php endif; ?>
-                                <?php if (isWhDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                                <?php if (isWhDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
                                 <?php if (isWhDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan KEK)</option><?php endif; ?>
+                                <?php if (isWhDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan KEK)</option><?php endif; ?>
                             </select>
                         </div>
                         <div class="filter-col">

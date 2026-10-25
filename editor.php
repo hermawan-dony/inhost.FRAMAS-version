@@ -52,36 +52,39 @@ $isErpConfigured = (!empty($companyErpName) && $companyErpName !== '-' && strtou
 $companyAllowedDocs = ceisa_resolve_allowed_docs($companyRoles, $companyAllowedDocsStr);
 $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 
-// Katalog Dokumen Pabean Berdasarkan Role Perusahaan
+// Katalog Dokumen Pabean Berdasarkan Role Perusahaan (Grup Pemasukan dulu, baru Pengeluaran, urut kode)
 $allBcCatalog = [
-    '611' => ['label' => 'BC 6.1.1 - Pemasukan ke KEK',          'role' => 'ppkek'],
-    '613' => ['label' => 'BC 6.1.3 - Pengeluaran dari KEK',       'role' => 'ppkek'],
-    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb'],
-    '23'  => ['label' => 'BC 2.3 - Impor TPB / Kawasan Berikat', 'role' => 'tpb'],
-    '40'  => ['label' => 'BC 4.0 - Pemasukan TLDDP ke TPB',     'role' => 'tpb'],
-    '30'  => ['label' => 'BC 3.0 - Pemberitahuan Ekspor (PEB)',   'role' => 'peb'],
-    '27'  => ['label' => 'BC 2.7 - Pengeluaran Antar TPB',       'role' => 'tpb'],
-    '20'  => ['label' => 'BC 2.0 - Impor untuk Dipakai (PIB)',    'role' => 'pib'],
-    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'plb'],
-    '41'  => ['label' => 'BC 4.1 - Pengeluaran Sementara ke TLDDP', 'role' => 'tpb'],
-    '261' => ['label' => 'BC 2.6.1 - Pengeluaran Subkontrak',     'role' => 'tpb'],
-    '262' => ['label' => 'BC 2.6.2 - Pemasukan Subkontrak',      'role' => 'tpb'],
-    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'plb'],
-    '33'  => ['label' => 'BC 3.3 - Ekspor dari PLB',             'role' => 'plb'],
-    '331' => ['label' => 'BC 3.3.1 - P3BET PLB',                 'role' => 'plb'],
-    '631' => ['label' => 'PPKEK 6.3.1 - Pengeluaran ke LDP',     'role' => 'ppkek'],
+    // --- PEMASUKAN (INBOUND) ---
+    '16'  => ['label' => 'BC 1.6 - Pemasukan ke PLB',            'role' => 'plb',   'group' => 'pemasukan'],
+    '20'  => ['label' => 'BC 2.0 - Impor untuk Dipakai (PIB)',    'role' => 'pib',   'group' => 'pemasukan'],
+    '23'  => ['label' => 'BC 2.3 - Impor TPB / Kawasan Berikat', 'role' => 'tpb',   'group' => 'pemasukan'],
+    '262' => ['label' => 'BC 2.6.2 - Pemasukan Subkontrak',      'role' => 'tpb',   'group' => 'pemasukan'],
+    '28'  => ['label' => 'BC 2.8 - Impor dari PLB',              'role' => 'plb',   'group' => 'pemasukan'],
+    '40'  => ['label' => 'BC 4.0 - Pemasukan TLDDP ke TPB',     'role' => 'tpb',   'group' => 'pemasukan'],
+    '611' => ['label' => 'PPKEK 6.1.1 - Pemasukan ke KEK (LDP)',  'role' => 'ppkek', 'group' => 'pemasukan'],
+    '613' => ['label' => 'PPKEK 6.1.3 - Pemasukan ke KEK (TLDDP)','role' => 'ppkek', 'group' => 'pemasukan'],
+
+    // --- PENGELUARAN (OUTBOUND) ---
+    '25'  => ['label' => 'BC 2.5 - Pengeluaran TPB ke TLDDP',    'role' => 'tpb',   'group' => 'pengeluaran'],
+    '261' => ['label' => 'BC 2.6.1 - Pengeluaran Subkontrak',     'role' => 'tpb',   'group' => 'pengeluaran'],
+    '27'  => ['label' => 'BC 2.7 - Pengeluaran Antar TPB',       'role' => 'tpb',   'group' => 'pengeluaran'],
+    '30'  => ['label' => 'BC 3.0 - Pemberitahuan Ekspor (PEB)',   'role' => 'peb',   'group' => 'pengeluaran'],
+    '33'  => ['label' => 'BC 3.3 - Ekspor dari PLB',             'role' => 'plb',   'group' => 'pengeluaran'],
+    '331' => ['label' => 'BC 3.3.1 - P3BET PLB',                 'role' => 'plb',   'group' => 'pengeluaran'],
+    '41'  => ['label' => 'BC 4.1 - Pengeluaran Sementara ke TLDDP', 'role' => 'tpb', 'group' => 'pengeluaran'],
+    '631' => ['label' => 'PPKEK 6.3.1 - Pengeluaran ke LDP',     'role' => 'ppkek', 'group' => 'pengeluaran'],
 ];
 
 $allowedBcOptions = [];
 foreach ($allBcCatalog as $code => $info) {
     if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $effectiveAllowedDocs)) {
-        $allowedBcOptions[$code] = $info['label'];
+        $allowedBcOptions[$code] = $info;
     }
 }
 if (empty($allowedBcOptions)) {
     foreach ($allBcCatalog as $code => $info) {
         if (!empty($_SESSION['is_super_admin']) || in_array((string)$code, $companyAllowedDocs)) {
-            $allowedBcOptions[$code] = $info['label'];
+            $allowedBcOptions[$code] = $info;
         }
     }
 }
@@ -4538,14 +4541,35 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
                 <select id="entryDocBc" onchange="onEntryBcChange(this.value)" style="font-weight:700; color:var(--primary);">
                     <?php 
-                    $firstBc = true;
-                    foreach ($allowedBcOptions as $bcCode => $bcLabel): 
+                    $pemasukanOpts = [];
+                    $pengeluaranOpts = [];
+                    foreach ($allowedBcOptions as $bcCode => $bcInfo) {
+                        $label = is_array($bcInfo) ? $bcInfo['label'] : $bcInfo;
+                        $grp = is_array($bcInfo) ? ($bcInfo['group'] ?? 'pengeluaran') : 'pengeluaran';
+                        if ($grp === 'pemasukan') {
+                            $pemasukanOpts[$bcCode] = $label;
+                        } else {
+                            $pengeluaranOpts[$bcCode] = $label;
+                        }
+                    }
+                    $isFirst = true;
                     ?>
-                        <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
-                    <?php 
-                        $firstBc = false;
-                    endforeach; 
-                    ?>
+                    <?php if (!empty($pemasukanOpts)): ?>
+                        <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                            <?php foreach ($pemasukanOpts as $bcCode => $bcLabel): ?>
+                                <option value="<?= htmlspecialchars($bcCode) ?>" <?= $isFirst ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                                <?php $isFirst = false; ?>
+                            <?php endforeach; ?>
+                        </optgroup>
+                    <?php endif; ?>
+                    <?php if (!empty($pengeluaranOpts)): ?>
+                        <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                            <?php foreach ($pengeluaranOpts as $bcCode => $bcLabel): ?>
+                                <option value="<?= htmlspecialchars($bcCode) ?>" <?= $isFirst ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                                <?php $isFirst = false; ?>
+                            <?php endforeach; ?>
+                        </optgroup>
+                    <?php endif; ?>
                 </select>
                 <div style="display:flex; gap:4px; margin-top:2px;">
                     <button type="button" class="btn btn-secondary btn-xs" style="flex:1;" onclick="openConfigAjuModal()">⚙️ Konfig AJU</button>
@@ -5846,21 +5870,26 @@ $isEditMode = !empty($selectedAjuParam);
                     <div>
                         <label style="font-size:10px; font-weight:700; color:var(--text-muted); display:block; margin-bottom:2px;">DOKUMEN BC:</label>
                         <select id="cfgFilterDocBc" onchange="loadFilterSettingsData()" style="font-weight:700; padding:4px 8px; font-size:11px; border:1px solid var(--border); border-radius:4px; background:var(--bg-input); color:var(--text-main);">
-                            <option value="23">BC 2.3 - Impor TPB / Kawasan Berikat</option>
-                            <option value="40">BC 4.0 - Pemasukan TLDDP ke TPB</option>
-                            <option value="30">BC 3.0 - Pemberitahuan Ekspor (PEB)</option>
-                            <option value="25">BC 2.5 - Pengeluaran TPB ke TLDDP</option>
-                            <option value="27">BC 2.7 - Pengeluaran Antar TPB</option>
-                            <option value="20">BC 2.0 - Impor untuk Dipakai (PIB)</option>
-                            <option value="16">BC 1.6 - Pemasukan ke PLB</option>
-                            <option value="41">BC 4.1 - Pengeluaran Sementara ke TLDDP</option>
-                            <option value="261">BC 2.6.1 - Pengeluaran Subkontrak</option>
-                            <option value="262">BC 2.6.2 - Pemasukan Subkontrak</option>
-                            <option value="28">BC 2.8 - Impor dari PLB</option>
-                            <option value="33">BC 3.3 - Ekspor dari TPB</option>
-                            <option value="611">BC 6.1.1 - Pemasukan ke KEK</option>
-                            <option value="613">BC 6.1.3 - Pengeluaran dari KEK</option>
-                            <option value="631">PPKEK 6.3.1 - Pengeluaran ke LDP</option>
+                            <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                                <option value="16">BC 1.6 - Pemasukan ke PLB</option>
+                                <option value="20">BC 2.0 - Impor untuk Dipakai (PIB)</option>
+                                <option value="23">BC 2.3 - Impor TPB / Kawasan Berikat</option>
+                                <option value="262">BC 2.6.2 - Pemasukan Subkontrak</option>
+                                <option value="28">BC 2.8 - Impor dari PLB</option>
+                                <option value="40">BC 4.0 - Pemasukan TLDDP ke TPB</option>
+                                <option value="611">PPKEK 6.1.1 - Pemasukan ke KEK (LDP)</option>
+                                <option value="613">PPKEK 6.1.3 - Pemasukan ke KEK (TLDDP)</option>
+                            </optgroup>
+                            <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                                <option value="25">BC 2.5 - Pengeluaran TPB ke TLDDP</option>
+                                <option value="261">BC 2.6.1 - Pengeluaran Subkontrak</option>
+                                <option value="27">BC 2.7 - Pengeluaran Antar TPB</option>
+                                <option value="30">BC 3.0 - Pemberitahuan Ekspor (PEB)</option>
+                                <option value="33">BC 3.3 - Ekspor dari PLB</option>
+                                <option value="331">BC 3.3.1 - P3BET PLB</option>
+                                <option value="41">BC 4.1 - Pengeluaran Sementara ke TLDDP</option>
+                                <option value="631">PPKEK 6.3.1 - Pengeluaran ke LDP</option>
+                            </optgroup>
                         </select>
                     </div>
 
@@ -6211,21 +6240,26 @@ $isEditMode = !empty($selectedAjuParam);
                     <div>
                         <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">Jenis Dokumen BC:</label>
                         <select id="cfgBc" onchange="loadConfigAjuForBc(this.value)" style="width:100%;">
-                            <option value="23">BC 2.3</option>
-                            <option value="40">BC 4.0</option>
-                            <option value="30">BC 3.0</option>
-                            <option value="25">BC 2.5</option>
-                            <option value="27">BC 2.7</option>
-                            <option value="20">BC 2.0</option>
-                            <option value="16">BC 1.6</option>
-                            <option value="41">BC 4.1</option>
-                            <option value="261">BC 2.6.1</option>
-                            <option value="262">BC 2.6.2</option>
-                            <option value="28">BC 2.8</option>
-                            <option value="33">BC 3.3</option>
-                            <option value="611">BC 6.1.1</option>
-                            <option value="613">BC 6.1.3</option>
-                            <option value="631">PPKEK 6.3.1</option>
+                            <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                                <option value="16">BC 1.6</option>
+                                <option value="20">BC 2.0</option>
+                                <option value="23" selected>BC 2.3</option>
+                                <option value="262">BC 2.6.2</option>
+                                <option value="28">BC 2.8</option>
+                                <option value="40">BC 4.0</option>
+                                <option value="611">PPKEK 6.1.1</option>
+                                <option value="613">PPKEK 6.1.3</option>
+                            </optgroup>
+                            <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                                <option value="25">BC 2.5</option>
+                                <option value="261">BC 2.6.1</option>
+                                <option value="27">BC 2.7</option>
+                                <option value="30">BC 3.0</option>
+                                <option value="33">BC 3.3</option>
+                                <option value="331">BC 3.3.1</option>
+                                <option value="41">BC 4.1</option>
+                                <option value="631">PPKEK 6.3.1</option>
+                            </optgroup>
                         </select>
                     </div>
                     <div>

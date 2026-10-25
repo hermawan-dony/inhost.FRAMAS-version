@@ -181,6 +181,17 @@ if ($action === 'list') {
             $totRekap += (int)$rk['jml'];
         }
     }
+    // Urutkan rekap: Pemasukan lebih dulu, kemudian Pengeluaran, masing-masing urut kode dokumen numerik
+    $docSortWeight = [
+        '16' => 10, '20' => 20, '23' => 30, '262' => 40, '27IN' => 50, '28' => 60, '40' => 70, '611' => 80, '613' => 90,
+        '25' => 110, '261' => 120, '27' => 130, '27OUT' => 131, '30' => 140, '33' => 150, '331' => 160, '41' => 170, '631' => 180
+    ];
+    usort($rekapBc, function($a, $b) use ($docSortWeight) {
+        $wA = $docSortWeight[$a['bc']] ?? 999;
+        $wB = $docSortWeight[$b['bc']] ?? 999;
+        if ($wA === $wB) return strcmp((string)$a['bc'], (string)$b['bc']);
+        return $wA - $wB;
+    });
 
     $sql = "SELECT * FROM (
         SELECT
@@ -2593,23 +2604,27 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             </div>
                             <select id="filterBc" class="filter-control" onchange="onBcFilterChange()">
                                 <option value="">Semua Dokumen</option>
-                                <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN (Pemasukan TPB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
-                                <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                                <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                                <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                                <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                                <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
+                                <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                                    <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN (Pemasukan TPB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                                </optgroup>
+                                <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                                    <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                                    <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                                </optgroup>
                                 <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
                                     <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
                                 <?php endif; ?>
@@ -3356,6 +3371,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 if (totalEl) totalEl.innerText = '0';
                 return;
             }
+
+            const docOrder = {
+                '16': 10, '20': 20, '23': 30, '262': 40, '27IN': 50, '28': 60, '40': 70, '611': 80, '613': 90,
+                '25': 110, '261': 120, '27': 130, '27OUT': 131, '30': 140, '33': 150, '331': 160, '41': 170, '631': 180
+            };
+            currentRekapData.sort((a, b) => {
+                const wA = docOrder[a.bc] !== undefined ? docOrder[a.bc] : 999;
+                const wB = docOrder[b.bc] !== undefined ? docOrder[b.bc] : 999;
+                if (wA === wB) return String(a.bc).localeCompare(String(b.bc));
+                return wA - wB;
+            });
 
             let tot = 0;
             currentRekapData.forEach(item => {

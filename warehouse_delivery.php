@@ -55,7 +55,7 @@ if ($action === 'list') {
     $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
 
     $escCmp = $koneksi->real_escape_string($filter_cmp);
-    $allOutboundCodes = ['25', '41', '261', '27', '613', '631', '30', '33', '331'];
+    $allOutboundCodes = ['25', '261', '27', '30', '33', '331', '41', '613', '631'];
     $allowedOutboundWh = (!empty($isAdmin) && (empty($filter_cmp) || $filter_cmp === 'ALL')) 
         ? $allOutboundCodes 
         : array_values(array_filter($allOutboundCodes, 'isWhOutDocPermitted'));
@@ -955,14 +955,14 @@ if ($action === 'detail_tab') {
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen Keluar</option>
                                 <?php if (isWhOutDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran KB ke TLDDP)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Keluar)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET PLB)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
                             </select>
                         </div>
                         <div class="filter-col">

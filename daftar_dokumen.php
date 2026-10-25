@@ -45,6 +45,9 @@ $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
         global $isAdmin, $sessionCmpId, $companyAllowedDocs, $effectiveAllowedDocs;
+        if ($d === '27IN') {
+            return isDocPermitted('27');
+        }
         // Jika Super Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
         if (!empty($isAdmin) && empty($sessionCmpId)) {
             return true;
@@ -101,7 +104,13 @@ if ($action === 'list') {
         }
     }
     if (!empty($filter_bc)) {
-        $where[] = "a.kodeDokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
+        if ($filter_bc === '27IN') {
+            $where[] = "(a.kodeDokumen = '27IN' OR (a.kodeDokumen = '27' AND a.namaPerusahaan NOT LIKE '%$cleanCmp%'))";
+        } elseif ($filter_bc === '27') {
+            $where[] = "(a.kodeDokumen = '27' OR a.kodeDokumen = '27OUT')";
+        } else {
+            $where[] = "a.kodeDokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
+        }
     }
 
     // Penegakan Izin Jenis Dokumen Bea Cukai Pengguna
@@ -1528,22 +1537,27 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <label>DOKUMEN BC</label>
                     <select id="filterBc" onchange="loadList()" class="filter-control">
                         <option value="">Semua Dokumen</option>
-                        <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
-                        <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                        <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                        <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                        <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                        <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor)</option><?php endif; ?>
+                        <optgroup label="─── PEMASUKAN (INBOUND) ───">
+                            <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
+                            <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN (Pemasukan TPB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
+                            <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
+                            <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                        </optgroup>
+                        <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
+                            <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
+                            <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
+                            <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
+                            <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
+                            <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                        </optgroup>
                         <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
                             <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
                         <?php endif; ?>
