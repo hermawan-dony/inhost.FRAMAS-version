@@ -2945,6 +2945,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             <button type="button" class="ant-btn ant-btn-sm ant-btn-success" onclick="startBatchDownloadExcel()" id="btnBatchDownload" style="font-weight:600;">
                 📥 Unduh Excel Terpilih (<span id="batchBtnCount">0</span>)
             </button>
+            <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" onclick="startBatchImportH2H()" id="btnBatchImportH2H" style="font-weight:600; background:#1890ff; border-color:#1890ff;">
+                ⚡ Import ke H2H Terpilih (<span id="batchBtnCountH2H">0</span>)
+            </button>
             <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllOnCurrentPage()" title="Pilih semua dokumen di halaman ini">Pilih Halaman Ini</button>
             <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllFilteredData()" title="Pilih seluruh dokumen hasil filter">Pilih Semua Filter</button>
             <button type="button" class="ant-btn ant-btn-sm" onclick="clearAllSelection()" title="Batalkan seluruh centang">Batal Pilih</button>
@@ -2955,17 +2958,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <!-- 2. CONTEXT MENU KLIK KANAN BARIS TABEL -->
     <div id="ddContextMenu" class="dd-context-menu">
         <div class="dd-context-item" id="ctxItemDownloadExcel">
-            <svg viewBox="64 64 896 896" width="13" height="13" fill="#52c41a">
-                <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M514.1 639.9l61.7-89c3.1-4.5 4.7-9.9 4.7-15.3 0-14.7-11.9-26.6-26.6-26.6h-34.9c-7.3 0-14.1 3.5-18.4 9.4l-40.3 58-40.3-58c-4.3-5.9-11.1-9.4-18.4-9.4h-34.9c-14.7 0-26.6 11.9-26.6 26.6 0 5.4 1.6 10.8 4.7 15.3l61.7 89-63.5 91.6c-3.1 4.5-4.7 9.9-4.7 15.3 0 14.7 11.9 26.6 26.6 26.6h35.5c7.3 0 14.1-3.5 18.4-9.4l42-60.5 42 60.5c4.3 5.9 11.1 9.4 18.4 9.4h35.5c14.7 0 26.6-11.9 26.6-26.6 0-5.4-1.6-10.8-4.7-15.3l-63.5-91.6z"/>
             </svg>
-            <span style="font-weight:600; color:#389e0d;">Unduh Excel (CEISA 4.0)</span>
+            <span>Unduh Excel</span>
         </div>
         <div class="dd-context-item" id="ctxItemImportH2H">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
                 <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
                 <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
             </svg>
-            <span style="font-weight:600; color:#1890ff;">Import ke Data H2H</span>
+            <span>Import ke H2H</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemCetakDokumen">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M336 496h352v64H336zm0 144h352v64H336z"/>
+            </svg>
+            <span>Cetak Dokumen</span>
         </div>
         <div class="dd-context-item" id="ctxItemViewPdf">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
@@ -2979,6 +2990,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
             </svg>
             <span>Riwayat Status Tracking</span>
+        </div>
+        <div class="dd-context-divider" id="ctxDividerDelete" style="display:none;"></div>
+        <div class="dd-context-item row-action-item-danger" id="ctxItemDeleteDoc" style="display:none; color:#ff4d4f;" title="Hapus dokumen yang masih berstatus perekaman">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
+                <path d="M864 256H736V160c0-35.3-28.7-64-64-64H352c-35.3 0-64 28.7-64 64v96H160c-17.7 0-32 14.3-32 32v16c0 4.4 3.6 8 8 8h56.4l41.6 572.2c2.6 35.7 32.4 63.8 68.2 63.8h419.6c35.8 0 65.6-28.1 68.2-63.8L831.6 312H888c4.4 0 8-3.6 8-8v-16c0-17.7-14.3-32-32-32zM368 176h288v80H368v-80zm386.1 704H269.9l-39.6-544h533.4l-39.6 544z"/>
+                <path d="M432 400h48v336h-48zm112 0h48v336h-48z"/>
+            </svg>
+            <span style="font-weight:600;">Hapus Dokumen</span>
         </div>
         <div class="dd-context-divider"></div>
         <div class="dd-context-item" id="ctxItemSelectToggle">
@@ -3034,8 +3053,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <div style="display:flex; align-items:center; gap:8px;">
                     <span style="font-size:16px;">🛡️</span>
                     <div>
-                        <h3 style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Unduh Excel Massal CEISA 4.0</h3>
-                        <div style="font-size:10px; color:#52c41a; font-weight:600; margin-top:2px;">Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif</div>
+                        <h3 id="batchModalTitle" style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Unduh Excel Massal CEISA 4.0</h3>
+                        <div id="batchModalSubtitle" style="font-size:10px; color:#52c41a; font-weight:600; margin-top:2px;">Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif</div>
                     </div>
                 </div>
                 <button type="button" class="ant-btn ant-btn-sm" onclick="cancelBatchDownload()">✕</button>
@@ -3672,7 +3691,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
 
                 html += `
-                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}')">
+                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}', '${r.kode_proses || ''}', '${r.namaProses ? encodeURIComponent(r.namaProses) : ''}', '${r.nomor_daftar || ''}')">
                         <td style="text-align:center;" class="col-select-mode">
                             <input type="checkbox" class="row-select-cb" data-aju="${r.nomor_aju}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow('${r.nomor_aju}', this.checked)" style="cursor:pointer;">
                         </td>
@@ -3906,8 +3925,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const count = (typeof selectedAju !== 'undefined' && selectedAju) ? selectedAju.size : 0;
             const elSelected = document.getElementById('batchSelectedCount');
             const elBtn = document.getElementById('batchBtnCount');
+            const elBtnH2H = document.getElementById('batchBtnCountH2H');
             if (elSelected) elSelected.innerText = count;
             if (elBtn) elBtn.innerText = count;
+            if (elBtnH2H) elBtnH2H.innerText = count;
 
             const bar = document.getElementById('batchActionBar');
             if (bar && isModeSelectActive) {
@@ -3922,12 +3943,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             window.open(url, '_blank');
         }
 
-        // Context Menu Handler
-        function openRowContextMenu(e, nomorAju, cmpId, pdfFile) {
+        // Context Menu Handler (Klik Kanan Baris Tabel)
+        let activeContextMenuAju = '';
+        let activeContextMenuCmp = '';
+        let activeContextMenuPdf = '';
+        let activeContextMenuIdHeader = '';
+        let activeContextMenuKodeDok = '';
+        let activeContextMenuKodeProses = '';
+        let activeContextMenuNamaProses = '';
+        let activeContextMenuNomorDaftar = '';
+
+        function openRowContextMenu(e, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen, kodeProses, namaProses, nomorDaftar) {
             e.preventDefault();
             activeContextMenuAju = nomorAju;
             activeContextMenuCmp = cmpId;
             activeContextMenuPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+            activeContextMenuIdHeader = idHeader || '';
+            activeContextMenuKodeDok = kodeDokumen || '';
+            activeContextMenuKodeProses = kodeProses || '';
+            activeContextMenuNamaProses = namaProses ? decodeURIComponent(namaProses) : '';
+            activeContextMenuNomorDaftar = nomorDaftar || '';
 
             const menu = document.getElementById('ddContextMenu');
             if (!menu) return;
@@ -3941,9 +3976,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 itemPdf.style.display = activeContextMenuPdf ? 'flex' : 'none';
             }
 
+            // Opsi Hapus Dokumen: hanya aktif jika status masih perekaman dokumen
+            const isPerekaman = (activeContextMenuKodeProses === '001') || 
+                                (activeContextMenuNamaProses && activeContextMenuNamaProses.toLowerCase().includes('rekam')) ||
+                                ((!activeContextMenuKodeProses || activeContextMenuKodeProses === '001') && (!activeContextMenuNomorDaftar || activeContextMenuNomorDaftar === '-'));
+
+            const itemDel = document.getElementById('ctxItemDeleteDoc');
+            const divDel = document.getElementById('ctxDividerDelete');
+            if (itemDel) itemDel.style.display = isPerekaman ? 'flex' : 'none';
+            if (divDel) divDel.style.display = isPerekaman ? 'block' : 'none';
+
             // Atur posisi menu agar tidak keluar layar
             const x = Math.min(e.clientX, window.innerWidth - 210);
-            const y = Math.min(e.clientY, window.innerHeight - 180);
+            const y = Math.min(e.clientY, window.innerHeight - (isPerekaman ? 245 : 205));
 
             menu.style.left = `${x}px`;
             menu.style.top = `${y}px`;
@@ -3962,7 +4007,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
-                downloadSingleCeisaExcel(activeContextMenuAju, activeContextMenuCmp);
+                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(activeContextMenuAju)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}`;
+                window.open(url, '_blank');
+            }
+        });
+
+        document.getElementById('ctxItemImportH2H')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                executeImportToH2H(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemCetakDokumen')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                const url = `daftar_dokumen.php?action=cetak_formulir&nomor_aju=${encodeURIComponent(activeContextMenuAju)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}`;
+                window.open(url, '_blank');
             }
         });
 
@@ -3983,11 +4046,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         });
 
-        document.getElementById('ctxItemImportH2H')?.addEventListener('click', function(e) {
+        document.getElementById('ctxItemDeleteDoc')?.addEventListener('click', function(e) {
             e.stopPropagation();
             closeContextMenu();
             if (activeContextMenuAju) {
-                executeImportToH2H(activeContextMenuAju, activeContextMenuCmp);
+                executeDeleteDocument(activeContextMenuAju, activeContextMenuCmp, activeContextMenuIdHeader, activeContextMenuKodeDok, activeContextMenuKodeProses);
             }
         });
 
@@ -4330,6 +4393,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const modal = document.getElementById('modalBatchProgress');
             if (modal) modal.style.display = 'flex';
 
+            const mTitle = document.getElementById('batchModalTitle');
+            if (mTitle) mTitle.innerHTML = '📥 Unduh Excel Massal CEISA 4.0';
+            const mSubtitle = document.getElementById('batchModalSubtitle');
+            if (mSubtitle) mSubtitle.innerHTML = 'Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif (Jeda Acak 2.5s - 5.0s)';
+
             document.getElementById('batchModalProgressBar').style.width = '0%';
             document.getElementById('batchModalPercent').innerText = '0%';
             document.getElementById('batchCountSuccess').innerText = '0';
@@ -4493,6 +4561,149 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (!batchSuccessfulAjus || batchSuccessfulAjus.length === 0) return;
             const url = `download_ceisa_excel.php?action=bundle_zip&nomor_ajus=${encodeURIComponent(batchSuccessfulAjus.join(','))}`;
             window.location.href = url;
+        }
+
+        // =========================================================================
+        // ENGINE BATCH IMPORT KE DATA H2H DENGAN PROTEKSI WAF & JEDA AMAN
+        // =========================================================================
+        async function startBatchImportH2H() {
+            if (!selectedAju || selectedAju.size === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih Dokumen',
+                    text: 'Silakan pilih / centang minimal 1 dokumen untuk diimpor ke Data Host to Host.',
+                    confirmButtonColor: '#1890ff'
+                });
+                return;
+            }
+
+            const ajus = Array.from(selectedAju);
+            const total = ajus.length;
+
+            const confirmRes = await Swal.fire({
+                icon: 'question',
+                title: '<span style="font-size:15px; font-weight:700;">Import Massal ke Host to Host</span>',
+                html: `
+                    <div style="text-align:left; font-size:11.5px; line-height:1.5;">
+                        <p>Anda akan mengimpor <b>${total} dokumen CEISA 4.0</b> ke tabel Staging Host to Host beserta rincian kontainer, kemasan, dokumen, dan barang.</p>
+                        <div style="background:rgba(24,144,255,0.08); border-left:3px solid #1890ff; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
+                            🛡️ <b>Proteksi Anti-Blokir WAF Bea Cukai Aktif:</b><br>
+                            Sistem akan memproses secara sekuensial (berurutan satu per satu) dengan <b>jeda aman (2.0 – 4.0 detik)</b> antar dokumen untuk menjaga kestabilan gateway CEISA dan menghindarkan alamat IP dari pemblokiran firewall.
+                        </div>
+                        <p style="margin:0;">Mulai proses impor massal sekarang?</p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '⚡ Mulai Import Aman',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#1890ff',
+                cancelButtonColor: '#8c8c8c',
+                reverseButtons: true
+            });
+
+            if (!confirmRes.isConfirmed) return;
+
+            batchDownloadCancelled = false;
+            batchDownloadPaused = false;
+            batchSuccessfulAjus = [];
+
+            // Buka Modal Progress Batch dan sesuaikan judulnya
+            const modal = document.getElementById('modalBatchProgress');
+            if (modal) modal.style.display = 'flex';
+
+            const mTitle = document.getElementById('batchModalTitle');
+            if (mTitle) mTitle.innerHTML = '⚡ Import Massal ke Data H2H (CEISA 4.0)';
+            const mSubtitle = document.getElementById('batchModalSubtitle');
+            if (mSubtitle) mSubtitle.innerHTML = 'Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif (Jeda Aman 2.0s - 4.0s)';
+
+            document.getElementById('batchModalProgressBar').style.width = '0%';
+            document.getElementById('batchModalPercent').innerText = '0%';
+            document.getElementById('batchCountSuccess').innerText = '0';
+            document.getElementById('batchCountFailed').innerText = '0';
+            document.getElementById('batchModalLogList').innerHTML = '';
+            document.getElementById('btnBatchPauseResume').style.display = 'inline-block';
+            document.getElementById('btnBatchPauseResume').innerHTML = '⏸️ Jeda';
+            document.getElementById('btnBatchCancel').style.display = 'inline-block';
+            document.getElementById('btnBatchDownloadZip').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'none';
+            document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+
+            let successCount = 0;
+            let failedCount = 0;
+            const failedAjus = [];
+
+            for (let i = 0; i < ajus.length; i++) {
+                if (batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerHTML = '<span style="color:#cf1322;">⚠️ Proses dibatalkan oleh pengguna.</span>';
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Proses impor dihentikan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    break;
+                }
+
+                while (batchDownloadPaused && !batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerText = `⏸️ Proses impor dijeda (${i}/${total})...`;
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Klik "▶️ Lanjutkan" untuk melanjutkan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    await new Promise(r => setTimeout(r, 400));
+                }
+
+                const aju = ajus[i];
+                const num = i + 1;
+                const pct = Math.round(((num - 1) / total) * 100);
+
+                document.getElementById('batchModalProgressBar').style.width = `${pct}%`;
+                document.getElementById('batchModalPercent').innerText = `${pct}%`;
+                document.getElementById('batchModalStatusText').innerHTML = `[${num}/${total}] Mengimpor: <b style="color:var(--primary); font-family:monospace;">${aju}</b>...`;
+                document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+                document.getElementById('batchModalSafetyTimer').innerText = `Mengambil data dari gateway LNSW CEISA 4.0 & staging H2H...`;
+
+                try {
+                    const cmpId = document.getElementById('filterCmp')?.value || '';
+                    const res = await fetch(`daftar_dokumen.php?action=import_to_h2h&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                    const json = await res.json();
+
+                    if (json.status === 'OK') {
+                        successCount++;
+                        batchSuccessfulAjus.push(aju);
+                        document.getElementById('batchCountSuccess').innerText = successCount;
+                        const infoMsg = json.source ? `Berhasil (${json.source})` : 'Berhasil Masuk H2H';
+                        appendBatchLog(num, aju, true, infoMsg);
+                    } else {
+                        failedCount++;
+                        failedAjus.push({ aju, message: json.message || 'Gagal' });
+                        document.getElementById('batchCountFailed').innerText = failedCount;
+                        appendBatchLog(num, aju, false, json.message || 'Gagal');
+                    }
+                } catch (err) {
+                    failedCount++;
+                    failedAjus.push({ aju, message: err.message });
+                    document.getElementById('batchCountFailed').innerText = failedCount;
+                    appendBatchLog(num, aju, false, err.message);
+                }
+
+                const currentPct = Math.round((num / total) * 100);
+                document.getElementById('batchModalProgressBar').style.width = `${currentPct}%`;
+                document.getElementById('batchModalPercent').innerText = `${currentPct}%`;
+
+                // Jika bukan item terakhir dan belum dibatalkan, lakukan jeda acak WAF Evasion (2.0s - 4.0s)
+                if (i < ajus.length - 1 && !batchDownloadCancelled) {
+                    const delayMs = Math.floor(2000 + Math.random() * 2000); // 2.0s - 4.0s
+                    await countdownWafSafety(delayMs);
+                }
+            }
+
+            // Selesai loop
+            document.getElementById('batchSafetySpinner').style.display = 'none';
+            document.getElementById('btnBatchPauseResume').style.display = 'none';
+            document.getElementById('btnBatchCancel').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'inline-block';
+
+            if (!batchDownloadCancelled) {
+                document.getElementById('batchModalProgressBar').style.width = '100%';
+                document.getElementById('batchModalPercent').innerText = '100%';
+                document.getElementById('batchModalStatusText').innerHTML = `<span style="color:#52c41a; font-weight:700;">✓ Impor Massal Selesai! (${successCount} sukses, ${failedCount} gagal)</span>`;
+                document.getElementById('batchModalSafetyTimer').innerText = `Semua dokumen terpilih telah diproses dan disimpan ke tabel Staging Host to Host.`;
+            }
         }
 
         // =========================================================================
