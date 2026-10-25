@@ -1434,36 +1434,53 @@ if ($initialTab === 'editor') {
             gap: 0 !important;
         }
 
-        /* Sidebar Company Card (NAMA PERUSAHAAN) */
+        /* Sidebar Company Card (Sleek Modern Workspace Switcher - No Icon, Clear Bold Name) */
         .sidebar-company-card {
-            margin: 8px 12px 2px;
-            padding: 6px 10px;
-            background: var(--bg-base);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
+            margin: 6px 10px 4px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, rgba(24, 144, 255, 0.05) 0%, rgba(24, 144, 255, 0.015) 100%), var(--bg-card, #ffffff);
+            border: 1px solid rgba(24, 144, 255, 0.22);
+            border-left: 3.5px solid #1890ff;
+            border-radius: 8px;
             display: flex;
             align-items: center;
-            gap: 8px;
-            transition: all 0.2s ease;
+            justify-content: space-between;
+            gap: 10px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(24, 144, 255, 0.03);
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
             user-select: none;
             flex-shrink: 0;
+            position: relative;
+            overflow: hidden;
+        }
+        body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]) {
+            background: linear-gradient(135deg, rgba(24, 144, 255, 0.12) 0%, rgba(255, 255, 255, 0.02) 100%), #1f1f1f;
+            border-color: rgba(24, 144, 255, 0.35);
+            border-left-color: #177ddc;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
         }
         .sidebar-company-card.is-admin-clickable {
             cursor: pointer;
         }
         .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover {
-            background: var(--primary-light);
-            border-color: var(--primary);
-            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.12);
+            background: linear-gradient(135deg, rgba(24, 144, 255, 0.10) 0%, rgba(24, 144, 255, 0.04) 100%), var(--bg-card, #ffffff);
+            border-color: #1890ff;
+            border-left-color: #096dd9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(24, 144, 255, 0.16);
+        }
+        body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover {
+            background: linear-gradient(135deg, rgba(24, 144, 255, 0.18) 0%, rgba(255, 255, 255, 0.04) 100%), #262626;
+            border-color: #40a9ff;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
         }
         .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover {
             filter: brightness(1.08);
-            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.22);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
         }
         .sidebar-company-icon {
-            font-size: 14px;
-            line-height: 1;
-            flex-shrink: 0;
+            display: none !important;
         }
         .sidebar-company-info {
             flex: 1 1 auto;
@@ -1471,29 +1488,68 @@ if ($initialTab === 'editor') {
             overflow: hidden;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            gap: 2px;
         }
-        .sidebar-company-name {
-            font-size: 11px;
+        .sidebar-company-meta {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 2px;
+            line-height: 1;
+        }
+        .sidebar-company-status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: #52c41a;
+            box-shadow: 0 0 0 2px rgba(82, 196, 26, 0.2);
+            flex-shrink: 0;
+            display: inline-block;
+            animation: pulseActiveDot 2.4s infinite ease-in-out;
+        }
+        @keyframes pulseActiveDot {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.25); opacity: 0.7; }
+        }
+        .sidebar-company-tag {
+            font-size: 8px;
             font-weight: 700;
-            color: var(--card-title-color, var(--text-main));
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            line-height: 1.25;
-        }
-        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-name {
-            color: var(--primary);
+            letter-spacing: 0.5px;
+            color: var(--card-sub-color, var(--text-muted, #8c8c8c));
+            text-transform: uppercase;
         }
         .sidebar-company-sub {
-            font-size: 9px;
-            font-family: monospace;
-            color: var(--card-sub-color, var(--text-muted));
+            font-size: 8.5px;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-weight: 700;
+            color: #1890ff;
+            background: rgba(24, 144, 255, 0.08);
+            padding: 1px 5px;
+            border-radius: 3px;
+            line-height: 1.2;
+        }
+        body[data-theme="dark"] .sidebar-company-sub {
+            color: #40a9ff;
+            background: rgba(24, 144, 255, 0.16);
+        }
+        .sidebar-company-name {
+            font-size: 13.5px;
+            font-weight: 800;
+            color: var(--card-title-color, var(--text-main, #141414));
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            line-height: 1.2;
-            margin-top: 1px;
+            line-height: 1.3;
+            letter-spacing: 0.2px;
+        }
+        body[data-theme="dark"] .sidebar-company-name {
+            color: var(--card-title-color, #f0f0f0);
+        }
+        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-name {
+            color: #1890ff;
+        }
+        body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-name {
+            color: #40a9ff;
         }
         .sidebar-company-action {
             flex-shrink: 0;
@@ -1504,22 +1560,30 @@ if ($initialTab === 'editor') {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 2px 6px;
-            border-radius: 4px;
-            background: var(--card-btn-bg, var(--primary-light));
-            color: var(--card-btn-color, var(--primary));
-            border: 1px solid var(--card-btn-border, transparent);
-            font-size: 9px;
-            font-weight: 600;
-            transition: all 0.2s;
-            gap: 2px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: var(--card-btn-bg, rgba(24, 144, 255, 0.08));
+            color: var(--card-btn-color, #1890ff);
+            border: 1px solid var(--card-btn-border, rgba(24, 144, 255, 0.25));
+            font-size: 9.5px;
+            font-weight: 700;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            gap: 4px;
+            letter-spacing: 0.2px;
         }
         .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-btn {
-            background: var(--primary);
-            color: #fff;
+            background: #1890ff;
+            color: #ffffff;
+            border-color: #1890ff;
+            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.35);
+        }
+        body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-btn {
+            background: #177ddc;
+            color: #ffffff;
+            border-color: #177ddc;
         }
         .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover .sidebar-company-btn {
-            filter: brightness(1.15);
+            filter: brightness(1.2);
         }
 
         /* Sidebar Search Box (Matches CEISA 4.0 .Menu_searchWrapper__1Kj_Z) */
@@ -3198,28 +3262,24 @@ if ($initialTab === 'editor') {
             }
             $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
             ?>
-            <!-- Active Company Card (Admin & Authorized User bisa ganti perusahaan / bisa di-hide via setting) -->
+            <!-- Active Company Card (Sleek Modern Workspace Switcher - No Icon, Clear Bold Name) -->
             <div class="sidebar-company-card <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk ganti perusahaan aktif' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
-                <div class="sidebar-company-icon" id="sidebarCompanyLogoBox">
-                    <?php if (!empty($sessionLogo)): ?>
-                        <img src="<?= htmlspecialchars($sessionLogo) ?>" alt="Logo" style="width:22px; height:22px; object-fit:contain; border-radius:4px; background:#fff; padding:1px; box-shadow:0 1px 3px rgba(0,0,0,0.15);" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
-                    <?php else: ?>
-                        🏢
-                    <?php endif; ?>
-                </div>
+                <div id="sidebarCompanyLogoBox" style="display:none;" aria-hidden="true"></div>
                 <div class="sidebar-company-info">
+                    <div class="sidebar-company-meta">
+                        <span class="sidebar-company-status-dot" title="Sesi Perusahaan Aktif"></span>
+                        <span class="sidebar-company-tag">PERUSAHAAN AKTIF</span>
+                        <span class="sidebar-company-sub" id="sidebarCompanySub">[<?= htmlspecialchars($sessionCmpId) ?>]</span>
+                    </div>
                     <div class="sidebar-company-name" id="sidebarCompanyName" title="<?= htmlspecialchars($sessionCmpName) ?>">
                         <?= htmlspecialchars($sessionCmpName) ?>
-                    </div>
-                    <div class="sidebar-company-sub" id="sidebarCompanySub">
-                        [<?= htmlspecialchars($sessionCmpId) ?>]
                     </div>
                 </div>
                 <?php if ($canSwitchCompany): ?>
                 <div class="sidebar-company-action">
-                    <span class="sidebar-company-btn" title="Ganti Perusahaan">
-                        <svg viewBox="64 64 896 896" width="10" height="10" fill="currentColor">
-                            <path d="M759.2 383c-4.5-5-10.7-7.9-17.2-7.9H164.8c-13.3 0-24 10.7-24 24v48c0 13.3 10.7 24 24 24h476.3L527.4 584.7c-9.4 9.4-9.4 24.6 0 33.9l33.9 33.9c9.4 9.4 24.6 9.4 33.9 0l221.7-221.7c4.6-4.6 7.1-10.8 7.1-17.3s-2.5-12.7-7.1-17.3l-57.7-53.2z"></path>
+                    <span class="sidebar-company-btn" title="Klik untuk beralih perusahaan">
+                        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/>
                         </svg>
                         <span>Ganti</span>
                     </span>
@@ -5131,8 +5191,7 @@ if ($initialTab === 'editor') {
 
                 div.innerHTML = `
                     <div style="display:flex; flex-direction:column; gap:2px;">
-                        <div style="font-weight:600; font-size:12px; color:${isActive ? '#1890ff' : 'var(--text-main)'}; display:flex; align-items:center; gap:6px;">
-                            <span>🏢</span>
+                        <div style="font-weight:700; font-size:13px; color:${isActive ? '#1890ff' : 'var(--text-main)'}; display:flex; align-items:center; gap:6px;">
                             <span>${escapeHtml(c.cmp_name)}</span>
                             ${c.card_color ? `
                                 <span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${escapeHtml(c.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(c.card_color)}"></span>
