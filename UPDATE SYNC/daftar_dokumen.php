@@ -533,7 +533,7 @@ if ($action === 'cetak_formulir') {
     exit;
 }
 
-// 2. UNDUH EXCEL: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
+// 2. UNDUH EXCEL: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
 if ($action === 'unduh_excel') {
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
     $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
@@ -554,43 +554,69 @@ if ($action === 'unduh_excel') {
     $idHeader = trim($rowDoc['idHeader'] ?? '');
     if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
         $targetCmp = $rowDoc['cmp_id'];
-    }
-
-    // Panggil report-parser LNSW via initMFA jika idHeader ada
-    if (!empty($idHeader)) {
-        $cmp_id = $targetCmp;
-        $_GET['cmp_id'] = $targetCmp;
-        require_once __DIR__ . '/initmfa.php';
-        $comp = ceisa_get_company($targetCmp);
-        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
-
-        if (!empty($activeToken)) {
-            $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=" . urlencode($idHeader);
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 20,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $activeToken,
-                    'beacukai-api-key: ' . $apiKey,
-                    'Accept: application/json, text/plain, */*',
-                    'Origin: https://portal.beacukai.go.id',
-                    'Referer: https://portal.beacukai.go.id/'
-                ]
-            ]);
-            $respJson = curl_exec($ch);
-            curl_close($ch);
+    } elseif (empty($targetCmp)) {
+        $comp = ceisa_get_company($cleanAju);
+        if ($comp && !empty($comp['cmp_id'])) {
+            $targetCmp = $comp['cmp_id'];
+        } elseif (!empty($_SESSION['company_cmp_id'])) {
+            $targetCmp = $_SESSION['company_cmp_id'];
         }
     }
 
-    // Unduh berkas Excel resmi 21 Sheet via service CEISA 4.0
+    $cacheDir = __DIR__ . '/excel_cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0777, true);
+    }
+    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+
+    // 1. Prioritas Utama: Ambil payload JSON resmi via API LNSW report-parser jika idHeader ada
+    if (!empty($idHeader)) {
+        try {
+            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
+            if (!empty($docArr['data'])) {
+                CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
+                // Sekaligus lakukan staging ke database MySQL agar data langsung sinkron
+                try {
+                    CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
+                } catch (\Throwable $eStg) {}
+            }
+        } catch (\Throwable $eLnsw) {
+            error_log("unduh_excel LNSW error: " . $eLnsw->getMessage());
+        }
+    }
+
+    // 2. Fallback: Jika berkas belum ada di cache, coba bangun dari tabel staging database
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
+            require_once __DIR__ . '/CeisaXlsxExporter.php';
+            try {
+                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+                if ($chk && $chk->num_rows > 0) {
+                    $exporter = new CeisaXlsxExporter($koneksi);
+                    $exporter->generateXlsx($cleanAju, $excelPath);
+                }
+            } catch (\Throwable $eExp) {}
+        }
+    }
+
+    // Jika berkas Excel sudah berhasil dibuat / ada di cache
+    if (file_exists($excelPath) && filesize($excelPath) >= 1500) {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $cleanAju . '.xlsx"');
+        header('Content-Length: ' . filesize($excelPath));
+        header('Cache-Control: public, max-age=86400');
+        readfile($excelPath);
+        exit;
+    }
+
+    // 3. Fallback Terakhir: Arahkan ke service download_ceisa_excel.php
     header("Location: /download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp));
     exit;
 }
 
-// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=$idHeader
+// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
 if ($action === 'import_to_h2h') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
@@ -622,44 +648,42 @@ if ($action === 'import_to_h2h') {
         }
     }
 
-    // Coba ambil JSON via API report-parser LNSW jika idHeader ada
-    if (!empty($idHeader)) {
-        $cmp_id = $targetCmp;
-        $_GET['cmp_id'] = $targetCmp;
-        require_once __DIR__ . '/initmfa.php';
-
-        $comp = ceisa_get_company($targetCmp);
-        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
-
-        if (!empty($activeToken)) {
-            $url = "https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc?idHeader=" . urlencode($idHeader);
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => $url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 25,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_HTTPHEADER => [
-                    'Authorization: Bearer ' . $activeToken,
-                    'beacukai-api-key: ' . $apiKey,
-                    'Accept: application/json, text/plain, */*',
-                    'Origin: https://portal.beacukai.go.id',
-                    'Referer: https://portal.beacukai.go.id/'
-                ]
-            ]);
-            $respJson = curl_exec($ch);
-            curl_close($ch);
-            $docArr = @json_decode($respJson, true);
-        }
-    }
-
-    // Pastikan berkas Excel CEISA tersedia untuk impor presisi 21 Sheet
     $cacheDir = __DIR__ . '/excel_cache';
     if (!is_dir($cacheDir)) {
         @mkdir($cacheDir, 0777, true);
     }
     $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
 
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+
+    // 1. Prioritas Utama: Impor langsung via LNSW JSON report-parser (cepat, lengkap, presisi)
+    if (!empty($idHeader)) {
+        try {
+            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
+            if (!empty($docArr['data'])) {
+                $importResult = CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
+                
+                // Simpan berkas Excel ke cache sekaligus
+                try {
+                    CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
+                } catch (\Throwable $eEx) {}
+
+                echo json_encode([
+                    'status'    => 'OK',
+                    'nomor_aju' => $cleanAju,
+                    'cmp_id'    => $targetCmp,
+                    'source'    => 'LNSW_JSON',
+                    'message'   => "Dokumen {$cleanAju} berhasil diimpor langsung dari CEISA 4.0 ke Staging Host to Host!",
+                    'details'   => $importResult
+                ]);
+                exit;
+            }
+        } catch (\Throwable $eLnsw) {
+            error_log("import_to_h2h via LNSW failed: " . $eLnsw->getMessage() . ". Falling back to Excel importer.");
+        }
+    }
+
+    // 2. Fallback: Gunakan file Excel jika sudah ada di cache atau generate dari service
     if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
         $genSuccess = false;
         if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
@@ -694,12 +718,12 @@ if ($action === 'import_to_h2h') {
     if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
         echo json_encode([
             'status' => 'ERROR',
-            'message' => "Berkas dokumen CEISA untuk pengajuan {$cleanAju} tidak ditemukan di server dan belum berhasil diunduh. Silakan gunakan opsi 'Unduh Excel' terlebih dahulu untuk memastikan koneksi ke CEISA 4.0 aktif."
+            'message' => "Dokumen pengajuan {$cleanAju} tidak dapat diakses dari API LNSW maupun Excel service. Pastikan kredensial login dan OTP MFA perusahaan telah aktif."
         ]);
         exit;
     }
 
-    // Eksekusi CeisaXlsxImporter
+    // Eksekusi CeisaXlsxImporter dari file Excel
     try {
         require_once __DIR__ . '/CeisaXlsxImporter.php';
         $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
@@ -709,6 +733,7 @@ if ($action === 'import_to_h2h') {
             'status'    => 'OK',
             'nomor_aju' => $cleanAju,
             'cmp_id'    => $targetCmp,
+            'source'    => 'XLSX_FILE',
             'message'   => "Dokumen {$cleanAju} berhasil diimpor ke Data Host to Host!",
             'details'   => $result
         ]);

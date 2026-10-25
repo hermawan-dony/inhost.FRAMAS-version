@@ -280,6 +280,52 @@ function fetchCeisaExcel($nomorAju, $idUser, $activeToken, $apiKey) {
     return [$resp, $httpCode, $contentType, $err];
 }
 
+// 2.2b Prioritas Utama: Ambil dokumen via API LNSW report-parser jika idHeader tersedia
+if (file_exists(__DIR__ . '/CeisaJsonDocParser.php')) {
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+    $escAju = $koneksi ? $koneksi->real_escape_string($cleanAju) : $cleanAju;
+    $qHdr = $koneksi ? $koneksi->query("SELECT idHeader FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1") : null;
+    $rowHdr = $qHdr ? $qHdr->fetch_assoc() : null;
+    $idHeader = trim($rowHdr['idHeader'] ?? '');
+
+    if (!empty($idHeader)) {
+        try {
+            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
+            if (!empty($docArr['data'])) {
+                CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $cachedFile);
+                if (file_exists($cachedFile) && filesize($cachedFile) > 1000) {
+                    try {
+                        CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
+                    } catch (\Throwable $eStg) {}
+
+                    if ($format === 'json') {
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'status'       => 'OK',
+                            'nomor_aju'    => $cleanAju,
+                            'cached'       => false,
+                            'source'       => 'lnsw_report_parser',
+                            'size'         => filesize($cachedFile),
+                            'filename'     => $cleanAju . '.xlsx',
+                            'download_url' => 'download_ceisa_excel.php?nomor_aju=' . urlencode($cleanAju) . '&cmp_id=' . urlencode($targetCmp)
+                        ]);
+                        exit;
+                    }
+
+                    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+                    header('Content-Disposition: attachment; filename="' . $cleanAju . '.xlsx"');
+                    header('Content-Length: ' . filesize($cachedFile));
+                    header('Cache-Control: public, max-age=86400');
+                    readfile($cachedFile);
+                    exit;
+                }
+            }
+        } catch (\Throwable $eLnsw) {
+            error_log("download_ceisa_excel LNSW parser attempt: " . $eLnsw->getMessage());
+        }
+    }
+}
+
 list($resp, $httpCode, $contentType, $err) = fetchCeisaExcel($cleanAju, $idUser, $activeToken, $apiKey);
 
 // Jika 401 atau 403, coba refresh token 1 kali
