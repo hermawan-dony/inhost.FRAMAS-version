@@ -703,6 +703,109 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .kpi-val-danger { color: #ff4d4f; }
         .kpi-label-danger { color: #ff4d4f; }
 
+        .btn-rekap-mini {
+            margin-left: 4px;
+            padding: 0 5px;
+            font-size: 8.5px;
+            font-weight: 700;
+            color: #cf1322;
+            background: #fff1f0;
+            border: 1px solid #ffa39e;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            line-height: 14px;
+            height: 15px;
+        }
+        .btn-rekap-mini:hover {
+            background: #ff4d4f;
+            color: #ffffff;
+            border-color: #ff4d4f;
+        }
+        .rekap-floating-window {
+            position: fixed;
+            top: 135px;
+            right: 25px;
+            width: 340px;
+            background: var(--bg-card);
+            border: 1px solid #ffa39e;
+            border-radius: 4px;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.12);
+            z-index: 1040;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            font-family: inherit;
+        }
+        [data-theme="dark"] .rekap-floating-window {
+            background: #141414;
+            border-color: #a61d24;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+        }
+        .rekap-window-header {
+            background: linear-gradient(180deg, #fff1f0 0%, #ffccc7 100%);
+            border-bottom: 1px solid #ffa39e;
+            padding: 5px 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: move;
+        }
+        [data-theme="dark"] .rekap-window-header {
+            background: linear-gradient(180deg, #2a1215 0%, #431418 100%);
+            border-bottom: 1px solid #a61d24;
+        }
+        .rekap-window-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: #cf1322;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        [data-theme="dark"] .rekap-window-title {
+            color: #ff7875;
+        }
+        .rekap-window-close {
+            background: transparent;
+            border: none;
+            font-size: 15px;
+            line-height: 1;
+            color: #595959;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+        .rekap-window-close:hover {
+            color: #ff4d4f;
+        }
+        .rekap-row {
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .rekap-row:hover {
+            background: #fff7e6 !important;
+        }
+        [data-theme="dark"] .rekap-row:hover {
+            background: #2b1d11 !important;
+        }
+        .rekap-row.active-rekap-row {
+            background: #e6f7ff !important;
+            font-weight: 600;
+        }
+        [data-theme="dark"] .rekap-row.active-rekap-row {
+            background: #111d2c !important;
+        }
+        .rekap-row.active-rekap-row td {
+            color: #0050b3 !important;
+        }
+        [data-theme="dark"] .rekap-row.active-rekap-row td {
+            color: #40a9ff !important;
+        }
+
         /* -------------------------------------------------------------
            FILTER PANEL (.filter-panel)
            ------------------------------------------------------------- */
@@ -1363,6 +1466,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span>Rekap Dokumen</span>
                 </button>
 
+                <!-- Rekap Belum IT Inv -->
+                <button type="button" class="ant-btn" id="btnRekapNotInv" onclick="toggleRekapBulananNotInv()" title="Buka Rekap Dokumen Belum Masuk IT Inventory per Bulan">
+                    <svg viewBox="64 64 896 896" width="12" height="12" fill="#cf1322">
+                        <path d="M880 184H712v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H384v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H144c-17.7 0-32 14.3-32 32v664c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V216c0-17.7-14.3-32-32-32zm-40 656H184V336h656v504zm0-568H184v-40h136v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h256v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h136v40z"></path>
+                    </svg>
+                    <span style="color:#cf1322; font-weight:600;">Rekap Belum IT Inv</span>
+                </button>
+
                 <!-- Filter -->
                 <button type="button" class="ant-btn" onclick="toggleFilterPanel()">
                     <svg viewBox="64 64 896 896" width="12" height="12" fill="currentColor">
@@ -1406,6 +1517,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <div class="kpi-chip" id="kpiChipNotInv" onclick="filterByCard('not_inv')" title="Klik untuk memfilter hanya dokumen yang belum masuk IT Inventory (bc_1ab2)" style="display:none;">
                     <span class="kpi-label kpi-label-danger">Belum Masuk IT Inv</span>
                     <strong class="kpi-val kpi-val-danger" id="kpiNotInv">0</strong>
+                    <button type="button" class="btn-rekap-mini" onclick="event.stopPropagation(); toggleRekapBulananNotInv();" title="Buka Rekap Dokumen Belum Masuk IT Inventory per Bulan">📊 Rekap</button>
                 </div>
             </div>
 
@@ -1553,6 +1665,50 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     </li>
                 </ul>
             </div>
+        </div>
+    </div>
+
+    <!-- FLOATING WINDOW: REKAP DOKUMEN BELUM MASUK IT INVENTORY PER BULAN -->
+    <div id="rekapBulananNotInvModal" class="rekap-floating-window" style="display:none; width:350px; right:25px; top:135px;">
+        <div class="rekap-window-header" id="rekapBulananHeader">
+            <div class="rekap-window-title">
+                <svg viewBox="64 64 896 896" width="13" height="13" fill="#cf1322">
+                    <path d="M880 184H712v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H384v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H144c-17.7 0-32 14.3-32 32v664c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V216c0-17.7-14.3-32-32-32zm-40 656H184V336h656v504zm0-568H184v-40h136v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h256v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h136v40z"></path>
+                </svg>
+                <span>Rekap Belum IT Inv per Bulan</span>
+            </div>
+            <button type="button" class="rekap-window-close" onclick="closeRekapBulananNotInv()" title="Tutup">×</button>
+        </div>
+        <div style="padding:6px 10px; background:var(--bg-filter); border-bottom:1px solid var(--border-card); display:flex; justify-content:space-between; align-items:center; gap:6px;">
+            <button type="button" class="ant-btn ant-btn-sm" id="btnToggleRekapSort" onclick="setRekapSortMode(rekapSortMode === 'month_desc' ? 'count_desc' : 'month_desc')" style="font-size:10px; height:20px; padding:0 6px;">
+                <span>Urut: <b>Bulan Terbaru ↓</b></span>
+            </button>
+            <div style="display:flex; align-items:center; gap:4px;">
+                <button type="button" class="ant-btn ant-btn-sm" onclick="resetRekapMonthFilter()" style="font-size:9.5px; height:20px; padding:0 5px;" title="Tampilkan Semua Bulan">
+                    Semua
+                </button>
+                <span class="ant-tag ant-tag-red" style="font-weight:700; font-size:10.5px; padding:0 6px;" title="Total Dokumen Belum Masuk IT Inventory" id="rekapBulananTotal">
+                    0
+                </span>
+            </div>
+        </div>
+        <div style="max-height:360px; overflow-y:auto; overflow-x:hidden;">
+            <table class="ant-table" style="width:100%; border-collapse:collapse;">
+                <thead class="ant-table-thead" style="position:sticky; top:0; z-index:2;">
+                    <tr>
+                        <th style="width:28px; text-align:center; padding:4px;">#</th>
+                        <th style="padding:4px 8px;">Bulan / Periode</th>
+                        <th style="text-align:right; width:95px; padding:4px 8px;">Belum IT Inv</th>
+                        <th style="text-align:right; width:55px; padding:4px 8px;">% Ratio</th>
+                    </tr>
+                </thead>
+                <tbody class="ant-table-tbody" id="rekapBulananTbody">
+                    <tr><td colspan="4" style="text-align:center; padding:16px; color:#8c8c8c;">Memuat rekap...</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div style="padding:4px 8px; background:var(--bg-filter); border-top:1px solid var(--border-card); font-size:9.5px; color:#8c8c8c; text-align:center;">
+            💡 <i>Klik baris bulan untuk memfilter dokumen pada tabel utama</i>
         </div>
     </div>
 
@@ -2040,10 +2196,15 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         let currentCardFilter = 'all'; // 'all', 'unposted', 'posted', 'not_inv'
+        let selectedRekapMonth = '';
+        let rekapSortMode = 'month_desc'; // 'month_desc' | 'count_desc'
 
         function filterByCard(type) {
             if (document.getElementById('filterStatus')) {
                 document.getElementById('filterStatus').value = '';
+            }
+            if (type !== 'not_inv') {
+                selectedRekapMonth = '';
             }
             if (currentCardFilter === type) {
                 if (type !== 'all') {
@@ -2053,6 +2214,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 currentCardFilter = type;
             }
             updateCardFilterUI();
+            if (document.getElementById('rekapBulananNotInvModal')?.style.display !== 'none') {
+                renderRekapBulananTable();
+            }
             currentPage = 1;
             filterClientTable();
         }
@@ -2096,11 +2260,20 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
                     const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
                     if (isInv !== 1 || inItInv) return false;
+
+                    if (selectedRekapMonth) {
+                        let ym = (r.tanggal_daftar || '').substring(0, 7);
+                        if (!ym || ym.length < 7) {
+                            const aju = r.nomor_aju || '';
+                            if (aju.length >= 18) ym = aju.substring(12, 16) + '-' + aju.substring(16, 18); else ym = 'Lainnya';
+                        }
+                        if (ym !== selectedRekapMonth) return false;
+                    }
                 }
 
                 if (fBc && !('bc ' + r.bc).toLowerCase().includes(fBc)) return false;
                 if (fAju && !r.nomor_aju.toLowerCase().includes(fAju)) return false;
-                if (fDaftar && !(r.nomor_daftar || '').toLowerCase().includes(fDaftar)) return false;
+                if (fDaftar && !((r.nomor_daftar || '') + ' ' + (r.tanggal_daftar || '')).toLowerCase().includes(fDaftar)) return false;
                 if (fRespon && !(r.bcd_namaRespon || (parseInt(r.posted) > 0 ? 'sppb' : '')).toLowerCase().includes(fRespon)) return false;
                 if (fJalur && !(r.bcd_kodeJalur || 'h').toLowerCase().includes(fJalur)) return false;
                 if (fPerusahaan && !(r.cmp_name || r.bs || '').toLowerCase().includes(fPerusahaan)) return false;
@@ -2679,8 +2852,165 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
+        /* -------------------------------------------------------------
+           REKAP DOKUMEN BELUM MASUK IT INVENTORY PER BULAN (MODAL & FILTER)
+           ------------------------------------------------------------- */
+        function toggleRekapBulananNotInv() {
+            const el = document.getElementById('rekapBulananNotInvModal');
+            if (!el) return;
+            if (el.style.display === 'none' || el.style.display === '') {
+                el.style.display = 'flex';
+                renderRekapBulananTable();
+            } else {
+                closeRekapBulananNotInv();
+            }
+        }
+
+        function closeRekapBulananNotInv() {
+            const el = document.getElementById('rekapBulananNotInvModal');
+            if (el) el.style.display = 'none';
+        }
+
+        function setRekapSortMode(mode) {
+            rekapSortMode = mode;
+            renderRekapBulananTable();
+        }
+
+        function renderRekapBulananTable() {
+            const tbody = document.getElementById('rekapBulananTbody');
+            const totalEl = document.getElementById('rekapBulananTotal');
+            const sortBtn = document.getElementById('btnToggleRekapSort');
+            if (!tbody) return;
+
+            if (sortBtn) {
+                sortBtn.innerHTML = rekapSortMode === 'month_desc' 
+                    ? '<span>Urut: <b>Bulan Terbaru ↓</b></span>' 
+                    : '<span>Urut: <b>Jumlah Terbanyak ↓</b></span>';
+            }
+
+            const map = {};
+            const totalPerMonth = {};
+            let totalUnposted = 0;
+
+            ajuData.forEach(r => {
+                let ym = (r.tanggal_daftar || '').substring(0, 7);
+                if (!ym || ym.length < 7) {
+                    const aju = r.nomor_aju || '';
+                    if (aju.length >= 18) ym = aju.substring(12, 16) + '-' + aju.substring(16, 18); else ym = 'Lainnya';
+                }
+                totalPerMonth[ym] = (totalPerMonth[ym] || 0) + 1;
+
+                const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
+                const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
+                if (isInv === 1 && !inItInv) {
+                    if (!map[ym]) {
+                        map[ym] = { ym: ym, count: 0, byBc: {} };
+                    }
+                    map[ym].count++;
+                    totalUnposted++;
+                    const bc = r.bc || '?';
+                    map[ym].byBc[bc] = (map[ym].byBc[bc] || 0) + 1;
+                }
+            });
+
+            if (totalEl) totalEl.innerText = totalUnposted.toLocaleString('id-ID');
+
+            let list = Object.values(map);
+            if (rekapSortMode === 'month_desc') {
+                list.sort((a, b) => b.ym.localeCompare(a.ym));
+            } else {
+                list.sort((a, b) => b.count - a.count || b.ym.localeCompare(a.ym));
+            }
+
+            tbody.innerHTML = '';
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:16px; color:#8c8c8c;">Semua dokumen telah masuk IT Inventory!</td></tr>';
+                return;
+            }
+
+            list.forEach((item, idx) => {
+                const tr = document.createElement('tr');
+                tr.className = 'rekap-row' + (selectedRekapMonth === item.ym ? ' active-rekap-row' : '');
+                tr.onclick = function() {
+                    filterByRekapMonth(item.ym);
+                };
+
+                const totalMonth = totalPerMonth[item.ym] || item.count;
+                const pct = totalMonth > 0 ? ((item.count / totalMonth) * 100).toFixed(1) + '%' : '0%';
+                const bcParts = Object.entries(item.byBc).map(([bc, cnt]) => `BC ${bc}: ${cnt}`).join(', ');
+
+                tr.innerHTML = `
+                    <td style="text-align:center; color:#8c8c8c; font-size:10px;">${idx + 1}</td>
+                    <td style="font-weight:700; color:var(--text-heading); font-family:monospace; font-size:11.5px;">
+                        ${item.ym}
+                        ${selectedRekapMonth === item.ym ? ' <span style="color:#1890ff; font-weight:700;">✓</span>' : ''}
+                    </td>
+                    <td style="text-align:right;">
+                        <span class="ant-tag ant-tag-red" style="font-weight:700; font-size:11px; padding:0 6px;">${item.count.toLocaleString('id-ID')}</span>
+                    </td>
+                    <td style="text-align:right; color:#8c8c8c; font-size:10px;" title="${escapeHtml(bcParts)}">
+                        ${pct}
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterByRekapMonth(ym) {
+            if (selectedRekapMonth === ym) {
+                selectedRekapMonth = '';
+            } else {
+                selectedRekapMonth = ym;
+                currentCardFilter = 'not_inv';
+                updateCardFilterUI();
+            }
+            renderRekapBulananTable();
+            currentPage = 1;
+            filterClientTable();
+        }
+
+        function resetRekapMonthFilter() {
+            selectedRekapMonth = '';
+            renderRekapBulananTable();
+            currentPage = 1;
+            filterClientTable();
+        }
+
+        function initDraggableRekapBulanan() {
+            const win = document.getElementById('rekapBulananNotInvModal');
+            const hdr = document.getElementById('rekapBulananHeader');
+            if (!win || !hdr) return;
+
+            let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            hdr.onmousedown = function(e) {
+                if (e.target.closest('.rekap-window-close')) return;
+                e.preventDefault();
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = closeDrag;
+                document.onmousemove = dragElement;
+            };
+
+            function dragElement(e) {
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                win.style.top = (win.offsetTop - pos2) + "px";
+                win.style.left = (win.offsetLeft - pos1) + "px";
+                win.style.right = 'auto';
+            }
+
+            function closeDrag() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+            }
+        }
+
         window.onload = function() {
             loadList();
+            initDraggableRekapBulanan();
             // Otomatis sinkronisasi latar belakang saat halaman dibuka (progress tidak terlihat)
             setTimeout(() => {
                 triggerSilentCeisaSync(false);
