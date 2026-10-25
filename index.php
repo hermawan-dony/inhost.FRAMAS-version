@@ -55,21 +55,16 @@ if ($action === 'login') {
     $username = strtolower(trim($_POST['username'] ?? ''));
     $password = trim($_POST['password'] ?? '');
 
-    if (empty($cmp_id) || empty($password)) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Silakan pilih akses atau perusahaan dan masukkan password.']);
+    if (empty($password)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Kata Sandi / Password wajib diisi.']);
         exit;
     }
 
-    // A. Login Khusus SUPER ADMINISTRATOR (Pilihan [ADMIN] ATAU Username 'dp' / 'admin')
-    $isSuperAdminAttempt = (strtolower($cmp_id) === 'admin' || $username === 'dp' || $username === 'admin');
-    if ($isSuperAdminAttempt) {
-        $targetUser = !empty($username) ? $username : 'dp';
-        $uEsc = $koneksi->real_escape_string($targetUser);
-
-        $checkAdmin = $koneksi->query("SELECT user_id, nama_lengkap, password, role FROM bc_ceisa_login 
-                                       WHERE (user_id = '{$uEsc}' OR user_id = 'dp' OR user_id = 'admin') 
-                                         AND (role = 'superadmin' OR cmp_id = 'SYSTEM' OR user_id = 'admin' OR user_id = 'dp') 
-                                       ORDER BY (user_id = '{$uEsc}') DESC, (role = 'superadmin') DESC LIMIT 1");
+    // A. Login Khusus SUPER ADMINISTRATOR (Username 'dp' ATAU 'admin' tanpa company ATAU cmp_id 'admin' tanpa username)
+    $isSuperAttempt = ($username === 'dp' || (empty($username) && strtolower($cmp_id) === 'admin'));
+    if ($isSuperAttempt) {
+        $checkAdmin = $koneksi->query("SELECT user_id, nama_lengkap, password, role, last_cmp_id FROM bc_ceisa_login 
+                                       WHERE user_id = 'dp' AND (role = 'superadmin' OR cmp_id = 'SYSTEM') LIMIT 1");
         $validPass = '';
         $adminUserRow = null;
         if ($checkAdmin && $ar = $checkAdmin->fetch_assoc()) {
@@ -82,57 +77,48 @@ if ($action === 'login') {
             $loggedName   = $adminUserRow['nama_lengkap'] ?? 'Super Administrator (DP)';
 
             $_SESSION['is_super_admin']   = true;
-            $_SESSION['is_admin']         = true; // Super Admin memegang kendali penuh
+            $_SESSION['is_admin']         = true;
             $_SESSION['is_company_admin'] = false;
+            $_SESSION['can_switch_company'] = true;
             $_SESSION['user_id']          = $loggedUserId;
             $_SESSION['user_name']        = $loggedName;
             $_SESSION['user_role']        = 'superadmin';
             $_SESSION['allowed_menus']    = ['*'];
             $_SESSION['allowed_docs']     = ['*'];
 
-            // Jika login via portal perusahaan spesifik, gunakan perusahaan tersebut sebagai konteks awal
-            $targetCmpSearch = ($cmp_id !== 'admin' && !empty($cmp_id)) ? $cmp_id : '';
-            if (!empty($targetCmpSearch)) {
-                $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE (cmp_id = '{$koneksi->real_escape_string($targetCmpSearch)}' OR npwp = '{$koneksi->real_escape_string($targetCmpSearch)}') LIMIT 1");
-            } else {
-                $cRes = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
-            }
-
+            // Tentukan Perusahaan Aktif Berdasarkan Pilihan Terakhir Pengguna
+            $prefCmp = !empty($adminUserRow['last_cmp_id']) ? $adminUserRow['last_cmp_id'] : ($_COOKIE['ceisa_last_cmp_' . $loggedUserId] ?? ($_COOKIE['ceisa_last_cmp'] ?? 'FRM-1'));
+            $cStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR subdomain = ? LIMIT 1");
+            $cStmt->bind_param("ss", $prefCmp, $prefCmp);
+            $cStmt->execute();
+            $cRes = $cStmt->get_result();
             if ($cRes && $cr = $cRes->fetch_assoc()) {
-                $_SESSION['company_cmp_id']     = $cr['cmp_id'];
-                $_SESSION['company_name']       = $cr['cmp_name'];
-                $_SESSION['company_npwp']       = $cr['npwp'];
-                $_SESSION['is_inv']             = (int)$cr['IS_INV'];
-                $_SESSION['company_roles']      = $cr['company_roles'] ?: 'tpb';
-                $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs($cr['company_roles'], $cr['allowed_docs'] ?? null);
-                $_SESSION['company_erp_name']   = $cr['ERP_Name'] ?: '-';
-                $_SESSION['company_logo']       = $cr['logo'] ?? '';
-                $_SESSION['company_subdomain']  = $cr['subdomain'] ?? '';
-                $_SESSION['company_card_color'] = $cr['card_color'] ?? '';
+                $comp = $cr;
             } else {
-                $_SESSION['company_cmp_id']     = '010816064431000';
-                $_SESSION['company_name']       = 'FRAMAS INDO';
-                $_SESSION['company_npwp']       = '010816064431000';
-                $_SESSION['is_inv']             = 1;
-                $_SESSION['company_roles']      = 'tpb';
-                $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs('tpb', null);
-                $_SESSION['company_erp_name']   = '-';
-                $_SESSION['company_logo']       = '';
-                $_SESSION['company_subdomain']  = 'framas';
-                $_SESSION['company_card_color'] = '';
+                $fb = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+                $comp = $fb ? $fb->fetch_assoc() : null;
             }
+            $cStmt->close();
 
-            // Pastikan akun tersimpan di bc_ceisa_login
-            @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto)
-                             VALUES ('SYSTEM', '{$loggedUserId}', '{$loggedName}', '{$password}', '1', 'superadmin', '*', '*', 1, 'ALL')
-                             ON DUPLICATE KEY UPDATE password = VALUES(password), role = 'superadmin', is_active = 1");
+            if ($comp) {
+                $_SESSION['company_cmp_id']     = $comp['cmp_id'];
+                $_SESSION['company_name']       = $comp['cmp_name'];
+                $_SESSION['company_npwp']       = $comp['npwp'];
+                $_SESSION['is_inv']             = (int)$comp['IS_INV'];
+                $_SESSION['company_roles']      = $comp['company_roles'] ?: 'tpb';
+                $_SESSION['allowed_docs']       = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
+                $_SESSION['company_erp_name']   = $comp['ERP_Name'] ?: '-';
+                $_SESSION['company_logo']       = $comp['logo'] ?? '';
+                $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
+                $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
+            }
 
             // Catat log pengunjung login
             recordVisitorAccess($koneksi, [
                 'event'     => 'login',
                 'user_id'   => $loggedUserId,
                 'user_name' => $loggedName,
-                'cmp_id'    => 'SYSTEM'
+                'cmp_id'    => $comp['cmp_id'] ?? 'SYSTEM'
             ]);
 
             echo json_encode([
@@ -140,6 +126,8 @@ if ($action === 'login') {
                 'is_admin'       => true,
                 'is_super_admin' => true,
                 'user_role'      => 'superadmin',
+                'cmp_id'         => $comp['cmp_id'] ?? 'FRM-1',
+                'cmp_name'       => $comp['cmp_name'] ?? 'FRAMAS - 1',
                 'message'        => 'Login Super Administrator berhasil!'
             ]);
             exit;
@@ -149,168 +137,187 @@ if ($action === 'login') {
         }
     }
 
-    // B. Login Khusus Akun PERUSAHAAN (Username Wajib Diisi)
+    // B. Login PENGGUNA (Semua User: EXIM, WAREHOUSE, PRODUKSI, SUPERVISOR, OPERATOR, ADMIN)
     if (empty($username)) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Nama Pengguna (Username) wajib diisi untuk login perusahaan.']);
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nama Pengguna (Username) wajib diisi.']);
         exit;
     }
 
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(app_password, '1234') as app_password, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR npwp = ? LIMIT 1");
-    if ($stmt) {
-        $stmt->bind_param("ss", $cmp_id, $cmp_id);
-        $stmt->execute();
-        $res = $stmt->get_result();
-        if ($res && $comp = $res->fetch_assoc()) {
-            $realCmpId = $comp['cmp_id'];
+    // Cari akun pengguna di tabel bc_ceisa_login berdasarkan user_id
+    $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto, last_cmp_id 
+                                FROM bc_ceisa_login 
+                                WHERE user_id = ? 
+                                ORDER BY (cmp_id != '*') DESC LIMIT 1");
+    $uStmt->bind_param("s", $username);
+    $uStmt->execute();
+    $uRes = $uStmt->get_result();
 
-            // B1. Autentikasi Pengguna di tabel bc_ceisa_login (Mendukung cmp_id spesifik maupun '*')
-            $uStmt = $koneksi->prepare("SELECT cmp_id, user_id, nama_lengkap, password, lvl, role, allowed_menus, allowed_docs, is_active, oto FROM bc_ceisa_login WHERE (cmp_id = ? OR cmp_id = '*') AND user_id = ? ORDER BY (cmp_id = ?) DESC LIMIT 1");
-            $uStmt->bind_param("sss", $realCmpId, $username, $realCmpId);
-            $uStmt->execute();
-            $uRes = $uStmt->get_result();
-            if ($uRes && $u = $uRes->fetch_assoc()) {
-                if ((int)$u['is_active'] === 0) {
-                    echo json_encode(['status' => 'ERROR', 'message' => "Akun pengguna '$username' sedang dinonaktifkan. Hubungi Administrator Perusahaan."]);
-                    $uStmt->close();
-                    $stmt->close();
-                    exit;
-                }
-                if ($u['password'] === $password) {
-                    $userRole     = strtolower($u['role'] ?: 'operator');
-                    $isSuper      = ($u['user_id'] === 'dp' || $userRole === 'superadmin');
-                    $isCompAdmin  = ($userRole === 'admin' && !$isSuper);
-
-                    // Multi-Company switching: Superadmin, oto ALL, role exim/warehouse/produksi/supervisor, or Framas companies
-                    $canSwitch = $isSuper 
-                        || $u['cmp_id'] === '*' 
-                        || strtoupper($u['oto'] ?? '') === 'ALL'
-                        || in_array($userRole, ['exim', 'warehouse', 'produksi', 'supervisor'])
-                        || in_array($comp['cmp_id'], ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])
-                        || in_array(strtolower($u['user_id']), ['agret', 'ayu', 'jois', 'shafira', 'fahd', 'suryani', 'maikel']);
-
-                    $_SESSION['is_super_admin']   = $isSuper;
-                    $_SESSION['is_company_admin'] = $isCompAdmin;
-                    $_SESSION['is_admin']         = $isSuper; // STRICT: Hanya Super Administrator yang berhak is_admin = true!
-                    $_SESSION['can_switch_company'] = $canSwitch;
-                    $_SESSION['user_id']          = $u['user_id'];
-                    $_SESSION['user_name']        = !empty($u['nama_lengkap']) ? $u['nama_lengkap'] : $u['user_id'];
-                    $_SESSION['user_role']        = $userRole;
-                    $_SESSION['company_cmp_id']   = $comp['cmp_id'];
-                    $_SESSION['company_name']     = $comp['cmp_name'];
-                    $_SESSION['company_npwp']     = $comp['npwp'];
-                    $_SESSION['is_inv']           = (int)$comp['IS_INV'];
-                    $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
-                    $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
-                    $_SESSION['company_logo']     = $comp['logo'] ?? '';
-                    $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
-                    $_SESSION['company_card_color']= $comp['card_color'] ?? '';
-
-                    if ($userRole === 'bc') {
-                        $_SESSION['allowed_menus'] = ['it_inventory'];
-                    } else {
-                        $m = $u['allowed_menus'];
-                        $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
-                    }
-                    $compAllowed = ceisa_resolve_allowed_docs($comp['company_roles'] ?: 'tpb', $comp['allowed_docs'] ?? null);
-                    $_SESSION['company_allowed_docs'] = $compAllowed;
-
-                    $d = $u['allowed_docs'];
-                    $uDocs = ceisa_parse_docs($d);
-                    $_SESSION['user_allowed_docs'] = $uDocs;
-
-                    if ($isSuper || in_array('*', $uDocs)) {
-                        $_SESSION['allowed_docs'] = $isSuper ? ['*'] : $compAllowed;
-                    } else {
-                        $_SESSION['allowed_docs'] = array_values(array_intersect($uDocs, $compAllowed));
-                    }
-
-                    // Catat log pengunjung login
-                    recordVisitorAccess($koneksi, [
-                        'event'     => 'login',
-                        'user_id'   => $u['user_id'],
-                        'user_name' => $u['nama_lengkap'] ?: $u['user_id'],
-                        'cmp_id'    => $comp['cmp_id']
-                    ]);
-
-                    echo json_encode([
-                        'status'           => 'OK',
-                        'is_admin'         => $isSuper,
-                        'is_super_admin'   => $isSuper,
-                        'is_company_admin' => $isCompAdmin,
-                        'user_role'        => $userRole,
-                        'message'          => "Login berhasil sebagai {$u['user_id']}!"
-                    ]);
-                    $uStmt->close();
-                    $stmt->close();
-                    exit;
-                } else {
-                    echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
-                    $uStmt->close();
-                    $stmt->close();
-                    exit;
-                }
-            } else {
-                // B2. Fallback jika user adalah 'admin' atau subdomain tapi belum terdaftar di bc_ceisa_login
-                if (strtolower($username) === 'admin' || strtolower($username) === strtolower($comp['subdomain'])) {
-                    if ($comp['app_password'] === $password) {
-                        $_SESSION['is_super_admin']   = false;
-                        $_SESSION['is_company_admin'] = true;
-                        $_SESSION['is_admin']         = false;
-                        $_SESSION['user_id']          = 'admin';
-                        $_SESSION['user_name']        = 'Admin ' . $comp['cmp_name'];
-                        $_SESSION['user_role']        = 'admin';
-                        $_SESSION['company_cmp_id']   = $comp['cmp_id'];
-                        $_SESSION['company_name']     = $comp['cmp_name'];
-                        $_SESSION['company_npwp']     = $comp['npwp'];
-                        $_SESSION['is_inv']           = (int)$comp['IS_INV'];
-                        $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
-                        $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
-                        $_SESSION['company_logo']     = $comp['logo'] ?? '';
-                        $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
-                        $_SESSION['company_card_color']= $comp['card_color'] ?? '';
-                        $_SESSION['allowed_menus']    = ['*'];
-                        $_SESSION['allowed_docs']     = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
-
-                        @$koneksi->query("INSERT INTO bc_ceisa_login (cmp_id, user_id, nama_lengkap, password, role, allowed_menus, allowed_docs, is_active)
-                                         VALUES ('{$comp['cmp_id']}', 'admin', 'Administrator Perusahaan', '{$password}', 'admin', '*', '*', 1)
-                                         ON DUPLICATE KEY UPDATE password = VALUES(password), is_active = 1");
-
-                        // Catat log pengunjung login
-                        recordVisitorAccess($koneksi, [
-                            'event'     => 'login',
-                            'user_id'   => 'admin',
-                            'user_name' => 'Admin ' . $comp['cmp_name'],
-                            'cmp_id'    => $comp['cmp_id']
-                        ]);
-
-                        echo json_encode([
-                            'status'           => 'OK',
-                            'is_admin'         => false,
-                            'is_super_admin'   => false,
-                            'is_company_admin' => true,
-                            'user_role'        => 'admin',
-                            'message'          => "Login berhasil sebagai Administrator Perusahaan!"
-                        ]);
-                        $stmt->close();
-                        exit;
-                    } else {
-                        echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
-                        $stmt->close();
-                        exit;
-                    }
-                } else {
-                    echo json_encode(['status' => 'ERROR', 'message' => "Pengguna '$username' tidak terdaftar pada perusahaan ini."]);
-                    $stmt->close();
-                    exit;
-                }
-            }
-        } else {
-            echo json_encode(['status' => 'ERROR', 'message' => "Perusahaan dengan ID/NPWP '$cmp_id' tidak ditemukan."]);
+    if ($uRes && $u = $uRes->fetch_assoc()) {
+        if ((int)$u['is_active'] === 0) {
+            echo json_encode(['status' => 'ERROR', 'message' => "Akun pengguna '$username' sedang dinonaktifkan. Hubungi Administrator."]);
+            $uStmt->close();
+            exit;
         }
-        $stmt->close();
-    } else {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Database error: ' . $koneksi->error]);
+
+        if ($u['password'] !== $password) {
+            echo json_encode(['status' => 'ERROR', 'message' => "Password pengguna '$username' salah!"]);
+            $uStmt->close();
+            exit;
+        }
+
+        $userRole     = strtolower($u['role'] ?: 'operator');
+        $isSuper      = ($u['user_id'] === 'dp' || $userRole === 'superadmin');
+        $isCompAdmin  = ($userRole === 'admin' && !$isSuper);
+
+        // Tentukan Perusahaan AKTIF Sesuai Pilihan Sebelumnya Masing-Masing User
+        $prefCmp = !empty($u['last_cmp_id']) ? $u['last_cmp_id'] : ($_COOKIE['ceisa_last_cmp_' . $u['user_id']] ?? ($_COOKIE['ceisa_last_cmp'] ?? ''));
+        if (empty($prefCmp) || $prefCmp === '*') {
+            // Jika ada cmp_id yang dikirim dari form dan spesifik (bukan 'framas' atau 'admin')
+            if (!empty($cmp_id) && !in_array($cmp_id, ['framas', 'admin', 'auto'])) {
+                $prefCmp = $cmp_id;
+            } elseif ($u['cmp_id'] !== '*' && !empty($u['cmp_id'])) {
+                $prefCmp = $u['cmp_id'];
+            } else {
+                $prefCmp = 'FRM-1';
+            }
+        }
+
+        // Ambil data perusahaan aktif dari bc_ceisa_company
+        $compStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR subdomain = ? LIMIT 1");
+        $compStmt->bind_param("ss", $prefCmp, $prefCmp);
+        $compStmt->execute();
+        $compRes = $compStmt->get_result();
+        if ($compRes && $cRow = $compRes->fetch_assoc()) {
+            $comp = $cRow;
+        } else {
+            $fb = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = 'FRM-1' OR subdomain = 'frm-1' LIMIT 1");
+            $comp = ($fb && $fbRow = $fb->fetch_assoc()) ? $fbRow : null;
+        }
+        $compStmt->close();
+
+        if (!$comp) {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Profil perusahaan tidak ditemukan. Hubungi Administrator.']);
+            exit;
+        }
+
+        // Simpan preferensi perusahaan aktif ke database dan cookie
+        $escTarget = $koneksi->real_escape_string($comp['cmp_id']);
+        $koneksi->query("UPDATE bc_ceisa_login SET last_cmp_id = '{$escTarget}' WHERE user_id = '{$u['user_id']}'");
+        @setcookie('ceisa_last_cmp_' . $u['user_id'], $comp['cmp_id'], time() + (365 * 86400), '/');
+        @setcookie('ceisa_last_cmp', $comp['cmp_id'], time() + (365 * 86400), '/');
+
+        // Hak Switch Perusahaan (Aktif untuk seluruh user Framas)
+        $canSwitch = $isSuper 
+            || $u['cmp_id'] === '*' 
+            || strtoupper($u['oto'] ?? '') === 'ALL'
+            || in_array($userRole, ['exim', 'warehouse', 'produksi', 'supervisor'])
+            || in_array($comp['cmp_id'], ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])
+            || in_array(strtolower($u['user_id']), ['agret', 'ayu', 'jois', 'shafira', 'fahd', 'suryani', 'maikel']);
+
+        $_SESSION['is_super_admin']   = $isSuper;
+        $_SESSION['is_company_admin'] = $isCompAdmin;
+        $_SESSION['is_admin']         = $isSuper;
+        $_SESSION['can_switch_company'] = $canSwitch;
+        $_SESSION['user_id']          = $u['user_id'];
+        $_SESSION['user_name']        = !empty($u['nama_lengkap']) ? $u['nama_lengkap'] : $u['user_id'];
+        $_SESSION['user_role']        = $userRole;
+        $_SESSION['company_cmp_id']   = $comp['cmp_id'];
+        $_SESSION['company_name']     = $comp['cmp_name'];
+        $_SESSION['company_npwp']     = $comp['npwp'];
+        $_SESSION['is_inv']           = (int)$comp['IS_INV'];
+        $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
+        $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
+        $_SESSION['company_logo']     = $comp['logo'] ?? '';
+        $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
+        $_SESSION['company_card_color']= $comp['card_color'] ?? '';
+
+        if ($userRole === 'bc') {
+            $_SESSION['allowed_menus'] = ['it_inventory'];
+        } else {
+            $m = $u['allowed_menus'];
+            $_SESSION['allowed_menus'] = ($m === '*' || empty($m)) ? ['*'] : (json_decode($m, true) ?: [$m]);
+        }
+
+        $compAllowed = ceisa_resolve_allowed_docs($comp['company_roles'] ?: 'tpb', $comp['allowed_docs'] ?? null);
+        $_SESSION['company_allowed_docs'] = $compAllowed;
+
+        $d = $u['allowed_docs'];
+        $uDocs = ceisa_parse_docs($d);
+        $_SESSION['user_allowed_docs'] = $uDocs;
+
+        if ($isSuper || in_array('*', $uDocs)) {
+            $_SESSION['allowed_docs'] = $isSuper ? ['*'] : $compAllowed;
+        } else {
+            $_SESSION['allowed_docs'] = array_values(array_intersect($uDocs, $compAllowed));
+        }
+
+        // Catat log pengunjung login
+        recordVisitorAccess($koneksi, [
+            'event'     => 'login',
+            'user_id'   => $u['user_id'],
+            'user_name' => $u['nama_lengkap'] ?: $u['user_id'],
+            'cmp_id'    => $comp['cmp_id']
+        ]);
+
+        echo json_encode([
+            'status'           => 'OK',
+            'is_admin'         => $isSuper,
+            'is_super_admin'   => $isSuper,
+            'is_company_admin' => $isCompAdmin,
+            'user_role'        => $userRole,
+            'cmp_id'           => $comp['cmp_id'],
+            'cmp_name'         => $comp['cmp_name'],
+            'message'          => "Login berhasil sebagai {$u['user_id']}! Perusahaan aktif: [{$comp['cmp_id']}] {$comp['cmp_name']}"
+        ]);
+        $uStmt->close();
+        exit;
     }
+
+    // Fallback: jika user adalah 'admin' perusahaan
+    if (strtolower($username) === 'admin' && !empty($cmp_id)) {
+        $cStmt = $koneksi->prepare("SELECT * FROM bc_ceisa_company WHERE cmp_id = ? OR subdomain = ? LIMIT 1");
+        $cStmt->bind_param("ss", $cmp_id, $cmp_id);
+        $cStmt->execute();
+        $cRes = $cStmt->get_result();
+        if ($cRes && $comp = $cRes->fetch_assoc()) {
+            if ($comp['app_password'] === $password) {
+                $_SESSION['is_super_admin']   = false;
+                $_SESSION['is_company_admin'] = true;
+                $_SESSION['is_admin']         = false;
+                $_SESSION['can_switch_company'] = true;
+                $_SESSION['user_id']          = 'admin';
+                $_SESSION['user_name']        = 'Admin ' . $comp['cmp_name'];
+                $_SESSION['user_role']        = 'admin';
+                $_SESSION['company_cmp_id']   = $comp['cmp_id'];
+                $_SESSION['company_name']     = $comp['cmp_name'];
+                $_SESSION['company_npwp']     = $comp['npwp'];
+                $_SESSION['is_inv']           = (int)$comp['IS_INV'];
+                $_SESSION['company_roles']    = $comp['company_roles'] ?: 'tpb';
+                $_SESSION['company_erp_name'] = $comp['ERP_Name'] ?: '-';
+                $_SESSION['company_logo']     = $comp['logo'] ?? '';
+                $_SESSION['company_subdomain']= $comp['subdomain'] ?? '';
+                $_SESSION['company_card_color']= $comp['card_color'] ?? '';
+                $_SESSION['allowed_menus']    = ['*'];
+                $_SESSION['allowed_docs']     = ceisa_resolve_allowed_docs($comp['company_roles'], $comp['allowed_docs'] ?? null);
+
+                echo json_encode([
+                    'status'           => 'OK',
+                    'is_admin'         => false,
+                    'is_super_admin'   => false,
+                    'is_company_admin' => true,
+                    'user_role'        => 'admin',
+                    'cmp_id'           => $comp['cmp_id'],
+                    'cmp_name'         => $comp['cmp_name'],
+                    'message'          => "Login berhasil sebagai Administrator Perusahaan!"
+                ]);
+                $cStmt->close();
+                exit;
+            }
+        }
+        $cStmt->close();
+    }
+
+    echo json_encode(['status' => 'ERROR', 'message' => "Pengguna (Username) '$username' tidak ditemukan!"]);
     exit;
 }
 
@@ -354,6 +361,17 @@ if ($action === 'switch_company') {
             $_SESSION['company_logo']       = $comp['logo'] ?? '';
             $_SESSION['company_subdomain']  = $comp['subdomain'] ?? '';
             $_SESSION['company_card_color'] = $comp['card_color'] ?? '';
+
+            // Simpan preferensi perusahaan aktif ke database untuk user saat ini agar persist saat login berikutnya
+            $currentUserId = $_SESSION['user_id'] ?? '';
+            if (!empty($currentUserId)) {
+                $escUid = $koneksi->real_escape_string($currentUserId);
+                $escCmp = $koneksi->real_escape_string($comp['cmp_id']);
+                $koneksi->query("UPDATE bc_ceisa_login SET last_cmp_id = '{$escCmp}' WHERE user_id = '{$escUid}'");
+                @setcookie('ceisa_last_cmp_' . $currentUserId, $comp['cmp_id'], time() + (365 * 86400), '/');
+            }
+            @setcookie('ceisa_last_cmp', $comp['cmp_id'], time() + (365 * 86400), '/');
+
             echo json_encode([
                 'status'        => 'OK',
                 'cmp_id'        => $comp['cmp_id'],
@@ -602,7 +620,7 @@ if ($res) {
     }
 }
 
-// Deteksi Subdomain Perusahaan (misal: https://framas.inhost.web.id atau index.php?subdomain=framas)
+// Deteksi Subdomain Perusahaan (misal: https://inhost.framas.web.id atau index.php?subdomain=framas)
 $subdomainCompany = null;
 $detectedSubdomain = '';
 $isSubdomainUnregistered = false;
@@ -613,22 +631,38 @@ $cleanHost = explode(':', $rawHost)[0];
 $parts = explode('.', $cleanHost);
 $subCandidate = '';
 
+$servicePrefixes = ['www', 'root', 'portal', 'api', 'app', 'mail', 'cpanel', 'localhost', 'inhost', 'ceisa', 'cloud'];
+
+// Cek apakah host merupakan domain Framas Portal (1 subdomain melayani 4 perusahaan Framas: FRM-1, FRM-2, FRM-3, PDPLB)
+$isFramasPortal = (strpos($cleanHost, 'framas') !== false || in_array('framas', $parts) || (stripos($appSettings['app_name'] ?? '', 'framas') !== false));
+
 if (isset($_GET['subdomain'])) {
     $paramSub = strtolower(preg_replace('/[^a-zA-Z0-9_-]/', '', trim($_GET['subdomain'])));
     if ($paramSub === 'admin') {
         $isAdminOnlyLogin = true;
-    } elseif (!in_array($paramSub, ['none', 'root', 'all', 'portal', 'www', 'localhost', ''])) {
+    } elseif (!in_array($paramSub, array_merge($servicePrefixes, ['none', 'all', '']))) {
         $subCandidate = $paramSub;
     }
 } else {
     if (count($parts) >= 3) {
-        $firstPart = strtolower($parts[0]);
-        if ($firstPart === 'admin') {
+        // Jika parts[0] merupakan prefix umum (misal 'inhost', 'www'), periksa bagian kedua (misal inhost.framas.web.id)
+        $pIdx = 0;
+        if (in_array($parts[0], $servicePrefixes) && isset($parts[1]) && !in_array($parts[1], ['web', 'com', 'net', 'id', 'org', 'co'])) {
+            $pIdx = 1;
+        }
+        $candidate = strtolower($parts[$pIdx]);
+        if ($candidate === 'admin') {
             $isAdminOnlyLogin = true;
-        } elseif (!in_array($firstPart, ['www', 'root', 'portal', 'api', 'app', 'mail', 'cpanel', 'localhost'])) {
-            $subCandidate = $firstPart;
+        } elseif (!in_array($candidate, $servicePrefixes) && !in_array($candidate, ['web', 'com', 'net', 'id', 'org', 'co'])) {
+            $subCandidate = $candidate;
         }
     }
+}
+
+// Jika subCandidate adalah 'framas', ini adalah portal bersama Framas, bukan single company
+if ($subCandidate === 'framas') {
+    $isFramasPortal = true;
+    $subCandidate = '';
 }
 
 if (!empty($subCandidate) && isset($koneksi) && $koneksi) {
@@ -641,13 +675,21 @@ if (!empty($subCandidate) && isset($koneksi) && $koneksi) {
             $subdomainCompany = $subRes->fetch_assoc();
             $detectedSubdomain = $subCandidate;
         } else {
-            // Subdomain dipanggil tapi belum terdaftar sebagai perusahaan -> Akses khusus login Administrator!
-            $isSubdomainUnregistered = true;
-            $isAdminOnlyLogin = true;
-            $detectedSubdomain = $subCandidate;
+            // Jika bukan Framas Portal dan subdomain tidak terdaftar, baru tandai khusus admin
+            if (!$isFramasPortal) {
+                $isSubdomainUnregistered = true;
+                $isAdminOnlyLogin = true;
+                $detectedSubdomain = $subCandidate;
+            }
         }
         $subStmt->close();
     }
+}
+
+// Jika Framas Portal terdeteksi, pastikan BUKAN Admin-only login (semua user bisa login)
+if ($isFramasPortal) {
+    $isAdminOnlyLogin = false;
+    $isSubdomainUnregistered = false;
 }
 
 // Deteksi URL Query Parameter Khusus Perusahaan (misal: ?cmp=RMB atau ?cmp=TVL atau ?company=rmb)
@@ -3006,6 +3048,11 @@ if ($initialTab === 'editor') {
                         <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;">Login Administrator</h2>
                         <p style="font-size:12px; color:var(--text-muted); margin:0;">Silakan masukkan akun Administrator</p>
                     </div>
+                <?php elseif ($isFramasPortal): ?>
+                    <div style="margin-top:2px; margin-bottom:14px;">
+                        <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;">Masuk ke Sistem</h2>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0;">Portal Akses CEISA 4.0 &bull; FRAMAS Group</p>
+                    </div>
                 <?php elseif ($subdomainCompany): ?>
                     <?php if ($showLoginCompanyTitle): ?>
                         <div id="loginCompanyTitleWrap" style="margin-top:2px; margin-bottom:8px;">
@@ -3029,6 +3076,9 @@ if ($initialTab === 'editor') {
                 <?php if ($isAdminOnlyLogin): ?>
                     <!-- Akses Khusus Administrator -->
                     <input type="hidden" id="loginCmp" value="admin">
+                <?php elseif ($isFramasPortal): ?>
+                    <!-- Portal Bersama Seluruh Entitas Framas (FRM-1, FRM-2, FRM-3, PDPLB) -->
+                    <input type="hidden" id="loginCmp" value="framas">
                 <?php elseif ($subdomainCompany): ?>
                     <!-- Perusahaan Otomatis dari Subdomain -->
                     <input type="hidden" id="loginCmp" value="<?= htmlspecialchars($subdomainCompany['cmp_id']) ?>">
@@ -3050,13 +3100,13 @@ if ($initialTab === 'editor') {
                         </select>
                     </div>
                 <?php endif; ?>
-                <div class="form-group" id="groupLoginUsername" style="<?= ($isAdminOnlyLogin || $subdomainCompany) ? 'display:block;' : '' ?>">
+                <div class="form-group" id="groupLoginUsername" style="<?= ($isAdminOnlyLogin || $isFramasPortal || $subdomainCompany) ? 'display:block;' : '' ?>">
                     <label for="loginUsername">
                         <span><i class="fa-solid <?= $isAdminOnlyLogin ? 'fa-user-shield' : 'fa-user' ?>" style="color:var(--primary); margin-right:6px; font-size:12px;"></i>Nama Pengguna (Username)<span style="color:#ff4d4f; margin-left:3px;">*</span></span>
                     </label>
                     <div class="corporate-input-wrap">
                         <i class="fa-solid <?= $isAdminOnlyLogin ? 'fa-user-shield' : 'fa-user' ?> input-icon"></i>
-                        <input type="text" id="loginUsername" name="login_user_<?= date('Ymd') ?>" value="" <?= ($isAdminOnlyLogin || $subdomainCompany) ? 'required' : '' ?> placeholder="<?= $isAdminOnlyLogin ? 'Masukkan username administrator...' : 'Masukkan username pengguna...' ?>" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');">
+                        <input type="text" id="loginUsername" name="login_user_<?= date('Ymd') ?>" value="" <?= ($isAdminOnlyLogin || $isFramasPortal || $subdomainCompany) ? 'required' : '' ?> placeholder="<?= $isAdminOnlyLogin ? 'Masukkan username administrator...' : 'Masukkan username pengguna...' ?>" autocomplete="off" readonly onfocus="this.removeAttribute('readonly');">
                     </div>
                 </div>
                 <div class="form-group">
