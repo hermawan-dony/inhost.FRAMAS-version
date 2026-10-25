@@ -161,9 +161,9 @@ class CeisaXlsxExporter {
     /**
      * Membangun file .xlsx resmi CEISA 4.0
      */
-    public function generateXlsx($nomorAju, $targetFilePath) {
+    public function generateXlsx($nomorAju, $targetFilePath, $customAjuData = null) {
         $cleanAju = trim($nomorAju);
-        $ajuData = $this->getAjuData($cleanAju);
+        $ajuData = ($customAjuData !== null && is_array($customAjuData)) ? $customAjuData : $this->getAjuData($cleanAju);
 
         // Siapkan pool shared strings
         $sharedStrings = [];

@@ -4318,8 +4318,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 showWarning('Silakan pilih salah satu dokumen terlebih dahulu.');
                 return;
             }
-            showToast(`Mengunduh Excel CEISA 4.0 untuk AJU ${aju}...`);
-            window.location.href = `transfer.php?action=download_excel&nomor_aju=${encodeURIComponent(aju)}`;
+            if (typeof showToast === 'function') {
+                showToast(`Mengunduh Excel CEISA 4.0 untuk AJU ${aju}...`, 'success');
+            }
+            const link = document.createElement('a');
+            link.href = `export_ceisa_excel.php?nomor_aju=${encodeURIComponent(aju)}`;
+            link.download = `${aju}.xlsx`;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                if (link.parentNode) link.parentNode.removeChild(link);
+            }, 100);
         }
 
         async function resetPostedAju(targetAju) {

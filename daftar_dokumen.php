@@ -1,6 +1,4 @@
 <?php
-@ini_set('memory_limit', '512M');
-@ini_set('max_execution_time', '300');
 /**
  * CEISA 4.0 - Transfer Dokumen Pabean Dashboard (transfer.php)
  * Mengadopsi Layout, Warna, Font, dan Ant Design Style Resmi Portal CEISA 4.0 (portal.beacukai.go.id/dokumen-pabean/)
@@ -16,7 +14,7 @@ $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['
 $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_GET['cmp_id'] ?? '');
 
 $appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $sessionCmpId) : [];
-$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 120));
+$syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 60));
 $syncBatchSize   = max(10, min(1000, (int)($appSettings['ceisa_sync_batch_size'] ?? 50)));
 
 // Ambil daftar profil perusahaan aktif untuk filter
@@ -45,19 +43,15 @@ $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
 if (!function_exists('isDocPermitted')) {
     function isDocPermitted($d) {
         global $isAdmin, $sessionCmpId, $companyAllowedDocs, $effectiveAllowedDocs;
-        if ($d === '27IN') {
-            return isDocPermitted('27');
-        }
         // Jika Super Admin dan TIDAK sedang memfilter perusahaan tertentu, tampilkan semua dokumen
         if (!empty($isAdmin) && empty($sessionCmpId)) {
             return true;
         }
-        // Jika Super Admin memilih perusahaan tertentu, batasi sesuai dokumen perusahaan
-        if (!empty($isAdmin)) {
-            return in_array((string)$d, (array)$companyAllowedDocs);
+        $targetAllowed = !empty($isAdmin) ? (array)$companyAllowedDocs : (array)$effectiveAllowedDocs;
+        if ($d === '27IN') {
+            return in_array('27', $targetAllowed) || in_array('27IN', $targetAllowed);
         }
-        // Pengguna standar (operator/admin perusahaan): batasi ketat sesuai izin efektif
-        return in_array((string)$d, (array)$effectiveAllowedDocs);
+        return in_array((string)$d, $targetAllowed);
     }
 }
 
@@ -77,11 +71,6 @@ if (PHP_SAPI === 'cli' && empty($action)) {
 }
 
 if ($action === 'list') {
-    @ini_set('memory_limit', '512M');
-    @ini_set('max_execution_time', '300');
-    if (!ob_start('ob_gzhandler')) {
-        ob_start();
-    }
     header('Content-Type: application/json; charset=utf-8');
     $filter_cmp  = trim($_GET['cmp_id'] ?? '');
     $filter_bc   = trim($_GET['bc'] ?? '');
@@ -95,19 +84,23 @@ if ($action === 'list') {
 
     $where = [];
     $cmpIsInv = 1;
-    $cleanCmp = '';
     if (!empty($filter_cmp)) {
         $cleanCmp = $koneksi->real_escape_string($filter_cmp);
+        $cmpNpwp = '';
         $resComp = $koneksi->query("SELECT npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
         if ($resComp && $cr = $resComp->fetch_assoc()) {
+            $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
             $cmpIsInv = (int)$cr['IS_INV'];
+        }
+        if (!empty($cmpNpwp)) {
+            $where[] = "(a.cmp_id = '$cleanCmp' OR a.idPerusahaan LIKE '%$cmpNpwp%')";
+        } else {
+            $where[] = "a.cmp_id = '$cleanCmp'";
         }
     }
     if (!empty($filter_bc)) {
         if ($filter_bc === '27IN') {
-            $where[] = "(a.kodeDokumen = '27IN' OR (a.kodeDokumen = '27' AND a.namaPerusahaan NOT LIKE '%$cleanCmp%'))";
-        } elseif ($filter_bc === '27') {
-            $where[] = "(a.kodeDokumen = '27' OR a.kodeDokumen = '27OUT')";
+            $where[] = "(a.kodeDokumen = '27IN' OR (a.kodeDokumen = '27' AND (a.namaProses LIKE '%MASUK%' OR a.namaDokumen LIKE '%MASUK%')))";
         } else {
             $where[] = "a.kodeDokumen = '" . $koneksi->real_escape_string($filter_bc) . "'";
         }
@@ -136,7 +129,9 @@ if ($action === 'list') {
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
     $sql = "SELECT
+        COALESCE(NULLIF(a.idHeader, ''), '') AS id_header,
         a.kodeDokumen AS bc,
+        a.kodeDokumen AS kode_dokumen,
         a.nomorAju AS nomor_aju,
         COALESCE(NULLIF(a.nomorDaftar, ''), '-') AS nomor_daftar,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_daftar,
@@ -147,7 +142,7 @@ if ($action === 'list') {
         a.asalData AS user_id,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS upd_time,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_pernyataan,
-        COALESCE(hdr.cmp_id, '$cleanCmp', '') AS cmp_id,
+        COALESCE(NULLIF(a.cmp_id, ''), cmp.cmp_id, '') AS cmp_id,
         a.kodeKantor AS kode_kantor,
         COALESCE(NULLIF(a.namaPerusahaan, ''), cmp.cmp_name, '') AS cmp_name,
         COALESCE(NULLIF(a.idPerusahaan, ''), cmp.npwp, '') AS cmp_npwp,
@@ -168,14 +163,15 @@ if ($action === 'list') {
         COALESCE(NULLIF(a.namaPerusahaan, ''), '') AS bcd_namaPerusahaan,
         COALESCE(NULLIF(a.idPerusahaan, ''), '') AS bcd_idPerusahaan,
         COALESCE(cmp.IS_INV, $cmpIsInv, 1) AS is_inv,
-        CASE WHEN EXISTS (SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju) THEN 1 ELSE 0 END AS in_it_inv
+        IFNULL(it_inv.jml, 0) AS in_it_inv,
+        COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d 00:00:00'), '') AS effective_tanggal_respon
     FROM bc_ceisa_data a
+    LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
     LEFT JOIN (
-        SELECT nomor_aju, MAX(cmp_id) AS cmp_id
-        FROM bc_ceisa_header
-        GROUP BY nomor_aju
-    ) hdr ON a.nomorAju = hdr.nomor_aju
-    LEFT JOIN bc_ceisa_company cmp ON hdr.cmp_id = cmp.cmp_id
+        SELECT DISTINCT nomor_aju, 1 AS jml
+        FROM bc_1ab2
+        WHERE nomor_aju IS NOT NULL AND nomor_aju != ''
+    ) it_inv ON a.nomorAju = it_inv.nomor_aju
     LEFT JOIN (
         SELECT nomorAju, MIN(nomorRespon) AS nomorRespon, MAX(tanggalRespon) AS tanggalRespon, MAX(pdf) AS pdf
         FROM bc_ceisa_sppb
@@ -198,7 +194,7 @@ if ($action === 'list') {
         GROUP BY nomor_aju
     ) posted ON a.nomorAju = posted.nomor_aju
     $whereSql
-    ORDER BY a.tanggalRespon DESC, a.nomorAju DESC";
+    ORDER BY effective_tanggal_respon DESC, a.nomorAju DESC";
 
     try {
         $res = $koneksi->query($sql);
@@ -263,15 +259,64 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     $header = $resHdr ? $resHdr->fetch_assoc() : null;
 
     // 4. Data dari bc_ceisa_data (fallback jika header kosong atau butuh info kantor/perusahaan)
-    $sqlBcd = "SELECT kodeDokumen AS kode_dokumen, nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, 
+    $sqlBcd = "SELECT idHeader AS id_header, kodeDokumen AS kode_dokumen, nomorAju AS nomor_aju, nomorDaftar AS nomor_daftar, 
                       tanggalDaftar AS tanggal_daftar, namaPerusahaan AS nama_perusahaan, idPerusahaan AS id_perusahaan, 
                       kodeKantor AS kode_kantor, namaKantorPendek AS nama_kantor, namaProses AS nama_proses, 
                       namaRespon AS nama_respon, nomorRespon AS nomor_respon, tanggalRespon AS tanggal_respon, 
-                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, '' AS cmp_id
+                      kodeJalur AS kode_jalur, pdf, totalCount AS total_count, cmp_id
                FROM bc_ceisa_data 
                WHERE nomorAju = '$escAju' LIMIT 1";
     $resBcd = $koneksi->query($sqlBcd);
     $rowBcd = $resBcd ? $resBcd->fetch_assoc() : null;
+
+    // Ambil live riwayat status dari CEISA 4.0 via getRiwayatStatus/$idHeader jika tersedia
+    $liveIdHeader = trim($rowBcd['id_header'] ?? '');
+    if (!empty($liveIdHeader)) {
+        $liveCmp = $cmp_id ?: ($rowBcd['cmp_id'] ?? '');
+        $cmp_id = $liveCmp;
+        $_GET['cmp_id'] = $liveCmp;
+        require_once __DIR__ . '/initmfa.php';
+
+        $liveComp = ceisa_get_company($liveCmp);
+        $liveApiKey = !empty($liveComp['api_key_ceisa']) ? trim($liveComp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => "https://apis-gw.beacukai.go.id/v2/parser/v1/proses/getRiwayatStatus/" . urlencode($liveIdHeader),
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 12,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $liveApiKey,
+                    'Accept: application/json, text/plain, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $liveStatusJson = curl_exec($ch);
+            curl_close($ch);
+            $liveStatusArr = @json_decode($liveStatusJson, true);
+            if (!empty($liveStatusArr['data']) && is_array($liveStatusArr['data'])) {
+                $liveList = [];
+                foreach ($liveStatusArr['data'] as $st) {
+                    $liveList[] = [
+                        'kode_dokumen'   => $rowBcd['kode_dokumen'] ?? '',
+                        'nomor_aju'      => $nomor_aju,
+                        'nomor_daftar'   => $rowBcd['nomor_daftar'] ?? '',
+                        'tanggal_daftar' => $rowBcd['tanggal_daftar'] ?? '',
+                        'kode_proses'    => $st['kodeProses'] ?? '',
+                        'waktu_status'   => $st['waktuMulai'] ?? ($st['waktuStatus'] ?? ($st['waktuSelesai'] ?? '')),
+                        'keterangan'     => $st['catatan'] ?? ($st['namaProses'] ?? ('Proses ' . ($st['kodeProses'] ?? '')))
+                    ];
+                }
+                if (!empty($liveList)) {
+                    $listStatus = $liveList;
+                }
+            }
+        }
+    }
 
     if (!$header && $rowBcd) {
         $header = [
@@ -397,6 +442,310 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     ]);
     exit;
 }
+
+// =============================================================================
+// CEISA 4.0 OFFICIAL GATEWAY ACTIONS (BERBASIS idHeader, kodeDokumen & initMFA)
+// =============================================================================
+
+// 1. CETAK DOKUMEN: https://apis-gw.beacukai.go.id/v2/report-service/formulir/$kodeDokumen/$idHeader
+if ($action === 'cetak_formulir') {
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        http_response_code(400);
+        die("Nomor pengajuan tidak boleh kosong.");
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil idHeader, kodeDokumen, cmp_id, dan pdf dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id, pdf FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    }
+
+    $pdfContent = null;
+
+    // Panggil report-service formulir resmi CEISA 4.0 jika idHeader dan kodeDokumen ada
+    if (!empty($idHeader) && !empty($kodeDokumen)) {
+        $cmp_id = $targetCmp;
+        $_GET['cmp_id'] = $targetCmp;
+        require_once __DIR__ . '/initmfa.php';
+
+        $comp = ceisa_get_company($targetCmp);
+        $apiKey = !empty($comp['api_key_ceisa']) ? trim($comp['api_key_ceisa']) : '6222a75e-1dbb-493e-9461-27f721097e9c';
+
+        if (!empty($activeToken)) {
+            $url = "https://apis-gw.beacukai.go.id/v2/report-service/formulir/" . urlencode($kodeDokumen) . "/" . urlencode($idHeader);
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 25,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER => [
+                    'Authorization: Bearer ' . $activeToken,
+                    'beacukai-api-key: ' . $apiKey,
+                    'Accept: application/pdf, application/json, */*',
+                    'Origin: https://portal.beacukai.go.id',
+                    'Referer: https://portal.beacukai.go.id/'
+                ]
+            ]);
+            $resp = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($httpCode === 200 && substr($resp, 0, 4) === '%PDF') {
+                $pdfContent = $resp;
+            }
+        }
+    }
+
+    // Jika berhasil mendapatkan PDF formulir resmi dari report-service
+    if ($pdfContent !== null) {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: inline; filename="Formulir_BC' . $kodeDokumen . '_' . $cleanAju . '.pdf"');
+        header('Content-Length: ' . strlen($pdfContent));
+        header('Cache-Control: public, max-age=86400');
+        echo $pdfContent;
+        exit;
+    }
+
+    // Fallback: Jika formulir live belum dapat diakses, buka PDF respon resmi jika ada di database
+    $pdfFile = $rowDoc['pdf'] ?? '';
+    if (!empty($pdfFile)) {
+        header("Location: /pdf.php?aju=" . urlencode($cleanAju) . "&pdf=" . urlencode($pdfFile) . "&cmp_id=" . urlencode($targetCmp) . "&view=1");
+        exit;
+    }
+
+    http_response_code(404);
+    echo '<div style="font-family:sans-serif; text-align:center; padding:40px; color:#cf1322;">
+        <h3>⚠️ Berkas Formulir Belum Tersedia</h3>
+        <p>Formulir resmi atau PDF respon belum dapat diakses dari CEISA 4.0 untuk pengajuan <b>' . htmlspecialchars($cleanAju) . '</b>.</p>
+    </div>';
+    exit;
+}
+
+// 2. UNDUH EXCEL: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
+if ($action === 'unduh_excel') {
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        http_response_code(400);
+        die("Nomor pengajuan tidak boleh kosong.");
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil idHeader dan cmp_id dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    } elseif (empty($targetCmp)) {
+        $comp = ceisa_get_company($cleanAju);
+        if ($comp && !empty($comp['cmp_id'])) {
+            $targetCmp = $comp['cmp_id'];
+        } elseif (!empty($_SESSION['company_cmp_id'])) {
+            $targetCmp = $_SESSION['company_cmp_id'];
+        }
+    }
+
+    $cacheDir = __DIR__ . '/excel_cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0777, true);
+    }
+    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+
+    // 1. Prioritas Utama: Ambil payload JSON resmi via API LNSW report-parser jika idHeader ada
+    if (!empty($idHeader)) {
+        try {
+            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
+            if (!empty($docArr['data'])) {
+                CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
+                // Sekaligus lakukan staging ke database MySQL agar data langsung sinkron
+                try {
+                    CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
+                } catch (\Throwable $eStg) {}
+            }
+        } catch (\Throwable $eLnsw) {
+            error_log("unduh_excel LNSW error: " . $eLnsw->getMessage());
+        }
+    }
+
+    // 2. Fallback: Jika berkas belum ada di cache, coba bangun dari tabel staging database
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
+            require_once __DIR__ . '/CeisaXlsxExporter.php';
+            try {
+                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+                if ($chk && $chk->num_rows > 0) {
+                    $exporter = new CeisaXlsxExporter($koneksi);
+                    $exporter->generateXlsx($cleanAju, $excelPath);
+                }
+            } catch (\Throwable $eExp) {}
+        }
+    }
+
+    // Jika berkas Excel sudah berhasil dibuat / ada di cache
+    if (file_exists($excelPath) && filesize($excelPath) >= 1500) {
+        header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        header('Content-Disposition: attachment; filename="' . $cleanAju . '.xlsx"');
+        header('Content-Length: ' . filesize($excelPath));
+        header('Cache-Control: public, max-age=86400');
+        readfile($excelPath);
+        exit;
+    }
+
+    // 3. Fallback Terakhir: Arahkan ke service download_ceisa_excel.php
+    header("Location: /download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp));
+    exit;
+}
+
+// 3. IMPORT KE H2H: https://apis-gw.beacukai.go.id/v2/report-parser/v1/lnsw/get-data-doc/td-header?idHeader=$idHeader
+if ($action === 'import_to_h2h') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor Pengajuan (AJU) tidak boleh kosong.']);
+        exit;
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $escAju = $koneksi->real_escape_string($cleanAju);
+
+    // Ambil idHeader, kodeDokumen, dan cmp_id dari bc_ceisa_data
+    $sqlDoc = "SELECT idHeader, kodeDokumen, cmp_id FROM bc_ceisa_data WHERE nomorAju = '{$escAju}' LIMIT 1";
+    $resDoc = $koneksi->query($sqlDoc);
+    $rowDoc = $resDoc ? $resDoc->fetch_assoc() : null;
+
+    $idHeader = trim($rowDoc['idHeader'] ?? '');
+    $kodeDokumen = trim($rowDoc['kodeDokumen'] ?? '');
+    if (empty($targetCmp) && !empty($rowDoc['cmp_id'])) {
+        $targetCmp = $rowDoc['cmp_id'];
+    } elseif (empty($targetCmp)) {
+        $comp = ceisa_get_company($cleanAju);
+        if ($comp && !empty($comp['cmp_id'])) {
+            $targetCmp = $comp['cmp_id'];
+        } elseif (!empty($_SESSION['company_cmp_id'])) {
+            $targetCmp = $_SESSION['company_cmp_id'];
+        }
+    }
+
+    $cacheDir = __DIR__ . '/excel_cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0777, true);
+    }
+    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+
+    require_once __DIR__ . '/CeisaJsonDocParser.php';
+
+    // 1. Prioritas Utama: Impor langsung via LNSW JSON report-parser (cepat, lengkap, presisi)
+    if (!empty($idHeader)) {
+        try {
+            $docArr = CeisaJsonDocParser::fetchLnswDoc($idHeader, $targetCmp);
+            if (!empty($docArr['data'])) {
+                $importResult = CeisaJsonDocParser::importToStaging($koneksi, $docArr, $targetCmp, true);
+                
+                // Simpan berkas Excel ke cache sekaligus
+                try {
+                    CeisaJsonDocParser::exportToExcel($koneksi, $docArr, $excelPath);
+                } catch (\Throwable $eEx) {}
+
+                echo json_encode([
+                    'status'    => 'OK',
+                    'nomor_aju' => $cleanAju,
+                    'cmp_id'    => $targetCmp,
+                    'source'    => 'LNSW_JSON',
+                    'message'   => "Dokumen {$cleanAju} berhasil diimpor langsung dari CEISA 4.0 ke Staging Host to Host!",
+                    'details'   => $importResult
+                ]);
+                exit;
+            }
+        } catch (\Throwable $eLnsw) {
+            error_log("import_to_h2h via LNSW failed: " . $eLnsw->getMessage() . ". Falling back to Excel importer.");
+        }
+    }
+
+    // 2. Fallback: Gunakan file Excel jika sudah ada di cache atau generate dari service
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        $genSuccess = false;
+        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
+            require_once __DIR__ . '/CeisaXlsxExporter.php';
+            try {
+                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+                if ($chk && $chk->num_rows > 0) {
+                    $exporter = new CeisaXlsxExporter($koneksi);
+                    $genSuccess = $exporter->generateXlsx($cleanAju, $excelPath);
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        if (!$genSuccess || !file_exists($excelPath) || filesize($excelPath) < 1500) {
+            $host = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $dlUrl = $proto . $host . "/download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp) . "&format=json";
+            
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $dlUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0
+            ]);
+            $resCurl = curl_exec($ch);
+            curl_close($ch);
+        }
+    }
+
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        echo json_encode([
+            'status' => 'ERROR',
+            'message' => "Dokumen pengajuan {$cleanAju} tidak dapat diakses dari API LNSW maupun Excel service. Pastikan kredensial login dan OTP MFA perusahaan telah aktif."
+        ]);
+        exit;
+    }
+
+    // Eksekusi CeisaXlsxImporter dari file Excel
+    try {
+        require_once __DIR__ . '/CeisaXlsxImporter.php';
+        $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
+        $result = $importer->import($excelPath, ['overwrite' => true]);
+
+        echo json_encode([
+            'status'    => 'OK',
+            'nomor_aju' => $cleanAju,
+            'cmp_id'    => $targetCmp,
+            'source'    => 'XLSX_FILE',
+            'message'   => "Dokumen {$cleanAju} berhasil diimpor ke Data Host to Host!",
+            'details'   => $result
+        ]);
+    } catch (\Throwable $e) {
+        echo json_encode([
+            'status'  => 'ERROR',
+            'message' => 'Gagal mengimpor ke H2H: ' . $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
 $themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 ?>
@@ -712,107 +1061,235 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .kpi-val-danger { color: #ff4d4f; }
         .kpi-label-danger { color: #ff4d4f; }
 
-        .btn-rekap-mini {
-            margin-left: 4px;
-            padding: 0 5px;
-            font-size: 8.5px;
+        /* -------------------------------------------------------------
+           REKAP BELUM MASUK IT INVENTORY PER BULAN (FLOATING WIDGET)
+           ------------------------------------------------------------- */
+        .btn-rekap-pill {
+            background: linear-gradient(135deg, #ff4d4f 0%, #f5222d 100%);
+            color: #ffffff;
+            border: none;
+            border-radius: 4px;
+            padding: 1px 7px;
+            font-size: 10px;
             font-weight: 700;
-            color: #cf1322;
-            background: #fff1f0;
-            border: 1px solid #ffa39e;
-            border-radius: 10px;
             cursor: pointer;
-            transition: all 0.2s;
+            margin-left: 6px;
             display: inline-flex;
             align-items: center;
-            gap: 2px;
-            line-height: 14px;
-            height: 15px;
+            gap: 3px;
+            box-shadow: 0 1px 3px rgba(245, 34, 45, 0.35);
+            transition: all 0.15s ease-in-out;
+            vertical-align: middle;
+            line-height: 1.5;
         }
-        .btn-rekap-mini:hover {
-            background: #ff4d4f;
-            color: #ffffff;
-            border-color: #ff4d4f;
+        .btn-rekap-pill:hover {
+            background: linear-gradient(135deg, #ff7875 0%, #ff4d4f 100%);
+            box-shadow: 0 2px 6px rgba(245, 34, 45, 0.5);
+            transform: translateY(-1px);
         }
-        .rekap-floating-window {
+        .btn-rekap-pill:active {
+            transform: translateY(0);
+        }
+        .rekap-notinv-widget {
             position: fixed;
-            top: 135px;
-            right: 25px;
-            width: 340px;
-            background: var(--bg-card);
+            z-index: 1060;
+            width: 375px;
+            background: var(--bg-card, #ffffff);
             border: 1px solid #ffa39e;
-            border-radius: 4px;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.12);
-            z-index: 1040;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(207, 19, 34, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+            display: none;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             user-select: none;
-            font-family: inherit;
         }
-        [data-theme="dark"] .rekap-floating-window {
-            background: #141414;
-            border-color: #a61d24;
-            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.6);
+        body[data-theme="dark"] .rekap-notinv-widget {
+            background: #1f1f1f;
+            border-color: #5c2223;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
         }
-        .rekap-window-header {
-            background: linear-gradient(180deg, #fff1f0 0%, #ffccc7 100%);
+        .rekap-notinv-header {
+            background: linear-gradient(135deg, #fff1f0 0%, #ffe8e6 100%);
+            padding: 8px 12px;
             border-bottom: 1px solid #ffa39e;
-            padding: 5px 8px;
+            border-top-left-radius: 7px;
+            border-top-right-radius: 7px;
             display: flex;
-            align-items: center;
             justify-content: space-between;
+            align-items: center;
             cursor: move;
         }
-        [data-theme="dark"] .rekap-window-header {
-            background: linear-gradient(180deg, #2a1215 0%, #431418 100%);
-            border-bottom: 1px solid #a61d24;
+        body[data-theme="dark"] .rekap-notinv-header {
+            background: #2a1215;
+            border-color: #5c2223;
         }
-        .rekap-window-title {
-            font-size: 11px;
+        .rekap-notinv-title {
+            font-size: 13px;
             font-weight: 700;
             color: #cf1322;
             display: flex;
             align-items: center;
             gap: 6px;
         }
-        [data-theme="dark"] .rekap-window-title {
+        body[data-theme="dark"] .rekap-notinv-title {
             color: #ff7875;
         }
-        .rekap-window-close {
+        .rekap-notinv-close {
             background: transparent;
             border: none;
-            font-size: 15px;
-            line-height: 1;
-            color: #595959;
+            color: #8c8c8c;
+            font-size: 14px;
+            font-weight: 700;
             cursor: pointer;
             padding: 0 4px;
+            line-height: 1;
         }
-        .rekap-window-close:hover {
-            color: #ff4d4f;
+        .rekap-notinv-close:hover {
+            color: #cf1322;
         }
-        .rekap-row {
-            cursor: pointer;
-            transition: background 0.15s;
+        .rekap-notinv-toolbar {
+            padding: 6px 12px;
+            background: var(--bg-base, #fafafa);
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
         }
-        .rekap-row:hover {
-            background: #fff7e6 !important;
+        body[data-theme="dark"] .rekap-notinv-toolbar {
+            background: #141414;
+            border-color: #303030;
         }
-        [data-theme="dark"] .rekap-row:hover {
-            background: #2b1d11 !important;
-        }
-        .rekap-row.active-rekap-row {
-            background: #e6f7ff !important;
+        .rekap-notinv-select {
+            font-size: 11px;
             font-weight: 600;
+            padding: 3px 6px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: var(--bg-input, #ffffff);
+            color: var(--text-main, #262626);
+            outline: none;
+            cursor: pointer;
         }
-        [data-theme="dark"] .rekap-row.active-rekap-row {
-            background: #111d2c !important;
+        body[data-theme="dark"] .rekap-notinv-select {
+            border-color: #434343;
+            background: #1f1f1f;
+            color: #d9d9d9;
         }
-        .rekap-row.active-rekap-row td {
-            color: #0050b3 !important;
+        .btn-rekap-all {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            background: #ffffff;
+            color: #595959;
+            cursor: pointer;
+            transition: all 0.15s;
         }
-        [data-theme="dark"] .rekap-row.active-rekap-row td {
-            color: #40a9ff !important;
+        .btn-rekap-all:hover {
+            border-color: #ff4d4f;
+            color: #cf1322;
+        }
+        body[data-theme="dark"] .btn-rekap-all {
+            background: #1f1f1f;
+            border-color: #434343;
+            color: #bfbfbf;
+        }
+        .badge-rekap-total {
+            background: #fff1f0;
+            color: #cf1322;
+            border: 1px solid #ffa39e;
+            font-weight: 700;
+            font-size: 12px;
+            padding: 1px 7px;
+            border-radius: 4px;
+        }
+        body[data-theme="dark"] .badge-rekap-total {
+            background: #2a1215;
+            color: #ff7875;
+            border-color: #5c2223;
+        }
+        .rekap-notinv-body {
+            max-height: 330px;
+            overflow-y: auto;
+        }
+        .rekap-notinv-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11.5px;
+        }
+        .rekap-notinv-table th {
+            background: var(--bg-base, #fafafa);
+            padding: 5px 8px;
+            color: #595959;
+            font-weight: 600;
+            border-bottom: 1px solid #f0f0f0;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        body[data-theme="dark"] .rekap-notinv-table th {
+            background: #141414;
+            border-color: #303030;
+            color: #8c8c8c;
+        }
+        .rekap-notinv-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid #f5f5f5;
+            color: var(--text-main, #262626);
+        }
+        body[data-theme="dark"] .rekap-notinv-table td {
+            border-color: #262626;
+            color: #d9d9d9;
+        }
+        .rekap-notinv-row {
+            cursor: pointer;
+            transition: background 0.15s ease;
+        }
+        .rekap-notinv-row:hover {
+            background: #fff1f0;
+        }
+        body[data-theme="dark"] .rekap-notinv-row:hover {
+            background: #2a1215;
+        }
+        .rekap-notinv-row.active-month {
+            background: #ffe8e6 !important;
+            font-weight: 700;
+        }
+        body[data-theme="dark"] .rekap-notinv-row.active-month {
+            background: #44161a !important;
+        }
+        .badge-count-notinv {
+            display: inline-block;
+            min-width: 32px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+            color: #cf1322;
+            background: #fff1f0;
+            border: 1px solid #ffa39e;
+            border-radius: 3px;
+            text-align: center;
+        }
+        body[data-theme="dark"] .badge-count-notinv {
+            background: #2a1215;
+            color: #ff7875;
+            border-color: #5c2223;
+        }
+        .rekap-notinv-footer {
+            background: var(--bg-base, #fafafa);
+            border-top: 1px solid #f0f0f0;
+            padding: 5px 10px;
+            font-size: 10.5px;
+            color: #8c8c8c;
+            text-align: center;
+            border-bottom-left-radius: 7px;
+            border-bottom-right-radius: 7px;
+        }
+        body[data-theme="dark"] .rekap-notinv-footer {
+            background: #141414;
+            border-color: #303030;
+            color: #595959;
         }
 
         /* -------------------------------------------------------------
@@ -931,19 +1408,83 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .ant-table-wrapper {
             width: 100%;
             border: 1px solid rgba(0, 0, 0, 0.075);
-            border-radius: 3px;
+            border-radius: 4px;
             background: #fff;
-            overflow: hidden;
+            overflow-x: auto;
+            overflow-y: hidden;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
         }
         body[data-theme="dark"] .ant-table-wrapper {
             border-color: #2b2b40;
             background: #1e1e2d;
         }
+        /* Custom horizontal scrollbar matching user design */
+        .ant-table-wrapper::-webkit-scrollbar {
+            height: 10px;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-track {
+            background: #f0f2f5;
+            border-radius: 5px;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-thumb {
+            background: #b0b8c4;
+            border-radius: 5px;
+            border: 2px solid #f0f2f5;
+        }
+        .ant-table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #1890ff;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-track {
+            background: #151521;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-thumb {
+            background: #3f4254;
+            border-color: #151521;
+        }
+        body[data-theme="dark"] .ant-table-wrapper::-webkit-scrollbar-thumb:hover {
+            background: #52c41a;
+        }
         .ant-table {
             width: 100%;
+            min-width: 1480px;
             border-collapse: collapse;
             font-size: 10px;
             text-align: left;
+        }
+        .ant-table table {
+            width: 100%;
+            min-width: 1480px;
+            border-collapse: collapse;
+        }
+        /* Sticky Column Aksi */
+        .th-col-aksi, .td-col-aksi {
+            position: sticky;
+            right: 0;
+            background: #ffffff;
+            z-index: 5;
+            box-shadow: -3px 0 6px -2px rgba(0, 0, 0, 0.08);
+        }
+        .ant-table-thead > tr > th.th-col-aksi {
+            background: var(--table-head-bg, #fafafa);
+            z-index: 6;
+        }
+        body[data-theme="dark"] .th-col-aksi,
+        body[data-theme="dark"] .td-col-aksi {
+            background: #1e1e2d;
+            box-shadow: -3px 0 6px -2px rgba(0, 0, 0, 0.35);
+        }
+        body[data-theme="dark"] .ant-table-thead > tr > th.th-col-aksi {
+            background: #151521;
+        }
+        .ant-table-tbody > tr:hover > td.td-col-aksi {
+            background: #f0f7ff !important;
+        }
+        body[data-theme="dark"] .ant-table-tbody > tr:hover > td.td-col-aksi {
+            background: #262638 !important;
+        }
+        .ant-table-tbody > tr.selected-row > td.td-col-aksi {
+            background: #e6f7ff !important;
         }
         .ant-table-thead > tr > th {
             color: rgba(0, 0, 0, 0.85);
@@ -954,8 +1495,36 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             font-size: 9.5px;
             white-space: nowrap;
         }
+        .ant-table-thead > tr > th.th-sortable {
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.15s, color 0.15s;
+        }
+        .ant-table-thead > tr > th.th-sortable:hover {
+            background: rgba(24, 144, 255, 0.08);
+            color: var(--primary, #1890ff);
+        }
+        .ant-table-thead > tr > th.th-sorted {
+            background: rgba(24, 144, 255, 0.09) !important;
+            color: var(--primary, #1890ff) !important;
+        }
+        .th-sort-icon {
+            display: inline-block;
+            margin-left: 4px;
+            font-size: 9px;
+            vertical-align: middle;
+            opacity: 0.35;
+            transition: opacity 0.15s;
+        }
+        .ant-table-thead > tr > th.th-sorted .th-sort-icon {
+            opacity: 1 !important;
+            color: var(--primary, #1890ff);
+        }
         body[data-theme="dark"] .ant-table-thead > tr > th {
             color: #ffffff;
+        }
+        body[data-theme="dark"] .ant-table-thead > tr > th.th-sorted {
+            background: rgba(24, 144, 255, 0.2) !important;
         }
 
         .ant-table-tbody > tr > td {
@@ -1442,6 +2011,218 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Badge Unduh Excel CEISA 4.0 */
+        .excel-btn-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            padding: 2px 7px;
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            border-radius: 4px;
+            text-decoration: none !important;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(82, 196, 26, 0.08);
+            line-height: 1.2;
+        }
+        .excel-btn-badge:hover {
+            background: #52c41a;
+            border-color: #52c41a;
+        }
+        .excel-btn-badge:hover span {
+            color: #ffffff !important;
+        }
+        .excel-btn-badge:hover svg {
+            fill: #ffffff !important;
+        }
+        body[data-theme="dark"] .excel-btn-badge {
+            background: rgba(82, 196, 26, 0.15);
+            border-color: rgba(82, 196, 26, 0.35);
+        }
+        body[data-theme="dark"] .excel-btn-badge span {
+            color: #95de64 !important;
+        }
+        body[data-theme="dark"] .excel-btn-badge:hover {
+            background: #52c41a;
+        }
+        body[data-theme="dark"] .excel-btn-badge:hover span {
+            color: #ffffff !important;
+        }
+
+        /* Mode Select & Checkbox Kolom */
+        .col-select-mode {
+            display: none !important;
+            width: 38px;
+            text-align: center;
+        }
+        body.mode-select-active .col-select-mode {
+            display: table-cell !important;
+        }
+        body.mode-select-active tr.selected-row > td {
+            background: #e6f7ff !important;
+        }
+        body[data-theme="dark"].mode-select-active tr.selected-row > td {
+            background: rgba(24, 144, 255, 0.18) !important;
+        }
+
+        /* Floating Batch Action Bar */
+        .batch-action-bar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1050;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 8px;
+            padding: 8px 18px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            animation: batchSlideUp 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+        @keyframes batchSlideUp {
+            from { transform: translate(-50%, 40px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .batch-bar-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text-heading);
+            white-space: nowrap;
+        }
+        .batch-bar-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Context Menu */
+        .dd-context-menu {
+            position: fixed;
+            z-index: 9999;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+            padding: 4px 0;
+            min-width: 190px;
+            display: none;
+        }
+        .dd-context-item {
+            padding: 7px 14px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: var(--text-main);
+            transition: background 0.15s;
+        }
+        .dd-context-item:hover {
+            background: rgba(24, 144, 255, 0.12);
+            color: var(--primary);
+        }
+        .dd-context-divider {
+            height: 1px;
+            background: var(--border-card);
+            margin: 4px 0;
+        }
+
+        /* -------------------------------------------------------------
+           TOMBOL AKSI PORTAL CEISA & DROPDOWN MENU AKSI BARIS TABEL
+           ------------------------------------------------------------- */
+        .action-btn-ceisa {
+            background: #ffffff;
+            border: 1px solid #1890ff;
+            color: #1890ff;
+            padding: 2px 14px;
+            font-size: 11.5px;
+            font-weight: 500;
+            border-radius: 4px;
+            cursor: pointer;
+            outline: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            line-height: 1.5;
+            transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+            user-select: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+        .action-btn-ceisa:hover, .action-btn-ceisa.active {
+            background: #e6f7ff;
+            border-color: #40a9ff;
+            color: #096dd9;
+            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.2);
+        }
+        body[data-theme="dark"] .action-btn-ceisa {
+            background: transparent;
+            border-color: #177ddc;
+            color: #177ddc;
+        }
+        body[data-theme="dark"] .action-btn-ceisa:hover, 
+        body[data-theme="dark"] .action-btn-ceisa.active {
+            background: #111d2c;
+            border-color: #40a9ff;
+            color: #40a9ff;
+        }
+
+        .row-action-menu {
+            position: fixed;
+            z-index: 10000;
+            background: #ffffff;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            padding: 4px 0;
+            min-width: 155px;
+            display: none;
+            animation: fadeInRowMenu 0.15s ease-out;
+        }
+        @keyframes fadeInRowMenu {
+            from { opacity: 0; transform: translateY(-3px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        body[data-theme="dark"] .row-action-menu {
+            background: #1f1f1f;
+            border-color: #303030;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+        }
+        .row-action-item {
+            padding: 7px 14px;
+            font-size: 11.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #262626;
+            transition: background 0.15s, color 0.15s;
+            user-select: none;
+        }
+        body[data-theme="dark"] .row-action-item {
+            color: #d9d9d9;
+        }
+        .row-action-item:hover {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+        body[data-theme="dark"] .row-action-item:hover {
+            background: #111d2c;
+            color: #177ddc;
+        }
+        .row-action-item svg {
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -1475,7 +2256,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span>Rekap Dokumen</span>
                 </button>
 
-
                 <!-- Filter -->
                 <button type="button" class="ant-btn" onclick="toggleFilterPanel()">
                     <svg viewBox="64 64 896 896" width="12" height="12" fill="currentColor">
@@ -1497,6 +2277,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span style="font-size:11px;">🔄</span>
                     <span>Sinkron CEISA</span>
                 </button>
+
+                <!-- Mode Select (Pilih Massal Dokumen & Unduh Excel) -->
+                <button type="button" class="ant-btn" id="btnModeSelect" onclick="toggleModeSelect()" title="Aktifkan Mode Centang / Pilih Massal Dokumen untuk Unduh Excel">
+                    <span id="iconModeSelect">☑️</span>
+                    <span id="lblModeSelect">Mode Select</span>
+                </button>
             </div>
         </div>
 
@@ -1516,10 +2302,54 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span class="kpi-label kpi-label-success">Selesai Proses</span>
                     <strong class="kpi-val kpi-val-success" id="kpiPosted">0</strong>
                 </div>
-                <div class="kpi-chip" id="kpiChipNotInv" onclick="filterByCard('not_inv')" title="Klik untuk memfilter hanya dokumen yang belum masuk IT Inventory (bc_1ab2)" style="display:none;">
+                <div class="kpi-chip" id="kpiChipNotInv" onclick="filterByCard('not_inv')" title="Klik untuk memfilter hanya dokumen yang belum masuk IT Inventory (bc_1ab2)" style="display:none; align-items:center;">
                     <span class="kpi-label kpi-label-danger">Belum Masuk IT Inv</span>
                     <strong class="kpi-val kpi-val-danger" id="kpiNotInv">0</strong>
-                    <button type="button" class="btn-rekap-mini" onclick="event.stopPropagation(); toggleRekapBulananNotInv();" title="Buka Rekap Dokumen Belum Masuk IT Inventory per Bulan">📊 Rekap</button>
+                    <button type="button" class="btn-rekap-pill" id="btnRekapNotInv" onclick="toggleRekapNotInv(event)" title="Lihat Rekap Dokumen Belum Masuk IT Inventory per Bulan">
+                        📊 Rekap
+                    </button>
+                    <span id="badgeActiveMonth" style="display:none; font-size:9.5px; font-weight:700; background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; padding:1px 5px; border-radius:3px; margin-left:4px; cursor:pointer;" onclick="filterByRekapMonth(event, '')" title="Klik untuk reset filter periode bulan"></span>
+                </div>
+            </div>
+
+            <!-- FLOATING WIDGET: REKAP BELUM MASUK IT INVENTORY PER BULAN -->
+            <div class="rekap-notinv-widget" id="rekapNotInvWidget" style="display:none;">
+                <div class="rekap-notinv-header" id="rekapNotInvHeader">
+                    <span class="rekap-notinv-title">
+                        <span>📅</span>
+                        <span>Rekap Belum IT Inv per Bulan</span>
+                    </span>
+                    <button type="button" class="rekap-notinv-close" onclick="closeRekapNotInv(event)" title="Tutup Rekap">✕</button>
+                </div>
+                <div class="rekap-notinv-toolbar">
+                    <select id="sortRekapNotInv" class="rekap-notinv-select" onchange="renderRekapNotInvTable()">
+                        <option value="month_desc">Urut: Bulan Terbaru ↓</option>
+                        <option value="month_asc">Urut: Bulan Terlama ↑</option>
+                        <option value="count_desc">Urut: Belum IT Inv Terbanyak ↓</option>
+                        <option value="count_asc">Urut: Belum IT Inv Tersedikit ↑</option>
+                    </select>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <button type="button" class="btn-rekap-all" onclick="filterByRekapMonth(event, '')" title="Tampilkan Semua Periode">Semua</button>
+                        <span class="badge-rekap-total" id="badgeRekapTotal">0</span>
+                    </div>
+                </div>
+                <div class="rekap-notinv-body">
+                    <table class="rekap-notinv-table">
+                        <thead>
+                            <tr>
+                                <th style="width:32px; text-align:center;">#</th>
+                                <th>Bulan / Periode</th>
+                                <th style="text-align:center; width:95px;">Belum IT Inv</th>
+                                <th style="text-align:right; width:75px; padding-right:12px;">% Ratio</th>
+                            </tr>
+                        </thead>
+                        <tbody id="rekapNotInvTbody">
+                            <tr><td colspan="4" style="text-align:center; padding:16px; color:#8c8c8c;">Memuat rekap...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="rekap-notinv-footer">
+                    💡 Klik baris bulan untuk memfilter dokumen pada tabel utama
                 </div>
             </div>
 
@@ -1530,26 +2360,26 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <label>DOKUMEN BC</label>
                     <select id="filterBc" onchange="loadList()" class="filter-control">
                         <option value="">Semua Dokumen</option>
-                        <optgroup label="─── PEMASUKAN (INBOUND) ───">
-                            <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 (Impor PIB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 (Impor TPB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 (Subkon Masuk)</option><?php endif; ?>
-                            <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN (Pemasukan TPB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 (Impor PLB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 (Pemasukan TLDDP)</option><?php endif; ?>
-                            <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 (Pemasukan LDP)</option><?php endif; ?>
-                            <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pemasukan TLDDP)</option><?php endif; ?>
+                        <optgroup label="── PEMASUKAN (INBOUND) ──">
+                            <?php if (isDocPermitted('16')): ?><option value="16">BC 1.6 — Pemasukan ke PLB</option><?php endif; ?>
+                            <?php if (isDocPermitted('20')): ?><option value="20">BC 2.0 — Impor Non-Fasilitas (PIB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('23')): ?><option value="23">BC 2.3 — Impor ke Kawasan Berikat (TPB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('262')): ?><option value="262">BC 2.6.2 — Pemasukan Subcon Kembali</option><?php endif; ?>
+                            <?php if (isDocPermitted('27IN')): ?><option value="27IN">BC 2.7 IN — Pemasukan dari TPB Lain</option><?php endif; ?>
+                            <?php if (isDocPermitted('28')): ?><option value="28">BC 2.8 — Impor dari PLB</option><?php endif; ?>
+                            <?php if (isDocPermitted('40')): ?><option value="40">BC 4.0 — Pemasukan dari Lokal ke TPB</option><?php endif; ?>
+                            <?php if (isDocPermitted('611')): ?><option value="611">PPKEK 6.1.1 — Pemasukan ke KEK dari Luar Negeri</option><?php endif; ?>
+                            <?php if (isDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 — Pemasukan ke KEK dari Lokal</option><?php endif; ?>
                         </optgroup>
-                        <optgroup label="─── PENGELUARAN (OUTBOUND) ───">
-                            <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran TPB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Luar)</option><?php endif; ?>
-                            <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
-                            <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                            <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET)</option><?php endif; ?>
-                            <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
-                            <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
+                        <optgroup label="── PENGELUARAN (OUTBOUND) ──">
+                            <?php if (isDocPermitted('25')): ?><option value="25">BC 2.5 — Pengeluaran ke Lokal (Asal Impor / BC 2.3)</option><?php endif; ?>
+                            <?php if (isDocPermitted('261')): ?><option value="261">BC 2.6.1 — Pengeluaran Subcon</option><?php endif; ?>
+                            <?php if (isDocPermitted('27')): ?><option value="27">BC 2.7 — Pengeluaran ke TPB Lain</option><?php endif; ?>
+                            <?php if (isDocPermitted('30')): ?><option value="30">BC 3.0 — Ekspor Barang (PEB)</option><?php endif; ?>
+                            <?php if (isDocPermitted('33')): ?><option value="33">BC 3.3 — Ekspor dari PLB</option><?php endif; ?>
+                            <?php if (isDocPermitted('331')): ?><option value="331">BC 3.3.1 — P3BET PLB</option><?php endif; ?>
+                            <?php if (isDocPermitted('41')): ?><option value="41">BC 4.1 — Pengeluaran ke Lokal (Asal Lokal / BC 4.0)</option><?php endif; ?>
+                            <?php if (isDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 — Pengeluaran dari KEK ke Luar Negeri</option><?php endif; ?>
                         </optgroup>
                         <?php if (empty($companyAllowedDocs) && !empty($sessionCmpId)): ?>
                             <option value="" disabled>(Tidak ada dokumen pabean aktif)</option>
@@ -1580,19 +2410,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <thead class="ant-table-thead">
                             <!-- Header Row 1: Titles -->
                             <tr>
+                                <th style="width: 38px; text-align: center;" class="col-select-mode">
+                                    <input type="checkbox" id="masterSelectCb" onchange="toggleSelectAllPage(this)" title="Pilih Semua Dokumen di Halaman Ini" style="cursor:pointer;">
+                                </th>
                                 <th style="width: 55px;">Nomor</th>
-                                <th style="width: 110px;">Kode Dokumen</th>
-                                <th style="width: 260px;">Nomor Pengajuan</th>
-                                <th style="width: 170px;">Nomor / Tanggal Pendaftaran</th>
-                                <th style="width: 170px;">Nama Respon</th>
-                                <th style="width: 70px; text-align: center;">PDF</th>
-                                <th style="width: 155px;">Tanggal Respon</th>
-                                <th style="width: 65px; text-align: center;">Jalur</th>
-                                <th style="width: 250px;">Nama Perusahaan</th>
-                                <th style="width: 180px;">Kantor Pabean</th>
+                                <th style="width: 110px;" class="th-sortable" data-sort-col="bc" onclick="sortTable('bc')" title="Klik untuk mengurutkan Kode Dokumen">Kode Dokumen <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 250px;" class="th-sortable" data-sort-col="nomor_aju" onclick="sortTable('nomor_aju')" title="Klik untuk mengurutkan Nomor Pengajuan">Nomor Pengajuan <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 170px;" class="th-sortable" data-sort-col="nomor_daftar" onclick="sortTable('nomor_daftar')" title="Klik untuk mengurutkan Nomor / Tanggal Pendaftaran">Nomor / Tanggal Pendaftaran <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 170px;" class="th-sortable" data-sort-col="nama_respon" onclick="sortTable('nama_respon')" title="Klik untuk mengurutkan Nama Respon">Nama Respon <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 75px; text-align: center;">PDF</th>
+                                <th style="width: 155px;" class="th-sortable th-sorted" data-sort-col="tanggal_respon" onclick="sortTable('tanggal_respon')" title="Klik untuk mengurutkan Tanggal Respon (Default: Terakhir / Terbaru)">Tanggal Respon <span class="th-sort-icon">▼</span></th>
+                                <th style="width: 65px; text-align: center;" class="th-sortable" data-sort-col="jalur" onclick="sortTable('jalur')" title="Klik untuk mengurutkan Jalur">Jalur <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 250px;" class="th-sortable" data-sort-col="perusahaan" onclick="sortTable('perusahaan')" title="Klik untuk mengurutkan Nama Perusahaan">Nama Perusahaan <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 180px;" class="th-sortable" data-sort-col="kantor" onclick="sortTable('kantor')" title="Klik untuk mengurutkan Kantor Pabean">Kantor Pabean <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 90px; text-align: center;" class="th-col-aksi">Aksi</th>
                             </tr>
                             <!-- Header Row 2: Inline Input Filters -->
                             <tr>
+                                <th class="col-select-mode"></th>
                                 <th></th>
                                 <th>
                                     <span class="ant-input-affix-wrapper">
@@ -1652,11 +2487,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                         </span>
                                     </span>
                                 </th>
+                                <th class="th-col-aksi"></th>
                             </tr>
                         </thead>
                         <tbody class="ant-table-tbody" id="ajuTableBody">
                             <tr>
-                                <td colspan="10" style="text-align:center; padding:28px; color:#8c8c8c;">
+                                <td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">
                                     <span class="spinner"></span> Memuat data dokumen...
                                 </td>
                             </tr>
@@ -1672,50 +2508,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     </li>
                 </ul>
             </div>
-        </div>
-    </div>
-
-    <!-- FLOATING WINDOW: REKAP DOKUMEN BELUM MASUK IT INVENTORY PER BULAN -->
-    <div id="rekapBulananNotInvModal" class="rekap-floating-window" style="display:none; width:350px; right:25px; top:135px;">
-        <div class="rekap-window-header" id="rekapBulananHeader">
-            <div class="rekap-window-title">
-                <svg viewBox="64 64 896 896" width="13" height="13" fill="#cf1322">
-                    <path d="M880 184H712v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H384v-64c0-4.4-3.6-8-8-8h-56c-4.4 0-8 3.6-8 8v64H144c-17.7 0-32 14.3-32 32v664c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V216c0-17.7-14.3-32-32-32zm-40 656H184V336h656v504zm0-568H184v-40h136v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h256v32c0 4.4 3.6 8 8 8h56c4.4 0 8-3.6 8-8v-32h136v40z"></path>
-                </svg>
-                <span>Rekap Belum IT Inv per Bulan</span>
-            </div>
-            <button type="button" class="rekap-window-close" onclick="closeRekapBulananNotInv()" title="Tutup">×</button>
-        </div>
-        <div style="padding:6px 10px; background:var(--bg-filter); border-bottom:1px solid var(--border-card); display:flex; justify-content:space-between; align-items:center; gap:6px;">
-            <button type="button" class="ant-btn ant-btn-sm" id="btnToggleRekapSort" onclick="setRekapSortMode(rekapSortMode === 'month_desc' ? 'count_desc' : 'month_desc')" style="font-size:10px; height:20px; padding:0 6px;">
-                <span>Urut: <b>Bulan Terbaru ↓</b></span>
-            </button>
-            <div style="display:flex; align-items:center; gap:4px;">
-                <button type="button" class="ant-btn ant-btn-sm" onclick="resetRekapMonthFilter()" style="font-size:9.5px; height:20px; padding:0 5px;" title="Tampilkan Semua Bulan">
-                    Semua
-                </button>
-                <span class="ant-tag ant-tag-red" style="font-weight:700; font-size:10.5px; padding:0 6px;" title="Total Dokumen Belum Masuk IT Inventory" id="rekapBulananTotal">
-                    0
-                </span>
-            </div>
-        </div>
-        <div style="max-height:360px; overflow-y:auto; overflow-x:hidden;">
-            <table class="ant-table" style="width:100%; border-collapse:collapse;">
-                <thead class="ant-table-thead" style="position:sticky; top:0; z-index:2;">
-                    <tr>
-                        <th style="width:28px; text-align:center; padding:4px;">#</th>
-                        <th style="padding:4px 8px;">Bulan / Periode</th>
-                        <th style="text-align:right; width:95px; padding:4px 8px;">Belum IT Inv</th>
-                        <th style="text-align:right; width:55px; padding:4px 8px;">% Ratio</th>
-                    </tr>
-                </thead>
-                <tbody class="ant-table-tbody" id="rekapBulananTbody">
-                    <tr><td colspan="4" style="text-align:center; padding:16px; color:#8c8c8c;">Memuat rekap...</td></tr>
-                </tbody>
-            </table>
-        </div>
-        <div style="padding:4px 8px; background:var(--bg-filter); border-top:1px solid var(--border-card); font-size:9.5px; color:#8c8c8c; text-align:center;">
-            💡 <i>Klik baris bulan untuk memfilter dokumen pada tabel utama</i>
         </div>
     </div>
 
@@ -1948,6 +2740,140 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         </div>
     </div>
 
+    <!-- 1. FLOATING BATCH ACTION BAR -->
+    <div id="batchActionBar" class="batch-action-bar" style="display:none;">
+        <div class="batch-bar-info">
+            <span style="font-size:14px;">☑️</span>
+            <span>Terpilih: <strong id="batchSelectedCount" style="color:var(--primary); font-size:13px;">0</strong> dokumen</span>
+        </div>
+        <div class="batch-bar-actions">
+            <button type="button" class="ant-btn ant-btn-sm ant-btn-success" onclick="startBatchDownloadExcel()" id="btnBatchDownload" style="font-weight:600;">
+                📥 Unduh Excel Terpilih (<span id="batchBtnCount">0</span>)
+            </button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllOnCurrentPage()" title="Pilih semua dokumen di halaman ini">Pilih Halaman Ini</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllFilteredData()" title="Pilih seluruh dokumen hasil filter">Pilih Semua Filter</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="clearAllSelection()" title="Batalkan seluruh centang">Batal Pilih</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="toggleModeSelect(false)" title="Tutup mode select">✕ Keluar Mode</button>
+        </div>
+    </div>
+
+    <!-- 2. CONTEXT MENU KLIK KANAN BARIS TABEL -->
+    <div id="ddContextMenu" class="dd-context-menu">
+        <div class="dd-context-item" id="ctxItemDownloadExcel">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#52c41a">
+                <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+            </svg>
+            <span style="font-weight:600; color:#389e0d;">Unduh Excel (CEISA 4.0)</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemImportH2H">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
+                <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
+            </svg>
+            <span style="font-weight:600; color:#1890ff;">Import ke Data H2H</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemViewPdf">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
+                <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+            </svg>
+            <span>Buka Dokumen PDF</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemTracking">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
+            </svg>
+            <span>Riwayat Status Tracking</span>
+        </div>
+        <div class="dd-context-divider"></div>
+        <div class="dd-context-item" id="ctxItemSelectToggle">
+            <span>☑️</span>
+            <span id="ctxTextSelect">Pilih Dokumen Ini</span>
+        </div>
+    </div>
+
+    <!-- 2.1 DROPDOWN MENU AKSI TOMBOL KOLOM PALING KANAN -->
+    <div id="rowActionMenu" class="row-action-menu">
+        <div class="row-action-item" onclick="triggerRowAction('excel')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M514.1 639.9l61.7-89c3.1-4.5 4.7-9.9 4.7-15.3 0-14.7-11.9-26.6-26.6-26.6h-34.9c-7.3 0-14.1 3.5-18.4 9.4l-40.3 58-40.3-58c-4.3-5.9-11.1-9.4-18.4-9.4h-34.9c-14.7 0-26.6 11.9-26.6 26.6 0 5.4 1.6 10.8 4.7 15.3l61.7 89-63.5 91.6c-3.1 4.5-4.7 9.9-4.7 15.3 0 14.7 11.9 26.6 26.6 26.6h35.5c7.3 0 14.1-3.5 18.4-9.4l42-60.5 42 60.5c4.3 5.9 11.1 9.4 18.4 9.4h35.5c14.7 0 26.6-11.9 26.6-26.6 0-5.4-1.6-10.8-4.7-15.3l-63.5-91.6z"/>
+            </svg>
+            <span>Unduh Excel</span>
+        </div>
+        <div class="row-action-item" onclick="triggerRowAction('import_h2h')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
+                <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
+            </svg>
+            <span>Import ke H2H</span>
+        </div>
+        <div class="row-action-item" onclick="triggerRowAction('cetak')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M336 496h352v64H336zm0 144h352v64H336z"/>
+            </svg>
+            <span>Cetak Dokumen</span>
+        </div>
+        <div class="row-action-item" onclick="triggerRowAction('status')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
+            </svg>
+            <span>Status Dokumen</span>
+        </div>
+    </div>
+
+    <!-- 3. MODAL: BATCH DOWNLOAD EXCEL PROGRESS & ANTI-WAF ENGINE -->
+    <div class="modal-overlay" id="modalBatchProgress" style="display:none;">
+        <div class="modal" style="max-width:620px; width:95%; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.25); overflow:hidden;">
+            <div class="modal-header" style="background:var(--bg-filter); border-bottom:1px solid var(--border-card); padding:12px 18px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">🛡️</span>
+                    <div>
+                        <h3 style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Unduh Excel Massal CEISA 4.0</h3>
+                        <div style="font-size:10px; color:#52c41a; font-weight:600; margin-top:2px;">Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif</div>
+                    </div>
+                </div>
+                <button type="button" class="ant-btn ant-btn-sm" onclick="cancelBatchDownload()">✕</button>
+            </div>
+            <div class="modal-body" style="padding:16px 18px; display:flex; flex-direction:column; gap:12px; max-height:75vh; overflow-y:auto;">
+                <!-- Overall Progress -->
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:11px;">
+                        <span id="batchModalStatusText" style="font-weight:600; color:var(--text-heading);">Menyiapkan pengunduhan...</span>
+                        <span id="batchModalPercent" style="font-weight:700; color:#52c41a; font-family:monospace;">0%</span>
+                    </div>
+                    <div style="height:8px; background:var(--border-card); border-radius:4px; overflow:hidden;">
+                        <div id="batchModalProgressBar" style="width:0%; height:100%; background:#52c41a; transition:width 0.3s ease;"></div>
+                    </div>
+                </div>
+
+                <!-- Live Safety Countdown Box (WAF Evasion Indicator) -->
+                <div id="batchModalSafetyBox" style="background:rgba(82,196,26,0.08); border:1px solid #b7eb8f; border-radius:6px; padding:8px 12px; font-size:10.5px; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                    <span class="spinner" id="batchSafetySpinner" style="border-top-color:#52c41a; width:12px; height:12px;"></span>
+                    <span id="batchModalSafetyTimer">Memulai proses pengunduhan berurutan...</span>
+                </div>
+
+                <!-- Log List of Processed Items -->
+                <div style="border:1px solid var(--border-card); border-radius:6px; background:var(--bg-input); max-height:180px; overflow-y:auto; padding:6px 10px; font-size:10.5px; font-family:monospace;" id="batchModalLogList">
+                    <!-- Dynamic log rows -->
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:10px 18px; border-top:1px solid var(--border-card); background:var(--bg-filter); display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:11px; color:var(--text-muted);">
+                    Berhasil: <b id="batchCountSuccess" style="color:#52c41a;">0</b> | Gagal: <b id="batchCountFailed" style="color:#ff4d4f;">0</b>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnBatchPauseResume" onclick="togglePauseBatchDownload()">⏸️ Jeda</button>
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnBatchCancel" onclick="cancelBatchDownload()">✕ Batalkan</button>
+                    <button type="button" class="ant-btn ant-btn-sm ant-btn-success" id="btnBatchDownloadZip" onclick="triggerZipDownload()" style="display:none; font-weight:600;">📦 Unduh Arsip ZIP</button>
+                    <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" id="btnBatchClose" onclick="closeBatchModal()" style="display:none;">✓ Selesai</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let ajuData = [];
         let filteredData = [];
@@ -2104,12 +3030,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const indicatorText = document.getElementById('silentSyncText');
             const btnSync = document.getElementById('btnSyncCeisa');
 
-            if (indicator && isManual) {
-                indicator.style.display = 'inline-flex';
-                indicator.className = 'sync-indicator sync-active';
-                if (indicatorText) indicatorText.innerText = 'Menyinkronkan data CEISA...';
+            if (indicator) {
+                if (isManual) {
+                    indicator.style.display = 'inline-flex';
+                    indicator.className = 'sync-indicator sync-active';
+                    if (indicatorText) indicatorText.innerText = 'Menyinkronkan data CEISA...';
+                } else {
+                    indicator.style.display = 'none';
+                }
             }
-            if (btnSync && isManual) {
+            if (btnSync) {
                 btnSync.classList.add('btn-loading');
                 btnSync.disabled = true;
             }
@@ -2123,18 +3053,32 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 localStorage.setItem(cacheKey, Date.now().toString());
 
                 if (json.status === 'OK') {
-                    if (indicator && indicatorText && (isManual || json.inserted > 0)) {
-                        indicator.style.display = 'inline-flex';
-                        indicator.className = 'sync-indicator sync-success';
-                        indicatorText.innerText = `✓ CEISA 4.0 Terupdate (${json.inserted} dokumen)`;
-                        setTimeout(() => {
-                            if (indicator) indicator.style.display = 'none';
-                        }, 3500);
-                    }
+                    const hasRealChanges = !!json.has_changes;
+                    const changeTotal = (json.new_docs || 0) + (json.changed_responses || 0) + (json.updated_headers || 0);
 
-                    // Jika ada data baru atau respon terupdate, segarkan tabel tanpa kedip
-                    if (json.has_changes) {
+                    if (hasRealChanges) {
+                        // Tampilkan hanya jika ada perubahan riil
+                        if (indicator && indicatorText) {
+                            indicator.style.display = 'inline-flex';
+                            indicator.className = 'sync-indicator sync-success';
+                            indicatorText.innerText = `✓ CEISA 4.0 Terupdate (${changeTotal > 0 ? changeTotal + ' dokumen' : 'pembaruan data'})`;
+                            setTimeout(() => {
+                                if (indicator) indicator.style.display = 'none';
+                            }, 3500);
+                        }
                         loadList(true);
+                    } else {
+                        // Tidak ada perubahan / tidak ada yang sync
+                        if (isManual && indicator && indicatorText) {
+                            indicator.style.display = 'inline-flex';
+                            indicator.className = 'sync-indicator sync-success';
+                            indicatorText.innerText = '✓ Data CEISA sudah mutakhir (tidak ada dokumen baru)';
+                            setTimeout(() => {
+                                if (indicator) indicator.style.display = 'none';
+                            }, 3000);
+                        } else if (indicator) {
+                            indicator.style.display = 'none';
+                        }
                     }
                 } else if (json.status === 'RATE_LIMITED') {
                     if (indicator && indicatorText && isManual) {
@@ -2144,9 +3088,20 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         setTimeout(() => {
                             if (indicator) indicator.style.display = 'none';
                         }, 5000);
+                    } else if (indicator) {
+                        indicator.style.display = 'none';
                     }
                 } else if (json.status === 'CACHED') {
-                    if (indicator) indicator.style.display = 'none';
+                    if (isManual && indicator && indicatorText) {
+                        indicator.style.display = 'inline-flex';
+                        indicator.className = 'sync-indicator sync-success';
+                        indicatorText.innerText = '✓ Data CEISA masih segar';
+                        setTimeout(() => {
+                            if (indicator) indicator.style.display = 'none';
+                        }, 2500);
+                    } else if (indicator) {
+                        indicator.style.display = 'none';
+                    }
                 } else {
                     if (indicator && indicatorText && isManual) {
                         indicator.style.display = 'inline-flex';
@@ -2203,15 +3158,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         }
 
         let currentCardFilter = 'all'; // 'all', 'unposted', 'posted', 'not_inv'
-        let selectedRekapMonth = '';
-        let rekapSortMode = 'month_desc'; // 'month_desc' | 'count_desc'
+        let currentMonthFilter = '';   // e.g. '2026-10'
 
         function filterByCard(type) {
             if (document.getElementById('filterStatus')) {
                 document.getElementById('filterStatus').value = '';
-            }
-            if (type !== 'not_inv') {
-                selectedRekapMonth = '';
             }
             if (currentCardFilter === type) {
                 if (type !== 'all') {
@@ -2221,9 +3172,6 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 currentCardFilter = type;
             }
             updateCardFilterUI();
-            if (document.getElementById('rekapBulananNotInvModal')?.style.display !== 'none') {
-                renderRekapBulananTable();
-            }
             currentPage = 1;
             filterClientTable();
         }
@@ -2242,6 +3190,41 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const activeId = chips[currentCardFilter] || 'kpiChipTotal';
             const activeEl = document.getElementById(activeId);
             if (activeEl) activeEl.classList.add('active');
+        }
+
+        let currentSortCol = 'tanggal_respon';
+        let currentSortDir = 'desc';
+
+        function sortTable(col) {
+            if (currentSortCol === col) {
+                currentSortDir = (currentSortDir === 'desc') ? 'asc' : 'desc';
+            } else {
+                currentSortCol = col;
+                currentSortDir = (col === 'tanggal_respon' || col === 'nomor_daftar') ? 'desc' : 'asc';
+            }
+            updateSortIcons();
+            currentPage = 1;
+            filterClientTable();
+        }
+
+        function updateSortIcons() {
+            document.querySelectorAll('.th-sortable').forEach(th => {
+                const c = th.dataset.sortCol;
+                const icon = th.querySelector('.th-sort-icon');
+                if (c === currentSortCol) {
+                    th.classList.add('th-sorted');
+                    if (icon) {
+                        icon.innerHTML = currentSortDir === 'desc' ? '▼' : '▲';
+                        icon.style.opacity = '1';
+                    }
+                } else {
+                    th.classList.remove('th-sorted');
+                    if (icon) {
+                        icon.innerHTML = '⇅';
+                        icon.style.opacity = '0.35';
+                    }
+                }
+            });
         }
 
         function filterClientTable() {
@@ -2267,25 +3250,55 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
                     const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
                     if (isInv !== 1 || inItInv) return false;
+                }
 
-                    if (selectedRekapMonth) {
-                        let ym = (r.tanggal_daftar || '').substring(0, 7);
-                        if (!ym || ym.length < 7) {
-                            const aju = r.nomor_aju || '';
-                            if (aju.length >= 18) ym = aju.substring(12, 16) + '-' + aju.substring(16, 18); else ym = 'Lainnya';
-                        }
-                        if (ym !== selectedRekapMonth) return false;
-                    }
+                // Filter Bulan / Periode dari Rekap
+                if (currentMonthFilter) {
+                    const m = getDocMonth(r);
+                    if (m !== currentMonthFilter) return false;
                 }
 
                 if (fBc && !('bc ' + r.bc).toLowerCase().includes(fBc)) return false;
                 if (fAju && !r.nomor_aju.toLowerCase().includes(fAju)) return false;
-                if (fDaftar && !((r.nomor_daftar || '') + ' ' + (r.tanggal_daftar || '')).toLowerCase().includes(fDaftar)) return false;
+                if (fDaftar && !(r.nomor_daftar || '').toLowerCase().includes(fDaftar)) return false;
                 if (fRespon && !(r.bcd_namaRespon || (parseInt(r.posted) > 0 ? 'sppb' : '')).toLowerCase().includes(fRespon)) return false;
                 if (fJalur && !(r.bcd_kodeJalur || 'h').toLowerCase().includes(fJalur)) return false;
                 if (fPerusahaan && !(r.cmp_name || r.bs || '').toLowerCase().includes(fPerusahaan)) return false;
                 if (fKantor && !(r.bcd_namaKantorPendek || r.kode_kantor || '').toLowerCase().includes(fKantor)) return false;
                 return true;
+            });
+
+            // Urutkan data berdasarkan kolom aktif (Default: Tanggal Respon Descending)
+            filteredData.sort((a, b) => {
+                let valA = '';
+                let valB = '';
+                if (currentSortCol === 'tanggal_respon') {
+                    valA = a.effective_tanggal_respon || a.bcd_tanggalRespon || a.sppb_tanggal_respon || a.posted_waktu || a.tanggal_pernyataan || '';
+                    valB = b.effective_tanggal_respon || b.bcd_tanggalRespon || b.sppb_tanggal_respon || b.posted_waktu || b.tanggal_pernyataan || '';
+                } else if (currentSortCol === 'bc') {
+                    valA = a.bc || ''; valB = b.bc || '';
+                } else if (currentSortCol === 'nomor_aju') {
+                    valA = a.nomor_aju || ''; valB = b.nomor_aju || '';
+                } else if (currentSortCol === 'nomor_daftar') {
+                    valA = (a.nomor_daftar || '') + ' ' + (a.tanggal_daftar || '');
+                    valB = (b.nomor_daftar || '') + ' ' + (b.tanggal_daftar || '');
+                } else if (currentSortCol === 'nama_respon') {
+                    valA = a.bcd_namaRespon || (parseInt(a.posted) > 0 ? 'SPPB' : '') || '';
+                    valB = b.bcd_namaRespon || (parseInt(b.posted) > 0 ? 'SPPB' : '') || '';
+                } else if (currentSortCol === 'jalur') {
+                    valA = a.bcd_kodeJalur || 'H'; valB = b.bcd_kodeJalur || 'H';
+                } else if (currentSortCol === 'perusahaan') {
+                    valA = a.cmp_name || a.bs || ''; valB = b.cmp_name || b.bs || '';
+                } else if (currentSortCol === 'kantor') {
+                    valA = a.bcd_namaKantorPendek || a.kode_kantor || '';
+                    valB = b.bcd_namaKantorPendek || b.kode_kantor || '';
+                }
+
+                if (valA === valB) {
+                    return (b.nomor_aju || '').localeCompare(a.nomor_aju || '');
+                }
+                const cmp = valA.localeCompare(valB);
+                return currentSortDir === 'desc' ? -cmp : cmp;
             });
 
             // Update KPI metrics (selalu dihitung dari seluruh data ajuData)
@@ -2321,13 +3334,24 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
             }
 
+            // Segarkan tabel rekap jika widget sedang terbuka
+            const rekapWidget = document.getElementById('rekapNotInvWidget');
+            if (rekapWidget && rekapWidget.style.display !== 'none') {
+                renderRekapNotInvTable();
+            }
+
             currentPage = 1;
             renderTable();
         }
 
         function resetFilters() {
             currentCardFilter = 'all';
+            currentMonthFilter = '';
+            currentSortCol = 'tanggal_respon';
+            currentSortDir = 'desc';
             updateCardFilterUI();
+            updateRekapMonthHighlight();
+            updateSortIcons();
             if (document.getElementById('filterBc')) document.getElementById('filterBc').value = '';
             if (document.getElementById('filterStatus')) document.getElementById('filterStatus').value = '';
             if (document.getElementById('filterSearch')) document.getElementById('filterSearch').value = '';
@@ -2344,7 +3368,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         function renderTable() {
             const tbody = document.getElementById('ajuTableBody');
             if (!filteredData || filteredData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
                 selectedAju.clear();
                 updateSelectedCount();
                 renderPagination(0, 1, pageSize);
@@ -2419,6 +3443,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     `;
                 }
 
+                // Excel Resmi CEISA 4.0
+                const excelUrl = `/download_ceisa_excel.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}&cmp_id=${encodeURIComponent(r.cmp_id || '')}`;
+                const excelHtml = `
+                    <a href="${excelUrl}" target="_blank" class="excel-btn-badge" title="Unduh Berkas Excel (.xlsx) Resmi dari Portal CEISA 4.0 (${escapeHtml(r.nomor_aju)})">
+                        <svg viewBox="64 64 896 896" width="12" height="12" fill="#52c41a" style="vertical-align:-1px;">
+                            <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+                        </svg>
+                        <span style="font-size:9.5px; font-weight:600; color:#389e0d; margin-left:2px;">XLSX</span>
+                    </a>
+                `;
+
                 // Cek status IT Inventory jika IS_INV = 1
                 const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
                 const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
@@ -2434,7 +3469,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
 
                 html += `
-                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}">
+                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}')">
+                        <td style="text-align:center;" class="col-select-mode">
+                            <input type="checkbox" class="row-select-cb" data-aju="${r.nomor_aju}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow('${r.nomor_aju}', this.checked)" style="cursor:pointer;">
+                        </td>
                         <td style="color:#8c8c8c; font-family:monospace;">${itemNum}</td>
                         <td style="font-weight:500;">BC ${r.bc}</td>
                         <td>
@@ -2452,10 +3490,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <div>${escapeHtml(namaRespon)}${responBadgeExtra}</div>
                             ${noRespon ? `<p style="cursor:pointer; text-decoration:underline; color:rgb(3, 157, 252); margin:0; font-size:10px;" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat Riwayat Tracking Status">${escapeHtml(noRespon)}</p>` : ''}
                         </td>
-                        <td style="text-align:center;">
+                        <td style="text-align:center; white-space:nowrap;">
                             ${pdfHtml}
                         </td>
-                        <td style="font-size:10.5px; color:#595959;">${r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '-'}</td>
+                        <td style="font-size:10.5px; color:#595959;">${r.effective_tanggal_respon || r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '-'}</td>
                         <td style="text-align:center;">
                             <span class="ant-tag ${jalurTag}">${jalurChar}</span>
                         </td>
@@ -2463,12 +3501,25 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <div style="display:flex; font-size:10px; color:#8c8c8c; font-family:monospace;">${escapeHtml(companyId)}</div>
                             <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
                         </td>
-                        <td style="font-size:10.5px; color:#595959;">${escapeHtml(kantorName)}</td>
+                        <td style="text-align:center; white-space:nowrap;" class="td-col-aksi">
+                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
+                                <span>Aksi</span>
+                                <span style="font-size:8px; opacity:0.75; transform:scale(0.85); display:inline-block;">▼</span>
+                            </button>
+                        </td>
                     </tr>
                 `;
             });
 
             tbody.innerHTML = html;
+
+            // Sinkronkan master checkbox halaman ini
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) {
+                const allPageSelected = pageItems.length > 0 && pageItems.every(item => selectedAju.has(item.nomor_aju));
+                masterCb.checked = allPageSelected;
+            }
+
             updateSelectedCount();
             renderPagination(total, currentPage, pageSize);
         }
@@ -2542,7 +3593,55 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         }
 
-        function toggleSelect(nomorAju, isChecked) {
+        // =========================================================================
+        // MODE SELECT & BATCH DOWNLOAD EXCEL RESMI CEISA 4.0
+        // =========================================================================
+        let isModeSelectActive = false;
+        let batchDownloadCancelled = false;
+        let batchDownloadPaused = false;
+        let activeContextMenuAju = null;
+        let activeContextMenuCmp = null;
+        let activeContextMenuPdf = null;
+        let batchSuccessfulAjus = [];
+
+        function toggleModeSelect(forceState) {
+            if (forceState !== undefined) {
+                isModeSelectActive = !!forceState;
+            } else {
+                isModeSelectActive = !isModeSelectActive;
+            }
+
+            const btn = document.getElementById('btnModeSelect');
+            const lbl = document.getElementById('lblModeSelect');
+            const ico = document.getElementById('iconModeSelect');
+            const bar = document.getElementById('batchActionBar');
+
+            if (isModeSelectActive) {
+                document.body.classList.add('mode-select-active');
+                if (btn) {
+                    btn.classList.add('ant-btn-primary');
+                    btn.style.background = '#1890ff';
+                    btn.style.borderColor = '#1890ff';
+                }
+                if (lbl) lbl.textContent = '✕ Tutup Mode Select';
+                if (ico) ico.textContent = '☑️';
+                if (bar) bar.style.display = 'flex';
+            } else {
+                document.body.classList.remove('mode-select-active');
+                if (btn) {
+                    btn.classList.remove('ant-btn-primary');
+                    btn.style.background = '';
+                    btn.style.borderColor = '';
+                }
+                if (lbl) lbl.textContent = 'Mode Select';
+                if (ico) ico.textContent = '☑️';
+                if (bar) bar.style.display = 'none';
+            }
+
+            updateSelectedCount();
+        }
+
+        function toggleSelectRow(nomorAju, isChecked) {
             if (isChecked) {
                 selectedAju.add(nomorAju);
                 document.getElementById(`row-${nomorAju}`)?.classList.add('selected-row');
@@ -2553,9 +3652,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             updateSelectedCount();
         }
 
-        function toggleSelectAll(masterCheckbox) {
+        function toggleSelectAllPage(masterCheckbox) {
             const isChecked = masterCheckbox.checked;
-            filteredData.forEach(r => {
+            const startIdx = (currentPage - 1) * pageSize;
+            const endIdx = Math.min(startIdx + pageSize, filteredData.length);
+            const pageItems = filteredData.slice(startIdx, endIdx);
+
+            pageItems.forEach(r => {
                 if (isChecked) {
                     selectedAju.add(r.nomor_aju);
                 } else {
@@ -2564,17 +3667,516 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const row = document.getElementById(`row-${r.nomor_aju}`);
                 if (row) {
                     row.classList.toggle('selected-row', isChecked);
-                    const cb = row.querySelector('input[type="checkbox"]');
+                    const cb = row.querySelector('.row-select-cb');
                     if (cb) cb.checked = isChecked;
                 }
             });
             updateSelectedCount();
         }
 
+        function selectAllOnCurrentPage() {
+            toggleModeSelect(true);
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) masterCb.checked = true;
+            toggleSelectAllPage({ checked: true });
+        }
+
+        function selectAllFilteredData() {
+            toggleModeSelect(true);
+            filteredData.forEach(r => {
+                selectedAju.add(r.nomor_aju);
+            });
+            renderTable();
+            updateSelectedCount();
+        }
+
+        function clearAllSelection() {
+            selectedAju.clear();
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) masterCb.checked = false;
+            document.querySelectorAll('.row-select-cb').forEach(cb => cb.checked = false);
+            document.querySelectorAll('.ant-table-row').forEach(tr => tr.classList.remove('selected-row'));
+            updateSelectedCount();
+        }
+
         function updateSelectedCount() {
             const count = (typeof selectedAju !== 'undefined' && selectedAju) ? selectedAju.size : 0;
-            const el = document.getElementById('selectedCount');
-            if (el) el.innerText = count;
+            const elSelected = document.getElementById('batchSelectedCount');
+            const elBtn = document.getElementById('batchBtnCount');
+            if (elSelected) elSelected.innerText = count;
+            if (elBtn) elBtn.innerText = count;
+
+            const bar = document.getElementById('batchActionBar');
+            if (bar && isModeSelectActive) {
+                bar.style.display = 'flex';
+            }
+        }
+
+        function downloadSingleCeisaExcel(nomorAju, cmpId) {
+            if (!nomorAju) return;
+            const activeCmp = cmpId || document.getElementById('filterCmp')?.value || '';
+            const url = `download_ceisa_excel.php?nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmp)}`;
+            window.open(url, '_blank');
+        }
+
+        // Context Menu Handler
+        function openRowContextMenu(e, nomorAju, cmpId, pdfFile) {
+            e.preventDefault();
+            activeContextMenuAju = nomorAju;
+            activeContextMenuCmp = cmpId;
+            activeContextMenuPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+
+            const menu = document.getElementById('ddContextMenu');
+            if (!menu) return;
+
+            const isSel = selectedAju.has(nomorAju);
+            const txtSel = document.getElementById('ctxTextSelect');
+            if (txtSel) txtSel.textContent = isSel ? 'Batal Pilih Dokumen Ini' : 'Pilih / Centang Dokumen Ini';
+
+            const itemPdf = document.getElementById('ctxItemViewPdf');
+            if (itemPdf) {
+                itemPdf.style.display = activeContextMenuPdf ? 'flex' : 'none';
+            }
+
+            // Atur posisi menu agar tidak keluar layar
+            const x = Math.min(e.clientX, window.innerWidth - 210);
+            const y = Math.min(e.clientY, window.innerHeight - 180);
+
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
+            menu.style.display = 'block';
+        }
+
+        function closeContextMenu() {
+            const menu = document.getElementById('ddContextMenu');
+            if (menu) menu.style.display = 'none';
+        }
+
+        document.addEventListener('click', closeContextMenu);
+        window.addEventListener('resize', closeContextMenu);
+
+        document.getElementById('ctxItemDownloadExcel')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                downloadSingleCeisaExcel(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemViewPdf')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju && activeContextMenuPdf) {
+                const pdfUrl = `/pdf.php?aju=${encodeURIComponent(activeContextMenuAju)}&pdf=${encodeURIComponent(activeContextMenuPdf)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}&view=1`;
+                window.open(pdfUrl, '_blank');
+            }
+        });
+
+        document.getElementById('ctxItemTracking')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                openTrackingHistory(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemImportH2H')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                executeImportToH2H(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemSelectToggle')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                toggleModeSelect(true);
+                const isChecked = !selectedAju.has(activeContextMenuAju);
+                toggleSelectRow(activeContextMenuAju, isChecked);
+                const row = document.getElementById(`row-${activeContextMenuAju}`);
+                if (row) {
+                    const cb = row.querySelector('.row-select-cb');
+                    if (cb) cb.checked = isChecked;
+                }
+            }
+        });
+
+        // =========================================================================
+        // DROPDOWN MENU AKSI (KOLOM PALING KANAN)
+        // =========================================================================
+        let activeActionAju = '';
+        let activeActionCmp = '';
+        let activeActionPdf = '';
+        let activeActionIdHeader = '';
+        let activeActionKodeDok = '';
+        let activeActionTriggerBtn = null;
+
+        function openRowActionMenu(event, nomorAju, cmpId, pdfFile, idHeader, kodeDokumen) {
+            if (event) {
+                if (typeof event.stopPropagation === 'function') event.stopPropagation();
+            }
+
+            const menu = document.getElementById('rowActionMenu');
+            if (menu && menu.style.display === 'block' && activeActionAju === nomorAju) {
+                closeRowActionMenu();
+                return;
+            }
+
+            activeActionAju = nomorAju;
+            activeActionCmp = cmpId;
+            activeActionPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+            activeActionIdHeader = idHeader || '';
+            activeActionKodeDok = kodeDokumen || '';
+
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.remove('active');
+            }
+            activeActionTriggerBtn = event ? (event.currentTarget || event.target.closest('.action-btn-ceisa')) : null;
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.add('active');
+            }
+
+            if (!menu) return;
+
+            const rect = activeActionTriggerBtn ? activeActionTriggerBtn.getBoundingClientRect() : { right: window.innerWidth - 100, bottom: 200, left: 100, top: 100 };
+            const menuWidth = 165;
+            const menuHeight = 155;
+
+            let left = rect.right - menuWidth;
+            if (left < 10) left = Math.max(10, rect.left);
+            if (left + menuWidth > window.innerWidth - 10) {
+                left = window.innerWidth - menuWidth - 10;
+            }
+
+            let top = rect.bottom + 4;
+            if (top + menuHeight > window.innerHeight - 10) {
+                top = Math.max(10, rect.top - menuHeight - 4);
+            }
+
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+            menu.style.display = 'block';
+        }
+
+        function closeRowActionMenu() {
+            const menu = document.getElementById('rowActionMenu');
+            if (menu) menu.style.display = 'none';
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.remove('active');
+                activeActionTriggerBtn = null;
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#rowActionMenu') && !e.target.closest('.action-btn-ceisa')) {
+                closeRowActionMenu();
+            }
+        });
+        window.addEventListener('resize', closeRowActionMenu);
+
+        async function triggerRowAction(type) {
+            const aju = activeActionAju;
+            const cmp = activeActionCmp;
+            const pdf = activeActionPdf;
+            const idHeader = activeActionIdHeader;
+            const kodeDok = activeActionKodeDok;
+            closeRowActionMenu();
+
+            if (!aju) return;
+
+            if (type === 'excel') {
+                // Unduh Excel Resmi CEISA 4.0 via backend action
+                const url = `daftar_dokumen.php?action=unduh_excel&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
+                window.open(url, '_blank');
+            } else if (type === 'import_h2h') {
+                await executeImportToH2H(aju, cmp);
+            } else if (type === 'cetak') {
+                // Cetak Dokumen via report-service formulir resmi CEISA 4.0
+                const url = `daftar_dokumen.php?action=cetak_formulir&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmp || '')}`;
+                window.open(url, '_blank');
+            } else if (type === 'status') {
+                openTrackingHistory(aju, cmp);
+            }
+        }
+
+        async function executeImportToH2H(aju, cmp) {
+            const activeCmp = cmp || document.getElementById('filterCmp')?.value || '';
+
+            let confirmed = true;
+            if (typeof Swal !== 'undefined') {
+                const prompt = await Swal.fire({
+                    title: 'Import ke Data H2H?',
+                    html: `Dokumen <b>${escapeHtml(aju)}</b> beserta rincian kontainer, kemasan, dokumen lampiran, dan barang akan diimpor ke Data Host to Host.`,
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#1890ff',
+                    cancelButtonColor: '#8c8c8c',
+                    confirmButtonText: 'Ya, Import Sekarang',
+                    cancelButtonText: 'Batal'
+                });
+                confirmed = prompt.isConfirmed;
+            }
+            if (!confirmed) return;
+
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({
+                    title: 'Mengimpor ke H2H...',
+                    html: `Sedang memproses dan mengimpor seluruh data dokumen <b>${escapeHtml(aju)}</b>...`,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+            }
+
+            try {
+                const res = await fetch(`daftar_dokumen.php?action=import_to_h2h&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(activeCmp)}`);
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Berhasil Diimpor!',
+                            html: `Dokumen <b>${escapeHtml(aju)}</b> berhasil diimpor ke sistem Host to Host.<br><small style="color:#8c8c8c;">Silakan periksa dokumen ini di menu <b>Data Host to Host</b> atau <b>Form Editor</b>.</small>`,
+                            confirmButtonColor: '#52c41a',
+                            confirmButtonText: 'Selesai'
+                        });
+                    } else {
+                        alert(`Dokumen ${aju} berhasil diimpor ke Data Host to Host!`);
+                    }
+                } else {
+                    throw new Error(json.message || 'Gagal melakukan impor dokumen.');
+                }
+            } catch (err) {
+                console.error('Import H2H error:', err);
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Gagal Impor ke H2H',
+                        text: err.message || 'Terjadi kesalahan sistem saat mengimpor dokumen.',
+                        confirmButtonColor: '#ff4d4f'
+                    });
+                } else {
+                    alert('Gagal impor: ' + (err.message || 'Error'));
+                }
+            }
+        }
+
+        // =========================================================================
+        // ENGINE BATCH DOWNLOAD DENGAN PROTEKSI WAF & JEDA ACAK
+        // =========================================================================
+        async function startBatchDownloadExcel() {
+            if (!selectedAju || selectedAju.size === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih Dokumen',
+                    text: 'Silakan pilih / centang minimal 1 dokumen untuk diunduh.',
+                    confirmButtonColor: '#1890ff'
+                });
+                return;
+            }
+
+            const ajus = Array.from(selectedAju);
+            const total = ajus.length;
+
+            const confirmRes = await Swal.fire({
+                icon: 'question',
+                title: '<span style="font-size:15px; font-weight:700;">Unduh Excel Massal CEISA 4.0</span>',
+                html: `
+                    <div style="text-align:left; font-size:11.5px; line-height:1.5;">
+                        <p>Anda akan mengunduh <b>${total} berkas Excel resmi</b> langsung dari server portal CEISA 4.0.</p>
+                        <div style="background:rgba(82,196,26,0.1); border-left:3px solid #52c41a; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
+                            🛡️ <b>Proteksi Keamanan WAF Bea Cukai Aktif:</b><br>
+                            Sistem akan mengunduh secara berurutan (*sequential*) dengan <b>jeda acak (2.5 – 5.0 detik)</b> antar dokumen untuk menjaga kredibilitas sesi browser dan menghindarkan alamat IP dari deteksi bot atau pemblokiran firewall Bea Cukai.
+                        </div>
+                        <p style="margin:0;">Mulai proses pengunduhan aman sekarang?</p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '🚀 Mulai Unduh Aman',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#52c41a',
+                cancelButtonColor: '#8c8c8c',
+                reverseButtons: true
+            });
+
+            if (!confirmRes.isConfirmed) return;
+
+            batchDownloadCancelled = false;
+            batchDownloadPaused = false;
+            batchSuccessfulAjus = [];
+
+            // Buka Modal Progress Batch
+            const modal = document.getElementById('modalBatchProgress');
+            if (modal) modal.style.display = 'flex';
+
+            document.getElementById('batchModalProgressBar').style.width = '0%';
+            document.getElementById('batchModalPercent').innerText = '0%';
+            document.getElementById('batchCountSuccess').innerText = '0';
+            document.getElementById('batchCountFailed').innerText = '0';
+            document.getElementById('batchModalLogList').innerHTML = '';
+            document.getElementById('btnBatchPauseResume').style.display = 'inline-block';
+            document.getElementById('btnBatchPauseResume').innerHTML = '⏸️ Jeda';
+            document.getElementById('btnBatchCancel').style.display = 'inline-block';
+            document.getElementById('btnBatchDownloadZip').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'none';
+            document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+
+            let successCount = 0;
+            let failedCount = 0;
+            const failedAjus = [];
+
+            for (let i = 0; i < ajus.length; i++) {
+                if (batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerHTML = '<span style="color:#cf1322;">⚠️ Proses dibatalkan oleh pengguna.</span>';
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Proses dihentikan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    break;
+                }
+
+                while (batchDownloadPaused && !batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerText = `⏸️ Pengunduhan dijeda (${i}/${total})...`;
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Klik "▶️ Lanjutkan" untuk melanjutkan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    await new Promise(r => setTimeout(r, 400));
+                }
+
+                const aju = ajus[i];
+                const num = i + 1;
+                const pct = Math.round(((num - 1) / total) * 100);
+
+                document.getElementById('batchModalProgressBar').style.width = `${pct}%`;
+                document.getElementById('batchModalPercent').innerText = `${pct}%`;
+                document.getElementById('batchModalStatusText').innerHTML = `[${num}/${total}] Mengunduh: <b style="color:var(--primary); font-family:monospace;">${aju}</b>...`;
+                document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+                document.getElementById('batchModalSafetyTimer').innerText = `Menghubungi API excel-service CEISA 4.0...`;
+
+                try {
+                    const cmpId = document.getElementById('filterCmp')?.value || '';
+                    const res = await fetch(`download_ceisa_excel.php?nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmpId)}&format=json`);
+                    const json = await res.json();
+
+                    if (json.status === 'OK') {
+                        successCount++;
+                        batchSuccessfulAjus.push(aju);
+                        document.getElementById('batchCountSuccess').innerText = successCount;
+                        appendBatchLog(num, aju, true, json.cached ? 'Tersedia di Cache (0ms)' : `${(json.size/1024).toFixed(1)} KB`);
+                    } else {
+                        failedCount++;
+                        failedAjus.push({ aju, message: json.message || 'Gagal' });
+                        document.getElementById('batchCountFailed').innerText = failedCount;
+                        appendBatchLog(num, aju, false, json.message || 'Gagal');
+                    }
+                } catch (err) {
+                    failedCount++;
+                    failedAjus.push({ aju, message: err.message });
+                    document.getElementById('batchCountFailed').innerText = failedCount;
+                    appendBatchLog(num, aju, false, err.message);
+                }
+
+                const currentPct = Math.round((num / total) * 100);
+                document.getElementById('batchModalProgressBar').style.width = `${currentPct}%`;
+                document.getElementById('batchModalPercent').innerText = `${currentPct}%`;
+
+                // Jika bukan item terakhir dan belum dibatalkan, lakukan jeda acak WAF Evasion
+                if (i < ajus.length - 1 && !batchDownloadCancelled) {
+                    const delayMs = Math.floor(2500 + Math.random() * 2500); // 2.5s - 5.0s
+                    await countdownWafSafety(delayMs);
+                }
+            }
+
+            // Selesai loop
+            document.getElementById('batchSafetySpinner').style.display = 'none';
+            document.getElementById('btnBatchPauseResume').style.display = 'none';
+            document.getElementById('btnBatchCancel').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'inline-block';
+
+            if (!batchDownloadCancelled) {
+                document.getElementById('batchModalProgressBar').style.width = '100%';
+                document.getElementById('batchModalPercent').innerText = '100%';
+                document.getElementById('batchModalStatusText').innerHTML = `<span style="color:#52c41a; font-weight:700;">✓ Pengunduhan selesai! (${successCount} sukses, ${failedCount} gagal)</span>`;
+                document.getElementById('batchModalSafetyTimer').innerText = `Semua berkas selesai diproses dengan aman tanpa kendala firewall.`;
+
+                if (batchSuccessfulAjus.length > 1) {
+                    const btnZip = document.getElementById('btnBatchDownloadZip');
+                    if (btnZip) {
+                        btnZip.style.display = 'inline-block';
+                        btnZip.innerHTML = `📦 Unduh Arsip ZIP (${batchSuccessfulAjus.length})`;
+                    }
+                    // Otomatis download bundle ZIP
+                    triggerZipDownload();
+                } else if (batchSuccessfulAjus.length === 1) {
+                    downloadSingleCeisaExcel(batchSuccessfulAjus[0]);
+                }
+            }
+        }
+
+        async function countdownWafSafety(delayMs) {
+            const startTime = Date.now();
+            const endTime = startTime + delayMs;
+            const timerEl = document.getElementById('batchModalSafetyTimer');
+
+            while (Date.now() < endTime && !batchDownloadCancelled) {
+                if (batchDownloadPaused) {
+                    await new Promise(r => setTimeout(r, 200));
+                    continue;
+                }
+                const remaining = Math.max(0, ((endTime - Date.now()) / 1000).toFixed(1));
+                if (timerEl) {
+                    timerEl.innerHTML = `🛡️ <b>Proteksi WAF Bea Cukai:</b> Menunggu jeda acak <b>${remaining} detik</b> untuk dokumen berikutnya...`;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+
+        function appendBatchLog(num, aju, isSuccess, info) {
+            const logList = document.getElementById('batchModalLogList');
+            if (!logList) return;
+            const icon = isSuccess ? '✓' : '✕';
+            const color = isSuccess ? '#52c41a' : '#ff4d4f';
+            const item = document.createElement('div');
+            item.style.padding = '3px 0';
+            item.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+            item.style.display = 'flex';
+            item.style.justifyContent = 'space-between';
+            item.innerHTML = `
+                <span><span style="color:${color}; font-weight:bold;">${icon}</span> [${num}] <b>${escapeHtml(aju)}</b></span>
+                <span style="color:var(--text-muted); font-size:9.5px;">${escapeHtml(info)}</span>
+            `;
+            logList.appendChild(item);
+            logList.scrollTop = logList.scrollHeight;
+        }
+
+        function togglePauseBatchDownload() {
+            batchDownloadPaused = !batchDownloadPaused;
+            const btn = document.getElementById('btnBatchPauseResume');
+            if (btn) {
+                btn.innerHTML = batchDownloadPaused ? '▶️ Lanjutkan' : '⏸️ Jeda';
+            }
+        }
+
+        function cancelBatchDownload() {
+            if (batchDownloadCancelled) {
+                closeBatchModal();
+                return;
+            }
+            batchDownloadCancelled = true;
+            batchDownloadPaused = false;
+        }
+
+        function closeBatchModal() {
+            const modal = document.getElementById('modalBatchProgress');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function triggerZipDownload() {
+            if (!batchSuccessfulAjus || batchSuccessfulAjus.length === 0) return;
+            const url = `download_ceisa_excel.php?action=bundle_zip&nomor_ajus=${encodeURIComponent(batchSuccessfulAjus.join(','))}`;
+            window.location.href = url;
         }
 
         // =========================================================================
@@ -2859,165 +4461,267 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         }
 
-        /* -------------------------------------------------------------
-           REKAP DOKUMEN BELUM MASUK IT INVENTORY PER BULAN (MODAL & FILTER)
-           ------------------------------------------------------------- */
-        function toggleRekapBulananNotInv() {
-            const el = document.getElementById('rekapBulananNotInvModal');
-            if (!el) return;
-            if (el.style.display === 'none' || el.style.display === '') {
-                el.style.display = 'flex';
-                renderRekapBulananTable();
-            } else {
-                closeRekapBulananNotInv();
+        // =========================================================================
+        // REKAP DOKUMEN BELUM MASUK IT INVENTORY PER BULAN
+        // =========================================================================
+        function getDocMonth(r) {
+            // 1. Tanggal pendaftaran resmi (YYYY-MM-DD atau DD-MM-YYYY)
+            if (r.tanggal_daftar && r.tanggal_daftar !== '-') {
+                const s = String(r.tanggal_daftar).trim();
+                const mYmd = s.match(/^(\d{4})[-/](\d{2})/);
+                if (mYmd) return mYmd[1] + '-' + mYmd[2];
+                const mDmy = s.match(/^\d{2}[-/](\d{2})[-/](\d{4})/);
+                if (mDmy) return mDmy[2] + '-' + mDmy[1];
             }
-        }
-
-        function closeRekapBulananNotInv() {
-            const el = document.getElementById('rekapBulananNotInvModal');
-            if (el) el.style.display = 'none';
-        }
-
-        function setRekapSortMode(mode) {
-            rekapSortMode = mode;
-            renderRekapBulananTable();
-        }
-
-        function renderRekapBulananTable() {
-            const tbody = document.getElementById('rekapBulananTbody');
-            const totalEl = document.getElementById('rekapBulananTotal');
-            const sortBtn = document.getElementById('btnToggleRekapSort');
-            if (!tbody) return;
-
-            if (sortBtn) {
-                sortBtn.innerHTML = rekapSortMode === 'month_desc' 
-                    ? '<span>Urut: <b>Bulan Terbaru ↓</b></span>' 
-                    : '<span>Urut: <b>Jumlah Terbanyak ↓</b></span>';
+            // 2. Tanggal respon dokumen / status resmi
+            if (r.bcd_tanggalRespon && r.bcd_tanggalRespon !== '-') {
+                const s = String(r.bcd_tanggalRespon).trim();
+                const mYmd = s.match(/^(\d{4})[-/](\d{2})/);
+                if (mYmd) return mYmd[1] + '-' + mYmd[2];
+                const mDmy = s.match(/^\d{2}[-/](\d{2})[-/](\d{4})/);
+                if (mDmy) return mDmy[2] + '-' + mDmy[1];
             }
+            // 3. Waktu update / log
+            if (r.upd_time && r.upd_time !== '-') {
+                const s = String(r.upd_time).trim();
+                const mYmd = s.match(/^(\d{4})[-/](\d{2})/);
+                if (mYmd) return mYmd[1] + '-' + mYmd[2];
+                const mDmy = s.match(/^\d{2}[-/](\d{2})[-/](\d{4})/);
+                if (mDmy) return mDmy[2] + '-' + mDmy[1];
+            }
+            // 4. Ekstrak tanggal dari Nomor AJU jika metadata tanggal di atas kosong
+            if (r.nomor_aju) {
+                const clean = String(r.nomor_aju).replace(/[^A-Za-z0-9]/g, '');
+                if (clean.length >= 20) {
+                    // Pola 1: Standar Dokumen BC (posisi indeks 12..20 adalah YYYYMMDD)
+                    const subBc = clean.substring(12, 20);
+                    const mBc = subBc.match(/^(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+                    if (mBc) {
+                        return mBc[1] + '-' + mBc[2];
+                    }
+                    // Pola 2: Dokumen PPKEK / INSW (posisi 26 char: digit ke-14..21 adalah DDMMYYYY)
+                    if (clean.length === 26) {
+                        const subPpkek = clean.slice(-13, -5);
+                        const mPpkek = subPpkek.match(/^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(20\d{2})$/);
+                        if (mPpkek) {
+                            return mPpkek[3] + '-' + mPpkek[2];
+                        }
+                    }
+                    // Pola 3: Pencarian fleksibel YYYYMMDD di seluruh string AJU
+                    const mAnyYmd = clean.match(/(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])/);
+                    if (mAnyYmd) {
+                        return mAnyYmd[1] + '-' + mAnyYmd[2];
+                    }
+                    // Pola 4: Pencarian fleksibel DDMMYYYY di seluruh string AJU
+                    const mAnyDmy = clean.match(/(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(20\d{2})/);
+                    if (mAnyDmy) {
+                        return mAnyDmy[3] + '-' + mAnyDmy[2];
+                    }
+                }
+            }
+            return 'Lainnya';
+        }
 
-            const map = {};
-            const totalPerMonth = {};
-            let totalUnposted = 0;
+        function computeRekapNotInv() {
+            const monthMap = {};
+            let totalNotInvAll = 0;
 
             ajuData.forEach(r => {
-                let ym = (r.tanggal_daftar || '').substring(0, 7);
-                if (!ym || ym.length < 7) {
-                    const aju = r.nomor_aju || '';
-                    if (aju.length >= 18) ym = aju.substring(12, 16) + '-' + aju.substring(16, 18); else ym = 'Lainnya';
-                }
-                totalPerMonth[ym] = (totalPerMonth[ym] || 0) + 1;
-
                 const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
+                if (isInv !== 1) return;
+
+                const m = getDocMonth(r);
+                if (!monthMap[m]) {
+                    monthMap[m] = { month: m, notInv: 0, total: 0 };
+                }
+                monthMap[m].total++;
+
                 const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
-                if (isInv === 1 && !inItInv) {
-                    if (!map[ym]) {
-                        map[ym] = { ym: ym, count: 0, byBc: {} };
-                    }
-                    map[ym].count++;
-                    totalUnposted++;
-                    const bc = r.bc || '?';
-                    map[ym].byBc[bc] = (map[ym].byBc[bc] || 0) + 1;
+                if (!inItInv) {
+                    monthMap[m].notInv++;
+                    totalNotInvAll++;
                 }
             });
 
-            if (totalEl) totalEl.innerText = totalUnposted.toLocaleString('id-ID');
+            const list = Object.values(monthMap).filter(item => item.notInv > 0);
+            return { list, totalNotInvAll };
+        }
 
-            let list = Object.values(map);
-            if (rekapSortMode === 'month_desc') {
-                list.sort((a, b) => b.ym.localeCompare(a.ym));
+        function toggleRekapNotInv(event) {
+            if (event) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+            const widget = document.getElementById('rekapNotInvWidget');
+            if (!widget) return;
+
+            if (widget.style.display === 'none' || widget.style.display === '') {
+                const chip = document.getElementById('kpiChipNotInv');
+                if (chip && !widget.dataset.dragged) {
+                    const rect = chip.getBoundingClientRect();
+                    widget.style.top = (rect.bottom + 6) + 'px';
+                    const maxLeft = window.innerWidth - 390;
+                    const leftPos = Math.max(10, Math.min(maxLeft, rect.left));
+                    widget.style.left = leftPos + 'px';
+                }
+                widget.style.display = 'block';
+                renderRekapNotInvTable();
             } else {
-                list.sort((a, b) => b.count - a.count || b.ym.localeCompare(a.ym));
+                widget.style.display = 'none';
+            }
+        }
+
+        function closeRekapNotInv(event) {
+            if (event) event.stopPropagation();
+            const widget = document.getElementById('rekapNotInvWidget');
+            if (widget) widget.style.display = 'none';
+        }
+
+        function renderRekapNotInvTable() {
+            const tbody = document.getElementById('rekapNotInvTbody');
+            const totalBadge = document.getElementById('badgeRekapTotal');
+            if (!tbody) return;
+
+            const { list, totalNotInvAll } = computeRekapNotInv();
+
+            if (totalBadge) {
+                totalBadge.innerText = totalNotInvAll.toLocaleString('id-ID');
             }
 
-            tbody.innerHTML = '';
+            const sortType = document.getElementById('sortRekapNotInv')?.value || 'month_desc';
+            list.sort((a, b) => {
+                if (sortType === 'month_desc') return b.month.localeCompare(a.month);
+                if (sortType === 'month_asc') return a.month.localeCompare(b.month);
+                if (sortType === 'count_desc') return b.notInv - a.notInv;
+                if (sortType === 'count_asc') return a.notInv - b.notInv;
+                return 0;
+            });
+
             if (list.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:16px; color:#8c8c8c;">Semua dokumen telah masuk IT Inventory!</td></tr>';
+                tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; padding:20px; color:#8c8c8c; font-size:11px;">✓ Semua dokumen sudah masuk IT Inventory!</td></tr>`;
+                updateRekapMonthHighlight();
                 return;
             }
 
+            let html = '';
             list.forEach((item, idx) => {
-                const tr = document.createElement('tr');
-                tr.className = 'rekap-row' + (selectedRekapMonth === item.ym ? ' active-rekap-row' : '');
-                tr.onclick = function() {
-                    filterByRekapMonth(item.ym);
-                };
-
-                const totalMonth = totalPerMonth[item.ym] || item.count;
-                const pct = totalMonth > 0 ? ((item.count / totalMonth) * 100).toFixed(1) + '%' : '0%';
-                const bcParts = Object.entries(item.byBc).map(([bc, cnt]) => `BC ${bc}: ${cnt}`).join(', ');
-
-                tr.innerHTML = `
-                    <td style="text-align:center; color:#8c8c8c; font-size:10px;">${idx + 1}</td>
-                    <td style="font-weight:700; color:var(--text-heading); font-family:monospace; font-size:11.5px;">
-                        ${item.ym}
-                        ${selectedRekapMonth === item.ym ? ' <span style="color:#1890ff; font-weight:700;">✓</span>' : ''}
-                    </td>
-                    <td style="text-align:right;">
-                        <span class="ant-tag ant-tag-red" style="font-weight:700; font-size:11px; padding:0 6px;">${item.count.toLocaleString('id-ID')}</span>
-                    </td>
-                    <td style="text-align:right; color:#8c8c8c; font-size:10px;" title="${escapeHtml(bcParts)}">
-                        ${pct}
-                    </td>
+                const isActive = currentMonthFilter === item.month;
+                const ratio = item.total > 0 ? ((item.notInv / item.total) * 100).toFixed(1) + '%' : '0.0%';
+                const tooltip = `${item.notInv.toLocaleString('id-ID')} dari ${item.total.toLocaleString('id-ID')} dokumen pada periode ${item.month} belum masuk IT Inventory`;
+                html += `
+                    <tr class="rekap-notinv-row ${isActive ? 'active-month' : ''}" data-month="${escapeHtml(item.month)}" onclick="filterByRekapMonth(event, '${escapeHtml(item.month)}')" title="${tooltip}">
+                        <td style="text-align:center; color:#8c8c8c; font-size:10.5px;">${idx + 1}</td>
+                        <td style="font-weight:700;">${escapeHtml(item.month)}</td>
+                        <td style="text-align:center;">
+                            <span class="badge-count-notinv">${item.notInv.toLocaleString('id-ID')}</span>
+                        </td>
+                        <td style="text-align:right; color:#8c8c8c; font-size:11px; padding-right:12px;">${ratio}</td>
+                    </tr>
                 `;
-                tbody.appendChild(tr);
             });
+
+            tbody.innerHTML = html;
+            updateRekapMonthHighlight();
         }
 
-        function filterByRekapMonth(ym) {
-            if (selectedRekapMonth === ym) {
-                selectedRekapMonth = '';
+        function filterByRekapMonth(event, month) {
+            if (event) event.stopPropagation();
+
+            if (currentMonthFilter === month && month !== '') {
+                currentMonthFilter = '';
             } else {
-                selectedRekapMonth = ym;
-                currentCardFilter = 'not_inv';
-                updateCardFilterUI();
+                currentMonthFilter = month;
+                if (month !== '') {
+                    currentCardFilter = 'not_inv';
+                    updateCardFilterUI();
+                }
             }
-            renderRekapBulananTable();
+
+            updateRekapMonthHighlight();
             currentPage = 1;
             filterClientTable();
         }
 
-        function resetRekapMonthFilter() {
-            selectedRekapMonth = '';
-            renderRekapBulananTable();
-            currentPage = 1;
-            filterClientTable();
+        function updateRekapMonthHighlight() {
+            const rows = document.querySelectorAll('.rekap-notinv-row');
+            rows.forEach(tr => {
+                if (currentMonthFilter && tr.dataset.month === currentMonthFilter) {
+                    tr.classList.add('active-month');
+                } else {
+                    tr.classList.remove('active-month');
+                }
+            });
+
+            const allBtn = document.querySelector('.btn-rekap-all');
+            if (allBtn) {
+                if (!currentMonthFilter) {
+                    allBtn.style.borderColor = '#ff4d4f';
+                    allBtn.style.color = '#cf1322';
+                    allBtn.style.fontWeight = '700';
+                } else {
+                    allBtn.style.borderColor = '#d9d9d9';
+                    allBtn.style.color = '#595959';
+                    allBtn.style.fontWeight = '600';
+                }
+            }
+
+            const badgeActive = document.getElementById('badgeActiveMonth');
+            if (badgeActive) {
+                if (currentMonthFilter) {
+                    badgeActive.style.display = 'inline-block';
+                    badgeActive.innerText = currentMonthFilter + ' ✕';
+                } else {
+                    badgeActive.style.display = 'none';
+                    badgeActive.innerText = '';
+                }
+            }
         }
 
-        function initDraggableRekapBulanan() {
-            const win = document.getElementById('rekapBulananNotInvModal');
-            const hdr = document.getElementById('rekapBulananHeader');
-            if (!win || !hdr) return;
+        function initRekapNotInvDraggable() {
+            const widget = document.getElementById('rekapNotInvWidget');
+            const header = document.getElementById('rekapNotInvHeader');
+            if (!widget || !header) return;
 
             let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
-            hdr.onmousedown = function(e) {
-                if (e.target.closest('.rekap-window-close')) return;
+            header.onmousedown = function(e) {
+                if (e.target.closest('button') || e.target.closest('select')) return;
                 e.preventDefault();
                 pos3 = e.clientX;
                 pos4 = e.clientY;
-                document.onmouseup = closeDrag;
-                document.onmousemove = dragElement;
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
             };
 
-            function dragElement(e) {
+            function elementDrag(e) {
                 e.preventDefault();
                 pos1 = pos3 - e.clientX;
                 pos2 = pos4 - e.clientY;
                 pos3 = e.clientX;
                 pos4 = e.clientY;
-                win.style.top = (win.offsetTop - pos2) + "px";
-                win.style.left = (win.offsetLeft - pos1) + "px";
-                win.style.right = 'auto';
+                widget.style.top = (widget.offsetTop - pos2) + "px";
+                widget.style.left = (widget.offsetLeft - pos1) + "px";
+                widget.dataset.dragged = '1';
             }
 
-            function closeDrag() {
+            function closeDragElement() {
                 document.onmouseup = null;
                 document.onmousemove = null;
             }
+
+            // Menutup widget saat klik di luar
+            document.addEventListener('click', function(e) {
+                if (widget && widget.style.display !== 'none') {
+                    const btn = document.getElementById('btnRekapNotInv');
+                    if (!widget.contains(e.target) && (!btn || !btn.contains(e.target))) {
+                        widget.style.display = 'none';
+                    }
+                }
+            });
         }
 
         window.onload = function() {
+            initRekapNotInvDraggable();
             loadList();
-            initDraggableRekapBulanan();
             // Otomatis sinkronisasi latar belakang saat halaman dibuka (progress tidak terlihat)
             setTimeout(() => {
                 triggerSilentCeisaSync(false);

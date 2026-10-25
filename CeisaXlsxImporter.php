@@ -391,14 +391,19 @@ class CeisaXlsxImporter {
      * Menjalankan impor data Excel ke tabel database
      */
     public function import($filePath, $options = []) {
+        $excelData = $this->parseXlsx($filePath);
+        return $this->importData($excelData, $options);
+    }
+
+    /**
+     * Menjalankan impor data array terstruktur ke tabel database
+     */
+    public function importData(array $excelData, $options = []) {
         $startTime = microtime(true);
         $overwrite = $options['overwrite'] ?? true;
         
-        // Parse isi Excel secara native
-        $excelData = $this->parseXlsx($filePath);
-        
         if (empty($excelData['HEADER']) || empty($excelData['HEADER'][0])) {
-            throw new Exception("File Excel tidak memiliki Sheet 'HEADER' yang valid.");
+            throw new Exception("Data tidak memiliki Sheet 'HEADER' yang valid.");
         }
 
         // Kumpulkan seluruh nomor AJU yang ada di file Excel (mendukung file batch dengan banyak AJU)
@@ -635,7 +640,7 @@ class CeisaXlsxImporter {
             'nomor_aju'              => (count($allAjus) === 1 ? $primaryAju : $allAjus),
             'total_ajus'             => count($allAjus),
             'kode_dokumen'           => $kodeDokumen,
-            'file_name'              => basename($filePath),
+            'file_name'              => (!empty($filePath) ? basename($filePath) : ($options['file_name'] ?? 'LNSW_JSON')),
             'tables_imported'        => $importedStats,
             'total_rows_imported'    => $totalRows,
             'execution_time_seconds' => $execTime
