@@ -4,25 +4,26 @@ Dokumen ini ditujukan sebagai instruksi kerja (SOP) bagi Developer / AI Assistan
 
 ---
 
-## 1. Rangkuman Pembaruan Fitur Terkini (Versi 20261025.1250)
+## 1. Rangkuman Pembaruan Fitur Terkini (Versi 20261025.1336)
 
-1. **Tab Dokumen Lampiran (`bc_ceisa_docidx`)**:
-   - Fitur pengaturan urutan dokumen lampiran default per jenis dokumen BC (BC 4.0, BC 2.3, BC 2.5, BC 2.7, BC 3.0, dll.).
-   - Tombol **`⚙️ Setting List Dokumen Default`** pada toolbar Tab Dokumen untuk mengelola tabel `bc_ceisa_docidx` (lingkup Global maupun Spesifik Perusahaan).
-   - Tombol **`⚡ Reset Dokumen Default`** untuk mengosongkan dan menyusun ulang baris dokumen lampiran mengikuti konfigurasi `bc_ceisa_docidx`.
-   - Otomatis membuat baris dokumen lampiran default saat pembuatan **AJU Baru** (misal BC 4.0: Surat Jalan, Faktur Pajak, Invoice, Packing List, Kontrak).
+1. **Modal Validasi Mandatory & Kolom Bagian (Anti-Overlap)**:
+   - Pengecekan otomatis kolom mandatory mencakup **seluruh tab dokumen** (Header, Barang, Entitas, Dokumen, Kemasan, Pengangkut).
+   - Dialog peringatan didesain lebih lebar (680px), kompak, dan proporsional.
+   - Header tabel diubah dari `Tab / Sheet` menjadi **`Bagian`**.
+   - Lebar kolom ditetapkan secara proporsional dengan `<colgroup>` (`Bagian`: 165px, `Kolom Mandatory`: 175px, `Keterangan Masalah`: fleksibel/sisa ruang) serta proteksi `overflow: hidden; text-overflow: ellipsis;` sehingga teks panjang pada nama entitas/barang tidak akan menabrak atau menumpuk teks kolom di sebelahnya.
 
-2. **Tab Entitas Terlibat (`bc_ceisa_entidx`) & Riwayat Partner (Lookup History)**:
-   - Fitur pengaturan urutan entitas default via tombol **`⚙️ Setting List Entitas Default`** (`bc_ceisa_entidx`).
-   - Fitur **Lookup History Entitas**: Dobel klik baris entitas untuk mencari mitra bisnis yang pernah digunakan sebelumnya dengan auto-filter peran entitas aktif dan tipografi yang rapi tanpa overlap header.
+2. **Fitur Context Menu Klik Kanan "Copy ke Excel" & "Paste dari Excel"**:
+   - Tersedia di seluruh tab tabel editor: **Barang**, **Bahan Baku**, **Barang Dokumen**, **Barang Tarif**, **Bahan Baku Tarif**, **Bahan Baku Dokumen**, dan **Dokumen**.
+   - Memungkinkan user menyalin data langsung ke Excel, mengedit secara leluasa di spreadsheet, lalu menempelkannya kembali secara presisi ke tabel web.
 
-3. **Validasi Kolom Mandatory & Dialog Konfirmasi Simpan**:
-   - Pengecekan otomatis kolom wajib saat menyimpan Header atau tabel (`Barang`, `Entitas`, `Dokumen`, `Kemasan`, `Pengangkut`) sesuai spesifikasi CEISA 4.0 Open API.
-   - Dialog peringatan/error interaktif bertema profesional dan kompak dengan header kolom **`Tab / Sheet`**, **`Kolom Mandatory`**, dan **`Keterangan Masalah`**.
-   - Opsi fleksibel bagi pengguna: **`⚠️ Tetap Lanjut Simpan`** (simpan draft) atau **`✕ Perbaiki Dulu`**.
+3. **Fitur "Unduh Excel" Resmi CEISA 4.0 (21 Sheet OpenXML Native)**:
+   - Tersedia di menu Host to Host (`transfer.php`) via tombol & klik kanan konteks menu, serta toolbar form editor (`editor.php`).
+   - Menghasilkan file Excel (.xlsx) dengan 21 sheet yang 100% kompatibel dan identik dengan format resmi unduhan Portal CEISA 4.0 Bea Cukai tanpa ketergantungan library vendor pihak ketiga.
 
-4. **Reorder Urutan Tab Form Editor**:
-   - Urutan tab diperbarui menjadi: **Header | Entitas | Dokumen | Barang | Barang Tarif | Kemasan | Pengangkut | Pungutan | ...**
+4. **Tab Dokumen Lampiran (`bc_ceisa_docidx`) & Entitas Terlibat (`bc_ceisa_entidx`)**:
+   - Pengaturan urutan default per jenis dokumen BC (BC 4.0, 2.3, 2.5, 2.7, 3.0, dll.) via toolbar tombol `⚙️ Setting List Dokumen Default` dan `⚙️ Setting List Entitas Default`.
+   - Tombol `⚡ Reset Dokumen Default` dan auto-populate saat AJU baru.
+   - Fitur **Lookup History Entitas** via dobel klik baris entitas.
 
 ---
 
@@ -30,8 +31,10 @@ Dokumen ini ditujukan sebagai instruksi kerja (SOP) bagi Developer / AI Assistan
 
 | Nama File | Keterangan |
 | :--- | :--- |
-| **`editor.php`** | File utama editor dokumen pabean yang telah dilengkapi seluruh fitur di atas. |
-| **`version.txt`** | File pencatat timestamp rilis versi aplikasi terbaru (`20261025.1250`). |
+| **`editor.php`** | File utama editor dokumen pabean yang telah dilengkapi seluruh fitur dan perbaikan tampilan di atas. |
+| **`transfer.php`** | Modul data Host to Host dengan context menu "Unduh Excel" format resmi CEISA 4.0. |
+| **`CeisaXlsxExporter.php`** | Generator berkas Excel (.xlsx) 21 Sheet OpenXML native tanpa Composer/library luar. |
+| **`version.txt`** | File pencatat timestamp rilis versi aplikasi terbaru (`20261025.1336`). |
 | **`migration_database.sql`** | Skrip SQL DDL & DML untuk tabel `bc_ceisa_docidx` dan `bc_ceisa_entidx` beserta data defaultnya. |
 | **`PANDUAN_UPDATE_SYNC.md`** | Dokumen panduan langkah demi langkah ini. |
 
@@ -39,20 +42,19 @@ Dokumen ini ditujukan sebagai instruksi kerja (SOP) bagi Developer / AI Assistan
 
 ## 3. Langkah Demi Langkah Penerapan (Step-by-Step Guide)
 
-### Langkah 1: Eksekusi Migrasi Database
+### Langkah 1: Eksekusi Migrasi Database (Jika belum pernah dijalankan sebelumnya)
 Jalankan file SQL `migration_database.sql` pada database aplikasi target (MySQL / MariaDB):
 ```bash
 mysql -u [username] -p [nama_database] < "UPDATE SYNC/migration_database.sql"
 ```
-*Catatan Perubahan Skema / Tabel Baru:*
-- Tabel baru: `bc_ceisa_docidx` (kolom: `cmp_id`, `bc`, `kode_dokumen`, `idx`)
-- Tabel referensi: `bc_ceisa_entidx` (kolom: `cmp_id`, `bc`, `kode_entitas`, `idx`)
-- Keduanya memiliki indeks pada `cmp_id` untuk efisiensi kueri multi-tenant.
+*Catatan:* Jika tabel `bc_ceisa_docidx` dan `bc_ceisa_entidx` sudah dibuat pada pembaruan sebelumnya, langkah ini dapat dilewati.
 
 ### Langkah 2: Salin File Source Code ke Root Web
-Salin file yang telah diperbarui ke direktori root aplikasi web target:
+Salin seluruh file yang telah diperbarui ke direktori root aplikasi web target:
 ```bash
 cp "UPDATE SYNC/editor.php" "./editor.php"
+cp "UPDATE SYNC/transfer.php" "./transfer.php"
+cp "UPDATE SYNC/CeisaXlsxExporter.php" "./CeisaXlsxExporter.php"
 cp "UPDATE SYNC/version.txt" "./version.txt"
 ```
 
@@ -61,12 +63,12 @@ Jalankan kueri berikut pada database untuk mencatat riwayat pembaruan:
 ```sql
 INSERT INTO bc_app_version_log (version, title, category, release_date, changes, files_modified, author, created_at)
 VALUES (
-    '20261025.1250',
-    'Sinkronisasi Fitur Editor: Docidx, Entidx, Validasi Mandatory & UI Compact',
-    'Feature',
-    '2026-10-25 12:50:00',
-    '- Pengaturan urutan default dokumen lampiran (bc_ceisa_docidx) dan tombol reset default.\n- Validasi kolom mandatory per jenis dokumen BC dengan dialog konfirmasi Tab / Sheet.\n- Reorder urutan tab editor: Header | Entitas | Dokumen | Barang.\n- Modal pencarian entitas history anti-overlap dengan auto-filter role.',
-    'editor.php, version.txt',
+    '20261025.1336',
+    'Perbaikan Modal Mandatory Kolom Bagian, Copy-Paste Excel, dan Unduh Excel CEISA 4.0',
+    'Feature & Bugfix',
+    '2026-10-25 13:36:00',
+    '- Rapikan modal alert validasi mandatory, perlebar kolom dan ubah header Tab/Sheet menjadi Bagian.\n- Context menu Klik Kanan Copy ke Excel & Paste dari Excel pada seluruh tabel editor.\n- Fitur Unduh Excel 21 Sheet format resmi CEISA 4.0 pada transfer.php dan editor.php.',
+    'editor.php, transfer.php, CeisaXlsxExporter.php, version.txt',
     'Super Administrator',
     NOW()
 )
@@ -83,13 +85,17 @@ ON DUPLICATE KEY UPDATE
 
 ## 4. Verifikasi & Pengujian
 
-1. **Uji Tab Dokumen Lampiran**:
-   - Buka form editor dokumen BC 4.0.
-   - Klik tab **Dokumen**. Pastikan tombol **`⚙️ Setting List Dokumen Default`** dan **`⚡ Reset Dokumen Default`** muncul dan berfungsi membuka modal serta menyusun ulang dokumen.
-2. **Uji Validasi Mandatory**:
-   - Buat atau buka dokumen AJU yang belum lengkap datanya.
-   - Klik tombol **Simpan Data** atau **Simpan Dokumen / Barang**.
-   - Pastikan dialog modal peringatan muncul dengan kolom **`Tab / Sheet`**, tipografi kompak, dan tombol konfirmasi **`⚠️ Tetap Lanjut Simpan`** serta **`✕ Perbaiki Dulu`**.
-3. **Uji Lookup Entitas**:
-   - Pada tab **Entitas**, lakukan dobel klik pada salah satu baris entitas.
-   - Pastikan modal riwayat terbuka dengan filter role yang otomatis terpilih sesuai kode entitas baris dan header tabel tidak tertutup baris saat scroll.
+1. **Uji Validasi Mandatory (Modal Anti-Overlap & Label Bagian)**:
+   - Buat atau buka draft dokumen yang datanya belum lengkap.
+   - Klik tombol **Simpan Data**.
+   - Periksa modal SweetAlert yang muncul:
+     - Header kolom kiri wajib bertuliskan **`Bagian`** (bukan `Tab / Sheet`).
+     - Teks nama entitas atau rincian barang tidak tumpang tindih dengan kolom **`Kolom Mandatory`** atau **`Keterangan Masalah`**.
+     - Kolom memiliki lebar yang proporsional, tulisan rapi, dan mudah dibaca.
+2. **Uji Context Menu Copy/Paste Excel**:
+   - Di tab **Barang**, klik kanan pada baris tabel: klik **Copy ke Excel**, lalu paste ke aplikasi Excel lokal.
+   - Edit baris di Excel, copy dari Excel, lalu klik kanan tabel web: klik **Paste dari Excel**.
+   - Data berhasil terimpor kembali dengan rapi ke tabel web.
+3. **Uji Unduh Excel CEISA 4.0**:
+   - Di halaman **Data Host to Host** (`transfer.php`), klik kanan dokumen dan pilih **Unduh Excel**.
+   - Buka file `.xlsx` yang diunduh menggunakan Microsoft Excel dan pastikan tersusun atas 21 Sheet resmi CEISA 4.0 dengan data lengkap.

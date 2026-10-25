@@ -4978,9 +4978,9 @@ if ($action === 'ai_inject') {
 
         /* Modal Validasi Mandatory Swal2 Compact Styling */
         div.swal2-popup.swal2-mandatory-modal {
-            width: 640px !important;
+            width: 680px !important;
             max-width: 95vw !important;
-            padding: 16px 22px 18px 22px !important;
+            padding: 16px 20px 18px 20px !important;
             border-radius: 8px !important;
             box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
         }
@@ -12720,10 +12720,10 @@ $isEditMode = !empty($selectedAjuParam);
 
         async function promptMandatoryWarning(scopeName, errors, bc) {
             const htmlRows = errors.map((err, idx) => `
-                <tr style="border-bottom:1px solid rgba(255,255,255,0.08); ${idx % 2 === 1 ? 'background:rgba(255,255,255,0.02);' : ''}">
-                    <td style="padding:4px 8px; font-weight:700; color:var(--primary); font-size:10.5px; white-space:nowrap; vertical-align:top; border-right:1px solid rgba(255,255,255,0.05);">${escapeHtml(err.section)}</td>
-                    <td style="padding:4px 8px; font-weight:700; color:#ef4444; font-size:10.5px; white-space:nowrap; vertical-align:top; border-right:1px solid rgba(255,255,255,0.05);">✕ ${escapeHtml(err.field)}</td>
-                    <td style="padding:4px 8px; color:var(--text-main); font-size:10px; line-height:1.35; vertical-align:top; word-break:break-word;">${escapeHtml(err.message)}</td>
+                <tr style="border-bottom:1px solid rgba(255,255,255,0.06); ${idx % 2 === 1 ? 'background:rgba(255,255,255,0.02);' : ''}">
+                    <td title="${escapeHtml(err.section)}" style="padding:4px 8px; font-weight:600; color:var(--primary); font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; border-right:1px solid rgba(255,255,255,0.05);">${escapeHtml(err.section)}</td>
+                    <td title="${escapeHtml(err.field)}" style="padding:4px 8px; font-weight:600; color:#ef4444; font-size:10px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; vertical-align:middle; border-right:1px solid rgba(255,255,255,0.05);">✕ ${escapeHtml(err.field)}</td>
+                    <td style="padding:4px 8px; color:var(--text-main); font-size:10px; line-height:1.35; vertical-align:middle; word-break:break-word;">${escapeHtml(err.message)}</td>
                 </tr>
             `).join('');
 
@@ -12731,22 +12731,27 @@ $isEditMode = !empty($selectedAjuParam);
             const res = await Swal.fire({
                 ...swalBase,
                 icon: 'warning',
-                title: `<span style="font-size:14px; font-weight:700; letter-spacing:0.2px;">Validasi Kolom Mandatory Belum Lengkap</span>`,
+                title: `<span style="font-size:13.5px; font-weight:700; letter-spacing:0.2px;">Validasi Kolom Mandatory Belum Lengkap</span>`,
                 html: `
-                    <div style="text-align:left; font-size:11px; margin-top:2px;">
+                    <div style="text-align:left; font-size:10.5px; margin-top:2px;">
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid rgba(255,255,255,0.08);">
-                            <span style="font-weight:600; color:var(--text-main); font-size:11px;">
-                                Ditemukan <b style="color:#ef4444; font-size:11.5px;">${errors.length} data mandatory</b> belum lengkap di seluruh dokumen:
+                            <span style="font-weight:600; color:var(--text-main); font-size:10.5px;">
+                                Ditemukan <b style="color:#ef4444; font-size:11px;">${errors.length} data mandatory</b> belum lengkap di seluruh dokumen:
                             </span>
                             <span class="badge" style="background:#2563eb; color:#fff; font-size:9.5px; font-weight:700; padding:2px 7px; border-radius:3px;">Dokumen BC ${bc}</span>
                         </div>
                         
-                        <div style="max-height:220px; overflow-y:auto; overflow-x:hidden; border:1px solid var(--border); border-radius:4px; margin-bottom:8px; background:var(--bg-input);">
+                        <div style="max-height:230px; overflow-y:auto; overflow-x:hidden; border:1px solid var(--border); border-radius:4px; margin-bottom:8px; background:var(--bg-input);">
                             <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+                                <colgroup>
+                                    <col style="width:165px;">
+                                    <col style="width:175px;">
+                                    <col style="width:auto;">
+                                </colgroup>
                                 <thead style="background:var(--bg-card); position:sticky; top:0; z-index:10; border-bottom:1px solid var(--border);">
                                     <tr>
-                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); width:95px; border-right:1px solid rgba(255,255,255,0.05);">Tab / Sheet</th>
-                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); width:155px; border-right:1px solid rgba(255,255,255,0.05);">Kolom Mandatory</th>
+                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); border-right:1px solid rgba(255,255,255,0.05);">Bagian</th>
+                                        <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted); border-right:1px solid rgba(255,255,255,0.05);">Kolom Mandatory</th>
                                         <th style="padding:5px 8px; text-align:left; font-size:9.5px; font-weight:700; color:var(--text-muted);">Keterangan Masalah</th>
                                     </tr>
                                 </thead>
@@ -12756,11 +12761,11 @@ $isEditMode = !empty($selectedAjuParam);
                             </table>
                         </div>
 
-                        <div style="background:rgba(239, 68, 68, 0.08); border-left:3px solid #ef4444; padding:6px 9px; border-radius:3px; font-size:10px; color:var(--text-main); margin-bottom:10px; line-height:1.4;">
+                        <div style="background:rgba(239, 68, 68, 0.08); border-left:3px solid #ef4444; padding:5px 8px; border-radius:3px; font-size:9.5px; color:var(--text-main); margin-bottom:8px; line-height:1.4;">
                             ⚠️ <b>Peringatan CEISA 4.0:</b> Dokumen dengan kolom mandatory kosong berisiko ditolak (<i>Reject 1028</i>) saat proses transfer.
                         </div>
 
-                        <p style="margin:0; text-align:center; font-weight:600; color:var(--text-main); font-size:11px;">
+                        <p style="margin:0; text-align:center; font-weight:600; color:var(--text-main); font-size:10.5px;">
                             Apakah Anda tetap ingin <b>melanjutkan penyimpanan</b> data ini?
                         </p>
                     </div>
@@ -12772,7 +12777,7 @@ $isEditMode = !empty($selectedAjuParam);
                 cancelButtonColor: '#2563eb',
                 reverseButtons: true,
                 focusCancel: true,
-                width: '620px',
+                width: '680px',
                 customClass: {
                     popup: 'swal2-mandatory-modal',
                     confirmButton: 'btn-sm',
