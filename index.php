@@ -1477,11 +1477,11 @@ if ($initialTab === 'editor') {
 
         /* Sidebar Footer (Versi Update) */
         .kt-aside__footer {
-            padding: 4px 8px;
-            font-size: 7.5px;
-            font-weight: 400;
+            padding: 5px 8px;
+            font-size: 8.5px;
+            font-weight: 500;
             color: var(--text-muted);
-            opacity: 0.75;
+            opacity: 0.85;
             border-top: 1px solid var(--border-color);
             background: var(--bg-sidebar);
             flex-shrink: 0;
@@ -1491,6 +1491,18 @@ if ($initialTab === 'editor') {
             text-align: center;
             letter-spacing: 0.2px;
             user-select: none;
+            cursor: pointer;
+            transition: all 0.25s ease;
+        }
+        .kt-aside__footer:hover {
+            color: #1890ff;
+            opacity: 1;
+            background: rgba(24, 144, 255, 0.08);
+            box-shadow: 0 -2px 10px rgba(24, 144, 255, 0.25);
+        }
+        .kt-aside__footer:hover #sidebarAppVersion {
+            color: #1890ff;
+            text-shadow: 0 0 6px rgba(24, 144, 255, 0.5);
         }
 
         .kt-menu__section {

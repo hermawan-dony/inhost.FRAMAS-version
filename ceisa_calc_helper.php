@@ -553,18 +553,15 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
             $kp = strtoupper($item['kode_pungutan']);
             if ($kp === 'PPNLOKAL' && $item['total'] == 0) continue;
 
-            // Aturan pembulatan ribuan CEISA (CEIL ke atas ribuan / PMK)
-            $rounded = ceil($item['total'] / 1000) * 1000;
-            if ($rounded < 1000 && $item['total'] > 0) {
-                $rounded = ceil($item['total']);
-            }
+            // Akumulasi tarif CEISA 4.0 tanpa pembulatan ribuan (sinkron dengan portal CEISA 4.0)
+            $nilai = round($item['total'], 2);
 
             $newPungutan[] = [
                 'cmp_id' => $cmp_id,
                 'nomor_aju' => $nomor_aju,
                 'kode_jenis_pungutan' => $item['kode_pungutan'],
                 'kode_fasilitas_tarif' => $item['kode_fasilitas'],
-                'nilai_pungutan' => $rounded,
+                'nilai_pungutan' => $nilai,
                 'npwp_billing' => $existingNpwp ?: null
             ];
         }
@@ -580,7 +577,7 @@ if (!defined('CEISA_CALC_HELPER_LOADED')) {
 
         return [
             'status' => 'OK',
-            'message' => "Kalkulasi pungutan sukses! Dihitung " . count($newPungutan) . " jenis pungutan dari $source (pembulatan ribuan CEISA).",
+            'message' => "Kalkulasi pungutan sukses! Dihitung " . count($newPungutan) . " jenis pungutan dari $source (sesuai akumulasi tarif CEISA 4.0).",
             'source' => $source,
             'count' => count($newPungutan),
             'rows' => $newPungutan

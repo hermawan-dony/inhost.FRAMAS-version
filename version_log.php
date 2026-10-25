@@ -2,6 +2,7 @@
 /**
  * CEISA 4.0 - Log Update Versi Aplikasi (Version Changelog & History)
  * Menampilkan dan mengelola riwayat pembaruan, perbaikan bug, dan optimasi sistem.
+ * Desain Compact 10.5px serasi dengan portal CEISA 4.0.
  */
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
@@ -33,15 +34,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
 // Pastikan tabel bc_app_version_log selalu ada
 $sqlCreateTable = "CREATE TABLE IF NOT EXISTS `bc_app_version_log` (
-    `id` INT AUTO_INCREMENT PRIMARY KEY,
-    `version` VARCHAR(30) NOT NULL,
-    `title` VARCHAR(255) NOT NULL,
-    `category` VARCHAR(50) NOT NULL DEFAULT 'Update',
-    `release_date` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `changes` TEXT NOT NULL,
-    `files_modified` VARCHAR(500) NULL,
-    `author` VARCHAR(50) NOT NULL DEFAULT 'Super Administrator',
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `id` int(11) NOT NULL AUTO_INCREMENT,
+    `version` varchar(30) NOT NULL,
+    `title` varchar(255) NOT NULL,
+    `category` varchar(50) NOT NULL DEFAULT 'Update',
+    `release_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `changes` text NOT NULL,
+    `files_modified` varchar(500) DEFAULT NULL,
+    `author` varchar(50) NOT NULL DEFAULT 'Super Administrator',
+    `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
     UNIQUE KEY `uk_version` (`version`),
     KEY `idx_rel_date` (`release_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;";
@@ -56,7 +58,6 @@ if ($action === 'list') {
     header('Content-Type: application/json; charset=utf-8');
     $q        = trim($_GET['q'] ?? '');
     $category = trim($_GET['category'] ?? '');
-    $sort     = trim($_GET['sort'] ?? 'desc'); // desc / asc
 
     $where = [];
     if (!empty($q)) {
@@ -68,8 +69,10 @@ if ($action === 'list') {
             $where[] = "(category = 'Feature' OR category = 'Bug Fix' OR category = 'Bugfix')";
         } elseif ($category === 'Bugfix' || $category === 'Bug Fix') {
             $where[] = "(category = 'Bugfix' OR category = 'Bug Fix')";
-        } elseif ($category === 'UI/UX Refactor' || $category === 'UI/UX') {
-            $where[] = "(category = 'UI/UX' OR category = 'UI/UX Refactor')";
+        } elseif ($category === 'Feature') {
+            $where[] = "(category = 'Feature')";
+        } elseif ($category === 'Refactor' || $category === 'UI/UX Refactor' || $category === 'UI/UX') {
+            $where[] = "(category LIKE '%Refactor%' OR category = 'UI/UX')";
         } elseif ($category === 'Enhancement') {
             $where[] = "(category = 'Enhancement' OR category = 'Performance')";
         } else {
@@ -79,12 +82,12 @@ if ($action === 'list') {
     }
 
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
-    $orderDir = (strtolower($sort) === 'asc') ? 'ASC' : 'DESC';
 
+    // Pengurutan WAJIB Descending (versi terbaru selalu paling atas)
     $sql = "SELECT id, version, title, category, release_date, changes, files_modified, author, created_at 
             FROM bc_app_version_log 
             $whereSql 
-            ORDER BY version $orderDir, release_date $orderDir, id $orderDir";
+            ORDER BY version DESC, release_date DESC, id DESC";
 
     $res = $koneksi->query($sql);
     $data = [];
@@ -206,7 +209,7 @@ if ($action === 'delete') {
 
     $koneksi->query("DELETE FROM bc_app_version_log WHERE id = $id LIMIT 1");
     
-    $resLatest = $koneksi->query("SELECT version FROM bc_app_version_log ORDER BY version DESC, release_date DESC LIMIT 1");
+    $resLatest = $koneksi->query("SELECT version FROM bc_app_version_log ORDER BY version DESC, release_date DESC, id DESC LIMIT 1");
     if ($resLatest && $rowLatest = $resLatest->fetch_assoc()) {
         $latestVer = trim($rowLatest['version']);
         if (!empty($latestVer)) {
@@ -254,51 +257,52 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             padding: 0;
         }
 
+        /* Desain Compact 10.5px serasi dengan portal CEISA 4.0 */
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background: var(--bg-body);
             color: var(--text-body);
-            font-size: 13px;
-            line-height: 1.5;
-            padding: 16px;
+            font-size: 10.5px;
+            line-height: 1.45;
+            padding: 10px 14px;
         }
 
         .container {
-            max-width: 1240px;
+            max-width: 1140px;
             margin: 0 auto;
         }
 
-        /* 1. HEADER CARD (MIRRORING SCREENSHOT 3) */
+        /* 1. HEADER CARD (COMPACT) */
         .version-header-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 18px 24px;
-            margin-bottom: 16px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+            border-radius: 6px;
+            padding: 10px 16px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 16px;
+            gap: 10px;
         }
 
         .version-header-left {
             display: flex;
             align-items: center;
-            gap: 14px;
+            gap: 10px;
         }
 
         .header-icon-box {
-            width: 42px;
-            height: 42px;
-            border-radius: 8px;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
             background: #e6f7ff;
             color: #1890ff;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 19px;
+            font-size: 15px;
             flex-shrink: 0;
         }
         body[data-theme='dark'] .header-icon-box {
@@ -309,18 +313,18 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .version-header-info {
             display: flex;
             flex-direction: column;
-            gap: 3px;
+            gap: 2px;
         }
 
         .version-title-row {
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
             flex-wrap: wrap;
         }
 
         .version-header-info h2 {
-            font-size: 18px;
+            font-size: 14.5px;
             font-weight: 700;
             color: var(--text-heading);
             margin: 0;
@@ -330,27 +334,49 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: #e6f7ff;
             border: 1px solid #91d5ff;
             color: #1890ff;
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 600;
-            padding: 2px 10px;
-            border-radius: 12px;
+            padding: 1px 8px;
+            border-radius: 10px;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
         }
         body[data-theme='dark'] .badge-active-version {
             background: #111b26;
             border-color: #15395b;
             color: #177ddc;
         }
-        .dot-green {
-            color: #52c41a;
-            font-size: 10px;
-            line-height: 1;
+
+        /* LIVE STATUS ANIMASI BERDENYUT HIJAU */
+        @keyframes pulseGreen {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(82, 196, 26, 0.7);
+            }
+            70% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 5px rgba(82, 196, 26, 0);
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(82, 196, 26, 0);
+            }
+        }
+
+        .dot-green-pulse {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: #52c41a;
+            animation: pulseGreen 1.8s infinite;
+            margin-right: 2px;
+            vertical-align: middle;
         }
 
         .version-header-info p {
-            font-size: 12px;
+            font-size: 10px;
             color: var(--text-muted);
             margin: 0;
         }
@@ -358,7 +384,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .version-header-right {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
         /* BUTTONS */
@@ -367,13 +393,13 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: #ffffff;
             border: 1px solid #1890ff;
             border-radius: 4px;
-            padding: 7px 16px;
-            font-size: 12.5px;
+            padding: 5px 12px;
+            font-size: 10.5px;
             font-weight: 600;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             transition: all 0.2s;
             text-decoration: none;
         }
@@ -387,13 +413,13 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: rgba(0, 0, 0, 0.85);
             border: 1px solid #d9d9d9;
             border-radius: 4px;
-            padding: 7px 16px;
-            font-size: 12.5px;
+            padding: 5px 12px;
+            font-size: 10.5px;
             font-weight: 500;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             transition: all 0.2s;
         }
         .btn-default-refresh:hover {
@@ -406,34 +432,34 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: #d9d9d9;
         }
 
-        /* 2. FILTER & SEARCH TOOLBAR (SCREENSHOT 3) */
+        /* 2. FILTER & SEARCH TOOLBAR */
         .toolbar-panel {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 12px 20px;
-            margin-bottom: 16px;
+            border-radius: 6px;
+            padding: 8px 14px;
+            margin-bottom: 12px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 12px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+            gap: 8px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.015);
         }
 
         .search-wrap {
             position: relative;
             display: inline-flex;
             align-items: center;
-            width: 360px;
+            width: 300px;
             max-width: 100%;
         }
 
         .search-icon {
             position: absolute;
-            left: 12px;
+            left: 10px;
             color: #bfbfbf;
-            font-size: 12px;
+            font-size: 10.5px;
             pointer-events: none;
         }
 
@@ -442,8 +468,8 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: var(--input-bg);
             border: 1px solid var(--input-border);
             border-radius: 4px;
-            padding: 7px 12px 7px 32px;
-            font-size: 12px;
+            padding: 5px 10px 5px 28px;
+            font-size: 10.5px;
             color: var(--text-heading);
             outline: none;
             transition: all 0.2s;
@@ -457,7 +483,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .filter-pills-wrap {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             flex-wrap: wrap;
         }
 
@@ -465,10 +491,10 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: transparent;
             border: none;
             color: var(--text-body);
-            font-size: 12px;
+            font-size: 10px;
             font-weight: 500;
-            padding: 5px 14px;
-            border-radius: 16px;
+            padding: 3px 10px;
+            border-radius: 12px;
             cursor: pointer;
             transition: all 0.2s;
             user-select: none;
@@ -484,43 +510,43 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             font-weight: 600;
         }
 
-        /* 3. TIMELINE LAYOUT (SCREENSHOT 3) */
+        /* 3. TIMELINE LAYOUT */
         .timeline-container {
             position: relative;
-            padding-left: 36px;
-            margin-top: 14px;
+            padding-left: 28px;
+            margin-top: 10px;
         }
 
         .timeline-container::before {
             content: '';
             position: absolute;
-            left: 14px;
-            top: 24px;
-            bottom: 30px;
+            left: 10px;
+            top: 16px;
+            bottom: 20px;
             width: 2px;
             background: var(--border-color);
         }
 
         .timeline-item {
             position: relative;
-            margin-bottom: 22px;
+            margin-bottom: 14px;
         }
 
         .timeline-node {
             position: absolute;
-            left: -36px;
-            top: 18px;
-            width: 24px;
-            height: 24px;
+            left: -28px;
+            top: 12px;
+            width: 20px;
+            height: 20px;
             border-radius: 50%;
             background: var(--bg-card);
             border: 2px solid #1890ff;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 12px;
+            font-size: 10px;
             color: #1890ff;
-            box-shadow: 0 0 0 4px var(--bg-body);
+            box-shadow: 0 0 0 3px var(--bg-body);
             z-index: 2;
         }
 
@@ -528,22 +554,22 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             border-color: #52c41a;
             background: #f6ffed;
             color: #52c41a;
-            box-shadow: 0 0 0 4px var(--bg-body);
+            box-shadow: 0 0 0 3px var(--bg-body);
         }
 
         /* CARD */
         .version-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 18px 24px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+            border-radius: 6px;
+            padding: 12px 16px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.015);
             transition: border-color 0.2s, box-shadow 0.2s;
         }
 
         .version-card:hover {
             border-color: #91d5ff;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
         }
 
         .version-card-head {
@@ -551,13 +577,13 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
 
         .card-head-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex-wrap: wrap;
         }
 
@@ -565,31 +591,31 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: #52c41a;
             color: #ffffff;
             font-weight: 700;
-            font-size: 11.5px;
-            padding: 2px 9px;
-            border-radius: 4px;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
             font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
         }
 
         .badge-version-blue {
             background: #1890ff;
             color: #ffffff;
             font-weight: 700;
-            font-size: 11.5px;
-            padding: 2px 9px;
-            border-radius: 4px;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 3px;
             font-family: 'SFMono-Regular', Consolas, Menlo, monospace;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
         }
 
         .tag-cat {
-            font-size: 10.5px;
+            font-size: 9px;
             font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 4px;
+            padding: 1px 6px;
+            border-radius: 3px;
             text-transform: uppercase;
-            letter-spacing: 0.3px;
+            letter-spacing: 0.2px;
         }
 
         .tag-cat-enhancement { background: #f6ffed; border: 1px solid #b7eb8f; color: #52c41a; }
@@ -604,10 +630,10 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: #f6ffed;
             border: 1px solid #b7eb8f;
             color: #52c41a;
-            font-size: 11px;
+            font-size: 9.5px;
             font-weight: 600;
-            padding: 2px 8px;
-            border-radius: 4px;
+            padding: 1px 6px;
+            border-radius: 3px;
             display: inline-flex;
             align-items: center;
             gap: 4px;
@@ -616,59 +642,59 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .card-head-right {
             display: flex;
             align-items: center;
-            gap: 6px;
-            font-size: 12px;
+            gap: 5px;
+            font-size: 10px;
             color: var(--text-muted);
         }
 
         .card-item-title {
-            font-size: 15px;
+            font-size: 12px;
             font-weight: 700;
             color: var(--text-heading);
-            margin: 10px 0 12px 0;
+            margin: 6px 0 8px 0;
         }
 
         .changes-list {
             display: flex;
             flex-direction: column;
-            gap: 7px;
-            margin-bottom: 14px;
+            gap: 4px;
+            margin-bottom: 8px;
         }
 
         .change-row {
             display: flex;
             align-items: flex-start;
-            gap: 8px;
-            font-size: 12.5px;
+            gap: 6px;
+            font-size: 10.5px;
             color: var(--text-body);
-            line-height: 1.6;
+            line-height: 1.45;
         }
 
         .change-check {
             color: #52c41a;
             font-weight: 700;
-            font-size: 13px;
-            line-height: 1.6;
+            font-size: 11px;
+            line-height: 1.45;
             flex-shrink: 0;
         }
 
         .card-footer-row {
             border-top: 1px solid var(--border-color-light);
-            padding-top: 10px;
-            margin-top: 10px;
+            padding-top: 8px;
+            margin-top: 8px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 11.5px;
+            font-size: 10px;
             color: var(--text-muted);
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 6px;
         }
 
         .footer-left {
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
             flex-wrap: wrap;
         }
 
@@ -676,8 +702,8 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: var(--bg-card-alt);
             border: 1px solid var(--border-color);
             border-radius: 3px;
-            padding: 2px 7px;
-            font-size: 10.5px;
+            padding: 1px 5px;
+            font-size: 9.5px;
             font-family: 'SFMono-Regular', Consolas, monospace;
             color: var(--text-heading);
         }
@@ -685,13 +711,13 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .footer-right {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
         .action-icon {
             cursor: pointer;
             color: var(--text-muted);
-            font-size: 12px;
+            font-size: 11px;
             transition: color 0.2s;
         }
         .action-icon:hover {
@@ -701,7 +727,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             color: #ff4d4f;
         }
 
-        /* MODAL STYLES */
+        /* MODAL STYLES (COMPACT) */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -713,15 +739,15 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             z-index: 1000;
             align-items: center;
             justify-content: center;
-            padding: 16px;
+            padding: 12px;
         }
 
         .modal-dialog {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 6px;
             width: 100%;
-            max-width: 650px;
+            max-width: 580px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.15);
             display: flex;
             flex-direction: column;
@@ -730,12 +756,12 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         }
 
         @keyframes modalFadeIn {
-            from { opacity: 0; transform: translateY(-12px); }
+            from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
         .modal-header {
-            padding: 14px 18px;
+            padding: 10px 14px;
             border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
@@ -743,7 +769,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         }
 
         .modal-header h3 {
-            font-size: 15px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--text-heading);
             margin: 0;
@@ -752,7 +778,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         .modal-close {
             background: transparent;
             border: none;
-            font-size: 18px;
+            font-size: 16px;
             color: var(--text-muted);
             cursor: pointer;
         }
@@ -761,28 +787,28 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         }
 
         .modal-body {
-            padding: 16px 18px;
+            padding: 12px 14px;
             overflow-y: auto;
             flex: 1;
         }
 
         .form-row {
-            margin-bottom: 12px;
+            margin-bottom: 10px;
         }
 
         .form-row-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 10px;
+            margin-bottom: 10px;
         }
 
         .form-label {
             display: block;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             color: var(--text-heading);
-            margin-bottom: 4px;
+            margin-bottom: 3px;
         }
 
         .form-control {
@@ -790,8 +816,8 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             background: var(--input-bg);
             border: 1px solid var(--input-border);
             border-radius: 4px;
-            padding: 7px 10px;
-            font-size: 12px;
+            padding: 5px 8px;
+            font-size: 10.5px;
             color: var(--text-heading);
             outline: none;
             transition: border-color 0.2s;
@@ -803,33 +829,33 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         }
 
         textarea.form-control {
-            min-height: 110px;
+            min-height: 90px;
             resize: vertical;
             font-family: inherit;
         }
 
         .modal-footer {
-            padding: 12px 18px;
+            padding: 10px 14px;
             border-top: 1px solid var(--border-color);
             display: flex;
             justify-content: flex-end;
-            gap: 8px;
+            gap: 6px;
             background: var(--bg-card-alt);
-            border-bottom-left-radius: 8px;
-            border-bottom-right-radius: 8px;
+            border-bottom-left-radius: 6px;
+            border-bottom-right-radius: 6px;
         }
 
         .empty-state {
             text-align: center;
-            padding: 40px 20px;
+            padding: 30px 16px;
             color: var(--text-muted);
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 8px;
+            border-radius: 6px;
         }
         .empty-state i {
-            font-size: 36px;
-            margin-bottom: 10px;
+            font-size: 30px;
+            margin-bottom: 8px;
             color: var(--border-color);
         }
     </style>
@@ -838,7 +864,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
 <div class="container">
 
-    <!-- 1. HEADER CARD (MIRRORING SCREENSHOT 3) -->
+    <!-- 1. HEADER CARD (COMPACT) -->
     <div class="version-header-card">
         <div class="version-header-left">
             <div class="header-icon-box" title="Log Update Versi">
@@ -848,7 +874,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
                 <div class="version-title-row">
                     <h2>Log Update Versi Sistem</h2>
                     <span class="badge-active-version" title="Versi aktif yang sedang berjalan">
-                        <span class="dot-green">●</span> Versi Aktif : <span id="headerActiveVersion"><?= htmlspecialchars($currentSystemVersion) ?></span>
+                        <span class="dot-green-pulse"></span> Versi Aktif : <span id="headerActiveVersion"><?= htmlspecialchars($currentSystemVersion) ?></span>
                     </span>
                 </div>
                 <p>Catatan riwayat rilis pembaruan, bugfix, dan perbaikan fitur CEISA 4.0</p>
@@ -867,7 +893,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         </div>
     </div>
 
-    <!-- 2. TOOLBAR: SEARCH & CATEGORY PILLS (SCREENSHOT 3) -->
+    <!-- 2. TOOLBAR: SEARCH & CATEGORY PILLS -->
     <div class="toolbar-panel">
         <div class="search-wrap">
             <i class="fa-solid fa-magnifying-glass search-icon"></i>
@@ -880,19 +906,19 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             <button type="button" class="filter-pill" data-category="Bugfix" onclick="setFilterCategory('Bugfix', this)">Bugfix</button>
             <button type="button" class="filter-pill" data-category="Feature" onclick="setFilterCategory('Feature', this)">Feature</button>
             <button type="button" class="filter-pill" data-category="Enhancement" onclick="setFilterCategory('Enhancement', this)">Enhancement</button>
-            <button type="button" class="filter-pill" data-category="UI/UX Refactor" onclick="setFilterCategory('UI/UX Refactor', this)">UI/UX Refactor</button>
+            <button type="button" class="filter-pill" data-category="Refactor" onclick="setFilterCategory('Refactor', this)">Refactor</button>
         </div>
     </div>
 
-    <!-- 3. TIMELINE CARDS LIST (SCREENSHOT 3) -->
+    <!-- 3. TIMELINE CARDS LIST (DESCENDING) -->
     <div class="timeline-container" id="timelineView">
         <!-- Populated via JS -->
     </div>
 
     <div class="empty-state" id="emptyState" style="display:none;">
         <i class="fa-regular fa-clipboard"></i>
-        <div style="font-weight:600; font-size:14px; color:var(--text-heading); margin-bottom:4px;">Tidak Ada Log Versi Ditemukan</div>
-        <div style="font-size:12px;">Coba ubah kata kunci pencarian atau filter kategori Anda.</div>
+        <div style="font-weight:600; font-size:12px; color:var(--text-heading); margin-bottom:3px;">Tidak Ada Log Versi Ditemukan</div>
+        <div style="font-size:10.5px;">Coba ubah kata kunci pencarian atau filter kategori Anda.</div>
     </div>
 
 </div>
@@ -910,9 +936,9 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             <div class="modal-body">
                 <div class="form-row-grid">
                     <div>
-                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
                             <label class="form-label" style="margin:0;">Nomor Versi:</label>
-                            <a href="javascript:void(0)" onclick="generateNewVersionNumber()" style="font-size:10.5px; color:var(--primary); text-decoration:none; font-weight:600;" title="Generate nomor versi sesuai timestamp saat ini">
+                            <a href="javascript:void(0)" onclick="generateNewVersionNumber()" style="font-size:9.5px; color:var(--primary); text-decoration:none; font-weight:600;" title="Generate nomor versi sesuai timestamp saat ini">
                                 ⚡ Timestamp Ini
                             </a>
                         </div>
@@ -924,7 +950,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
                             <option value="Enhancement">Enhancement (Penyempurnaan)</option>
                             <option value="Feature">Feature (Rilis Fitur Baru)</option>
                             <option value="Bugfix">Bugfix (Perbaikan Kendala / Error)</option>
-                            <option value="UI/UX Refactor">UI/UX Refactor (Penyempurnaan Tampilan)</option>
+                            <option value="Refactor">Refactor (Penyempurnaan Kode/Tampilan)</option>
                             <option value="Performance">Performance (Optimasi Kecepatan)</option>
                             <option value="Update">Update (Pembaruan Umum)</option>
                             <option value="Security">Security (Keamanan & Autentikasi)</option>
@@ -945,29 +971,29 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
                 <div class="form-row">
                     <label class="form-label">Judul Pembaruan (Ringkasan):</label>
-                    <input type="text" id="formTitleText" class="form-control" required placeholder="Contoh: Pengurutan Descending Log Update Versi Sistem">
+                    <input type="text" id="formTitleText" class="form-control" required placeholder="Contoh: Perbaikan Kalkulasi Pungutan Dokumen & Modul Log Versi">
                 </div>
 
                 <div class="form-row">
                     <label class="form-label">Rincian Perubahan / Yang Disolve (Pisahkan dengan baris baru):</label>
-                    <textarea id="formChanges" class="form-control" required placeholder="Memperbaiki sorting log rilis menjadi descending...&#10;Versi rilis terbaru selalu tampil paling atas...&#10;Menyelaraskan timestamp release_date..."></textarea>
+                    <textarea id="formChanges" class="form-control" required placeholder="• Menghapus pembulatan ribuan pada kalkulasi total pungutan...&#10;• Sinkronisasi nilai pungutan dokumen dengan CEISA 4.0...&#10;• Menyediakan antarmuka log rilis versi sistem..."></textarea>
                 </div>
 
                 <div class="form-row">
                     <label class="form-label">Berkas yang Dimodifikasi (Pisahkan dengan koma):</label>
-                    <input type="text" id="formFiles" class="form-control" placeholder="Contoh: version_log.php, version.txt">
+                    <input type="text" id="formFiles" class="form-control" placeholder="Contoh: editor.php, ceisa_calc_helper.php, version_log.php">
                 </div>
 
-                <div class="form-row" style="margin-top:10px;">
-                    <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:12px; font-weight:600; color:var(--text-heading);">
+                <div class="form-row" style="margin-top:8px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:10.5px; font-weight:600; color:var(--text-heading);">
                         <input type="checkbox" id="formSetActive" checked>
                         <span>Jadikan sebagai versi aktif sistem saat ini (perbarui version.txt)</span>
                     </label>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn-default-refresh" onclick="closeVersionModal()" style="padding:6px 14px;">Batal</button>
-                <button type="submit" class="btn-primary-release" id="btnSubmitForm" style="padding:6px 14px;">
+                <button type="button" class="btn-default-refresh" onclick="closeVersionModal()" style="padding:4px 12px;">Batal</button>
+                <button type="submit" class="btn-primary-release" id="btnSubmitForm" style="padding:4px 12px;">
                     <i class="fa-solid fa-floppy-disk"></i> Simpan Catatan Versi
                 </button>
             </div>
@@ -1010,7 +1036,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         const emptyState = document.getElementById('emptyState');
 
         try {
-            const res = await fetch(`version_log.php?action=list&q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&sort=desc&_t=${Date.now()}`);
+            const res = await fetch(`version_log.php?action=list&q=${encodeURIComponent(q)}&category=${encodeURIComponent(cat)}&_t=${Date.now()}`);
             const json = await res.json();
 
             if (json.status !== 'OK') {
@@ -1019,6 +1045,19 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
             rawVersionData = json.data || [];
             activeSystemVersion = json.active_version || activeSystemVersion;
+
+            // Pengurutan WAJIB Descending (versi terbaru selalu paling atas)
+            rawVersionData.sort((a, b) => {
+                const vA = String(a.version || '');
+                const vB = String(b.version || '');
+                if (vB !== vA) {
+                    return vB.localeCompare(vA, undefined, { numeric: true, sensitivity: 'base' });
+                }
+                const rA = new Date(a.release_date || 0).getTime();
+                const rB = new Date(b.release_date || 0).getTime();
+                if (rB !== rA) return rB - rA;
+                return (parseInt(b.id, 10) || 0) - (parseInt(a.id, 10) || 0);
+            });
 
             // Update stats & chip
             const headerActiveEl = document.getElementById('headerActiveVersion');
@@ -1037,7 +1076,7 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
 
         } catch (err) {
             console.error(err);
-            tlView.innerHTML = `<div style="color:#ff4d4f; padding:20px; text-align:center;">Gagal memuat log versi: ${escapeHtml(err.message)}</div>`;
+            tlView.innerHTML = `<div style="color:#ff4d4f; padding:16px; text-align:center;">Gagal memuat log versi: ${escapeHtml(err.message)}</div>`;
         }
     }
 
@@ -1054,9 +1093,9 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
         } else if (c.includes('bug')) {
             cls = 'tag-cat-bugfix';
             label = 'BUGFIX';
-        } else if (c.includes('ui') || c.includes('ux') || c.includes('refactor')) {
+        } else if (c.includes('refactor') || c.includes('ui') || c.includes('ux')) {
             cls = 'tag-cat-uiux';
-            label = 'UI/UX REFACTOR';
+            label = 'REFACTOR';
         } else if (c.includes('perf')) {
             cls = 'tag-cat-performance';
             label = 'PERFORMANCE';
@@ -1102,14 +1141,14 @@ $currentSystemVersion = getAppUpdateVersion($koneksi);
             itemEl.className = `timeline-item ${isCurrent ? 'is-current' : ''}`;
             itemEl.innerHTML = `
                 <div class="timeline-node">
-                    ${isCurrent ? '<i class="fa-solid fa-check"></i>' : '<span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#1890ff;"></span>'}
+                    ${isCurrent ? '<i class="fa-solid fa-check"></i>' : '<span style="display:inline-block; width:6px; height:6px; border-radius:50%; background:#1890ff;"></span>'}
                 </div>
                 <div class="version-card">
                     <div class="version-card-head">
                         <div class="card-head-left">
                             <span class="${badgeClass}">v${escapeHtml(item.version)}</span>
                             ${catTagHtml}
-                            ${isCurrent ? '<span class="tag-active-status"><span class="dot-green">●</span> Versi Aktif</span>' : ''}
+                            ${isCurrent ? '<span class="tag-active-status"><span class="dot-green-pulse"></span> Versi Aktif</span>' : ''}
                         </div>
                         <div class="card-head-right">
                             <i class="fa-regular fa-calendar"></i>

@@ -1605,22 +1605,19 @@ if ($action === 'calc_pungutan') {
         exit;
     }
 
-    // Dibulatkan ke ribuan penuh sesuai aturan CEISA (PMK 190)
+    // Akumulasi tarif CEISA 4.0 tanpa pembulatan ribuan (sinkron dengan portal CEISA 4.0)
     $newPungutan = [];
     foreach ($finalSummary as $item) {
         $kp = strtoupper($item['kode_pungutan']);
         if ($kp === 'PPNLOKAL' && $item['total'] == 0) continue;
 
-        $rounded = round($item['total'], -3);
-        if ($rounded < 1000 && $item['total'] > 0) {
-            $rounded = ceil($item['total']);
-        }
+        $nilai = round($item['total'], 2);
         $newPungutan[] = [
             'cmp_id' => $cmp_id,
             'nomor_aju' => $nomor_aju,
             'kode_jenis_pungutan' => $item['kode_pungutan'],
             'kode_fasilitas_tarif' => $item['kode_fasilitas'],
-            'nilai_pungutan' => $rounded,
+            'nilai_pungutan' => $nilai,
             'npwp_billing' => $existingNpwp ?: null
         ];
     }
@@ -1639,7 +1636,7 @@ if ($action === 'calc_pungutan') {
 
         echo json_encode([
             'status' => 'OK',
-            'message' => "Kalkulasi pungutan sukses! Dihitung " . count($newPungutan) . " jenis pungutan dari $source (dibulatkan ke ribuan penuh sesuai aturan CEISA).",
+            'message' => "Kalkulasi pungutan sukses! Dihitung " . count($newPungutan) . " jenis pungutan dari $source (sesuai akumulasi tarif CEISA 4.0).",
             'source' => $source,
             'rows' => $newPungutan
         ]);
@@ -5471,7 +5468,7 @@ $isEditMode = !empty($selectedAjuParam);
             <div class="grid-toolbar">
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Pungutan <span class="tbl-tech-name">(<code>bc_ceisa_pungutan</code>)</span></span>
                 <div style="display:flex; gap:8px;">
-                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen (dibulatkan ke ribuan penuh sesuai aturan CEISA 4.0)">⚡ Hitung Pungutan</button>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen (sesuai akumulasi tarif CEISA 4.0)">⚡ Hitung Pungutan</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('pungutan')">➕ Tambah Pungutan</button>
                     <button class="btn btn-success btn-sm" onclick="saveTable('pungutan')">💾 Simpan Pungutan</button>
                 </div>
