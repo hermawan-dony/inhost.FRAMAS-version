@@ -58,6 +58,18 @@ if (!function_exists('isDocPermitted')) {
 // -------------------------------------------------------------
 $action = $_REQUEST['action'] ?? '';
 
+// DOWNLOAD EXCEL RESMI CEISA 4.0 (21 SHEET PERSIS PORTAL CEISA)
+if ($action === 'download_excel' || $action === 'export_excel') {
+    $nomorAju = trim($_REQUEST['nomor_aju'] ?? '');
+    if (empty($nomorAju)) {
+        die('Nomor AJU wajib disertakan.');
+    }
+    require_once __DIR__ . '/CeisaXlsxExporter.php';
+    $exporter = new CeisaXlsxExporter($koneksi);
+    $exporter->streamDownload($nomorAju);
+    exit;
+}
+
 // 1. REKAP JUMLAH DOKUMEN PER PERIODE (POPUP REKAP DOKUMEN)
 if ($action === 'rekap_dokumen') {
     header('Content-Type: application/json; charset=utf-8');
@@ -3199,6 +3211,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="context-menu-item" onclick="contextAction('unpost_it')"><i class="fa-solid fa-rotate-left" style="color:#ff7a45; width:16px;"></i> Unposting IT Inventory</div>
         <div class="context-menu-divider"></div>
         <div class="context-menu-item" onclick="contextAction('view_json')"><i class="fa-solid fa-code" style="color:#722ed1; width:16px;"></i> View JSON</div>
+        <div class="context-menu-item" onclick="contextAction('download_excel')"><i class="fa-solid fa-file-excel" style="color:#107c41; width:16px;"></i> Unduh Excel</div>
         <div class="context-menu-item" onclick="contextAction('copy_aju')"><i class="fa-solid fa-copy" style="color:#13c2c2; width:16px;"></i> Copy AJU</div>
         <div class="context-menu-item" onclick="contextAction('rename_aju')"><i class="fa-solid fa-i-cursor" style="color:#fa8c16; width:16px;"></i> Rename AJU</div>
     </div>
@@ -4287,6 +4300,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 case 'view_json':
                     viewJsonActiveAju();
                     break;
+                case 'download_excel':
+                    downloadCeisaExcel(targetAju);
+                    break;
                 case 'copy_aju':
                     openCopyModal();
                     break;
@@ -4294,6 +4310,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     openRenameModal();
                     break;
             }
+        }
+
+        function downloadCeisaExcel(targetAju) {
+            const aju = targetAju || activeAju;
+            if (!aju) {
+                showWarning('Silakan pilih salah satu dokumen terlebih dahulu.');
+                return;
+            }
+            showToast(`Mengunduh Excel CEISA 4.0 untuk AJU ${aju}...`);
+            window.location.href = `transfer.php?action=download_excel&nomor_aju=${encodeURIComponent(aju)}`;
         }
 
         async function resetPostedAju(targetAju) {

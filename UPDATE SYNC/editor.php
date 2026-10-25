@@ -5132,6 +5132,7 @@ $isEditMode = !empty($selectedAjuParam);
                 <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')">🌙 Dark</button>
                 <button class="theme-btn" data-theme="light" onclick="setTheme('light')">☀️ Light</button>
             </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="downloadCeisaExcel()" title="Unduh file Excel 21 sheet resmi CEISA 4.0">📥 Unduh Excel</button>
             <button class="btn btn-secondary btn-sm" onclick="previewJson()">👁️ Preview JSON</button>
             <button class="btn btn-success btn-sm" onclick="saveCurrentTab()">💾 Simpan Perubahan</button>
             <button class="btn btn-primary btn-sm" id="btnTopTransferCeisa" onclick="transferCeisa()">🚀 Transfer ke CEISA</button>
@@ -13100,6 +13101,13 @@ $isEditMode = !empty($selectedAjuParam);
                     if (b._origHtml) b.innerHTML = b._origHtml;
                 });
             }
+        function downloadCeisaExcel() {
+            if (!currentAju) {
+                showWarning('Silakan buat dokumen baru atau pilih nomor AJU terlebih dahulu untuk mengunduh Excel.', 'Pilih Dokumen');
+                return;
+            }
+            showToast(`Mengunduh file Excel CEISA 4.0 untuk AJU ${currentAju}...`);
+            window.location.href = `export_ceisa_excel.php?nomor_aju=${encodeURIComponent(currentAju)}`;
         }
 
         async function previewJson() {
