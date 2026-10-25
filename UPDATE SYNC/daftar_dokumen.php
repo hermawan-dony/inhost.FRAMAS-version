@@ -391,6 +391,97 @@ if ($action === 'get_timeline' || $action === 'tracking_history') {
     ]);
     exit;
 }
+
+if ($action === 'import_to_h2h') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_REQUEST['aju'] ?? ''));
+    $targetCmp = trim($_REQUEST['cmp_id'] ?? '');
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor Pengajuan (AJU) tidak boleh kosong.']);
+        exit;
+    }
+
+    $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
+    $cacheDir = __DIR__ . '/excel_cache';
+    if (!is_dir($cacheDir)) {
+        @mkdir($cacheDir, 0777, true);
+    }
+    $excelPath = $cacheDir . '/' . $cleanAju . '.xlsx';
+
+    // Jika targetCmp belum diset, ambil dari database
+    if (empty($targetCmp)) {
+        $comp = ceisa_get_company($cleanAju);
+        if ($comp && !empty($comp['cmp_id'])) {
+            $targetCmp = $comp['cmp_id'];
+        } elseif (!empty($_SESSION['company_cmp_id'])) {
+            $targetCmp = $_SESSION['company_cmp_id'];
+        }
+    }
+
+    // 1. Cek apakah berkas Excel sudah ada di cache
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        $genSuccess = false;
+        if (file_exists(__DIR__ . '/CeisaXlsxExporter.php')) {
+            require_once __DIR__ . '/CeisaXlsxExporter.php';
+            try {
+                $escAju = $koneksi->real_escape_string($cleanAju);
+                $chk = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}' LIMIT 1");
+                if ($chk && $chk->num_rows > 0) {
+                    $exporter = new CeisaXlsxExporter($koneksi);
+                    $genSuccess = $exporter->generateXlsx($cleanAju, $excelPath);
+                }
+            } catch (\Throwable $e) {}
+        }
+
+        if (!$genSuccess || !file_exists($excelPath) || filesize($excelPath) < 1500) {
+            $host = $_SERVER['HTTP_HOST'] ?? '127.0.0.1';
+            $proto = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+            $dlUrl = $proto . $host . "/download_ceisa_excel.php?nomor_aju=" . urlencode($cleanAju) . "&cmp_id=" . urlencode($targetCmp) . "&format=json";
+            
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $dlUrl,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 30,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => 0
+            ]);
+            $resCurl = curl_exec($ch);
+            curl_close($ch);
+        }
+    }
+
+    if (!file_exists($excelPath) || filesize($excelPath) < 1500) {
+        echo json_encode([
+            'status' => 'ERROR',
+            'message' => "Berkas Excel CEISA untuk nomor pengajuan {$cleanAju} tidak ditemukan di server dan belum berhasil diunduh. Silakan gunakan opsi 'Unduh Excel' terlebih dahulu untuk memastikan koneksi ke CEISA 4.0 aktif."
+        ]);
+        exit;
+    }
+
+    // 2. Eksekusi CeisaXlsxImporter
+    try {
+        require_once __DIR__ . '/CeisaXlsxImporter.php';
+        $importer = new CeisaXlsxImporter($koneksi, $targetCmp);
+        $result = $importer->import($excelPath, ['overwrite' => true]);
+
+        echo json_encode([
+            'status'    => 'OK',
+            'nomor_aju' => $cleanAju,
+            'cmp_id'    => $targetCmp,
+            'message'   => "Dokumen {$cleanAju} berhasil diimpor ke Data Host to Host!",
+            'details'   => $result
+        ]);
+    } catch (\Throwable $e) {
+        echo json_encode([
+            'status'  => 'ERROR',
+            'message' => 'Gagal mengimpor ke H2H: ' . $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
 $themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 ?>
@@ -1717,6 +1808,93 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             background: var(--border-card);
             margin: 4px 0;
         }
+
+        /* -------------------------------------------------------------
+           TOMBOL AKSI PORTAL CEISA & DROPDOWN MENU AKSI BARIS TABEL
+           ------------------------------------------------------------- */
+        .action-btn-ceisa {
+            background: #ffffff;
+            border: 1px solid #1890ff;
+            color: #1890ff;
+            padding: 2px 14px;
+            font-size: 11.5px;
+            font-weight: 500;
+            border-radius: 4px;
+            cursor: pointer;
+            outline: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            line-height: 1.5;
+            transition: all 0.2s cubic-bezier(0.645, 0.045, 0.355, 1);
+            user-select: none;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+        }
+        .action-btn-ceisa:hover, .action-btn-ceisa.active {
+            background: #e6f7ff;
+            border-color: #40a9ff;
+            color: #096dd9;
+            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.2);
+        }
+        body[data-theme="dark"] .action-btn-ceisa {
+            background: transparent;
+            border-color: #177ddc;
+            color: #177ddc;
+        }
+        body[data-theme="dark"] .action-btn-ceisa:hover, 
+        body[data-theme="dark"] .action-btn-ceisa.active {
+            background: #111d2c;
+            border-color: #40a9ff;
+            color: #40a9ff;
+        }
+
+        .row-action-menu {
+            position: fixed;
+            z-index: 10000;
+            background: #ffffff;
+            border: 1px solid #d9d9d9;
+            border-radius: 4px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            padding: 4px 0;
+            min-width: 155px;
+            display: none;
+            animation: fadeInRowMenu 0.15s ease-out;
+        }
+        @keyframes fadeInRowMenu {
+            from { opacity: 0; transform: translateY(-3px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        body[data-theme="dark"] .row-action-menu {
+            background: #1f1f1f;
+            border-color: #303030;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+        }
+        .row-action-item {
+            padding: 7px 14px;
+            font-size: 11.5px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: #262626;
+            transition: background 0.15s, color 0.15s;
+            user-select: none;
+        }
+        body[data-theme="dark"] .row-action-item {
+            color: #d9d9d9;
+        }
+        .row-action-item:hover {
+            background: #e6f7ff;
+            color: #1890ff;
+        }
+        body[data-theme="dark"] .row-action-item:hover {
+            background: #111d2c;
+            color: #177ddc;
+        }
+        .row-action-item svg {
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -1912,11 +2090,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                 <th style="width: 250px;" class="th-sortable" data-sort-col="nomor_aju" onclick="sortTable('nomor_aju')" title="Klik untuk mengurutkan Nomor Pengajuan">Nomor Pengajuan <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 170px;" class="th-sortable" data-sort-col="nomor_daftar" onclick="sortTable('nomor_daftar')" title="Klik untuk mengurutkan Nomor / Tanggal Pendaftaran">Nomor / Tanggal Pendaftaran <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 170px;" class="th-sortable" data-sort-col="nama_respon" onclick="sortTable('nama_respon')" title="Klik untuk mengurutkan Nama Respon">Nama Respon <span class="th-sort-icon">⇅</span></th>
-                                <th style="width: 115px; text-align: center;">Unduh</th>
+                                <th style="width: 75px; text-align: center;">PDF</th>
                                 <th style="width: 155px;" class="th-sortable th-sorted" data-sort-col="tanggal_respon" onclick="sortTable('tanggal_respon')" title="Klik untuk mengurutkan Tanggal Respon (Default: Terakhir / Terbaru)">Tanggal Respon <span class="th-sort-icon">▼</span></th>
                                 <th style="width: 65px; text-align: center;" class="th-sortable" data-sort-col="jalur" onclick="sortTable('jalur')" title="Klik untuk mengurutkan Jalur">Jalur <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 250px;" class="th-sortable" data-sort-col="perusahaan" onclick="sortTable('perusahaan')" title="Klik untuk mengurutkan Nama Perusahaan">Nama Perusahaan <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 180px;" class="th-sortable" data-sort-col="kantor" onclick="sortTable('kantor')" title="Klik untuk mengurutkan Kantor Pabean">Kantor Pabean <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 85px; text-align: center;">Aksi</th>
                             </tr>
                             <!-- Header Row 2: Inline Input Filters -->
                             <tr>
@@ -1980,11 +2159,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                         </span>
                                     </span>
                                 </th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody class="ant-table-tbody" id="ajuTableBody">
                             <tr>
-                                <td colspan="10" style="text-align:center; padding:28px; color:#8c8c8c;">
+                                <td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">
                                     <span class="spinner"></span> Memuat data dokumen...
                                 </td>
                             </tr>
@@ -2255,6 +2435,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             </svg>
             <span style="font-weight:600; color:#389e0d;">Unduh Excel (CEISA 4.0)</span>
         </div>
+        <div class="dd-context-item" id="ctxItemImportH2H">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
+                <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
+            </svg>
+            <span style="font-weight:600; color:#1890ff;">Import ke Data H2H</span>
+        </div>
         <div class="dd-context-item" id="ctxItemViewPdf">
             <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
                 <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
@@ -2272,6 +2459,31 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         <div class="dd-context-item" id="ctxItemSelectToggle">
             <span>☑️</span>
             <span id="ctxTextSelect">Pilih Dokumen Ini</span>
+        </div>
+    </div>
+
+    <!-- 2.1 DROPDOWN MENU AKSI TOMBOL KOLOM PALING KANAN -->
+    <div id="rowActionMenu" class="row-action-menu">
+        <div class="row-action-item" onclick="triggerRowAction('excel')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M514.1 639.9l61.7-89c3.1-4.5 4.7-9.9 4.7-15.3 0-14.7-11.9-26.6-26.6-26.6h-34.9c-7.3 0-14.1 3.5-18.4 9.4l-40.3 58-40.3-58c-4.3-5.9-11.1-9.4-18.4-9.4h-34.9c-14.7 0-26.6 11.9-26.6 26.6 0 5.4 1.6 10.8 4.7 15.3l61.7 89-63.5 91.6c-3.1 4.5-4.7 9.9-4.7 15.3 0 14.7 11.9 26.6 26.6 26.6h35.5c7.3 0 14.1-3.5 18.4-9.4l42-60.5 42 60.5c4.3 5.9 11.1 9.4 18.4 9.4h35.5c14.7 0 26.6-11.9 26.6-26.6 0-5.4-1.6-10.8-4.7-15.3l-63.5-91.6z"/>
+            </svg>
+            <span>Unduh Excel</span>
+        </div>
+        <div class="row-action-item" onclick="triggerRowAction('import_h2h')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656z"/>
+                <path d="M512 304c-8.8 0-16 7.2-16 16v208h-80c-7.1 0-10.7 8.6-5.7 13.6l101.7 101.7c3.1 3.1 8.2 3.1 11.3 0l101.7-101.7c5-5 1.4-13.6-5.7-13.6h-80V320c0-8.8-7.2-16-16-16z"/>
+            </svg>
+            <span>Import ke H2H</span>
+        </div>
+        <div class="row-action-item" onclick="triggerRowAction('cetak')">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M854.6 288.6L639.4 73.4c-6-6-14.1-9.4-22.6-9.4H192c-17.7 0-32 14.3-32 32v832c0 17.7 14.3 32 32 32h640c17.7 0 32-14.3 32-32V311.3c0-8.5-3.4-16.7-9.4-22.7zM790.2 326H602V137.8L790.2 326zm1.8 562H232V136h302v216a42 42 0 0 0 42 42h216v494z"/>
+                <path d="M336 496h352v64H336zm0 144h352v64H336z"/>
+            </svg>
+            <span>Cetak Dokumen</span>
         </div>
     </div>
 
@@ -2819,7 +3031,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         function renderTable() {
             const tbody = document.getElementById('ajuTableBody');
             if (!filteredData || filteredData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
                 selectedAju.clear();
                 updateSelectedCount();
                 renderPagination(0, 1, pageSize);
@@ -2942,10 +3154,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             ${noRespon ? `<p style="cursor:pointer; text-decoration:underline; color:rgb(3, 157, 252); margin:0; font-size:10px;" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat Riwayat Tracking Status">${escapeHtml(noRespon)}</p>` : ''}
                         </td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <div style="display:inline-flex; align-items:center; gap:4px; justify-content:center;">
-                                ${pdfHtml}
-                                ${excelHtml}
-                            </div>
+                            ${pdfHtml}
                         </td>
                         <td style="font-size:10.5px; color:#595959;">${r.effective_tanggal_respon || r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '-'}</td>
                         <td style="text-align:center;">
@@ -2956,6 +3165,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
                         </td>
                         <td style="font-size:10.5px; color:#595959;">${escapeHtml(kantorName)}</td>
+                        <td style="text-align:center; white-space:nowrap;">
+                            <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">
+                                Aksi
+                            </button>
+                        </td>
                     </tr>
                 `;
             });
@@ -3229,6 +3443,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         });
 
+        document.getElementById('ctxItemImportH2H')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                executeImportToH2H(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
         document.getElementById('ctxItemSelectToggle')?.addEventListener('click', function(e) {
             e.stopPropagation();
             closeContextMenu();
@@ -3243,6 +3465,169 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
             }
         });
+
+        // =========================================================================
+        // DROPDOWN MENU AKSI (KOLOM PALING KANAN)
+        // =========================================================================
+        let activeActionAju = '';
+        let activeActionCmp = '';
+        let activeActionPdf = '';
+        let activeActionTriggerBtn = null;
+
+        function openRowActionMenu(event, nomorAju, cmpId, pdfFile) {
+            event.stopPropagation();
+
+            const menu = document.getElementById('rowActionMenu');
+            if (menu && menu.style.display === 'block' && activeActionAju === nomorAju) {
+                closeRowActionMenu();
+                return;
+            }
+
+            activeActionAju = nomorAju;
+            activeActionCmp = cmpId;
+            activeActionPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.remove('active');
+            }
+            activeActionTriggerBtn = event.currentTarget;
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.add('active');
+            }
+
+            if (!menu) return;
+
+            const rect = event.currentTarget.getBoundingClientRect();
+            const menuWidth = 155;
+            const menuHeight = 110;
+
+            let left = rect.right - menuWidth;
+            if (left < 10) left = rect.left;
+            if (left + menuWidth > window.innerWidth - 10) {
+                left = window.innerWidth - menuWidth - 10;
+            }
+
+            let top = rect.bottom + 4;
+            if (top + menuHeight > window.innerHeight - 10) {
+                top = Math.max(10, rect.top - menuHeight - 4);
+            }
+
+            menu.style.left = `${left}px`;
+            menu.style.top = `${top}px`;
+            menu.style.display = 'block';
+        }
+
+        function closeRowActionMenu() {
+            const menu = document.getElementById('rowActionMenu');
+            if (menu) menu.style.display = 'none';
+            if (activeActionTriggerBtn) {
+                activeActionTriggerBtn.classList.remove('active');
+                activeActionTriggerBtn = null;
+            }
+        }
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('#rowActionMenu') && !e.target.closest('.action-btn-ceisa')) {
+                closeRowActionMenu();
+            }
+        });
+        window.addEventListener('scroll', closeRowActionMenu, true);
+
+        async function triggerRowAction(type) {
+            const aju = activeActionAju;
+            const cmp = activeActionCmp;
+            const pdf = activeActionPdf;
+            closeRowActionMenu();
+
+            if (!aju) return;
+
+            if (type === 'excel') {
+                downloadSingleCeisaExcel(aju, cmp);
+            } else if (type === 'import_h2h') {
+                await executeImportToH2H(aju, cmp);
+            } else if (type === 'cetak') {
+                if (pdf) {
+                    const pdfUrl = `/pdf.php?aju=${encodeURIComponent(aju)}&pdf=${encodeURIComponent(pdf)}&cmp_id=${encodeURIComponent(cmp || '')}&view=1`;
+                    window.open(pdfUrl, '_blank');
+                } else {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'info',
+                            title: 'Dokumen Belum Tersedia',
+                            text: `Berkas PDF respon belum tersedia untuk pengajuan ${aju}.`,
+                            confirmButtonColor: '#1890ff'
+                        });
+                    } else {
+                        alert(`Berkas PDF respon belum tersedia untuk pengajuan ${aju}.`);
+                    }
+                }
+            }
+        }
+
+        async function executeImportToH2H(aju, cmp) {
+            const activeCmp = cmp || document.getElementById('filterCmp')?.value || '';
+
+            let confirmed = true;
+            if (typeof Swal !== 'undefined') {
+                const prompt = await Swal.fire({
+                    title: 'Import ke Data H2H?',
+                    html: `Dokumen <b>${escapeHtml(aju)}</b> beserta rincian kontainer, kemasan, dokumen lampiran, dan barang akan diimpor ke Data Host to Host.`,
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#1890ff',
+                    cancelButtonColor: '#8c8c8c',
+                    confirmButtonText: 'Ya, Import Sekarang',
+                    cancelButtonText: 'Batal'
+                });
+                confirmed = prompt.isConfirmed;
+            }
+            if (!confirmed) return;
+
+            if (typeof Swal !== 'undefined') {
+                Swal.fire({
+                    title: 'Mengimpor ke H2H...',
+                    html: `Sedang memproses dan mengimpor seluruh data dokumen <b>${escapeHtml(aju)}</b>...`,
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    didOpen: () => {
+                        Swal.showLoading();
+                    }
+                });
+            }
+
+            try {
+                const res = await fetch(`daftar_dokumen.php?action=import_to_h2h&nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(activeCmp)}`);
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    if (typeof Swal !== 'undefined') {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Berhasil Diimpor!',
+                            html: `Dokumen <b>${escapeHtml(aju)}</b> berhasil diimpor ke sistem Host to Host.<br><small style="color:#8c8c8c;">Silakan periksa dokumen ini di menu <b>Data Host to Host</b> atau <b>Form Editor</b>.</small>`,
+                            confirmButtonColor: '#52c41a',
+                            confirmButtonText: 'Selesai'
+                        });
+                    } else {
+                        alert(`Dokumen ${aju} berhasil diimpor ke Data Host to Host!`);
+                    }
+                } else {
+                    throw new Error(json.message || 'Gagal melakukan impor dokumen.');
+                }
+            } catch (err) {
+                console.error('Import H2H error:', err);
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Gagal Impor ke H2H',
+                        text: err.message || 'Terjadi kesalahan sistem saat mengimpor dokumen.',
+                        confirmButtonColor: '#ff4d4f'
+                    });
+                } else {
+                    alert('Gagal impor: ' + (err.message || 'Error'));
+                }
+            }
+        }
 
         // =========================================================================
         // ENGINE BATCH DOWNLOAD DENGAN PROTEKSI WAF & JEDA ACAK
