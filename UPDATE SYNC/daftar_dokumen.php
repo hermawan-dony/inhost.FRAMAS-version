@@ -1592,6 +1592,131 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        /* Badge Unduh Excel CEISA 4.0 */
+        .excel-btn-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            padding: 2px 7px;
+            background: #f6ffed;
+            border: 1px solid #b7eb8f;
+            border-radius: 4px;
+            text-decoration: none !important;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(82, 196, 26, 0.08);
+            line-height: 1.2;
+        }
+        .excel-btn-badge:hover {
+            background: #52c41a;
+            border-color: #52c41a;
+        }
+        .excel-btn-badge:hover span {
+            color: #ffffff !important;
+        }
+        .excel-btn-badge:hover svg {
+            fill: #ffffff !important;
+        }
+        body[data-theme="dark"] .excel-btn-badge {
+            background: rgba(82, 196, 26, 0.15);
+            border-color: rgba(82, 196, 26, 0.35);
+        }
+        body[data-theme="dark"] .excel-btn-badge span {
+            color: #95de64 !important;
+        }
+        body[data-theme="dark"] .excel-btn-badge:hover {
+            background: #52c41a;
+        }
+        body[data-theme="dark"] .excel-btn-badge:hover span {
+            color: #ffffff !important;
+        }
+
+        /* Mode Select & Checkbox Kolom */
+        .col-select-mode {
+            display: none !important;
+            width: 38px;
+            text-align: center;
+        }
+        body.mode-select-active .col-select-mode {
+            display: table-cell !important;
+        }
+        body.mode-select-active tr.selected-row > td {
+            background: #e6f7ff !important;
+        }
+        body[data-theme="dark"].mode-select-active tr.selected-row > td {
+            background: rgba(24, 144, 255, 0.18) !important;
+        }
+
+        /* Floating Batch Action Bar */
+        .batch-action-bar {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1050;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 8px;
+            padding: 8px 18px;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            animation: batchSlideUp 0.25s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+        }
+        @keyframes batchSlideUp {
+            from { transform: translate(-50%, 40px); opacity: 0; }
+            to { transform: translate(-50%, 0); opacity: 1; }
+        }
+        .batch-bar-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11.5px;
+            font-weight: 600;
+            color: var(--text-heading);
+            white-space: nowrap;
+        }
+        .batch-bar-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Context Menu */
+        .dd-context-menu {
+            position: fixed;
+            z-index: 9999;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+            padding: 4px 0;
+            min-width: 190px;
+            display: none;
+        }
+        .dd-context-item {
+            padding: 7px 14px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            color: var(--text-main);
+            transition: background 0.15s;
+        }
+        .dd-context-item:hover {
+            background: rgba(24, 144, 255, 0.12);
+            color: var(--primary);
+        }
+        .dd-context-divider {
+            height: 1px;
+            background: var(--border-card);
+            margin: 4px 0;
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -1645,6 +1770,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <button type="button" class="ant-btn" id="btnSyncCeisa" onclick="triggerManualSync()" title="Sinkronisasi status dan respon terbaru dari portal CEISA 4.0">
                     <span style="font-size:11px;">🔄</span>
                     <span>Sinkron CEISA</span>
+                </button>
+
+                <!-- Mode Select (Pilih Massal Dokumen & Unduh Excel) -->
+                <button type="button" class="ant-btn" id="btnModeSelect" onclick="toggleModeSelect()" title="Aktifkan Mode Centang / Pilih Massal Dokumen untuk Unduh Excel">
+                    <span id="iconModeSelect">☑️</span>
+                    <span id="lblModeSelect">Mode Select</span>
                 </button>
             </div>
         </div>
@@ -1773,12 +1904,15 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <thead class="ant-table-thead">
                             <!-- Header Row 1: Titles -->
                             <tr>
+                                <th style="width: 38px; text-align: center;" class="col-select-mode">
+                                    <input type="checkbox" id="masterSelectCb" onchange="toggleSelectAllPage(this)" title="Pilih Semua Dokumen di Halaman Ini" style="cursor:pointer;">
+                                </th>
                                 <th style="width: 55px;">Nomor</th>
                                 <th style="width: 110px;" class="th-sortable" data-sort-col="bc" onclick="sortTable('bc')" title="Klik untuk mengurutkan Kode Dokumen">Kode Dokumen <span class="th-sort-icon">⇅</span></th>
-                                <th style="width: 260px;" class="th-sortable" data-sort-col="nomor_aju" onclick="sortTable('nomor_aju')" title="Klik untuk mengurutkan Nomor Pengajuan">Nomor Pengajuan <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 250px;" class="th-sortable" data-sort-col="nomor_aju" onclick="sortTable('nomor_aju')" title="Klik untuk mengurutkan Nomor Pengajuan">Nomor Pengajuan <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 170px;" class="th-sortable" data-sort-col="nomor_daftar" onclick="sortTable('nomor_daftar')" title="Klik untuk mengurutkan Nomor / Tanggal Pendaftaran">Nomor / Tanggal Pendaftaran <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 170px;" class="th-sortable" data-sort-col="nama_respon" onclick="sortTable('nama_respon')" title="Klik untuk mengurutkan Nama Respon">Nama Respon <span class="th-sort-icon">⇅</span></th>
-                                <th style="width: 70px; text-align: center;">PDF</th>
+                                <th style="width: 115px; text-align: center;">Unduh</th>
                                 <th style="width: 155px;" class="th-sortable th-sorted" data-sort-col="tanggal_respon" onclick="sortTable('tanggal_respon')" title="Klik untuk mengurutkan Tanggal Respon (Default: Terakhir / Terbaru)">Tanggal Respon <span class="th-sort-icon">▼</span></th>
                                 <th style="width: 65px; text-align: center;" class="th-sortable" data-sort-col="jalur" onclick="sortTable('jalur')" title="Klik untuk mengurutkan Jalur">Jalur <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 250px;" class="th-sortable" data-sort-col="perusahaan" onclick="sortTable('perusahaan')" title="Klik untuk mengurutkan Nama Perusahaan">Nama Perusahaan <span class="th-sort-icon">⇅</span></th>
@@ -1786,6 +1920,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             </tr>
                             <!-- Header Row 2: Inline Input Filters -->
                             <tr>
+                                <th class="col-select-mode"></th>
                                 <th></th>
                                 <th>
                                     <span class="ant-input-affix-wrapper">
@@ -2093,6 +2228,99 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <div style="font-size:11px; color:#8c8c8c;">Menyiapkan matriks dokumen & data real-time...</div>
                 </div>
                 <iframe id="rekapViewerFrame" src="" style="width:100%; height:100%; border:none;"></iframe>
+            </div>
+        </div>
+    <!-- 1. FLOATING BATCH ACTION BAR -->
+    <div id="batchActionBar" class="batch-action-bar" style="display:none;">
+        <div class="batch-bar-info">
+            <span style="font-size:14px;">☑️</span>
+            <span>Terpilih: <strong id="batchSelectedCount" style="color:var(--primary); font-size:13px;">0</strong> dokumen</span>
+        </div>
+        <div class="batch-bar-actions">
+            <button type="button" class="ant-btn ant-btn-sm ant-btn-success" onclick="startBatchDownloadExcel()" id="btnBatchDownload" style="font-weight:600;">
+                📥 Unduh Excel Terpilih (<span id="batchBtnCount">0</span>)
+            </button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllOnCurrentPage()" title="Pilih semua dokumen di halaman ini">Pilih Halaman Ini</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="selectAllFilteredData()" title="Pilih seluruh dokumen hasil filter">Pilih Semua Filter</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="clearAllSelection()" title="Batalkan seluruh centang">Batal Pilih</button>
+            <button type="button" class="ant-btn ant-btn-sm" onclick="toggleModeSelect(false)" title="Tutup mode select">✕ Keluar Mode</button>
+        </div>
+    </div>
+
+    <!-- 2. CONTEXT MENU KLIK KANAN BARIS TABEL -->
+    <div id="ddContextMenu" class="dd-context-menu">
+        <div class="dd-context-item" id="ctxItemDownloadExcel">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#52c41a">
+                <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+            </svg>
+            <span style="font-weight:600; color:#389e0d;">Unduh Excel (CEISA 4.0)</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemViewPdf">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#ff4d4f">
+                <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+            </svg>
+            <span>Buka Dokumen PDF</span>
+        </div>
+        <div class="dd-context-item" id="ctxItemTracking">
+            <svg viewBox="64 64 896 896" width="13" height="13" fill="#1890ff">
+                <path d="M512 64C264.6 64 64 264.6 64 512s200.6 448 448 448 448-200.6 448-448S759.4 64 512 64zm0 820c-205.4 0-372-166.6-372-372s166.6-372 372-372 372 166.6 372 372-166.6 372-372 372z"></path>
+                <path d="M686.7 638.6L544.1 535.5V288c0-4.4-3.6-8-8-8h-48c-4.4 0-8 3.6-8 8v275.9c0 2.7 1.4 5.3 3.7 6.8l164.7 119.5a8 8 0 0 0 11.4-1.9l28.6-39.7a8 8 0 0 0-1.8-10z"></path>
+            </svg>
+            <span>Riwayat Status Tracking</span>
+        </div>
+        <div class="dd-context-divider"></div>
+        <div class="dd-context-item" id="ctxItemSelectToggle">
+            <span>☑️</span>
+            <span id="ctxTextSelect">Pilih Dokumen Ini</span>
+        </div>
+    </div>
+
+    <!-- 3. MODAL: BATCH DOWNLOAD EXCEL PROGRESS & ANTI-WAF ENGINE -->
+    <div class="modal-overlay" id="modalBatchProgress" style="display:none;">
+        <div class="modal" style="max-width:620px; width:95%; border-radius:8px; box-shadow:0 16px 40px rgba(0,0,0,0.25); overflow:hidden;">
+            <div class="modal-header" style="background:var(--bg-filter); border-bottom:1px solid var(--border-card); padding:12px 18px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:16px;">🛡️</span>
+                    <div>
+                        <h3 style="font-size:13px; font-weight:700; margin:0; color:var(--text-heading);">Unduh Excel Massal CEISA 4.0</h3>
+                        <div style="font-size:10px; color:#52c41a; font-weight:600; margin-top:2px;">Proteksi WAF Bea Cukai & Anti-Blokir IP Aktif</div>
+                    </div>
+                </div>
+                <button type="button" class="ant-btn ant-btn-sm" onclick="cancelBatchDownload()">✕</button>
+            </div>
+            <div class="modal-body" style="padding:16px 18px; display:flex; flex-direction:column; gap:12px; max-height:75vh; overflow-y:auto;">
+                <!-- Overall Progress -->
+                <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; font-size:11px;">
+                        <span id="batchModalStatusText" style="font-weight:600; color:var(--text-heading);">Menyiapkan pengunduhan...</span>
+                        <span id="batchModalPercent" style="font-weight:700; color:#52c41a; font-family:monospace;">0%</span>
+                    </div>
+                    <div style="height:8px; background:var(--border-card); border-radius:4px; overflow:hidden;">
+                        <div id="batchModalProgressBar" style="width:0%; height:100%; background:#52c41a; transition:width 0.3s ease;"></div>
+                    </div>
+                </div>
+
+                <!-- Live Safety Countdown Box (WAF Evasion Indicator) -->
+                <div id="batchModalSafetyBox" style="background:rgba(82,196,26,0.08); border:1px solid #b7eb8f; border-radius:6px; padding:8px 12px; font-size:10.5px; color:var(--text-main); display:flex; align-items:center; gap:8px;">
+                    <span class="spinner" id="batchSafetySpinner" style="border-top-color:#52c41a; width:12px; height:12px;"></span>
+                    <span id="batchModalSafetyTimer">Memulai proses pengunduhan berurutan...</span>
+                </div>
+
+                <!-- Log List of Processed Items -->
+                <div style="border:1px solid var(--border-card); border-radius:6px; background:var(--bg-input); max-height:180px; overflow-y:auto; padding:6px 10px; font-size:10.5px; font-family:monospace;" id="batchModalLogList">
+                    <!-- Dynamic log rows -->
+                </div>
+            </div>
+            <div class="modal-footer" style="padding:10px 18px; border-top:1px solid var(--border-card); background:var(--bg-filter); display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:11px; color:var(--text-muted);">
+                    Berhasil: <b id="batchCountSuccess" style="color:#52c41a;">0</b> | Gagal: <b id="batchCountFailed" style="color:#ff4d4f;">0</b>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnBatchPauseResume" onclick="togglePauseBatchDownload()">⏸️ Jeda</button>
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnBatchCancel" onclick="cancelBatchDownload()">✕ Batalkan</button>
+                    <button type="button" class="ant-btn ant-btn-sm ant-btn-success" id="btnBatchDownloadZip" onclick="triggerZipDownload()" style="display:none; font-weight:600;">📦 Unduh Arsip ZIP</button>
+                    <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" id="btnBatchClose" onclick="closeBatchModal()" style="display:none;">✓ Selesai</button>
+                </div>
             </div>
         </div>
     </div>
@@ -2591,7 +2819,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         function renderTable() {
             const tbody = document.getElementById('ajuTableBody');
             if (!filteredData || filteredData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
                 selectedAju.clear();
                 updateSelectedCount();
                 renderPagination(0, 1, pageSize);
@@ -2666,6 +2894,17 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     `;
                 }
 
+                // Excel Resmi CEISA 4.0
+                const excelUrl = `/download_ceisa_excel.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}&cmp_id=${encodeURIComponent(r.cmp_id || '')}`;
+                const excelHtml = `
+                    <a href="${excelUrl}" target="_blank" class="excel-btn-badge" title="Unduh Berkas Excel (.xlsx) Resmi dari Portal CEISA 4.0 (${escapeHtml(r.nomor_aju)})">
+                        <svg viewBox="64 64 896 896" width="12" height="12" fill="#52c41a" style="vertical-align:-1px;">
+                            <path d="M532 224h260c4.4 0 8 3.6 8 8v632c0 4.4-3.6 8-8 8H232c-4.4 0-8-3.6-8-8V160c0-4.4 3.6-8 8-8h300v72zm-72 328h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm-144 0h-32c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c22.1 0 40-17.9 40-40v-96c0-22.1-17.9-40-40-40zm320 0h-88c-4.4 0-8 3.6-8 8v160c0 4.4 3.6 8 8 8h32c4.4 0 8-3.6 8-8v-48h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8h-48v-32h48c4.4 0 8-3.6 8-8v-32c0-4.4-3.6-8-8-8z"></path>
+                        </svg>
+                        <span style="font-size:9.5px; font-weight:600; color:#389e0d; margin-left:2px;">XLSX</span>
+                    </a>
+                `;
+
                 // Cek status IT Inventory jika IS_INV = 1
                 const isInv = parseInt(r.is_inv !== undefined ? r.is_inv : 1, 10);
                 const inItInv = parseInt(r.in_it_inv || 0, 10) > 0;
@@ -2681,7 +2920,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
 
                 html += `
-                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}">
+                    <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}')">
+                        <td style="text-align:center;" class="col-select-mode">
+                            <input type="checkbox" class="row-select-cb" data-aju="${r.nomor_aju}" ${isSelected ? 'checked' : ''} onchange="toggleSelectRow('${r.nomor_aju}', this.checked)" style="cursor:pointer;">
+                        </td>
                         <td style="color:#8c8c8c; font-family:monospace;">${itemNum}</td>
                         <td style="font-weight:500;">BC ${r.bc}</td>
                         <td>
@@ -2699,8 +2941,11 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             <div>${escapeHtml(namaRespon)}${responBadgeExtra}</div>
                             ${noRespon ? `<p style="cursor:pointer; text-decoration:underline; color:rgb(3, 157, 252); margin:0; font-size:10px;" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Lihat Riwayat Tracking Status">${escapeHtml(noRespon)}</p>` : ''}
                         </td>
-                        <td style="text-align:center;">
-                            ${pdfHtml}
+                        <td style="text-align:center; white-space:nowrap;">
+                            <div style="display:inline-flex; align-items:center; gap:4px; justify-content:center;">
+                                ${pdfHtml}
+                                ${excelHtml}
+                            </div>
                         </td>
                         <td style="font-size:10.5px; color:#595959;">${r.effective_tanggal_respon || r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '-'}</td>
                         <td style="text-align:center;">
@@ -2716,6 +2961,14 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             });
 
             tbody.innerHTML = html;
+
+            // Sinkronkan master checkbox halaman ini
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) {
+                const allPageSelected = pageItems.length > 0 && pageItems.every(item => selectedAju.has(item.nomor_aju));
+                masterCb.checked = allPageSelected;
+            }
+
             updateSelectedCount();
             renderPagination(total, currentPage, pageSize);
         }
@@ -2789,7 +3042,55 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }
         }
 
-        function toggleSelect(nomorAju, isChecked) {
+        // =========================================================================
+        // MODE SELECT & BATCH DOWNLOAD EXCEL RESMI CEISA 4.0
+        // =========================================================================
+        let isModeSelectActive = false;
+        let batchDownloadCancelled = false;
+        let batchDownloadPaused = false;
+        let activeContextMenuAju = null;
+        let activeContextMenuCmp = null;
+        let activeContextMenuPdf = null;
+        let batchSuccessfulAjus = [];
+
+        function toggleModeSelect(forceState) {
+            if (forceState !== undefined) {
+                isModeSelectActive = !!forceState;
+            } else {
+                isModeSelectActive = !isModeSelectActive;
+            }
+
+            const btn = document.getElementById('btnModeSelect');
+            const lbl = document.getElementById('lblModeSelect');
+            const ico = document.getElementById('iconModeSelect');
+            const bar = document.getElementById('batchActionBar');
+
+            if (isModeSelectActive) {
+                document.body.classList.add('mode-select-active');
+                if (btn) {
+                    btn.classList.add('ant-btn-primary');
+                    btn.style.background = '#1890ff';
+                    btn.style.borderColor = '#1890ff';
+                }
+                if (lbl) lbl.textContent = '✕ Tutup Mode Select';
+                if (ico) ico.textContent = '☑️';
+                if (bar) bar.style.display = 'flex';
+            } else {
+                document.body.classList.remove('mode-select-active');
+                if (btn) {
+                    btn.classList.remove('ant-btn-primary');
+                    btn.style.background = '';
+                    btn.style.borderColor = '';
+                }
+                if (lbl) lbl.textContent = 'Mode Select';
+                if (ico) ico.textContent = '☑️';
+                if (bar) bar.style.display = 'none';
+            }
+
+            updateSelectedCount();
+        }
+
+        function toggleSelectRow(nomorAju, isChecked) {
             if (isChecked) {
                 selectedAju.add(nomorAju);
                 document.getElementById(`row-${nomorAju}`)?.classList.add('selected-row');
@@ -2800,9 +3101,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             updateSelectedCount();
         }
 
-        function toggleSelectAll(masterCheckbox) {
+        function toggleSelectAllPage(masterCheckbox) {
             const isChecked = masterCheckbox.checked;
-            filteredData.forEach(r => {
+            const startIdx = (currentPage - 1) * pageSize;
+            const endIdx = Math.min(startIdx + pageSize, filteredData.length);
+            const pageItems = filteredData.slice(startIdx, endIdx);
+
+            pageItems.forEach(r => {
                 if (isChecked) {
                     selectedAju.add(r.nomor_aju);
                 } else {
@@ -2811,17 +3116,345 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const row = document.getElementById(`row-${r.nomor_aju}`);
                 if (row) {
                     row.classList.toggle('selected-row', isChecked);
-                    const cb = row.querySelector('input[type="checkbox"]');
+                    const cb = row.querySelector('.row-select-cb');
                     if (cb) cb.checked = isChecked;
                 }
             });
             updateSelectedCount();
         }
 
+        function selectAllOnCurrentPage() {
+            toggleModeSelect(true);
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) masterCb.checked = true;
+            toggleSelectAllPage({ checked: true });
+        }
+
+        function selectAllFilteredData() {
+            toggleModeSelect(true);
+            filteredData.forEach(r => {
+                selectedAju.add(r.nomor_aju);
+            });
+            renderTable();
+            updateSelectedCount();
+        }
+
+        function clearAllSelection() {
+            selectedAju.clear();
+            const masterCb = document.getElementById('masterSelectCb');
+            if (masterCb) masterCb.checked = false;
+            document.querySelectorAll('.row-select-cb').forEach(cb => cb.checked = false);
+            document.querySelectorAll('.ant-table-row').forEach(tr => tr.classList.remove('selected-row'));
+            updateSelectedCount();
+        }
+
         function updateSelectedCount() {
             const count = (typeof selectedAju !== 'undefined' && selectedAju) ? selectedAju.size : 0;
-            const el = document.getElementById('selectedCount');
-            if (el) el.innerText = count;
+            const elSelected = document.getElementById('batchSelectedCount');
+            const elBtn = document.getElementById('batchBtnCount');
+            if (elSelected) elSelected.innerText = count;
+            if (elBtn) elBtn.innerText = count;
+
+            const bar = document.getElementById('batchActionBar');
+            if (bar && isModeSelectActive) {
+                bar.style.display = 'flex';
+            }
+        }
+
+        function downloadSingleCeisaExcel(nomorAju, cmpId) {
+            if (!nomorAju) return;
+            const activeCmp = cmpId || document.getElementById('filterCmp')?.value || '';
+            const url = `download_ceisa_excel.php?nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmp)}`;
+            window.open(url, '_blank');
+        }
+
+        // Context Menu Handler
+        function openRowContextMenu(e, nomorAju, cmpId, pdfFile) {
+            e.preventDefault();
+            activeContextMenuAju = nomorAju;
+            activeContextMenuCmp = cmpId;
+            activeContextMenuPdf = pdfFile ? decodeURIComponent(pdfFile) : '';
+
+            const menu = document.getElementById('ddContextMenu');
+            if (!menu) return;
+
+            const isSel = selectedAju.has(nomorAju);
+            const txtSel = document.getElementById('ctxTextSelect');
+            if (txtSel) txtSel.textContent = isSel ? 'Batal Pilih Dokumen Ini' : 'Pilih / Centang Dokumen Ini';
+
+            const itemPdf = document.getElementById('ctxItemViewPdf');
+            if (itemPdf) {
+                itemPdf.style.display = activeContextMenuPdf ? 'flex' : 'none';
+            }
+
+            // Atur posisi menu agar tidak keluar layar
+            const x = Math.min(e.clientX, window.innerWidth - 210);
+            const y = Math.min(e.clientY, window.innerHeight - 180);
+
+            menu.style.left = `${x}px`;
+            menu.style.top = `${y}px`;
+            menu.style.display = 'block';
+        }
+
+        function closeContextMenu() {
+            const menu = document.getElementById('ddContextMenu');
+            if (menu) menu.style.display = 'none';
+        }
+
+        document.addEventListener('click', closeContextMenu);
+        window.addEventListener('scroll', closeContextMenu, true);
+
+        document.getElementById('ctxItemDownloadExcel')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                downloadSingleCeisaExcel(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemViewPdf')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju && activeContextMenuPdf) {
+                const pdfUrl = `/pdf.php?aju=${encodeURIComponent(activeContextMenuAju)}&pdf=${encodeURIComponent(activeContextMenuPdf)}&cmp_id=${encodeURIComponent(activeContextMenuCmp || '')}&view=1`;
+                window.open(pdfUrl, '_blank');
+            }
+        });
+
+        document.getElementById('ctxItemTracking')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                openTrackingHistory(activeContextMenuAju, activeContextMenuCmp);
+            }
+        });
+
+        document.getElementById('ctxItemSelectToggle')?.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeContextMenu();
+            if (activeContextMenuAju) {
+                toggleModeSelect(true);
+                const isChecked = !selectedAju.has(activeContextMenuAju);
+                toggleSelectRow(activeContextMenuAju, isChecked);
+                const row = document.getElementById(`row-${activeContextMenuAju}`);
+                if (row) {
+                    const cb = row.querySelector('.row-select-cb');
+                    if (cb) cb.checked = isChecked;
+                }
+            }
+        });
+
+        // =========================================================================
+        // ENGINE BATCH DOWNLOAD DENGAN PROTEKSI WAF & JEDA ACAK
+        // =========================================================================
+        async function startBatchDownloadExcel() {
+            if (!selectedAju || selectedAju.size === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Pilih Dokumen',
+                    text: 'Silakan pilih / centang minimal 1 dokumen untuk diunduh.',
+                    confirmButtonColor: '#1890ff'
+                });
+                return;
+            }
+
+            const ajus = Array.from(selectedAju);
+            const total = ajus.length;
+
+            const confirmRes = await Swal.fire({
+                icon: 'question',
+                title: '<span style="font-size:15px; font-weight:700;">Unduh Excel Massal CEISA 4.0</span>',
+                html: `
+                    <div style="text-align:left; font-size:11.5px; line-height:1.5;">
+                        <p>Anda akan mengunduh <b>${total} berkas Excel resmi</b> langsung dari server portal CEISA 4.0.</p>
+                        <div style="background:rgba(82,196,26,0.1); border-left:3px solid #52c41a; padding:8px 12px; border-radius:4px; margin:10px 0; font-size:11px;">
+                            🛡️ <b>Proteksi Keamanan WAF Bea Cukai Aktif:</b><br>
+                            Sistem akan mengunduh secara berurutan (*sequential*) dengan <b>jeda acak (2.5 – 5.0 detik)</b> antar dokumen untuk menjaga kredibilitas sesi browser dan menghindarkan alamat IP dari deteksi bot atau pemblokiran firewall Bea Cukai.
+                        </div>
+                        <p style="margin:0;">Mulai proses pengunduhan aman sekarang?</p>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: '🚀 Mulai Unduh Aman',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#52c41a',
+                cancelButtonColor: '#8c8c8c',
+                reverseButtons: true
+            });
+
+            if (!confirmRes.isConfirmed) return;
+
+            batchDownloadCancelled = false;
+            batchDownloadPaused = false;
+            batchSuccessfulAjus = [];
+
+            // Buka Modal Progress Batch
+            const modal = document.getElementById('modalBatchProgress');
+            if (modal) modal.style.display = 'flex';
+
+            document.getElementById('batchModalProgressBar').style.width = '0%';
+            document.getElementById('batchModalPercent').innerText = '0%';
+            document.getElementById('batchCountSuccess').innerText = '0';
+            document.getElementById('batchCountFailed').innerText = '0';
+            document.getElementById('batchModalLogList').innerHTML = '';
+            document.getElementById('btnBatchPauseResume').style.display = 'inline-block';
+            document.getElementById('btnBatchPauseResume').innerHTML = '⏸️ Jeda';
+            document.getElementById('btnBatchCancel').style.display = 'inline-block';
+            document.getElementById('btnBatchDownloadZip').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'none';
+            document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+
+            let successCount = 0;
+            let failedCount = 0;
+            const failedAjus = [];
+
+            for (let i = 0; i < ajus.length; i++) {
+                if (batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerHTML = '<span style="color:#cf1322;">⚠️ Proses dibatalkan oleh pengguna.</span>';
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Proses dihentikan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    break;
+                }
+
+                while (batchDownloadPaused && !batchDownloadCancelled) {
+                    document.getElementById('batchModalStatusText').innerText = `⏸️ Pengunduhan dijeda (${i}/${total})...`;
+                    document.getElementById('batchModalSafetyTimer').innerText = 'Klik "▶️ Lanjutkan" untuk melanjutkan.';
+                    document.getElementById('batchSafetySpinner').style.display = 'none';
+                    await new Promise(r => setTimeout(r, 400));
+                }
+
+                const aju = ajus[i];
+                const num = i + 1;
+                const pct = Math.round(((num - 1) / total) * 100);
+
+                document.getElementById('batchModalProgressBar').style.width = `${pct}%`;
+                document.getElementById('batchModalPercent').innerText = `${pct}%`;
+                document.getElementById('batchModalStatusText').innerHTML = `[${num}/${total}] Mengunduh: <b style="color:var(--primary); font-family:monospace;">${aju}</b>...`;
+                document.getElementById('batchSafetySpinner').style.display = 'inline-block';
+                document.getElementById('batchModalSafetyTimer').innerText = `Menghubungi API excel-service CEISA 4.0...`;
+
+                try {
+                    const cmpId = document.getElementById('filterCmp')?.value || '';
+                    const res = await fetch(`download_ceisa_excel.php?nomor_aju=${encodeURIComponent(aju)}&cmp_id=${encodeURIComponent(cmpId)}&format=json`);
+                    const json = await res.json();
+
+                    if (json.status === 'OK') {
+                        successCount++;
+                        batchSuccessfulAjus.push(aju);
+                        document.getElementById('batchCountSuccess').innerText = successCount;
+                        appendBatchLog(num, aju, true, json.cached ? 'Tersedia di Cache (0ms)' : `${(json.size/1024).toFixed(1)} KB`);
+                    } else {
+                        failedCount++;
+                        failedAjus.push({ aju, message: json.message || 'Gagal' });
+                        document.getElementById('batchCountFailed').innerText = failedCount;
+                        appendBatchLog(num, aju, false, json.message || 'Gagal');
+                    }
+                } catch (err) {
+                    failedCount++;
+                    failedAjus.push({ aju, message: err.message });
+                    document.getElementById('batchCountFailed').innerText = failedCount;
+                    appendBatchLog(num, aju, false, err.message);
+                }
+
+                const currentPct = Math.round((num / total) * 100);
+                document.getElementById('batchModalProgressBar').style.width = `${currentPct}%`;
+                document.getElementById('batchModalPercent').innerText = `${currentPct}%`;
+
+                // Jika bukan item terakhir dan belum dibatalkan, lakukan jeda acak WAF Evasion
+                if (i < ajus.length - 1 && !batchDownloadCancelled) {
+                    const delayMs = Math.floor(2500 + Math.random() * 2500); // 2.5s - 5.0s
+                    await countdownWafSafety(delayMs);
+                }
+            }
+
+            // Selesai loop
+            document.getElementById('batchSafetySpinner').style.display = 'none';
+            document.getElementById('btnBatchPauseResume').style.display = 'none';
+            document.getElementById('btnBatchCancel').style.display = 'none';
+            document.getElementById('btnBatchClose').style.display = 'inline-block';
+
+            if (!batchDownloadCancelled) {
+                document.getElementById('batchModalProgressBar').style.width = '100%';
+                document.getElementById('batchModalPercent').innerText = '100%';
+                document.getElementById('batchModalStatusText').innerHTML = `<span style="color:#52c41a; font-weight:700;">✓ Pengunduhan selesai! (${successCount} sukses, ${failedCount} gagal)</span>`;
+                document.getElementById('batchModalSafetyTimer').innerText = `Semua berkas selesai diproses dengan aman tanpa kendala firewall.`;
+
+                if (batchSuccessfulAjus.length > 1) {
+                    const btnZip = document.getElementById('btnBatchDownloadZip');
+                    if (btnZip) {
+                        btnZip.style.display = 'inline-block';
+                        btnZip.innerHTML = `📦 Unduh Arsip ZIP (${batchSuccessfulAjus.length})`;
+                    }
+                    // Otomatis download bundle ZIP
+                    triggerZipDownload();
+                } else if (batchSuccessfulAjus.length === 1) {
+                    downloadSingleCeisaExcel(batchSuccessfulAjus[0]);
+                }
+            }
+        }
+
+        async function countdownWafSafety(delayMs) {
+            const startTime = Date.now();
+            const endTime = startTime + delayMs;
+            const timerEl = document.getElementById('batchModalSafetyTimer');
+
+            while (Date.now() < endTime && !batchDownloadCancelled) {
+                if (batchDownloadPaused) {
+                    await new Promise(r => setTimeout(r, 200));
+                    continue;
+                }
+                const remaining = Math.max(0, ((endTime - Date.now()) / 1000).toFixed(1));
+                if (timerEl) {
+                    timerEl.innerHTML = `🛡️ <b>Proteksi WAF Bea Cukai:</b> Menunggu jeda acak <b>${remaining} detik</b> untuk dokumen berikutnya...`;
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+
+        function appendBatchLog(num, aju, isSuccess, info) {
+            const logList = document.getElementById('batchModalLogList');
+            if (!logList) return;
+            const icon = isSuccess ? '✓' : '✕';
+            const color = isSuccess ? '#52c41a' : '#ff4d4f';
+            const item = document.createElement('div');
+            item.style.padding = '3px 0';
+            item.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+            item.style.display = 'flex';
+            item.style.justifyContent = 'space-between';
+            item.innerHTML = `
+                <span><span style="color:${color}; font-weight:bold;">${icon}</span> [${num}] <b>${escapeHtml(aju)}</b></span>
+                <span style="color:var(--text-muted); font-size:9.5px;">${escapeHtml(info)}</span>
+            `;
+            logList.appendChild(item);
+            logList.scrollTop = logList.scrollHeight;
+        }
+
+        function togglePauseBatchDownload() {
+            batchDownloadPaused = !batchDownloadPaused;
+            const btn = document.getElementById('btnBatchPauseResume');
+            if (btn) {
+                btn.innerHTML = batchDownloadPaused ? '▶️ Lanjutkan' : '⏸️ Jeda';
+            }
+        }
+
+        function cancelBatchDownload() {
+            if (batchDownloadCancelled) {
+                closeBatchModal();
+                return;
+            }
+            batchDownloadCancelled = true;
+            batchDownloadPaused = false;
+        }
+
+        function closeBatchModal() {
+            const modal = document.getElementById('modalBatchProgress');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function triggerZipDownload() {
+            if (!batchSuccessfulAjus || batchSuccessfulAjus.length === 0) return;
+            const url = `download_ceisa_excel.php?action=bundle_zip&nomor_ajus=${encodeURIComponent(batchSuccessfulAjus.join(','))}`;
+            window.location.href = url;
         }
 
         // =========================================================================
