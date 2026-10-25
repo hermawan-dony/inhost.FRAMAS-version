@@ -538,9 +538,9 @@ $curCfg = $typeTitles[$targetType];
         * { box-sizing: border-box; }
         body {
             margin: 0;
-            padding: 16px 20px;
+            padding: 10px 14px;
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            font-size: 12px;
+            font-size: 11px;
             color: var(--text-main);
             background-color: var(--bg-page);
         }
@@ -548,10 +548,10 @@ $curCfg = $typeTitles[$targetType];
         .header-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 14px 18px;
-            margin-bottom: 14px;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+            border-radius: 5px;
+            padding: 8px 14px;
+            margin-bottom: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
         }
 
         .header-top {
@@ -559,32 +559,32 @@ $curCfg = $typeTitles[$targetType];
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
-            gap: 12px;
-            margin-bottom: 12px;
+            gap: 8px;
+            margin-bottom: 6px;
         }
 
         .header-title-box {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
 
         .header-title {
-            font-size: 16px;
+            font-size: 13px;
             font-weight: 700;
             color: var(--text-main);
             margin: 0;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         .badge-target {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 600;
-            padding: 3px 8px;
-            border-radius: 12px;
-            letter-spacing: 0.3px;
+            padding: 2px 7px;
+            border-radius: 10px;
+            letter-spacing: 0.2px;
         }
         .badge-customer { background: rgba(24, 144, 255, 0.12); color: #1890ff; border: 1px solid rgba(24, 144, 255, 0.3); }
         .badge-framas   { background: rgba(82, 196, 26, 0.12); color: #52c41a; border: 1px solid rgba(82, 196, 26, 0.3); }
@@ -594,23 +594,23 @@ $curCfg = $typeTitles[$targetType];
             display: inline-flex;
             background: var(--header-bg);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 3px;
-            gap: 3px;
+            border-radius: 5px;
+            padding: 2px;
+            gap: 2px;
         }
 
         .type-pill {
-            padding: 5px 12px;
-            border-radius: 4px;
-            font-size: 11.5px;
+            padding: 3px 9px;
+            border-radius: 3px;
+            font-size: 10.5px;
             font-weight: 600;
             color: var(--text-muted);
             text-decoration: none;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.15s ease;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
 
         .type-pill:hover {
@@ -621,15 +621,15 @@ $curCfg = $typeTitles[$targetType];
         .type-pill.active {
             color: #ffffff;
             background: var(--primary);
-            box-shadow: 0 1px 3px rgba(24, 144, 255, 0.35);
+            box-shadow: 0 1px 2px rgba(24, 144, 255, 0.3);
         }
 
         .header-desc {
-            font-size: 11.5px;
+            font-size: 10.5px;
             color: var(--text-muted);
-            line-height: 1.5;
+            line-height: 1.4;
             margin: 0;
-            padding-top: 6px;
+            padding-top: 5px;
             border-top: 1px solid var(--border-color);
         }
 
@@ -637,54 +637,55 @@ $curCfg = $typeTitles[$targetType];
         .filter-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 12px 16px;
-            margin-bottom: 14px;
+            border-radius: 5px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             flex-wrap: wrap;
-            gap: 10px;
+            gap: 8px;
         }
 
         .filter-left {
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 6px;
             flex-wrap: wrap;
+            font-size: 10.5px;
         }
 
         .filter-input {
-            padding: 6px 10px;
+            padding: 3px 7px;
             border: 1px solid var(--border-dark);
             border-radius: 4px;
-            font-size: 11.5px;
+            font-size: 10.5px;
             background: var(--bg-card);
             color: var(--text-main);
             outline: none;
-            height: 30px;
+            height: 26px;
         }
 
         .filter-input:focus {
             border-color: var(--primary);
-            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.15);
         }
 
         .ant-btn {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
-            padding: 5px 12px;
+            gap: 4px;
+            padding: 2px 9px;
             border-radius: 4px;
-            font-size: 11.5px;
+            font-size: 10.5px;
             font-weight: 500;
             border: 1px solid var(--border-dark);
             background: var(--bg-card);
             color: var(--text-main);
             cursor: pointer;
-            height: 30px;
-            transition: all 0.2s ease;
+            height: 26px;
+            transition: all 0.15s ease;
         }
 
         .ant-btn:hover {
@@ -718,9 +719,9 @@ $curCfg = $typeTitles[$targetType];
         .table-card {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
-            border-radius: 6px;
+            border-radius: 5px;
             overflow: hidden;
-            box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.03);
         }
 
         .table-responsive {
@@ -731,7 +732,7 @@ $curCfg = $typeTitles[$targetType];
         table.winline-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 11.5px;
+            font-size: 10.5px;
             text-align: left;
         }
 
@@ -739,16 +740,18 @@ $curCfg = $typeTitles[$targetType];
             background: var(--header-bg);
             color: var(--text-main);
             font-weight: 600;
-            padding: 9px 12px;
+            padding: 6px 9px;
             border-bottom: 1px solid var(--border-color);
             white-space: nowrap;
+            font-size: 10.5px;
         }
 
         table.winline-table td {
-            padding: 9px 12px;
+            padding: 6px 9px;
             border-bottom: 1px solid var(--border-color);
             color: var(--text-main);
             vertical-align: middle;
+            font-size: 10.5px;
         }
 
         table.winline-table tbody tr:hover {
@@ -758,9 +761,9 @@ $curCfg = $typeTitles[$targetType];
         .badge-bc {
             font-family: monospace;
             font-weight: 700;
-            padding: 2px 6px;
+            padding: 1px 5px;
             border-radius: 3px;
-            font-size: 10.5px;
+            font-size: 9.5px;
         }
         .bc-27 { background: rgba(47, 84, 235, 0.12); color: #2f54eb; border: 1px solid rgba(47, 84, 235, 0.25); }
         .bc-30 { background: rgba(250, 140, 22, 0.12); color: #fa8c16; border: 1px solid rgba(250, 140, 22, 0.25); }
@@ -769,21 +772,21 @@ $curCfg = $typeTitles[$targetType];
         .bc-16 { background: rgba(82, 196, 26, 0.12);  color: #52c41a; border: 1px solid rgba(82, 196, 26, 0.25); }
 
         .tag-status {
-            font-size: 10px;
-            padding: 2px 8px;
+            font-size: 9px;
+            padding: 1px 6px;
             border-radius: 10px;
             font-weight: 600;
             display: inline-flex;
             align-items: center;
-            gap: 4px;
+            gap: 3px;
         }
         .tag-ready { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; }
         .tag-integrated { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
 
         .spinner {
             display: inline-block;
-            width: 14px;
-            height: 14px;
+            width: 12px;
+            height: 12px;
             border: 2px solid rgba(24, 144, 255, 0.2);
             border-top-color: var(--primary);
             border-radius: 50%;
@@ -805,19 +808,20 @@ $curCfg = $typeTitles[$targetType];
 
         .modal-box {
             background: var(--bg-card);
-            border-radius: 8px;
+            border-radius: 6px;
             width: 90%;
-            max-width: 850px;
+            max-width: 820px;
             max-height: 85vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
             border: 1px solid var(--border-color);
+            font-size: 11px;
         }
 
         .modal-header {
-            padding: 12px 18px;
+            padding: 8px 14px;
             background: var(--header-bg);
             border-bottom: 1px solid var(--border-color);
             display: flex;
@@ -826,18 +830,18 @@ $curCfg = $typeTitles[$targetType];
         }
 
         .modal-body {
-            padding: 16px;
+            padding: 10px;
             overflow-y: auto;
             flex: 1;
         }
 
         .modal-footer {
-            padding: 12px 18px;
+            padding: 8px 14px;
             background: var(--header-bg);
             border-top: 1px solid var(--border-color);
             display: flex;
             justify-content: flex-end;
-            gap: 8px;
+            gap: 6px;
         }
     </style>
 </head>
@@ -1029,36 +1033,36 @@ $curCfg = $typeTitles[$targetType];
 
                 const actionBtns = isIntegrated
                     ? `
-                        <button type="button" class="ant-btn ant-btn-sm" style="font-size:10.5px; height:24px; padding:0 6px;" onclick="openDetail('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Lihat Rincian Item Barang">👁️ Detail</button>
-                        <a href="editor.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}" target="_blank" class="ant-btn ant-btn-sm ant-btn-primary" style="font-size:10.5px; height:24px; padding:0 6px;" title="Buka Form Editor Dokumen">✏️ Editor</a>
+                        <button type="button" class="ant-btn ant-btn-sm" style="font-size:9.5px; height:21px; padding:0 5px;" onclick="openDetail('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Lihat Rincian Item Barang">👁️ Detail</button>
+                        <a href="editor.php?nomor_aju=${encodeURIComponent(r.nomor_aju)}" target="_blank" class="ant-btn ant-btn-sm ant-btn-primary" style="font-size:9.5px; height:21px; padding:0 5px;" title="Buka Form Editor Dokumen">✏️ Editor</a>
                       `
                     : `
-                        <button type="button" class="ant-btn ant-btn-sm" style="font-size:10.5px; height:24px; padding:0 6px;" onclick="openDetail('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Lihat Rincian Item Barang">👁️ Detail</button>
-                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="font-size:10.5px; height:24px; padding:0 6px;" onclick="integrateSingle('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Buat Draft Dokumen Pabean H2H">⚡ H2H</button>
+                        <button type="button" class="ant-btn ant-btn-sm" style="font-size:9.5px; height:21px; padding:0 5px;" onclick="openDetail('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Lihat Rincian Item Barang">👁️ Detail</button>
+                        <button type="button" class="ant-btn ant-btn-sm ant-btn-primary" style="font-size:9.5px; height:21px; padding:0 5px;" onclick="integrateSingle('${escapeHtml(r.doc_no)}', '${r.target_bc}')" title="Buat Draft Dokumen Pabean H2H">⚡ H2H</button>
                       `;
 
                 html += `
                     <tr>
                         <td style="text-align: center;"><input type="checkbox" class="row-check" value="${escapeHtml(r.doc_no)}" data-bc="${r.target_bc}"></td>
-                        <td style="font-family: monospace; font-weight: 700; color: var(--primary);">${escapeHtml(r.doc_no)}</td>
-                        <td>${escapeHtml(r.doc_date)}</td>
+                        <td style="font-family: monospace; font-weight: 700; color: var(--primary); font-size: 10.5px;">${escapeHtml(r.doc_no)}</td>
+                        <td style="white-space: nowrap; font-size: 10px;">${escapeHtml(r.doc_date)}</td>
                         <td>
-                            <div style="font-weight: 600;">${escapeHtml(r.partner_name)}</div>
-                            <div style="font-size: 10px; color: var(--text-muted);">${escapeHtml(r.partner_addr || '')}</div>
+                            <div style="font-weight: 600; font-size: 10.5px;">${escapeHtml(r.partner_name)}</div>
+                            <div style="font-size: 9.5px; color: var(--text-muted);">${escapeHtml(r.partner_addr || '')}</div>
                         </td>
                         <td><span class="badge-bc ${bcClass}">BC ${escapeHtml(r.target_bc)}</span></td>
-                        <td style="text-align: right; font-weight: 600;">${Number(r.total_qty || 0).toLocaleString('id-ID')} <span style="font-size:10px; color:var(--text-muted);">${escapeHtml(r.unit || '')}</span></td>
-                        <td style="text-align: right;">${Number(r.total_kemas || 0).toLocaleString('id-ID')} ${escapeHtml(r.kemas_sat || 'CT')}</td>
-                        <td style="text-align: right; font-size: 11px;">
+                        <td style="text-align: right; font-weight: 600; font-size: 10.5px;">${Number(r.total_qty || 0).toLocaleString('id-ID')} <span style="font-size:9px; color:var(--text-muted);">${escapeHtml(r.unit || '')}</span></td>
+                        <td style="text-align: right; font-size: 10px;">${Number(r.total_kemas || 0).toLocaleString('id-ID')} ${escapeHtml(r.kemas_sat || 'CT')}</td>
+                        <td style="text-align: right; font-size: 10px;">
                             <div>N: <b>${Number(r.netto || 0).toLocaleString('id-ID')}</b> kg</div>
                             <div style="color:var(--text-muted);">B: ${Number(r.bruto || 0).toLocaleString('id-ID')} kg</div>
                         </td>
-                        <td style="text-align: right; font-weight: 700; color: #389e0d;">
+                        <td style="text-align: right; font-weight: 700; color: #389e0d; font-size: 10.5px;">
                             ${escapeHtml(r.valuta)} ${Number(r.total_fob || 0).toLocaleString('id-ID', { minimumFractionDigits: 2 })}
                         </td>
                         <td style="text-align: center;">${statusBadge}</td>
                         <td style="text-align: center;">
-                            <div style="display:flex; justify-content:center; gap:4px;">${actionBtns}</div>
+                            <div style="display:flex; justify-content:center; gap:3px;">${actionBtns}</div>
                         </td>
                     </tr>
                 `;
