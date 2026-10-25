@@ -192,19 +192,19 @@ if ($action === 'get_config_aju') {
     // Prioritaskan pencarian exact match bcClean, fallback ke bc2
     $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
     if ($qSet && $rSet = $qSet->fetch_assoc()) {
-        $a = $rSet['a'];
-        $b = $rSet['b'];
-        $aju = intval($rSet['aju']);
-        $nama_ttd = $rSet['nama_ttd'] ?? '';
-        $jabatan_ttd = $rSet['jabatan_ttd'] ?? '';
-        $kota_ttd = $rSet['kota_ttd'] ?? '';
-        $kode_kantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a);
-        $kode_jenis_tpb = $rSet['kode_jenis_tpb'] ?? '';
-        $kode_tujuan_pengiriman = $rSet['kode_tujuan_pengiriman'] ?? '';
-        $kode_tujuan_pemasukan = $rSet['kode_tujuan_pemasukan'] ?? ($bcClean === '40' ? '1' : '');
-        $kode_tujuan_pengeluaran = $rSet['kode_tujuan_pengeluaran'] ?? '';
-        $kode_valuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : 'USD';
-        $header_defaults = $rSet['header_defaults'] ?? '';
+        $a = $rSet['a'] ?? ($rSet['A'] ?? '');
+        $b = $rSet['b'] ?? ($rSet['B'] ?? '');
+        $aju = intval($rSet['aju'] ?? ($rSet['AJU'] ?? 0));
+        $nama_ttd = $rSet['nama_ttd'] ?? ($rSet['NAMA_TTD'] ?? '');
+        $jabatan_ttd = $rSet['jabatan_ttd'] ?? ($rSet['JABATAN_TTD'] ?? '');
+        $kota_ttd = $rSet['kota_ttd'] ?? ($rSet['KOTA_TTD'] ?? '');
+        $kode_kantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a));
+        $kode_jenis_tpb = $rSet['kode_jenis_tpb'] ?? ($rSet['KODE_JENIS_TPB'] ?? '');
+        $kode_tujuan_pengiriman = $rSet['kode_tujuan_pengiriman'] ?? ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? '');
+        $kode_tujuan_pemasukan = $rSet['kode_tujuan_pemasukan'] ?? ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? ($bcClean === '40' ? '1' : ''));
+        $kode_tujuan_pengeluaran = $rSet['kode_tujuan_pengeluaran'] ?? ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? '');
+        $kode_valuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : 'USD');
+        $header_defaults = $rSet['header_defaults'] ?? ($rSet['HEADER_DEFAULTS'] ?? '');
     } else {
         $a = !empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000';
         $a = str_pad($a, 4, '0', STR_PAD_LEFT);
@@ -1139,6 +1139,7 @@ if ($action === 'create_new_aju') {
     $ymd = date('Ymd', strtotime($tanggal));
 
     $escCmp = $koneksi->real_escape_string($cmpId);
+    $escBc  = $koneksi->real_escape_string($cleanBc);
     $escBc2 = $koneksi->real_escape_string($cleanBc2);
 
     $comp = [];
@@ -1166,27 +1167,29 @@ if ($action === 'create_new_aju') {
         $koneksi->query("INSERT INTO bc_ceisa_setaju (cmp_id, bc, a, b, aju) VALUES ('$escCmp', '$escBc', '$a', '$b', $nextSeq)");
         $rSet = ['a' => $a, 'b' => $b, 'aju' => $nextSeq];
     } else {
-        $a = str_pad(substr($rSet['a'] ?? '0000', 0, 4), 4, '0', STR_PAD_LEFT);
-        $b = str_pad(substr($rSet['b'] ?? '000000', 0, 6), 6, '0', STR_PAD_RIGHT);
-        $nextSeq = intval($rSet['aju'] ?? 0) + 1;
+        $aRaw = $rSet['a'] ?? ($rSet['A'] ?? (!empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000'));
+        $a = str_pad(substr($aRaw, 0, 4), 4, '0', STR_PAD_LEFT);
+        $bRaw = $rSet['b'] ?? ($rSet['B'] ?? substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6));
+        $b = str_pad(substr($bRaw, 0, 6), 6, '0', STR_PAD_RIGHT);
+        $curAju = intval($rSet['aju'] ?? ($rSet['AJU'] ?? 0));
+        $nextSeq = $curAju + 1;
         $koneksi->query("UPDATE bc_ceisa_setaju SET aju = $nextSeq WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2')");
     }
 
     // Default header values dari profil perusahaan & konfigurasi setaju
-    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a);
-    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : '';
-    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : '';
-    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '');
-    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : '';
-    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : $valuta;
-    $defNama   = $rSet['nama_ttd'] ?? '';
-    $defJab    = $rSet['jabatan_ttd'] ?? '';
-    $defKota   = $rSet['kota_ttd'] ?? '';
+    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a));
+    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($rSet['KODE_JENIS_TPB'] ?? '');
+    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? '');
+    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? ($cleanBc === '40' ? '1' : ''));
+    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? '');
+    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : $valuta);
+    $defNama   = $rSet['nama_ttd'] ?? ($rSet['NAMA_TTD'] ?? '');
+    $defJab    = $rSet['jabatan_ttd'] ?? ($rSet['JABATAN_TTD'] ?? '');
+    $defKota   = $rSet['kota_ttd'] ?? ($rSet['KOTA_TTD'] ?? '');
 
     // Nomor AJU 26 Digit: A (4) + BC (2) + B (6) + YYYYMMDD (8) + SEQ (6)
     $nomorAju = sprintf('%04s%02s%06s%08s%06d', $a, $cleanBc2, $b, $ymd, $nextSeq);
     $escAju   = $koneksi->real_escape_string($nomorAju);
-    $escBc    = $koneksi->real_escape_string($cleanBc);
     $escKantor= $koneksi->real_escape_string($defKantor);
     $escVal   = $koneksi->real_escape_string($defValuta);
     $escTpb   = $koneksi->real_escape_string($defTpb);
@@ -8482,7 +8485,14 @@ $isEditMode = !empty($selectedAjuParam);
                     method: 'POST',
                     body: fd
                 });
-                const json = await res.json();
+                const text = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch(pe) {
+                    const cleanErr = text.replace(/<[^>]*>?/gm, '').trim();
+                    throw new Error("Respon server tidak valid: " + (cleanErr.substring(0, 150) || 'Format JSON rusak'));
+                }
                 if (json.status === 'OK') {
                     const newAju = json.nomor_aju;
                     document.getElementById('entryAjuDisplay').innerText = newAju;
