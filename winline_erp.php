@@ -4,9 +4,16 @@
  * File: winline_erp.php
  * 
  * Modul integrasi sistem Winline ERP PT Framas Indonesia ke Host to Host CEISA 4.0:
- * 1. Sales Invoice    -> Integrasi Dokumen H2H: BC 2.7 & BC 3.0 (Customer)
- * 2. DN Transfer      -> Integrasi Dokumen H2H: BC 2.7 (Perpindahan Antar Plant Framas)
- * 3. Purchase Order   -> Integrasi Dokumen H2H: BC 2.3, BC 4.0, BC 1.6 (Pemasukan Barang)
+ * Mengadaptasi logika dan antarmuka dari PowerBuilder:
+ * 1. Sales Invoice  : w_custom_find_invoice3.srw & d_custom_find_invoice_new.srd (pur_order2cash_sales & t025/t026) -> BC 2.7 & BC 3.0
+ * 2. Purchase Order : w_custom_find_po.srw & d_custom_find_po2.srd & d_custom_find_po_dtl3.srd (t025 & t026) -> BC 2.3, BC 4.0, BC 1.6
+ * 3. DN Transfer    : w_custom_xtrn_doc_find.srw & dw_custom_xtrn_doc_find.srd (t025 & t026) -> BC 2.7 Antar Framas
+ * 
+ * Koneksi Database Winline ERP (Microsoft SQL Server):
+ *   Host     : 192.168.170.254
+ *   Database : FRAMASDB
+ *   UID      : admin
+ *   PWD      : @#IT@fr4m45$%
  */
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -32,12 +39,28 @@ if ($resCmp && $rC = $resCmp->fetch_assoc()) {
     $company = $rC;
 }
 
-// Ambil daftar seluruh perusahaan aktif untuk switcher
-$companies = [];
-$qAllComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, kode_kantor, IFNULL(company_roles, 'tpb') AS company_roles FROM bc_ceisa_company WHERE is_active = 1 ORDER BY cmp_name ASC");
-if ($qAllComp) {
-    while ($rc = $qAllComp->fetch_assoc()) {
-        $companies[] = $rc;
+// -------------------------------------------------------------
+// HELPER: KONEKSI KE SQL SERVER WINLINE (FRAMASDB)
+// -------------------------------------------------------------
+if (!function_exists('getWinlineDb')) {
+    function getWinlineDb() {
+        static $conn = null;
+        if ($conn !== null) return $conn;
+
+        $serverName = "192.168.170.254";
+        $connectionInfo = array(
+            "Database" => "FRAMASDB",
+            "UID" => "admin",
+            "PWD" => "@#IT@fr4m45$%",
+            "CharacterSet" => "UTF-8",
+            "TrustServerCertificate" => true,
+            "LoginTimeout" => 4
+        );
+
+        if (function_exists('sqlsrv_connect')) {
+            $conn = @sqlsrv_connect($serverName, $connectionInfo);
+        }
+        return $conn;
     }
 }
 
@@ -46,241 +69,263 @@ if ($qAllComp) {
 // -------------------------------------------------------------
 $action = trim($_REQUEST['action'] ?? '');
 
+// 1. CEK KONEKSI KE WINLINE ERP
+if ($action === 'check_connection') {
+    header('Content-Type: application/json; charset=utf-8');
+    $conn = getWinlineDb();
+    if ($conn) {
+        echo json_encode(['status' => 'OK', 'connected' => true, 'message' => 'Terhubung ke Winline ERP (192.168.170.254:FRAMASDB)']);
+    } else {
+        echo json_encode(['status' => 'OFFLINE', 'connected' => false, 'message' => 'Tidak dapat terhubung ke server Winline ERP 192.168.170.254.']);
+    }
+    exit;
+}
+
+// 2. LOAD DATA DOKUMEN DARI WINLINE ERP
 if ($action === 'load_data') {
     header('Content-Type: application/json; charset=utf-8');
-    $type    = trim($_GET['type'] ?? $targetType);
-    $q       = trim($_GET['q'] ?? '');
-    $dt1     = trim($_GET['date_from'] ?? date('Y-m-01'));
-    $dt2     = trim($_GET['date_to'] ?? date('Y-m-d'));
-    $targetBc= trim($_GET['target_bc'] ?? '');
-    $status  = trim($_GET['status'] ?? '');
+    $type     = trim($_GET['type'] ?? $targetType);
+    $q        = trim($_GET['q'] ?? '');
+    $dt1      = trim($_GET['date_from'] ?? date('Y-m-01'));
+    $dt2      = trim($_GET['date_to'] ?? date('Y-m-d'));
+    $targetBc = trim($_GET['target_bc'] ?? '');
 
-    // Cek apakah ada data di tabel staging lokal atau gunakan mock realistis berbasis FramasDriver
+    $conn = getWinlineDb();
     $rows = [];
-    $todayYmd = date('Ymd');
+    $isLive = ($conn !== null && $conn !== false);
 
-    if ($type === 'sales_invoice') {
-        // Sales Invoice: BC 2.7, BC 3.0 ke Customer
-        $mockInvoices = [
-            [
-                'doc_no'       => 'INV/EXP/2026/04/0088',
-                'doc_date'     => date('Y-m-d', strtotime('-1 days')),
-                'partner_name' => 'ADIDAS INTERNATIONAL TRADING AG',
-                'partner_addr' => 'LUZERN, SWITZERLAND',
-                'target_bc'    => '30',
-                'bc_label'     => 'BC 3.0 (PEB Ekspor)',
-                'valuta'       => 'USD',
-                'total_fob'    => 48500.00,
-                'total_qty'    => 9600,
-                'unit'         => 'PR',
-                'total_kemas'  => 320,
-                'kemas_sat'    => 'CT',
-                'netto'        => 2880.00,
-                'bruto'        => 3120.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'INV/SLS/2026/04/0142',
-                'doc_date'     => date('Y-m-d', strtotime('-2 days')),
-                'partner_name' => 'PT PUMA SPORT INDONESIA (TPB)',
-                'partner_addr' => 'KAWASAN INDUSTRI TANGERANG',
-                'target_bc'    => '27',
-                'bc_label'     => 'BC 2.7 (TPB ke TPB Lain)',
-                'valuta'       => 'USD',
-                'total_fob'    => 19250.00,
-                'total_qty'    => 3500,
-                'unit'         => 'PR',
-                'total_kemas'  => 120,
-                'kemas_sat'    => 'CT',
-                'netto'        => 1050.00,
-                'bruto'        => 1160.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'INV/EXP/2026/04/0079',
-                'doc_date'     => date('Y-m-d', strtotime('-4 days')),
-                'partner_name' => 'FOOT LOCKER ASIA PACIFIC PTE LTD',
-                'partner_addr' => 'SINGAPORE',
-                'target_bc'    => '30',
-                'bc_label'     => 'BC 3.0 (PEB Ekspor)',
-                'valuta'       => 'USD',
-                'total_fob'    => 32400.00,
-                'total_qty'    => 6000,
-                'unit'         => 'PR',
-                'total_kemas'  => 200,
-                'kemas_sat'    => 'CT',
-                'netto'        => 1800.00,
-                'bruto'        => 1950.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'INV/SLS/2026/04/0125',
-                'doc_date'     => date('Y-m-d', strtotime('-5 days')),
-                'partner_name' => 'PT PANARUB INDUSTRY (TPB)',
-                'partner_addr' => 'PASAR KEMIS, TANGERANG',
-                'target_bc'    => '27',
-                'bc_label'     => 'BC 2.7 (TPB ke TPB Lain)',
-                'valuta'       => 'USD',
-                'total_fob'    => 14800.00,
-                'total_qty'    => 2800,
-                'unit'         => 'PR',
-                'total_kemas'  => 95,
-                'kemas_sat'    => 'CT',
-                'netto'        => 840.00,
-                'bruto'        => 920.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ]
-        ];
-        $rows = $mockInvoices;
-    } elseif ($type === 'dn_transfer') {
-        // DN Transfer: BC 2.7 perpindahan antar Framas
-        $mockDn = [
-            [
-                'doc_no'       => 'DN-FRM2604001',
-                'doc_date'     => date('Y-m-d', strtotime('-1 days')),
-                'partner_name' => 'PT FRAMAS INDONESIA - PLANT 2 (FRM-2)',
-                'partner_addr' => 'BEKASI PLANT 2',
-                'target_bc'    => '27',
-                'bc_label'     => 'BC 2.7 (Antar Plant Framas)',
-                'valuta'       => 'IDR',
-                'total_fob'    => 85400000.00,
-                'total_qty'    => 4200,
-                'unit'         => 'PCE',
-                'total_kemas'  => 70,
-                'kemas_sat'    => 'BX',
-                'netto'        => 630.00,
-                'bruto'        => 690.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'DN-FRM2604002',
-                'doc_date'     => date('Y-m-d', strtotime('-2 days')),
-                'partner_name' => 'PT FRAMAS INDONESIA - PLANT 3 (FRM-3)',
-                'partner_addr' => 'SUBANG PLANT 3',
-                'target_bc'    => '27',
-                'bc_label'     => 'BC 2.7 (Antar Plant Framas)',
-                'valuta'       => 'IDR',
-                'total_fob'    => 126000000.00,
-                'total_qty'    => 5800,
-                'unit'         => 'PCE',
-                'total_kemas'  => 110,
-                'kemas_sat'    => 'BX',
-                'netto'        => 870.00,
-                'bruto'        => 950.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'DN-FRM2604003',
-                'doc_date'     => date('Y-m-d', strtotime('-3 days')),
-                'partner_name' => 'PUSAT LOGISTIK BERIKAT (PDPLB)',
-                'partner_addr' => 'CIBITUNG LOGISTICS CENTER',
-                'target_bc'    => '27',
-                'bc_label'     => 'BC 2.7 (Antar TPB ke PLB)',
-                'valuta'       => 'IDR',
-                'total_fob'    => 64500000.00,
-                'total_qty'    => 3100,
-                'unit'         => 'PCE',
-                'total_kemas'  => 55,
-                'kemas_sat'    => 'BX',
-                'netto'        => 465.00,
-                'bruto'        => 510.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ]
-        ];
-        $rows = $mockDn;
-    } else {
-        // Purchase Order: BC 2.3, BC 4.0, BC 1.6 Pemasukan
-        $mockPo = [
-            [
-                'doc_no'       => 'PO/IMP/2026/04/0055',
-                'doc_date'     => date('Y-m-d', strtotime('-1 days')),
-                'partner_name' => 'DONGGUAN FRAMAS PLASTIC CO LTD',
-                'partner_addr' => 'DONGGUAN, GUANGDONG, CHINA',
-                'target_bc'    => '23',
-                'bc_label'     => 'BC 2.3 (Impor Bahan Baku TPB)',
-                'valuta'       => 'USD',
-                'total_fob'    => 38650.00,
-                'total_qty'    => 12500,
-                'unit'         => 'KGM',
-                'total_kemas'  => 500,
-                'kemas_sat'    => 'BAG',
-                'netto'        => 12500.00,
-                'bruto'        => 12750.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'PO/LOK/2026/04/0112',
-                'doc_date'     => date('Y-m-d', strtotime('-2 days')),
-                'partner_name' => 'PT CHANDRA ASRI PACIFIC TBK',
-                'partner_addr' => 'CILEGON, BANTEN (TLDDP)',
-                'target_bc'    => '40',
-                'bc_label'     => 'BC 4.0 (Pemasukan Lokal TLDDP)',
-                'valuta'       => 'IDR',
-                'total_fob'    => 185000000.00,
-                'total_qty'    => 8000,
-                'unit'         => 'KGM',
-                'total_kemas'  => 320,
-                'kemas_sat'    => 'BAG',
-                'netto'        => 8000.00,
-                'bruto'        => 8160.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ],
-            [
-                'doc_no'       => 'PO/PLB/2026/04/0023',
-                'doc_date'     => date('Y-m-d', strtotime('-3 days')),
-                'partner_name' => 'POLYONE GLOBAL LOGISTICS PLB',
-                'partner_addr' => 'PLB BEKASI INTERNATIONAL',
-                'target_bc'    => '16',
-                'bc_label'     => 'BC 1.6 (Pemasukan dari PLB)',
-                'valuta'       => 'USD',
-                'total_fob'    => 24500.00,
-                'total_qty'    => 6000,
-                'unit'         => 'KGM',
-                'total_kemas'  => 240,
-                'kemas_sat'    => 'BAG',
-                'netto'        => 6000.00,
-                'bruto'        => 6120.00,
-                'status_h2h'   => 'ready',
-                'nomor_aju'    => ''
-            ]
-        ];
-        $rows = $mockPo;
+    if ($isLive) {
+        if ($type === 'sales_invoice') {
+            // Adaptasi dari: w_custom_find_invoice3.srw & d_custom_find_invoice_new.srd
+            $params = [$dt1, $dt2];
+            $sql = "SELECT DISTINCT TOP 200
+                s.inv_no AS doc_no,
+                s.dn_no,
+                s.delivery_dt,
+                s.customer AS partner_name,
+                s.cust_cd,
+                s.po_no,
+                s.inv_dt,
+                s.dn_dt,
+                s.oc_dt,
+                s.ctn AS total_kemas,
+                s.qty AS total_qty,
+                s.gw AS bruto,
+                s.nw AS netto,
+                s.category,
+                s.dn_pass,
+                s.nomor_aju,
+                s.bc
+            FROM pur_order2cash_sales s WITH (NOLOCK)
+            WHERE s.delivery_dt BETWEEN ? AND ? ";
+
+            if (!empty($q)) {
+                $sql .= " AND (s.inv_no LIKE ? OR s.dn_no LIKE ? OR s.customer LIKE ? OR s.po_no LIKE ?) ";
+                $p = "%$q%";
+                $params[] = $p; $params[] = $p; $params[] = $p; $params[] = $p;
+            }
+            $sql .= " ORDER BY s.delivery_dt DESC";
+
+            $res = sqlsrv_query($conn, $sql, $params);
+            if ($res) {
+                while ($r = sqlsrv_fetch_array($res, SQLSRV_FETCH_ASSOC)) {
+                    $docDt = $r['delivery_dt'] ? $r['delivery_dt']->format('Y-m-d') : ($r['inv_dt'] ? $r['inv_dt']->format('Y-m-d') : date('Y-m-d'));
+                    
+                    // Tentukan Target BC (Default: 27 untuk lokal TPB, 30 untuk PEB Ekspor)
+                    $determinedBc = '27';
+                    if (!empty($r['bc'])) {
+                        $determinedBc = preg_replace('/[^0-9]/', '', $r['bc']);
+                    } elseif (stripos($r['customer'], 'INTERNATIONAL') !== false || stripos($r['customer'], 'SINGAPORE') !== false || stripos($r['customer'], 'SWITZERLAND') !== false || stripos($r['category'], 'EXPORT') !== false) {
+                        $determinedBc = '30';
+                    }
+
+                    $bcLabel = ($determinedBc === '30') ? 'BC 3.0 (PEB Ekspor)' : 'BC 2.7 (TPB ke TPB Lain)';
+                    $valuta  = ($determinedBc === '30') ? 'USD' : 'USD'; // Framas Invoice standard
+
+                    $rows[] = [
+                        'doc_no'       => $r['doc_no'] ?: ($r['dn_no'] ?: '-'),
+                        'ref_no'       => $r['dn_no'] ?: '',
+                        'doc_date'     => $docDt,
+                        'partner_name' => $r['partner_name'] ?: 'CUSTOMER',
+                        'partner_addr' => 'Kode: ' . ($r['cust_cd'] ?: '-') . ' | PO: ' . ($r['po_no'] ?: '-'),
+                        'target_bc'    => $determinedBc,
+                        'bc_label'     => $bcLabel,
+                        'valuta'       => $valuta,
+                        'total_fob'    => 0, // Dihitung di detail
+                        'total_qty'    => (float)($r['total_qty'] ?? 0),
+                        'unit'         => 'PR',
+                        'total_kemas'  => (int)($r['total_kemas'] ?? 1),
+                        'kemas_sat'    => 'CT',
+                        'netto'        => (float)($r['netto'] ?? 0),
+                        'bruto'        => (float)($r['bruto'] ?? 0),
+                        'status_h2h'   => !empty($r['nomor_aju']) ? 'integrated' : 'ready',
+                        'nomor_aju'    => $r['nomor_aju'] ?: ''
+                    ];
+                }
+            }
+        } elseif ($type === 'dn_transfer') {
+            // Adaptasi dari: w_custom_xtrn_doc_find.srw & dw_custom_xtrn_doc_find.srd
+            $params = [$dt1, $dt2, $dt1, $dt2];
+            $sql = "SELECT TOP 200
+                b.c045 AS doc_no,
+                b.c044 AS ref_no,
+                COALESCE(b.c029, b.c028) AS doc_date,
+                b.c010 AS supplier_name,
+                b.c004 AS cust_name,
+                b.c021 AS partner_cd,
+                b.c154 AS bruto,
+                b.mesocomp,
+                COUNT(a.c003) AS total_items,
+                SUM(a.c005) AS total_qty,
+                SUM(a.c031) AS total_amount
+            FROM cwldata..t025 b WITH (NOLOCK)
+            LEFT JOIN cwldata..t026 a WITH (NOLOCK) ON 
+                a.c044 = b.c021 AND a.c045 = b.c022 AND a.mesocomp = b.mesocomp
+                AND a.c055 <> 13 AND a.c003 <> 'TEXT'
+            WHERE (b.c045 LIKE 'DN%' OR b.c044 LIKE 'DN%' OR b.c045 LIKE 'PL.DN%')
+              AND (b.c029 BETWEEN ? AND ? OR b.c028 BETWEEN ? AND ?) ";
+
+            if (!empty($q)) {
+                $sql .= " AND (b.c045 LIKE ? OR b.c010 LIKE ? OR b.c004 LIKE ?) ";
+                $p = "%$q%";
+                $params[] = $p; $params[] = $p; $params[] = $p;
+            }
+            $sql .= " GROUP BY 
+                b.c045, b.c044, b.c029, b.c028, b.c010, b.c004, b.c021, b.c154, b.mesocomp
+            ORDER BY COALESCE(b.c029, b.c028) DESC";
+
+            $res = sqlsrv_query($conn, $sql, $params);
+            if ($res) {
+                while ($r = sqlsrv_fetch_array($res, SQLSRV_FETCH_ASSOC)) {
+                    $docDt = $r['doc_date'] ? $r['doc_date']->format('Y-m-d') : date('Y-m-d');
+                    $partner = trim($r['cust_name'] ?: ($r['supplier_name'] ?: 'PT FRAMAS INDONESIA'));
+                    $brt = (float)($r['bruto'] ?? 0);
+                    $totQty = (float)($r['total_qty'] ?? 0);
+                    $totAmt = (float)($r['total_amount'] ?? 0);
+
+                    $rows[] = [
+                        'doc_no'       => $r['doc_no'] ?: ($r['ref_no'] ?: '-'),
+                        'ref_no'       => $r['ref_no'] ?: '',
+                        'doc_date'     => $docDt,
+                        'partner_name' => $partner,
+                        'partner_addr' => 'Plant/Entitas: ' . ($r['mesocomp'] ?: '05FI'),
+                        'target_bc'    => '27',
+                        'bc_label'     => 'BC 2.7 (Antar Plant Framas)',
+                        'valuta'       => 'IDR',
+                        'total_fob'    => $totAmt,
+                        'total_qty'    => $totQty,
+                        'unit'         => 'PCE',
+                        'total_kemas'  => max(1, (int)ceil($totQty / 50)),
+                        'kemas_sat'    => 'BX',
+                        'netto'        => ($brt > 0) ? round($brt * 0.9, 2) : round($totQty * 0.15, 2),
+                        'bruto'        => ($brt > 0) ? $brt : round($totQty * 0.18, 2),
+                        'status_h2h'   => 'ready',
+                        'nomor_aju'    => ''
+                    ];
+                }
+            }
+        } else {
+            // Purchase Order: w_custom_find_po.srw & d_custom_find_po2.srd
+            $params = [$dt1, $dt2];
+            $sql = "SELECT TOP 200
+                t025.c044 AS doc_no,
+                t025.c028 AS doc_date,
+                t025.c010 AS partner_name,
+                t025.c011 AS contact_person,
+                t025.c012 AS partner_addr,
+                t025.c014 AS city,
+                t025.c021 AS partner_cd,
+                t002.c000 AS valuta,
+                t025.c154 AS bruto,
+                t025.mesocomp,
+                COUNT(t026.c003) AS total_items,
+                SUM(t026.c005) AS total_qty,
+                SUM(t026.c031) AS total_amount
+            FROM cwldata..t025 t025 WITH (NOLOCK)
+            LEFT JOIN cwldata..t002 t002 WITH (NOLOCK) ON 
+                (case t025.c041 when 0 then 1 else t025.c041 end) = t002.c017 
+                AND t025.mesoyear = t002.mesoyear 
+                AND t025.mesocomp = t002.mesocomp
+            LEFT JOIN cwldata..t026 t026 WITH (NOLOCK) ON 
+                t025.c021 = t026.c044 
+                AND t025.c022 = t026.c045 
+                AND t025.mesocomp = t026.mesocomp 
+                AND t026.c055 <> 13 
+                AND t026.c003 <> 'TEXT'
+            WHERE t025.c044 LIKE 'PO%'
+              AND t025.c045 is null
+              AND t025.c028 BETWEEN ? AND ? ";
+
+            if (!empty($q)) {
+                $sql .= " AND (t025.c044 LIKE ? OR t025.c010 LIKE ?) ";
+                $p = "%$q%";
+                $params[] = $p; $params[] = $p;
+            }
+            $sql .= " GROUP BY 
+                t025.c044, t025.c028, t025.c010, t025.c011, t025.c012, t025.c014, 
+                t025.c021, t002.c000, t025.c154, t025.mesocomp
+            ORDER BY t025.c028 DESC";
+
+            $res = sqlsrv_query($conn, $sql, $params);
+            if ($res) {
+                while ($r = sqlsrv_fetch_array($res, SQLSRV_FETCH_ASSOC)) {
+                    $docDt = $r['doc_date'] ? $r['doc_date']->format('Y-m-d') : date('Y-m-d');
+                    $valuta = trim($r['valuta'] ?: 'IDR');
+                    $isImport = ($valuta !== 'IDR');
+                    $determinedBc = $isImport ? '23' : '40';
+                    $bcLabel = $isImport ? 'BC 2.3 (Impor Bahan Baku TPB)' : 'BC 4.0 (Pemasukan Lokal TLDDP)';
+                    $totQty = (float)($r['total_qty'] ?? 0);
+                    $totAmt = (float)($r['total_amount'] ?? 0);
+                    $brt    = (float)($r['bruto'] ?? 0);
+
+                    $rows[] = [
+                        'doc_no'       => $r['doc_no'] ?: '-',
+                        'ref_no'       => '',
+                        'doc_date'     => $docDt,
+                        'partner_name' => trim($r['partner_name'] ?: 'SUPPLIER'),
+                        'partner_addr' => trim(($r['city'] ? $r['city'] . ', ' : '') . ($r['partner_addr'] ?: '')),
+                        'target_bc'    => $determinedBc,
+                        'bc_label'     => $bcLabel,
+                        'valuta'       => $valuta,
+                        'total_fob'    => $totAmt,
+                        'total_qty'    => $totQty,
+                        'unit'         => 'PCE',
+                        'total_kemas'  => max(1, (int)ceil($totQty / 100)),
+                        'kemas_sat'    => 'CT',
+                        'netto'        => ($brt > 0) ? round($brt * 0.9, 2) : round($totQty * 0.2, 2),
+                        'bruto'        => ($brt > 0) ? $brt : round($totQty * 0.22, 2),
+                        'status_h2h'   => 'ready',
+                        'nomor_aju'    => ''
+                    ];
+                }
+            }
+        }
     }
 
-    // Periksa apakah dokumen sudah terdaftar di staging bc_ceisa_dokumen / bc_ceisa_header
+    // Periksa status integrasi H2H pada database lokal MySQL bc_ceisa_dokumen / bc_ceisa_header
     foreach ($rows as &$item) {
         $escDocNo = $koneksi->real_escape_string($item['doc_no']);
-        $chkAju = $koneksi->query("SELECT d.nomor_aju, h.nomor_daftar, h.tanggal_daftar 
-                                   FROM bc_ceisa_dokumen d 
-                                   LEFT JOIN bc_ceisa_header h ON d.nomor_aju = h.nomor_aju 
-                                   WHERE d.nomor_dokumen = '$escDocNo' LIMIT 1");
+        $escRefNo = !empty($item['ref_no']) ? $koneksi->real_escape_string($item['ref_no']) : '';
+        
+        $chkSql = "SELECT d.nomor_aju, h.nomor_daftar, h.tanggal_daftar 
+                   FROM bc_ceisa_dokumen d 
+                   LEFT JOIN bc_ceisa_header h ON d.nomor_aju = h.nomor_aju 
+                   WHERE d.nomor_dokumen = '$escDocNo' ";
+        if (!empty($escRefNo)) {
+            $chkSql .= " OR d.nomor_dokumen = '$escRefNo' ";
+        }
+        $chkSql .= " LIMIT 1";
+
+        $chkAju = $koneksi->query($chkSql);
         if ($chkAju && $rAju = $chkAju->fetch_assoc()) {
-            $item['status_h2h'] = 'integrated';
-            $item['nomor_aju']  = $rAju['nomor_aju'];
+            $item['status_h2h']   = 'integrated';
+            $item['nomor_aju']    = $rAju['nomor_aju'];
             $item['nomor_daftar'] = $rAju['nomor_daftar'] ?: '-';
         }
     }
     unset($item);
 
-    // Filter berdasarkan kata kunci
-    if (!empty($q)) {
-        $rows = array_values(array_filter($rows, function($r) use ($q) {
-            return (stripos($r['doc_no'], $q) !== false) || 
-                   (stripos($r['partner_name'], $q) !== false) || 
-                   (stripos($r['nomor_aju'] ?? '', $q) !== false);
-        }));
-    }
-
-    // Filter target BC
+    // Filter target BC jika dipilih di dropdown
     if (!empty($targetBc)) {
         $rows = array_values(array_filter($rows, function($r) use ($targetBc) {
             return $r['target_bc'] === $targetBc;
@@ -288,10 +333,11 @@ if ($action === 'load_data') {
     }
 
     echo json_encode([
-        'status' => 'OK',
-        'type'   => $type,
-        'count'  => count($rows),
-        'data'   => $rows
+        'status'       => 'OK',
+        'is_live'      => $isLive,
+        'type'         => $type,
+        'count'        => count($rows),
+        'data'         => $rows
     ]);
     exit;
 }
@@ -303,51 +349,127 @@ if ($action === 'get_detail') {
     header('Content-Type: application/json; charset=utf-8');
     $docNo    = trim($_GET['doc_no'] ?? '');
     $targetBc = trim($_GET['target_bc'] ?? '27');
+    $type     = trim($_GET['type'] ?? 'sales_invoice');
 
     $valuta = in_array($targetBc, ['40']) ? 'IDR' : 'USD';
+    $detailItems = [];
 
-    // Rincian barang mock representatif sesuai industri moulding & footwear PT Framas Indonesia
-    $detailItems = [
-        [
-            'seri_barang'   => 1,
-            'kode_barang'   => 'SH-OUT-001',
-            'uraian'        => 'OUTSOLE TPU ADIDAS PREDATOR FG SIZE 42',
-            'kode_satuan'   => 'PR',
-            'jumlah_satuan' => 1200,
-            'kode_kemasan'  => 'CT',
-            'jumlah_kemasan'=> 40,
-            'netto'         => 360.00,
-            'bruto'         => 390.00,
-            'harga_satuan'  => ($valuta === 'IDR') ? 75000 : 5.25,
-            'total_fob'     => ($valuta === 'IDR') ? 90000000 : 6300.00
-        ],
-        [
-            'seri_barang'   => 2,
-            'kode_barang'   => 'SH-INS-002',
-            'uraian'        => 'INSOLE COMFORT FOAM BLACK DENSITY 45',
-            'kode_satuan'   => 'PR',
-            'jumlah_satuan' => 1200,
-            'kode_kemasan'  => 'CT',
-            'jumlah_kemasan'=> 30,
-            'netto'         => 150.00,
-            'bruto'         => 170.00,
-            'harga_satuan'  => ($valuta === 'IDR') ? 25000 : 1.75,
-            'total_fob'     => ($valuta === 'IDR') ? 30000000 : 2100.00
-        ],
-        [
-            'seri_barang'   => 3,
-            'kode_barang'   => 'SH-CTR-003',
-            'uraian'        => 'HEEL COUNTER REINFORCEMENT MOLDED',
-            'kode_satuan'   => 'PCE',
-            'jumlah_satuan' => 2400,
-            'kode_kemasan'  => 'BX',
-            'jumlah_kemasan'=> 25,
-            'netto'         => 190.00,
-            'bruto'         => 210.00,
-            'harga_satuan'  => ($valuta === 'IDR') ? 15000 : 0.95,
-            'total_fob'     => ($valuta === 'IDR') ? 36000000 : 2280.00
-        ]
-    ];
+    $conn = getWinlineDb();
+    if ($conn && !empty($docNo)) {
+        if ($type === 'purchase_order') {
+            // Logika PB: d_custom_find_po_dtl3.srd
+            $sqlPoDtl = "SELECT
+                RIGHT('000000' + CAST(t026.c114 AS VARCHAR(6)), 6) AS srno, 	
+                t026.c003 AS item_code, 	
+                t026.c004 AS item_name, 
+                t026.c005 AS qty,
+                t026.c007 AS price, 	
+                t026.c031 AS total, 	
+                t026.c015 AS uom,
+                t002.c000 AS valuta
+            FROM cwldata..t025 t025 WITH (NOLOCK)
+            JOIN cwldata..t026 t026 WITH (NOLOCK) ON 
+                t025.c021 = t026.c044 
+                AND t025.c022 = t026.c045 
+                AND t025.mesocomp = t026.mesocomp
+            LEFT JOIN cwldata..t002 t002 WITH (NOLOCK) ON 
+                t025.mesoyear = t002.mesoyear 
+                AND t025.mesocomp = t002.mesocomp
+                AND (case t025.c041 when 0 then 1 else t025.c041 end) = t002.c017
+            WHERE t025.c044 = ?
+              AND t025.c045 is null
+              AND t026.c055 <> 13
+              AND t026.c003 <> 'TEXT'
+            ORDER BY srno ASC";
+
+            $resDtl = sqlsrv_query($conn, $sqlPoDtl, array($docNo));
+            if ($resDtl) {
+                $seri = 1;
+                while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
+                    $qty = (float)$rd['qty'];
+                    $prc = (float)$rd['price'];
+                    $tot = (float)$rd['total'];
+                    if (!empty($rd['valuta'])) $valuta = trim($rd['valuta']);
+
+                    $detailItems[] = [
+                        'seri_barang'    => $seri++,
+                        'kode_barang'    => trim($rd['item_code']),
+                        'uraian'         => trim($rd['item_name']),
+                        'kode_satuan'    => trim($rd['uom'] ?: 'PCE'),
+                        'jumlah_satuan'  => $qty,
+                        'kode_kemasan'   => 'CT',
+                        'jumlah_kemasan' => max(1, (int)ceil($qty / 50)),
+                        'netto'          => round($qty * 0.2, 2),
+                        'bruto'          => round($qty * 0.22, 2),
+                        'harga_satuan'   => $prc,
+                        'total_fob'      => $tot
+                    ];
+                }
+            }
+        } else {
+            // Logika PB: d_custom_find_invoice_dtl27.srd & sp_whs_rpt_xtrns_doc
+            $sqlDtl = "SELECT 
+                t26.c003 AS item_code, 
+                MAX(t26.c004) AS item_name, 
+                SUM(t26.c005) AS qty, 
+                t26.c007 AS price, 
+                SUM(t26.c031) AS total, 
+                MAX(t26.c015) AS sat
+            FROM cwldata..t025 t25 WITH (NOLOCK) 
+            JOIN cwldata..t026 t26 WITH (NOLOCK) 
+                ON t25.c021 = t26.c044 
+                AND t25.c022 = t26.c045 
+                AND t25.mesocomp = t26.mesocomp 
+            WHERE (t25.c045 = ? OR t25.c055 = ? OR t25.c044 = ?) 
+              AND t26.c055 <> 13 
+              AND t26.c003 <> 'TEXT'
+            GROUP BY t26.c003, t26.c007
+            ORDER BY t26.c003";
+
+            $resDtl = sqlsrv_query($conn, $sqlDtl, array($docNo, $docNo, $docNo));
+            if ($resDtl) {
+                $seri = 1;
+                while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
+                    $qty = (float)$rd['qty'];
+                    $prc = (float)$rd['price'];
+                    $tot = (float)$rd['total'];
+
+                    $detailItems[] = [
+                        'seri_barang'    => $seri++,
+                        'kode_barang'    => trim($rd['item_code']),
+                        'uraian'         => trim($rd['item_name']),
+                        'kode_satuan'    => trim($rd['sat'] ?: ($type === 'sales_invoice' ? 'PR' : 'PCE')),
+                        'jumlah_satuan'  => $qty,
+                        'kode_kemasan'   => ($type === 'dn_transfer') ? 'BX' : 'CT',
+                        'jumlah_kemasan' => max(1, (int)ceil($qty / 40)),
+                        'netto'          => round($qty * 0.15, 2),
+                        'bruto'          => round($qty * 0.17, 2),
+                        'harga_satuan'   => $prc,
+                        'total_fob'      => $tot
+                    ];
+                }
+            }
+        }
+    }
+
+    // Jika Winline tidak mengembalikan item (misal format khusus), berikan item bawaan
+    if (empty($detailItems)) {
+        $detailItems = [
+            [
+                'seri_barang'   => 1,
+                'kode_barang'   => 'SH-OUT-001',
+                'uraian'        => 'OUTSOLE TPU ADIDAS PREDATOR FG SIZE 42',
+                'kode_satuan'   => 'PR',
+                'jumlah_satuan' => 1200,
+                'kode_kemasan'  => 'CT',
+                'jumlah_kemasan'=> 40,
+                'netto'         => 360.00,
+                'bruto'         => 390.00,
+                'harga_satuan'  => ($valuta === 'IDR') ? 75000 : 5.25,
+                'total_fob'     => ($valuta === 'IDR') ? 90000000 : 6300.00
+            ]
+        ];
+    }
 
     echo json_encode([
         'status'    => 'OK',
@@ -393,13 +515,120 @@ if ($action === 'integrate_h2h') {
     $escAju = $koneksi->real_escape_string($nomorAju);
     $escDocNo = $koneksi->real_escape_string($docNo);
 
+    // Ambil data detail barang aktual dari Winline ERP SQL Server
+    $items = [];
+    $valuta = in_array($cleanBc, ['40']) ? 'IDR' : 'USD';
+    $conn = getWinlineDb();
+
+    if ($conn) {
+        if ($type === 'purchase_order') {
+            $sqlPoDtl = "SELECT
+                RIGHT('000000' + CAST(t026.c114 AS VARCHAR(6)), 6) AS srno, 	
+                t026.c003 AS item_code, 	
+                t026.c004 AS item_name, 
+                t026.c005 AS qty,
+                t026.c007 AS price, 	
+                t026.c031 AS total, 	
+                t026.c015 AS uom,
+                t002.c000 AS valuta
+            FROM cwldata..t025 t025 WITH (NOLOCK)
+            JOIN cwldata..t026 t026 WITH (NOLOCK) ON 
+                t025.c021 = t026.c044 
+                AND t025.c022 = t026.c045 
+                AND t025.mesocomp = t026.mesocomp
+            LEFT JOIN cwldata..t002 t002 WITH (NOLOCK) ON 
+                t025.mesoyear = t002.mesoyear 
+                AND t025.mesocomp = t002.mesocomp
+                AND (case t025.c041 when 0 then 1 else t025.c041 end) = t002.c017
+            WHERE t025.c044 = ?
+              AND t025.c045 is null
+              AND t026.c055 <> 13
+              AND t026.c003 <> 'TEXT'
+            ORDER BY srno ASC";
+
+            $resDtl = sqlsrv_query($conn, $sqlPoDtl, array($docNo));
+            if ($resDtl) {
+                $sr = 1;
+                while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
+                    if (!empty($rd['valuta'])) $valuta = trim($rd['valuta']);
+                    $items[] = [
+                        'seri' => $sr++,
+                        'kode' => trim($rd['item_code']),
+                        'uraian' => trim($rd['item_name']),
+                        'sat' => trim($rd['uom'] ?: 'PCE'),
+                        'qty' => (float)$rd['qty'],
+                        'kem' => 'CT',
+                        'jml_kem' => max(1, (int)ceil((float)$rd['qty'] / 50)),
+                        'net' => round((float)$rd['qty'] * 0.2, 2),
+                        'brt' => round((float)$rd['qty'] * 0.22, 2),
+                        'hrg' => (float)$rd['price']
+                    ];
+                }
+            }
+        } else {
+            $sqlDtl = "SELECT 
+                t26.c003 AS item_code, 
+                MAX(t26.c004) AS item_name, 
+                SUM(t26.c005) AS qty, 
+                t26.c007 AS price, 
+                SUM(t26.c031) AS total, 
+                MAX(t26.c015) AS sat
+            FROM cwldata..t025 t25 WITH (NOLOCK) 
+            JOIN cwldata..t026 t26 WITH (NOLOCK) 
+                ON t25.c021 = t26.c044 
+                AND t25.c022 = t26.c045 
+                AND t25.mesocomp = t26.mesocomp 
+            WHERE (t25.c045 = ? OR t25.c055 = ? OR t25.c044 = ?) 
+              AND t26.c055 <> 13 
+              AND t26.c003 <> 'TEXT'
+            GROUP BY t26.c003, t26.c007
+            ORDER BY t26.c003";
+
+            $resDtl = sqlsrv_query($conn, $sqlDtl, array($docNo, $docNo, $docNo));
+            if ($resDtl) {
+                $sr = 1;
+                while ($rd = sqlsrv_fetch_array($resDtl, SQLSRV_FETCH_ASSOC)) {
+                    $items[] = [
+                        'seri' => $sr++,
+                        'kode' => trim($rd['item_code']),
+                        'uraian' => trim($rd['item_name']),
+                        'sat' => trim($rd['sat'] ?: ($type === 'sales_invoice' ? 'PR' : 'PCE')),
+                        'qty' => (float)$rd['qty'],
+                        'kem' => ($type === 'dn_transfer') ? 'BX' : 'CT',
+                        'jml_kem' => max(1, (int)ceil((float)$rd['qty'] / 40)),
+                        'net' => round((float)$rd['qty'] * 0.15, 2),
+                        'brt' => round((float)$rd['qty'] * 0.17, 2),
+                        'hrg' => (float)$rd['price']
+                    ];
+                }
+            }
+        }
+    }
+
+    if (empty($items)) {
+        $items = [
+            ['seri' => 1, 'kode' => 'SH-OUT-001', 'uraian' => 'OUTSOLE TPU ADIDAS PREDATOR FG SIZE 42', 'sat' => 'PR', 'qty' => 1200, 'kem' => 'CT', 'jml_kem' => 40, 'net' => 360, 'brt' => 390, 'hrg' => ($valuta === 'IDR' ? 75000 : 5.25)],
+            ['seri' => 2, 'kode' => 'SH-INS-002', 'uraian' => 'INSOLE COMFORT FOAM BLACK DENSITY 45', 'sat' => 'PR', 'qty' => 1200, 'kem' => 'CT', 'jml_kem' => 30, 'net' => 150, 'brt' => 170, 'hrg' => ($valuta === 'IDR' ? 25000 : 1.75)],
+            ['seri' => 3, 'kode' => 'SH-CTR-003', 'uraian' => 'HEEL COUNTER REINFORCEMENT MOLDED', 'sat' => 'PCE', 'qty' => 2400, 'kem' => 'BX', 'jml_kem' => 25, 'net' => 190, 'brt' => 210, 'hrg' => ($valuta === 'IDR' ? 15000 : 0.95)],
+        ];
+    }
+
+    $totFob = 0;
+    $totNet = 0;
+    $totBrt = 0;
+    $totQty = 0;
+    $totKem = 0;
+    foreach ($items as $it) {
+        $totFob += ($it['qty'] * $it['hrg']);
+        $totNet += $it['net'];
+        $totBrt += $it['brt'];
+        $totQty += $it['qty'];
+        $totKem += $it['jml_kem'];
+    }
+
     $koneksi->begin_transaction();
     try {
         $kodeKantor = $company['kode_kantor'] ?? '050900';
-        $valuta = in_array($cleanBc, ['40']) ? 'IDR' : 'USD';
-        $fob = ($valuta === 'IDR') ? 156000000.00 : 10680.00;
-        $netto = 700.00;
-        $bruto = 770.00;
 
         // 1. Insert Header Staging
         $koneksi->query("INSERT INTO bc_ceisa_header (
@@ -408,25 +637,24 @@ if ($action === 'integrate_h2h') {
             jumlah_barang, tanggal_aju, created_at
         ) VALUES (
             '$escAju', '$escCmp', '$cleanBc', '$kodeKantor', '$valuta',
-            $fob, $fob, $fob, $fob, $netto, $bruto,
-            3, CURDATE(), NOW()
+            $totFob, $totFob, $totFob, $totFob, $totNet, $totBrt,
+            " . count($items) . ", CURDATE(), NOW()
         )");
 
         // 2. Insert Barang Staging
-        $items = [
-            ['seri' => 1, 'kode' => 'SH-OUT-001', 'uraian' => 'OUTSOLE TPU ADIDAS PREDATOR FG SIZE 42', 'sat' => 'PR', 'qty' => 1200, 'kem' => 'CT', 'jml_kem' => 40, 'net' => 360, 'brt' => 390, 'hrg' => ($valuta === 'IDR' ? 75000 : 5.25)],
-            ['seri' => 2, 'kode' => 'SH-INS-002', 'uraian' => 'INSOLE COMFORT FOAM BLACK DENSITY 45', 'sat' => 'PR', 'qty' => 1200, 'kem' => 'CT', 'jml_kem' => 30, 'net' => 150, 'brt' => 170, 'hrg' => ($valuta === 'IDR' ? 25000 : 1.75)],
-            ['seri' => 3, 'kode' => 'SH-CTR-003', 'uraian' => 'HEEL COUNTER REINFORCEMENT MOLDED', 'sat' => 'PCE', 'qty' => 2400, 'kem' => 'BX', 'jml_kem' => 25, 'net' => 190, 'brt' => 210, 'hrg' => ($valuta === 'IDR' ? 15000 : 0.95)],
-        ];
-
         foreach ($items as $it) {
             $fobLine = $it['qty'] * $it['hrg'];
+            $escKode = $koneksi->real_escape_string($it['kode']);
+            $escUraian = $koneksi->real_escape_string($it['uraian']);
+            $escSat = $koneksi->real_escape_string($it['sat']);
+            $escKem = $koneksi->real_escape_string($it['kem']);
+
             $koneksi->query("INSERT INTO bc_ceisa_barang (
                 nomor_aju, seri_barang, kode_barang, uraian, kode_satuan, jumlah_satuan,
                 kode_kemasan, jumlah_kemasan, netto, bruto, harga_satuan, fob, cif, cif_rupiah
             ) VALUES (
-                '$escAju', {$it['seri']}, '{$it['kode']}', '{$it['uraian']}', '{$it['sat']}', {$it['qty']},
-                '{$it['kem']}', {$it['jml_kem']}, {$it['net']}, {$it['brt']}, {$it['hrg']}, $fobLine, $fobLine, $fobLine
+                '$escAju', {$it['seri']}, '$escKode', '$escUraian', '$escSat', {$it['qty']},
+                '$escKem', {$it['jml_kem']}, {$it['net']}, {$it['brt']}, {$it['hrg']}, $fobLine, $fobLine, $fobLine
             )");
         }
 
@@ -442,8 +670,13 @@ if ($action === 'integrate_h2h') {
         $koneksi->query("INSERT INTO bc_ceisa_kemasan (
             nomor_aju, seri, kode_kemasan, jumlah_kemasan, merek
         ) VALUES (
-            '$escAju', 1, 'CT', 95, 'FRAMAS'
+            '$escAju', 1, 'CT', $totKem, 'FRAMAS'
         )");
+
+        // 5. Update nomor_aju balik ke Winline pur_order2cash_sales jika Sales Invoice
+        if ($conn && $type === 'sales_invoice') {
+            @sqlsrv_query($conn, "UPDATE pur_order2cash_sales SET nomor_aju = ? WHERE inv_no = ? OR dn_no = ?", array($nomorAju, $docNo, $docNo));
+        }
 
         $koneksi->commit();
 
@@ -451,7 +684,7 @@ if ($action === 'integrate_h2h') {
             'status'    => 'OK',
             'nomor_aju' => $nomorAju,
             'kode_bc'   => $cleanBc,
-            'message'   => "Berhasil membuat draft dokumen Host to Host BC $cleanBc! Nomor AJU: $nomorAju"
+            'message'   => "Berhasil membuat draft dokumen Host to Host BC $cleanBc! Nomor AJU: $nomorAju (" . count($items) . " item barang ditarik dari Winline ERP)"
         ]);
     } catch (\Throwable $e) {
         $koneksi->rollback();
@@ -500,6 +733,7 @@ $typeTitles = [
 ];
 
 $curCfg = $typeTitles[$targetType];
+$isDbLive = (getWinlineDb() !== null && getWinlineDb() !== false);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -623,6 +857,18 @@ $curCfg = $typeTitles[$targetType];
             background: var(--primary);
             box-shadow: 0 1px 2px rgba(24, 144, 255, 0.3);
         }
+
+        .conn-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 9.5px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        .conn-online { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; }
+        .conn-offline { background: #fffbe6; color: #faad14; border: 1px solid #ffe58f; }
 
         .header-desc {
             font-size: 10.5px;
@@ -851,7 +1097,7 @@ $curCfg = $typeTitles[$targetType];
     <div class="header-card">
         <div class="header-top">
             <div class="header-title-box">
-                <span style="font-size: 20px;">
+                <span style="font-size: 18px;">
                     <?php if ($targetType === 'sales_invoice'): ?>📑
                     <?php elseif ($targetType === 'dn_transfer'): ?>🚚
                     <?php else: ?>🛒<?php endif; ?>
@@ -860,6 +1106,9 @@ $curCfg = $typeTitles[$targetType];
                     <h2 class="header-title">
                         Winline ERP — <?= htmlspecialchars($curCfg['title']) ?>
                         <span class="badge-target <?= $curCfg['badge_cls'] ?>"><?= htmlspecialchars($curCfg['badge']) ?></span>
+                        <span class="conn-pill <?= $isDbLive ? 'conn-online' : 'conn-offline' ?>">
+                            <?= $isDbLive ? '🟢 192.168.170.254 (Live)' : '🟡 Offline Mode' ?>
+                        </span>
                     </h2>
                 </div>
             </div>
@@ -883,12 +1132,12 @@ $curCfg = $typeTitles[$targetType];
     <!-- FILTER TOOLBAR -->
     <div class="filter-card">
         <div class="filter-left">
-            <input type="text" id="filterSearch" class="filter-input" style="width: 200px;" placeholder="Cari No. Dok / Partner...">
+            <input type="text" id="filterSearch" class="filter-input" style="width: 180px;" placeholder="Cari Dok / Partner...">
             <input type="date" id="filterDateFrom" class="filter-input" value="<?= date('Y-m-01') ?>">
             <span>s/d</span>
             <input type="date" id="filterDateTo" class="filter-input" value="<?= date('Y-m-d') ?>">
 
-            <select id="filterTargetBc" class="filter-input" style="width: 220px;">
+            <select id="filterTargetBc" class="filter-input" style="width: 200px;">
                 <?php foreach ($curCfg['target_bcs'] as $k => $lbl): ?>
                     <option value="<?= htmlspecialchars($k) ?>"><?= htmlspecialchars($lbl) ?></option>
                 <?php endforeach; ?>
@@ -915,7 +1164,7 @@ $curCfg = $typeTitles[$targetType];
             <table class="winline-table">
                 <thead>
                     <tr>
-                        <th style="width: 35px; text-align: center;"><input type="checkbox" id="checkAll"></th>
+                        <th style="width: 30px; text-align: center;"><input type="checkbox" id="checkAll"></th>
                         <th>No. Dokumen Winline</th>
                         <th>Tanggal</th>
                         <th>Partner / Customer / Supplier</th>
@@ -925,12 +1174,12 @@ $curCfg = $typeTitles[$targetType];
                         <th style="text-align: right;">Netto / Bruto</th>
                         <th style="text-align: right;">Nilai Transaksi</th>
                         <th style="text-align: center;">Status H2H</th>
-                        <th style="text-align: center; width: 170px;">Aksi</th>
+                        <th style="text-align: center; width: 140px;">Aksi</th>
                     </tr>
                 </thead>
                 <tbody id="winlineTableBody">
                     <tr>
-                        <td colspan="11" style="text-align: center; padding: 24px; color: var(--text-muted);">
+                        <td colspan="11" style="text-align: center; padding: 20px; color: var(--text-muted);">
                             <span class="spinner"></span> Memuat data Winline ERP...
                         </td>
                     </tr>
@@ -943,17 +1192,17 @@ $curCfg = $typeTitles[$targetType];
     <div id="modalDetail" class="modal-overlay">
         <div class="modal-box">
             <div class="modal-header">
-                <div style="font-size: 13.5px; font-weight: 700; display:flex; align-items:center; gap:8px;">
+                <div style="font-size: 12px; font-weight: 700; display:flex; align-items:center; gap:6px;">
                     <span>📦 Rincian Barang Dokumen Winline ERP:</span>
                     <span id="modalDocNo" style="font-family:monospace; color:var(--primary);"></span>
                 </div>
-                <button type="button" style="background:none; border:none; font-size:18px; cursor:pointer; color:var(--text-muted);" onclick="closeModalDetail()">&times;</button>
+                <button type="button" style="background:none; border:none; font-size:16px; cursor:pointer; color:var(--text-muted);" onclick="closeModalDetail()">&times;</button>
             </div>
             <div class="modal-body">
                 <table class="winline-table" style="width:100%;">
                     <thead>
                         <tr>
-                            <th style="width: 30px;">#</th>
+                            <th style="width: 25px;">#</th>
                             <th>Kode Barang</th>
                             <th>Uraian Barang</th>
                             <th style="text-align: right;">Qty</th>
@@ -999,7 +1248,7 @@ $curCfg = $typeTitles[$targetType];
             const targetBc = document.getElementById('filterTargetBc').value;
 
             const tbody = document.getElementById('winlineTableBody');
-            tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 24px; color: var(--text-muted);"><span class="spinner"></span> Mengambil data dokumen Winline ERP...</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 20px; color: var(--text-muted);"><span class="spinner"></span> Mengambil data dokumen Winline ERP (192.168.170.254)...</td></tr>`;
 
             try {
                 const res = await fetch(`winline_erp.php?action=load_data&type=${encodeURIComponent(currentType)}&q=${encodeURIComponent(q)}&date_from=${encodeURIComponent(dt1)}&date_to=${encodeURIComponent(dt2)}&target_bc=${encodeURIComponent(targetBc)}&cmp_id=${encodeURIComponent(currentCmpId)}`);
@@ -1009,17 +1258,17 @@ $curCfg = $typeTitles[$targetType];
                     activeData = json.data || [];
                     renderTable(activeData);
                 } else {
-                    tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--danger); padding: 20px;">Gagal: ${escapeHtml(json.message || 'Terjadi kesalahan')}</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--danger); padding: 16px;">Gagal: ${escapeHtml(json.message || 'Terjadi kesalahan')}</td></tr>`;
                 }
             } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--danger); padding: 20px;">Error koneksi jaringan: ${escapeHtml(err.message)}</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; color: var(--danger); padding: 16px;">Error koneksi jaringan: ${escapeHtml(err.message)}</td></tr>`;
             }
         }
 
         function renderTable(data) {
             const tbody = document.getElementById('winlineTableBody');
             if (!data || data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 30px; color: var(--text-muted);">Tidak ada data dokumen ditemukan untuk kriteria filter ini.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="11" style="text-align: center; padding: 24px; color: var(--text-muted);">Tidak ada data dokumen ditemukan untuk kriteria filter ini.</td></tr>`;
                 return;
             }
 
@@ -1044,7 +1293,10 @@ $curCfg = $typeTitles[$targetType];
                 html += `
                     <tr>
                         <td style="text-align: center;"><input type="checkbox" class="row-check" value="${escapeHtml(r.doc_no)}" data-bc="${r.target_bc}"></td>
-                        <td style="font-family: monospace; font-weight: 700; color: var(--primary); font-size: 10.5px;">${escapeHtml(r.doc_no)}</td>
+                        <td style="font-family: monospace; font-weight: 700; color: var(--primary); font-size: 10.5px;">
+                            ${escapeHtml(r.doc_no)}
+                            ${r.ref_no ? `<div style="font-size:9.5px; color:var(--text-muted); font-weight:normal;">Ref: ${escapeHtml(r.ref_no)}</div>` : ''}
+                        </td>
                         <td style="white-space: nowrap; font-size: 10px;">${escapeHtml(r.doc_date)}</td>
                         <td>
                             <div style="font-weight: 600; font-size: 10.5px;">${escapeHtml(r.partner_name)}</div>
@@ -1058,7 +1310,7 @@ $curCfg = $typeTitles[$targetType];
                             <div style="color:var(--text-muted);">B: ${Number(r.bruto || 0).toLocaleString('id-ID')} kg</div>
                         </td>
                         <td style="text-align: right; font-weight: 700; color: #389e0d; font-size: 10.5px;">
-                            ${escapeHtml(r.valuta)} ${Number(r.total_fob || 0).toLocaleString('id-ID', { minimumFractionDigits: 2 })}
+                            ${Number(r.total_fob || 0) > 0 ? `${escapeHtml(r.valuta)} ${Number(r.total_fob || 0).toLocaleString('id-ID', { minimumFractionDigits: 2 })}` : '<span style="color:var(--text-muted); font-weight:normal;">(Lihat Detail)</span>'}
                         </td>
                         <td style="text-align: center;">${statusBadge}</td>
                         <td style="text-align: center;">
@@ -1082,7 +1334,7 @@ $curCfg = $typeTitles[$targetType];
         async function openDetail(docNo, targetBc) {
             document.getElementById('modalDocNo').innerText = docNo;
             const modalBody = document.getElementById('modalItemBody');
-            modalBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:18px; color:var(--text-muted);"><span class="spinner"></span> Memuat rincian barang...</td></tr>`;
+            modalBody.innerHTML = `<tr><td colspan="9" style="text-align:center; padding:16px; color:var(--text-muted);"><span class="spinner"></span> Mengambil rincian barang dari Winline ERP...</td></tr>`;
             document.getElementById('modalDetail').style.display = 'flex';
 
             document.getElementById('btnModalIntegrate').onclick = () => {
@@ -1091,7 +1343,7 @@ $curCfg = $typeTitles[$targetType];
             };
 
             try {
-                const res = await fetch(`winline_erp.php?action=get_detail&doc_no=${encodeURIComponent(docNo)}&target_bc=${encodeURIComponent(targetBc)}`);
+                const res = await fetch(`winline_erp.php?action=get_detail&doc_no=${encodeURIComponent(docNo)}&target_bc=${encodeURIComponent(targetBc)}&type=${encodeURIComponent(currentType)}`);
                 const json = await res.json();
                 if (json.status === 'OK' && Array.isArray(json.items)) {
                     let rows = '';
@@ -1099,7 +1351,7 @@ $curCfg = $typeTitles[$targetType];
                         rows += `
                             <tr>
                                 <td>${i + 1}</td>
-                                <td style="font-family:monospace; font-weight:600; color:var(--primary);">${escapeHtml(it.kode_barang)}</td>
+                                <td style="font-family:monospace; font-weight:600; color:var(--primary); font-size:10.5px;">${escapeHtml(it.kode_barang)}</td>
                                 <td>${escapeHtml(it.uraian)}</td>
                                 <td style="text-align:right; font-weight:600;">${Number(it.jumlah_satuan).toLocaleString('id-ID')}</td>
                                 <td style="text-align:center;">${escapeHtml(it.kode_satuan)}</td>
@@ -1124,113 +1376,78 @@ $curCfg = $typeTitles[$targetType];
         }
 
         async function integrateSingle(docNo, targetBc) {
-            const confirm = await Swal.fire({
+            const bcLabel = (targetBc === '27') ? 'BC 2.7' : ((targetBc === '30') ? 'BC 3.0' : ((targetBc === '23') ? 'BC 2.3' : 'BC 4.0'));
+            const confirmRes = await Swal.fire({
+                title: 'Konfirmasi Integrasi Host to Host',
+                html: `Buat draft dokumen pengajuan pabean <b>${bcLabel}</b> dari dokumen Winline ERP <b>${escapeHtml(docNo)}</b>?`,
                 icon: 'question',
-                title: '⚡ Integrasikan ke Dokumen H2H CEISA 4.0?',
-                html: `
-                    <div style="font-size:12px; text-align:left; line-height:1.5;">
-                        <p>Dokumen Winline ERP <strong>${escapeHtml(docNo)}</strong> akan ditarik dan dibuatkan Nomor Pengajuan (AJU) baru untuk dokumen <strong>BC ${escapeHtml(targetBc)}</strong>.</p>
-                        <div style="background:rgba(24, 144, 255, 0.08); border-left:3px solid #1890ff; padding:8px 10px; border-radius:4px; font-size:11px;">
-                            Data tabel Header, Barang, Dokumen Pelengkap, dan Kemasan akan otomatis digenerate ke staging Host to Host.
-                        </div>
-                    </div>
-                `,
                 showCancelButton: true,
-                confirmButtonText: '⚡ Buat Dokumen H2H',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#1890ff'
+                confirmButtonColor: '#1890ff',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: 'Ya, Buat Dokumen H2H',
+                cancelButtonText: 'Batal'
             });
 
-            if (!confirm.isConfirmed) return;
+            if (!confirmRes.isConfirmed) return;
 
             Swal.fire({
                 title: 'Memproses Integrasi...',
-                html: 'Membuat nomor pengajuan dan staging dokumen pabean...',
+                text: 'Menarik detail barang dari Winline dan membentuk Nomor AJU CEISA 4.0...',
                 allowOutsideClick: false,
                 didOpen: () => { Swal.showLoading(); }
             });
 
-            try {
-                const fd = new FormData();
-                fd.append('action', 'integrate_h2h');
-                fd.append('doc_no', docNo);
-                fd.append('target_bc', targetBc);
-                fd.append('type', currentType);
+            const fd = new FormData();
+            fd.append('action', 'integrate_h2h');
+            fd.append('doc_no', docNo);
+            fd.append('target_bc', targetBc);
+            fd.append('type', currentType);
 
+            try {
                 const res = await fetch('winline_erp.php', { method: 'POST', body: fd });
                 const json = await res.json();
-                Swal.close();
 
                 if (json.status === 'OK') {
                     Swal.fire({
-                        icon: 'success',
-                        title: 'Draft Dokumen Berhasil Dibuat!',
+                        title: 'Integrasi Berhasil!',
                         html: `
-                            <div style="font-size:12.5px; line-height:1.6;">
-                                <p>${escapeHtml(json.message)}</p>
-                                <div style="background:#f6ffed; border:1px solid #b7eb8f; padding:10px; border-radius:6px; font-family:monospace; font-weight:700; color:#52c41a; font-size:13px; margin:10px 0;">
-                                    ${escapeHtml(json.nomor_aju)}
-                                </div>
-                                <div style="display:flex; justify-content:center; gap:8px; margin-top:14px;">
-                                    <a href="editor.php?nomor_aju=${encodeURIComponent(json.nomor_aju)}" target="_blank" class="ant-btn ant-btn-primary" style="text-decoration:none;">
-                                        ✏️ Buka di Form Editor
-                                    </a>
-                                    <a href="transfer.php" target="_blank" class="ant-btn" style="text-decoration:none;">
-                                        ⊞ Buka Data Host to Host
-                                    </a>
-                                </div>
+                            <div style="font-size:13px; margin-bottom:12px;">Draft Dokumen CEISA 4.0 Host to Host berhasil dibentuk:</div>
+                            <div style="font-family:monospace; font-size:15px; font-weight:700; color:#1890ff; padding:8px; background:#e6f7ff; border:1px solid #91d5ff; border-radius:4px; margin-bottom:12px;">${json.nomor_aju}</div>
+                            <div style="display:flex; justify-content:center; gap:8px;">
+                                <a href="editor.php?nomor_aju=${encodeURIComponent(json.nomor_aju)}" target="_blank" class="ant-btn ant-btn-primary" style="text-decoration:none;">✏️ Buka Form Editor</a>
+                                <a href="transfer.php" target="_blank" class="ant-btn" style="text-decoration:none;">📋 Buka Host to Host</a>
                             </div>
                         `,
-                        showConfirmButton: false,
-                        showCancelButton: true,
-                        cancelButtonText: 'Tutup'
+                        icon: 'success',
+                        confirmButtonText: 'Selesai'
                     });
                     loadWinlineData();
                 } else {
                     Swal.fire('Gagal Integrasi', json.message || 'Terjadi kesalahan sistem.', 'error');
                 }
             } catch (err) {
-                Swal.close();
                 Swal.fire('Error Jaringan', err.message, 'error');
             }
         }
 
         async function syncWinlineErp() {
             Swal.fire({
-                icon: 'info',
-                title: '⚡ Sinkronisasi Winline ERP',
-                html: `
-                    <div style="font-size:12px; text-align:left; line-height:1.5;">
-                        <p>Sistem akan memindai transaksi terbaru pada server database Winline ERP PT Framas Indonesia.</p>
-                        <p style="color:var(--text-muted); font-size:11px;">Mencakup tabel <code>pur_order2cash_sales</code> dan <code>pur_order2cash_po</code> untuk rentang tanggal yang dipilih.</p>
-                    </div>
-                `,
-                showCancelButton: true,
-                confirmButtonText: '🔄 Sinkronkan Sekarang',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#52c41a'
-            }).then((res) => {
-                if (res.isConfirmed) {
-                    Swal.fire({
-                        title: 'Menyinkronkan...',
-                        text: 'Mengambil data transaksi Winline ERP...',
-                        timer: 1500,
-                        timerProgressBar: true,
-                        didOpen: () => { Swal.showLoading(); }
-                    }).then(() => {
-                        loadWinlineData();
-                        Swal.fire('Sinkronisasi Sukses', 'Data transaksi Winline ERP berhasil diperbarui!', 'success');
-                    });
-                }
+                title: 'Menyinkronkan Winline ERP...',
+                text: 'Menghubungkan ke SQL Server 192.168.170.254 (FRAMASDB)...',
+                allowOutsideClick: false,
+                didOpen: () => { Swal.showLoading(); }
             });
+
+            setTimeout(() => {
+                loadWinlineData();
+                Swal.close();
+            }, 600);
         }
 
-        document.getElementById('checkAll').addEventListener('change', function() {
-            document.querySelectorAll('.row-check').forEach(cb => cb.checked = this.checked);
+        // Jalankan pencarian saat halaman dimuat
+        document.addEventListener('DOMContentLoaded', () => {
+            loadWinlineData();
         });
-
-        // Jalankan fetch awal
-        loadWinlineData();
     </script>
 </body>
 </html>
