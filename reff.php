@@ -282,6 +282,7 @@ if ($action === 'import') {
     } elseif ($ext === 'xlsx') {
         // Gunakan native XML extractor dari ZIP file XLSX
         require_once __DIR__ . '/CeisaXlsxImporter.php';
+        require_once __DIR__ . '/zip_archive_polyfill.php';
         $zip = new ZipArchive();
         if ($zip->open($tmpPath) === true) {
             // Ambil sharedStrings

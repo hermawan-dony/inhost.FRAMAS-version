@@ -6,6 +6,8 @@
  * 100% PHP Native (ZipArchive + XML SharedStrings).
  */
 
+require_once __DIR__ . '/zip_archive_polyfill.php';
+
 class CeisaManifestXlsxExporter {
     private $db;
     private $cmpId;

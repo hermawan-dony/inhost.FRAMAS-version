@@ -6,6 +6,8 @@
  * 100% PHP Native (ZipArchive + SimpleXML) tanpa library eksternal.
  */
 
+require_once __DIR__ . '/zip_archive_polyfill.php';
+
 class CeisaManifestXlsxImporter {
     private $koneksi;
     private $cmpId;

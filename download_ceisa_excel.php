@@ -17,6 +17,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 require_once __DIR__ . '/koneksi.php';
+require_once __DIR__ . '/zip_archive_polyfill.php';
 require_once __DIR__ . '/datalogin.php';
 
 // Pastikan folder cache excel tersedia

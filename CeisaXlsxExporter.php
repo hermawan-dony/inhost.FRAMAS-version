@@ -6,6 +6,8 @@
  * Menghasilkan 21 sheet lengkap, styling header bold, dan format sel yang kompatibel 100% dengan CEISA 4.0.
  */
 
+require_once __DIR__ . '/zip_archive_polyfill.php';
+
 class CeisaXlsxExporter {
     private $koneksi;
     private $pdo;
@@ -287,8 +289,22 @@ class CeisaXlsxExporter {
         // 7. Worksheets 1..21
         $sheetIdx = 1;
         foreach (self::$sheetTableMap as $sheetName => $tableName) {
-            $cols = $this->structure[$sheetName] ?? [];
             $rows = $ajuData[$sheetName] ?? [];
+            $cols = $this->structure[$sheetName] ?? [];
+            if (empty($cols)) {
+                if (!empty($rows[0])) {
+                    $cols = array_keys($rows[0]);
+                } elseif ($this->koneksi) {
+                    $qDesc = @$this->koneksi->query("DESCRIBE `$tableName`");
+                    if ($qDesc) {
+                        while ($rd = $qDesc->fetch_assoc()) {
+                            if (!in_array($rd['Field'], ['cmp_id', 'user_id', 'upd_time'])) {
+                                $cols[] = $rd['Field'];
+                            }
+                        }
+                    }
+                }
+            }
             $colCount = count($cols);
             $maxRow = max(1, count($rows) + 1);
             $lastColLetter = self::getColLetter($colCount);

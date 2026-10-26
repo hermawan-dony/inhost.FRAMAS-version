@@ -21,6 +21,9 @@ if (!function_exists('str_contains')) {
     }
 }
 
+// Polyfill ZipArchive universal jika ekstensi PHP 'zip' belum aktif
+require_once __DIR__ . '/zip_archive_polyfill.php';
+
 // Deteksi Otomatis Lingkungan Server (Windows lokal / VPS Bekasi / cPanel inhost.id)
 $isWindowsLocal = (
     strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ||

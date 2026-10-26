@@ -6,6 +6,8 @@
  * Mendukung Single AJU & Batch Multi-AJU, 22 sheet dokumen pabean, bulk-insert tuning berkecepatan tinggi.
  */
 
+require_once __DIR__ . '/zip_archive_polyfill.php';
+
 class CeisaXlsxImporter {
     private $pdo;
     private $koneksi;

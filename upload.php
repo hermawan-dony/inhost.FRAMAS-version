@@ -1,5 +1,6 @@
 <?php
 session_start();
+require_once __DIR__ . '/zip_archive_polyfill.php';
 
 $passHash = hash('sha256', '1782');
 $uploadDir = '/source/share/';
