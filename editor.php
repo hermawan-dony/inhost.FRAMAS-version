@@ -174,6 +174,71 @@ if (isset($koneksi) && $koneksi) {
 require_once __DIR__ . '/erp/ErpManager.php';
 $action = $_REQUEST['action'] ?? '';
 
+// Helper: Tarik data nilai bawaan dari Dokumen AJU Terakhir dengan kode dokumen BC yang sama
+if (!function_exists('getLatestAjuHeaderDefaults')) {
+    function getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId = '') {
+        $bc2 = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
+        $escCmp = $koneksi->real_escape_string($cmpId);
+        $escBc  = $koneksi->real_escape_string($bcClean);
+        $escBc2 = $koneksi->real_escape_string($bc2);
+
+        $sql = "
+            SELECT nomor_aju, cmp_id, kode_dokumen, kode_kantor, kode_jenis_tpb,
+                   kode_tujuan_pengiriman, kode_tujuan_pemasukan, kode_tujuan_pengeluaran,
+                   kode_valuta, nama_pernyataan, jabatan_pernyataan, kota_pernyataan,
+                   tanggal_pernyataan
+            FROM bc_ceisa_header
+            WHERE (cmp_id = '$escCmp' OR '$escCmp' = '')
+              AND (
+                  kode_dokumen = '$escBc' 
+                  OR kode_dokumen = '$escBc2' 
+                  OR kode_dokumen LIKE '{$escBc}%' 
+                  OR kode_dokumen LIKE '%{$escBc}'
+              )
+            ORDER BY 
+              IF(cmp_id = '$escCmp', 0, 1),
+              IF(kode_dokumen = '$escBc', 0, 1),
+              nomor_aju DESC
+            LIMIT 1
+        ";
+
+        $q = $koneksi->query($sql);
+        if ($q && $r = $q->fetch_assoc()) {
+            $aju = $r['nomor_aju'];
+            $a = '';
+            $b = '';
+            $seq = 0;
+            if (strlen($aju) >= 26) {
+                $a = substr($aju, 0, 4);
+                $b = substr($aju, 6, 6);
+                $seq = intval(substr($aju, -6));
+            }
+
+            return [
+                'found'                  => true,
+                'nomor_aju'              => $aju,
+                'cmp_id'                 => $r['cmp_id'],
+                'kode_dokumen'           => $r['kode_dokumen'],
+                'kode_kantor'            => $r['kode_kantor'] ?: '',
+                'kode_jenis_tpb'         => $r['kode_jenis_tpb'] ?: '',
+                'kode_tujuan_pengiriman' => $r['kode_tujuan_pengiriman'] ?: '',
+                'kode_tujuan_pemasukan'  => $r['kode_tujuan_pemasukan'] ?: '',
+                'kode_tujuan_pengeluaran'=> $r['kode_tujuan_pengeluaran'] ?: '',
+                'kode_valuta'            => $r['kode_valuta'] ?: 'USD',
+                'nama_ttd'               => $r['nama_pernyataan'] ?: '',
+                'jabatan_ttd'            => $r['jabatan_pernyataan'] ?: '',
+                'kota_ttd'               => $r['kota_pernyataan'] ?: '',
+                'tanggal_pernyataan'     => $r['tanggal_pernyataan'] ?: '',
+                'a'                      => $a,
+                'b'                      => $b,
+                'seq'                    => $seq
+            ];
+        }
+
+        return ['found' => false];
+    }
+}
+
 // 1. Ambil Konfigurasi Format Penomoran AJU & Default Header
 if ($action === 'get_config_aju') {
     header('Content-Type: application/json; charset=utf-8');
@@ -188,6 +253,9 @@ if ($action === 'get_config_aju') {
 
     $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
     $comp = $qCmp ? $qCmp->fetch_assoc() : [];
+
+    // Cari data dokumen AJU terakhir yang memiliki kode dokumen BC yang sama
+    $latestAju = getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId);
 
     // Prioritaskan pencarian exact match bcClean, fallback ke bc2
     $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
@@ -223,6 +291,23 @@ if ($action === 'get_config_aju') {
         $header_defaults = '';
     }
 
+    // Tarik otomatis nilai bawaan dari AJU terakhir jika masih kosong
+    if ($latestAju['found']) {
+        if (empty($kode_kantor) && !empty($latestAju['kode_kantor'])) $kode_kantor = $latestAju['kode_kantor'];
+        if (empty($kode_jenis_tpb) && !empty($latestAju['kode_jenis_tpb'])) $kode_jenis_tpb = $latestAju['kode_jenis_tpb'];
+        if (empty($kode_tujuan_pengiriman) && !empty($latestAju['kode_tujuan_pengiriman'])) $kode_tujuan_pengiriman = $latestAju['kode_tujuan_pengiriman'];
+        if (empty($kode_tujuan_pemasukan) && !empty($latestAju['kode_tujuan_pemasukan'])) $kode_tujuan_pemasukan = $latestAju['kode_tujuan_pemasukan'];
+        if (empty($kode_tujuan_pengeluaran) && !empty($latestAju['kode_tujuan_pengeluaran'])) $kode_tujuan_pengeluaran = $latestAju['kode_tujuan_pengeluaran'];
+        if ((empty($kode_valuta) || $kode_valuta === 'USD') && !empty($latestAju['kode_valuta'])) $kode_valuta = $latestAju['kode_valuta'];
+        if (empty($nama_ttd) && !empty($latestAju['nama_ttd'])) $nama_ttd = $latestAju['nama_ttd'];
+        if (empty($jabatan_ttd) && !empty($latestAju['jabatan_ttd'])) $jabatan_ttd = $latestAju['jabatan_ttd'];
+        if (empty($kota_ttd) && !empty($latestAju['kota_ttd'])) $kota_ttd = $latestAju['kota_ttd'];
+
+        if (($a === '0000' || empty($a)) && !empty($latestAju['a'])) $a = $latestAju['a'];
+        if (($b === '000000' || empty($b)) && !empty($latestAju['b'])) $b = $latestAju['b'];
+        if ($aju === 0 && !empty($latestAju['seq'])) $aju = $latestAju['seq'];
+    }
+
     echo json_encode([
         'status' => 'OK',
         'data' => [
@@ -241,9 +326,33 @@ if ($action === 'get_config_aju') {
             'kode_tujuan_pengeluaran'=> $kode_tujuan_pengeluaran,
             'kode_valuta'            => $kode_valuta,
             'header_defaults'        => $header_defaults,
+            'latest_aju'             => $latestAju,
             'preview'                => sprintf('%04s%02s%06s%s%06d', $a, $bc2, $b, date('Ymd'), $aju + 1)
         ]
     ]);
+    exit;
+}
+
+// 1b. Tarik Langsung Nilai Bawaan Header dari AJU Terakhir dengan Dokumen BC yang Sama
+if ($action === 'get_latest_aju_defaults') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $bcRaw   = trim($_GET['bc'] ?? '23');
+    $bcClean = preg_replace('/[^0-9]/', '', $bcRaw);
+
+    $latestAju = getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId);
+    if ($latestAju['found']) {
+        echo json_encode([
+            'status' => 'OK',
+            'data'   => $latestAju,
+            'message'=> "Berhasil menarik nilai dari AJU Terakhir: {$latestAju['nomor_aju']}"
+        ]);
+    } else {
+        echo json_encode([
+            'status' => 'NOT_FOUND',
+            'message'=> "Belum ada dokumen AJU sebelumnya dengan jenis dokumen BC $bcClean untuk perusahaan ini."
+        ]);
+    }
     exit;
 }
 
@@ -320,16 +429,20 @@ if ($action === 'get_header_defaults') {
     $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
     $rSet = ($qSet && $qSet->num_rows > 0) ? $qSet->fetch_assoc() : [];
 
+    // Fallback: Tarik nilai dari dokumen AJU terakhir jika belum disetel di setaju
+    $latestAju = getLatestAjuHeaderDefaults($koneksi, $cleanBc, $cmpId);
+
     $defaults = [
-        'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : ''),
-        'kode_jenis_tpb'         => $rSet['kode_jenis_tpb'] ?? '',
-        'kode_tujuan_pengiriman' => $rSet['kode_tujuan_pengiriman'] ?? '',
-        'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : ''),
-        'kode_tujuan_pengeluaran'=> $rSet['kode_tujuan_pengeluaran'] ?? '',
-        'kode_valuta'            => !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : 'USD',
-        'nama_pernyataan'        => $rSet['nama_ttd'] ?? '',
-        'jabatan_pernyataan'     => $rSet['jabatan_ttd'] ?? '',
-        'kota_pernyataan'        => $rSet['kota_ttd'] ?? '',
+        'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($latestAju['kode_kantor']) ? $latestAju['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : '')),
+        'kode_jenis_tpb'         => !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($latestAju['kode_jenis_tpb'] ?? ''),
+        'kode_tujuan_pengiriman' => !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($latestAju['kode_tujuan_pengiriman'] ?? ''),
+        'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($latestAju['kode_tujuan_pemasukan']) ? $latestAju['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')),
+        'kode_tujuan_pengeluaran'=> !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($latestAju['kode_tujuan_pengeluaran'] ?? ''),
+        'kode_valuta'            => !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($latestAju['kode_valuta']) ? $latestAju['kode_valuta'] : 'USD'),
+        'nama_pernyataan'        => !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($latestAju['nama_ttd'] ?? ''),
+        'jabatan_pernyataan'     => !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($latestAju['jabatan_ttd'] ?? ''),
+        'kota_pernyataan'        => !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($latestAju['kota_ttd'] ?? ''),
+        'source_nomor_aju'       => ($latestAju && !empty($latestAju['found'])) ? $latestAju['nomor_aju'] : null,
     ];
 
     echo json_encode(['status' => 'OK', 'data' => $defaults]);
@@ -1176,16 +1289,18 @@ if ($action === 'create_new_aju') {
         $koneksi->query("UPDATE bc_ceisa_setaju SET aju = $nextSeq WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2')");
     }
 
-    // Default header values dari profil perusahaan & konfigurasi setaju
-    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a));
-    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($rSet['KODE_JENIS_TPB'] ?? '');
-    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? '');
-    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? ($cleanBc === '40' ? '1' : ''));
-    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? '');
-    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : $valuta);
-    $defNama   = $rSet['nama_ttd'] ?? ($rSet['NAMA_TTD'] ?? '');
-    $defJab    = $rSet['jabatan_ttd'] ?? ($rSet['JABATAN_TTD'] ?? '');
-    $defKota   = $rSet['kota_ttd'] ?? ($rSet['KOTA_TTD'] ?? '');
+    // Default header values dari profil perusahaan, konfigurasi setaju, dan fallback AJU terakhir
+    $latestAju = getLatestAjuHeaderDefaults($koneksi, $cleanBc, $cmpId);
+
+    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($latestAju['kode_kantor']) ? $latestAju['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a)));
+    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($rSet['KODE_JENIS_TPB'] ?? ($latestAju['kode_jenis_tpb'] ?? ''));
+    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? ($latestAju['kode_tujuan_pengiriman'] ?? ''));
+    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? (!empty($latestAju['kode_tujuan_pemasukan']) ? $latestAju['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')));
+    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? ($latestAju['kode_tujuan_pengeluaran'] ?? ''));
+    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : (!empty($latestAju['kode_valuta']) ? $latestAju['kode_valuta'] : $valuta));
+    $defNama   = !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($rSet['NAMA_TTD'] ?? ($latestAju['nama_ttd'] ?? ''));
+    $defJab    = !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($rSet['JABATAN_TTD'] ?? ($latestAju['jabatan_ttd'] ?? ''));
+    $defKota   = !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($rSet['KOTA_TTD'] ?? ($latestAju['kota_ttd'] ?? ''));
 
     // Nomor AJU 26 Digit: A (4) + BC (2) + B (6) + YYYYMMDD (8) + SEQ (6)
     $nomorAju = sprintf('%04s%02s%06s%08s%06d', $a, $cleanBc2, $b, $ymd, $nextSeq);
@@ -7360,9 +7475,15 @@ $isEditMode = !empty($selectedAjuParam);
 
                 <!-- SECTION NILAI BAWAAN HEADER -->
                 <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:10px; margin-bottom:12px;">
-                    <div style="font-size:10px; font-weight:700; color:var(--primary); margin-bottom:8px; display:flex; align-items:center; gap:6px;">
-                        <span>📋 NILAI BAWAAN HEADER (INIT OTOMATIS SAAT BUAT DOKUMEN BARU)</span>
+                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                        <span style="font-size:10px; font-weight:700; color:var(--primary); display:flex; align-items:center; gap:4px;">
+                            📋 NILAI BAWAAN HEADER (INIT OTOMATIS SAAT BUAT DOKUMEN BARU)
+                        </span>
+                        <button type="button" class="btn btn-outline-primary btn-xs" onclick="pullDefaultsFromLatestAju()" style="padding:2px 8px; font-size:10px; font-weight:600; cursor:pointer;" title="Tarik otomatis nilai dari dokumen AJU terakhir untuk jenis dokumen BC ini">
+                            ⚡ Tarik dari AJU Terakhir
+                        </button>
                     </div>
+                    <div id="cfgLatestAjuBadge" style="display:none; font-size:9.5px; background:rgba(24,144,255,0.08); border:1px solid rgba(24,144,255,0.25); border-left:3px solid var(--primary); padding:5px 8px; border-radius:4px; margin-bottom:10px; color:var(--text); line-height:1.4;"></div>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
                         <div>
@@ -8661,10 +8782,70 @@ $isEditMode = !empty($selectedAjuParam);
                         document.getElementById('cfgKodeValuta').value = d.kode_valuta || 'USD';
                     }
 
+                    // Info badge AJU terakhir
+                    const badge = document.getElementById('cfgLatestAjuBadge');
+                    if (badge) {
+                        if (d.latest_aju && d.latest_aju.found) {
+                            badge.style.display = 'block';
+                            badge.innerHTML = `<strong>⚡ Terisi Otomatis dari AJU Terakhir:</strong> <span style="font-family:monospace; font-weight:700;">${d.latest_aju.nomor_aju}</span> (Dokumen BC ${d.latest_aju.kode_dokumen || bc}) &bull; Kantor: <b>${d.latest_aju.kode_kantor || '-'}</b> &bull; Valuta: <b>${d.latest_aju.kode_valuta || '-'}</b> &bull; TTD: <b>${d.latest_aju.nama_ttd || '-'}</b>`;
+                        } else {
+                            badge.style.display = 'none';
+                            badge.innerHTML = '';
+                        }
+                    }
+
                     updateConfigAjuPreview();
                 }
             } catch(e) {
                 console.warn('Gagal memuat konfigurasi AJU:', e);
+            }
+        }
+
+        async function pullDefaultsFromLatestAju() {
+            const selBc = document.getElementById('cfgBc');
+            const bc = selBc ? selBc.value : '23';
+            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+
+            try {
+                const res = await fetch(`editor.php?action=get_latest_aju_defaults&bc=${encodeURIComponent(bc)}&cmp_id=${encodeURIComponent(cmpId)}`);
+                const json = await res.json();
+                if (json.status === 'OK' && json.data) {
+                    const d = json.data;
+                    if (d.kode_kantor) document.getElementById('cfgKodeKantor').value = d.kode_kantor;
+                    if (d.kode_jenis_tpb) populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', d.kode_jenis_tpb);
+                    if (d.kode_tujuan_pengiriman) populateConfigReffSelect('cfgKodeTujuanPengiriman', 'TUJUAN PENGIRIMAN', d.kode_tujuan_pengiriman);
+                    if (d.kode_tujuan_pemasukan) populateConfigReffSelect('cfgKodeTujuanPemasukan', 'TUJUAN PEMASUKAN', d.kode_tujuan_pemasukan);
+                    if (d.kode_tujuan_pengeluaran) populateConfigReffSelect('cfgKodeTujuanPengeluaran', 'TUJUAN PENGELUARAN', d.kode_tujuan_pengeluaran);
+                    if (d.kode_valuta && document.getElementById('cfgKodeValuta')) {
+                        document.getElementById('cfgKodeValuta').value = d.kode_valuta;
+                    }
+                    if (d.nama_ttd) document.getElementById('cfgNamaTtd').value = d.nama_ttd;
+                    if (d.jabatan_ttd) document.getElementById('cfgJabatanTtd').value = d.jabatan_ttd;
+                    if (d.kota_ttd) document.getElementById('cfgKotaTtd').value = d.kota_ttd;
+
+                    // Update A, B, Sequence jika tersedia
+                    if (d.a) document.getElementById('cfgA').value = d.a;
+                    if (d.b) document.getElementById('cfgB').value = d.b;
+                    if (d.seq) document.getElementById('cfgAju').value = d.seq;
+
+                    updateConfigAjuPreview();
+
+                    const badge = document.getElementById('cfgLatestAjuBadge');
+                    if (badge) {
+                        badge.style.display = 'block';
+                        badge.innerHTML = `<strong>⚡ Menggunakan Nilai AJU Terakhir:</strong> <span style="font-family:monospace; font-weight:700;">${d.nomor_aju}</span> (Dokumen BC ${d.kode_dokumen || bc}) &bull; Kantor: <b>${d.kode_kantor || '-'}</b> &bull; Valuta: <b>${d.kode_valuta || '-'}</b> &bull; TTD: <b>${d.nama_ttd || '-'}</b>`;
+                    }
+
+                    if (typeof showToast === 'function') {
+                        showToast(`✓ Nilai berhasil ditarik dari AJU ${d.nomor_aju}!`);
+                    } else {
+                        alert(`✓ Nilai berhasil ditarik dari AJU ${d.nomor_aju}!`);
+                    }
+                } else {
+                    alert(json.message || `Tidak ditemukan dokumen AJU sebelumnya untuk BC ${bc}.`);
+                }
+            } catch(e) {
+                alert('Gagal menarik nilai bawaan dari AJU terakhir: ' + e.message);
             }
         }
 
@@ -8773,10 +8954,11 @@ $isEditMode = !empty($selectedAjuParam);
                         }
                     });
 
+                    const srcInfo = d.source_nomor_aju ? ` (sumber AJU: ${d.source_nomor_aju})` : '';
                     if (typeof showToast === 'function') {
-                        showToast(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                        showToast(`✓ Berhasil menerapkan ${applied} nilai bawaan header${srcInfo}!`);
                     } else {
-                        alert(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                        alert(`✓ Berhasil menerapkan ${applied} nilai bawaan header${srcInfo}!`);
                     }
                 } else {
                     alert('Nilai bawaan belum dikonfigurasi untuk jenis dokumen ini. Silakan atur pada menu "⚙️ Konfig AJU".');

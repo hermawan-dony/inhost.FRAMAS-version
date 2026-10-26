@@ -8192,6 +8192,30 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
    - Menjalankan builder JSON untuk nomor AJU `05104001824420261023000001` (BC 4.0 Bohler):
      `SUCCESS: JSON successfully generated! Length: 1879 bytes | Dokumen BC: 40`.
 
+---
+
+## 📌 49. PENARIKAN OTOMATIS NILAI BAWAAN HEADER DARI DOKUMEN AJU TERAKHIR (26 OKTOBER 2026)
+
+### A. Permintaan Pengguna
+* Pada modal **⚙️ Konfigurasi Format AJU & Nilai Bawaan Header** (`#modalConfigAju`), pengguna menginginkan agar nilai bawaan (Kode Kantor, Jenis TPB, Tujuan Pengiriman, Tujuan Pemasukan/Pengeluaran, Valuta, Nama TTD, Jabatan TTD, Kota TTD) dapat ditarik secara otomatis dari dokumen AJU terakhir yang memiliki kode dokumen BC sama untuk perusahaan yang sedang aktif.
+* Menyediakan tombol interaktif `[ ⚡ Tarik dari AJU Terakhir ]` di dalam modal untuk memperbarui/menarik nilai bawaan secara instan kapan saja.
+
+### B. Implementasi Teknis & Arsitektur
+1. **Helper Backend (`getLatestAjuHeaderDefaults`) di [`editor.php`](editor.php)**:
+   - Mencari dokumen AJU terakhir di `bc_ceisa_header` berdasarkan `cmp_id` dan `kode_dokumen` yang sesuai (mendukung pencarian exact match, kode 2 digit berpadded, maupun prefix/suffix).
+   - Mengambil data referensi: `nomor_aju`, `kode_kantor`, `kode_jenis_tpb`, `kode_tujuan_pengiriman`, `kode_tujuan_pemasukan`, `kode_tujuan_pengeluaran`, `kode_valuta`, `nama_ttd` (`nama_pernyataan`), `jabatan_ttd` (`jabatan_pernyataan`), `kota_ttd` (`kota_pernyataan`), serta membedah 26 digit AJU untuk mendapatkan kode kantor `a`, kode unik `b`, dan nomor urut `seq`.
+2. **Endpoint Backend API**:
+   - `action=get_config_aju`: Otomatis mem-backfill nilai yang kosong di `bc_ceisa_setaju` dengan nilai dari AJU terakhir, serta menyertakan objek `latest_aju` ke payload respons JSON.
+   - `action=get_latest_aju_defaults`: Endpoint AJAX khusus untuk tombol `[ ⚡ Tarik dari AJU Terakhir ]`.
+   - `action=get_header_defaults`: Menyediakan fallback cerdas ke AJU terakhir ketika pengguna mengeklik "⚡ Terapkan Nilai Bawaan" pada header dokumen atau saat membuat dokumen baru.
+   - `action=create_new_aju`: Menggunakan fallback AJU terakhir apabila profil `bc_ceisa_setaju` belum terisi lengkap.
+3. **Penyempurnaan Antarmuka (UI & JavaScript)**:
+   - Menambahkan tombol `⚡ Tarik dari AJU Terakhir` dan kotak status `#cfgLatestAjuBadge` di `#modalConfigAju`.
+   - Menampilkan badge visual informasi AJU sumber lengkap dengan nomor AJU, kantor, valuta, dan penandatangan.
+   - Fungsi JS `pullDefaultsFromLatestAju()` mengisi otomatis dropdown/input dan memperbarui live preview nomor AJU 26 digit.
+   - Notifikasi toast diperkaya dengan informasi nomor AJU sumber referensi.
+
+
 
 
 
