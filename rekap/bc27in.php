@@ -48,6 +48,11 @@ $cleanNamaPrs = $koneksi->real_escape_string($namaperusahaan ?? 'FRAMAS');
 $cleanCmpId   = $koneksi->real_escape_string($cmp_id ?? '');
 $whereCmp     = ""; // bc_ceisa_data bersifat shared lintas plant
 
+// Range tanggal bulan ini agar MySQL memanfaatkan B-Tree index pada tanggalDaftar
+$tglAwal = $tahun_bulan . '-01 00:00:00';
+$tglAkhir = date('Y-m-t 23:59:59', strtotime($tglAwal));
+$whereTgl = "AND a.tanggalDaftar >= '$tglAwal' AND a.tanggalDaftar <= '$tglAkhir'";
+
 $sql = "
 SELECT 
     DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d') as tanggalDaftar,  
@@ -62,13 +67,13 @@ SELECT
     a.nomorRespon, 
     a.asalData,
     a.pdf,
-    (SELECT count(1) FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju) AS sudah_tarik,
+    (CASE WHEN EXISTS(SELECT 1 FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju) THEN 1 ELSE 0 END) AS sudah_tarik,
     (SELECT count(1) FROM bc_ceisa_get_barang b WHERE b.nomor_aju = a.nomorAju) AS item_count,
-    (SELECT count(1) FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A') AS sudah_masuk_it
+    (CASE WHEN EXISTS(SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A') THEN 1 ELSE 0 END) AS sudah_masuk_it
 FROM bc_ceisa_data a
 WHERE a.kodeDokumen = '27'
   AND (NOT a.namaPerusahaan LIKE '%$cleanNamaPrs%')
-  AND DATE_FORMAT(a.tanggalDaftar, '%Y-%m') = '" . $koneksi->real_escape_string($tahun_bulan) . "'
+  $whereTgl
   $whereCmp
 ";
 
@@ -77,15 +82,15 @@ if (!empty($aju_filter)) {
 }
 
 if ($tarik_filter === '0') {
-    $sql .= " AND (SELECT count(1) FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju) = 0";
+    $sql .= " AND NOT EXISTS (SELECT 1 FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju)";
 } elseif ($tarik_filter === '1') {
-    $sql .= " AND (SELECT count(1) FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju) > 0";
+    $sql .= " AND EXISTS (SELECT 1 FROM bc_ceisa_get_data x WHERE x.nomor_aju = a.nomorAju)";
 }
 
 if ($it_filter === '0') {
-    $sql .= " AND (SELECT count(1) FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A') = 0";
+    $sql .= " AND NOT EXISTS (SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A')";
 } elseif ($it_filter === '1') {
-    $sql .= " AND (SELECT count(1) FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A') > 0";
+    $sql .= " AND EXISTS (SELECT 1 FROM bc_1ab2 it WHERE it.NOMOR_AJU = a.nomorAju AND it.AB = 'A')";
 }
 
 $sql .= " ORDER BY a.tanggalDaftar DESC, a.nomorAju DESC";

@@ -313,14 +313,14 @@ $sqlDelete = "DELETE FROM bc_ceisa_data WHERE nomorAju = ?";
 $stmtDelete = $koneksi->prepare($sqlDelete);
 
 $sqlInsertData = "INSERT INTO bc_ceisa_data (
-    idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
+    cmp_id, idHeader, nomorAju, nomorDaftar, tanggalDaftar, kodeDokumen, namaDokumen, 
     kodeKantor, namaKantorPendek, namaEntitas, kodeProses, kodeEntitas, namaProses, 
     idPerusahaan, namaPerusahaan, idPpjk, nipPfpd, nipPfpb, nipAp, kodeJalur, 
     flagHardcopy, flagHardcopySka, waktuTerimaHardcopy, jatuhtempoHardcopy, namaPpjk, 
     nomorBc11, totalCount, tanggalBc11, subposBc11, posBc11, kodeProsesPerbaikan, 
     namaProsesPerbaikan, flagSsm, idKepTujuan, nomorSkep, idRespon, namaRespon, 
     nomorRespon, tanggalRespon, pdf, asalData, statusPkb
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 $stmtInsertData = $koneksi->prepare($sqlInsertData);
 
 // Update nomor & tanggal daftar ke bc_ceisa_header jika tersedia
@@ -463,9 +463,11 @@ try {
             $asalDataVal   = (string)($row['asalData'] ?? '');
             $statusPkbVal  = (string)($row['statusPkb'] ?? '');
 
+            $targetCmpId   = !empty($core15) ? $core15 : (preg_replace('/[^0-9]/', '', $idPrshVal) ?: $cmpId);
+
             $stmtInsertData->bind_param(
-                "sssssssssssssssssssssssssisssssssssssssss",
-                $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
+                "ssssssssssssssssssssssssssisssssssssssssss",
+                $targetCmpId, $idHeaderVal, $nomorAju, $noDaftarVal, $tanggalDaftar, $kdDokVal, $nmDokVal,
                 $kdKantorVal, $nmKantorVal, $nmEntitasVal, $kdProsesVal, $kdEntitasVal, $nmProsesVal,
                 $idPrshVal, $nmPrshVal, $idPpjkVal, $nipPfpdVal, $nipPfpbVal, $nipApVal, $kdJalurVal,
                 $flgHrdVal, $flgSkaVal, $wktHrdVal, $jthHrdVal, $nmPpjkVal,

@@ -135,6 +135,7 @@ $klas_filter = trim($_GET['klas'] ?? '');
 if (empty($klas_filter) || $klas_filter === '%') {
     $klas_filter = 'Raw Materials';
 }
+$limit = isset($_GET['limit']) ? max(50, min(10000, (int)$_GET['limit'])) : 1000;
 
 // Helper Format Angka
 function fnum($val, $dec = 2) {
@@ -236,7 +237,7 @@ if ($activeTab === 'home') {
                 $types .= "sssss";
             }
         }
-        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT 1000";
+        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT $limit";
 
         $stmt = $koneksi->prepare($sql);
         if ($stmt) {
@@ -310,7 +311,7 @@ if ($activeTab === 'home') {
                 $types .= "ssss";
             }
         }
-        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT 1000";
+        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT $limit";
 
         if (!empty($params)) {
             $stmt = $koneksi->prepare($sql);
@@ -388,7 +389,7 @@ if ($activeTab === 'home') {
                 $types .= "sssss";
             }
         }
-        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT 1000";
+        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT $limit";
 
         $stmt = $koneksi->prepare($sql);
         if ($stmt) {
@@ -462,7 +463,7 @@ if ($activeTab === 'home') {
                 $types .= "ssss";
             }
         }
-        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT 1000";
+        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT $limit";
 
         if (!empty($params)) {
             $stmt = $koneksi->prepare($sql);
@@ -561,15 +562,11 @@ if ($activeTab === 'home') {
         $klasSql = "KLAS = '$escKlas'";
     }
 
-    $sql1d = "SELECT NI.*, (AWAL + MASUK - KELUAR) AKHIR, 
-              coalesce((SELECT sum(CASE WHEN ab = 'A' THEN qty ELSE qty * -1 END) FROM bc_1ab2 X 
-               WHERE tanggal_daftar BETWEEN ? AND ? AND bc = 'SPP' AND X.kode_barang = NI.KODE_BARANG AND X.UNIT = KODE_SATUAN$cmpFilter), 0) ADJ,
-              coalesce((SELECT SUM(AKTUAL) FROM bc_so X 
-               WHERE TGL_SO = ? AND TIPE = 'SO' AND X.kode_barang = NI.KODE_BARANG AND X.unit = KODE_SATUAN$cmpFilter), 0) SO,
-              ((AWAL + MASUK - KELUAR) - 
-               coalesce((SELECT SUM(AKTUAL) FROM bc_so X WHERE TGL_SO = ? AND TIPE = 'SO' AND X.kode_barang = NI.KODE_BARANG AND X.unit = KODE_SATUAN$cmpFilter), 0) -
-               coalesce((SELECT sum(CASE WHEN ab = 'A' THEN qty ELSE qty * -1 END) FROM bc_1ab2 X WHERE tanggal_daftar BETWEEN ? AND ? AND bc = 'SPP' AND X.kode_barang = NI.KODE_BARANG AND X.UNIT = KODE_SATUAN$cmpFilter), 0)
-              ) SELISIH
+    $sql1d = "SELECT NI.*, 
+              (AWAL + MASUK - KELUAR) AS AKHIR,
+              coalesce(ADJ_TBL.ADJ, 0) AS ADJ,
+              coalesce(SO_TBL.SO, 0) AS SO,
+              ((AWAL + MASUK - KELUAR) - coalesce(SO_TBL.SO, 0) - coalesce(ADJ_TBL.ADJ, 0)) AS SELISIH
               FROM (
                   SELECT MASTER.KODE_BARANG, MASTER.URAIAN, MODEL, MASTER.KODE_SATUAN, 
                          coalesce(AWAL.STOK,0) AWAL, coalesce(MASUK.STOK,0) MASUK, coalesce(KELUAR.STOK,0) KELUAR 
@@ -595,10 +592,22 @@ if ($activeTab === 'home') {
                       WHERE ab = 'B' AND $klasSql AND tgl_proses BETWEEN ? AND ?$cmpFilter
                       GROUP BY kode_barang, unit
                   ) KELUAR ON (MASTER.KODE_BARANG, MASTER.KODE_SATUAN) = (KELUAR.KODE_BARANG, KELUAR.unit)
-              ) NI ";
+              ) NI 
+              LEFT JOIN (
+                  SELECT X.kode_barang, X.UNIT, sum(CASE WHEN X.ab = 'A' THEN X.qty ELSE X.qty * -1 END) AS ADJ
+                  FROM bc_1ab2 X 
+                  WHERE X.tanggal_daftar BETWEEN ? AND ? AND X.bc = 'SPP'$cmpFilter
+                  GROUP BY X.kode_barang, X.UNIT
+              ) ADJ_TBL ON NI.KODE_BARANG = ADJ_TBL.kode_barang AND NI.KODE_SATUAN = ADJ_TBL.UNIT
+              LEFT JOIN (
+                  SELECT X.kode_barang, X.unit, SUM(X.AKTUAL) AS SO
+                  FROM bc_so X 
+                  WHERE X.TGL_SO = ? AND X.TIPE = 'SO'$cmpFilter
+                  GROUP BY X.kode_barang, X.unit
+              ) SO_TBL ON NI.KODE_BARANG = SO_TBL.kode_barang AND NI.KODE_SATUAN = SO_TBL.unit ";
 
-    $params = [$tgl1, $tgl2, $tgl2, $tgl2, $tgl1, $tgl2, $tgl1, $tgl1, $tgl1, $tgl2, $tgl1, $tgl2];
-    $types = "ssssssssssss";
+    $params = [$tgl1, $tgl1, $tgl1, $tgl2, $tgl1, $tgl2, $tgl1, $tgl2, $tgl2];
+    $types = "sssssssss";
 
     if (!empty($search_kw)) {
         $sql1d .= " WHERE (NI.KODE_BARANG LIKE ? OR NI.URAIAN LIKE ? OR NI.MODEL LIKE ?) ";
@@ -646,7 +655,7 @@ if ($activeTab === 'home') {
         $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
         $types .= "ssss";
     }
-    $sqlLog .= " ORDER BY r.ROWID DESC LIMIT 500";
+    $sqlLog .= " ORDER BY r.ROWID DESC LIMIT $limit";
 
     if (!empty($params)) {
         $stmt = $koneksi->prepare($sqlLog);
@@ -1509,6 +1518,17 @@ $stats['total_rows'] = count($dataRows);
         <div class="filter-col">
             <label>Kata Kunci Cari</label>
             <input type="text" name="search_kw" class="filter-control" style="width: 160px;" placeholder="Ketik kata kunci..." value="<?= htmlspecialchars($search_kw) ?>">
+        </div>
+
+        <div class="filter-col">
+            <label>Limit Data</label>
+            <select name="limit" class="filter-control" style="width: 110px;">
+                <option value="250" <?= $limit === 250 ? 'selected' : '' ?>>250 baris</option>
+                <option value="500" <?= $limit === 500 ? 'selected' : '' ?>>500 baris</option>
+                <option value="1000" <?= $limit === 1000 ? 'selected' : '' ?>>1.000 baris</option>
+                <option value="2500" <?= $limit === 2500 ? 'selected' : '' ?>>2.500 baris</option>
+                <option value="5000" <?= $limit === 5000 ? 'selected' : '' ?>>5.000 baris</option>
+            </select>
         </div>
 
         <button type="submit" class="ant-btn ant-btn-primary">

@@ -37,37 +37,40 @@ if (!empty($search)) {
     $whereSearch = "AND (a.nomorAju LIKE '%$s%' OR a.nomorDaftar LIKE '%$s%' OR a.namaPerusahaan LIKE '%$s%')";
 }
 
-// Subquery cek ke tabel bc_1ab2
+// Range tanggal bulan ini agar MySQL memanfaatkan B-Tree index pada tanggalDaftar
+$tglAwal = $tahun_bulan . '-01 00:00:00';
+$tglAkhir = date('Y-m-t 23:59:59', strtotime($tglAwal));
+$whereTgl = "AND a.tanggalDaftar >= '$tglAwal' AND a.tanggalDaftar <= '$tglAkhir'";
+
+// Optimasi: Eliminasi double-subquery dan manfaatkan composite index (NOMOR_AJU, AB)
 $sql = "
-SELECT * FROM (
-    SELECT dd.*,
-           CASE WHEN ifnull(ab2_cnt, 0) > 0 THEN 'OK' ELSE '-' END AS cek
-    FROM (
-        SELECT 
-            a.namaDokumen, 
-            a.kodeDokumen, 
-            a.nomorDaftar, 
-            DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d') as tanggalDaftar, 
-            a.nomorAju, 
-            a.namaPerusahaan, 
-            a.namaProses, 
-            a.namaRespon, 
-            a.pdf,
-            (SELECT count(1) FROM bc_1ab2 x WHERE x.NOMOR_AJU = a.nomorAju) as ab2_cnt,
-            (SELECT max(AB) FROM bc_1ab2 x WHERE x.NOMOR_AJU = a.nomorAju) as ab2_type
-        FROM bc_ceisa_data a
-        WHERE DATE_FORMAT(a.tanggalDaftar, '%Y-%m') = '" . $koneksi->real_escape_string($tahun_bulan) . "'
-          $whereDoc
-          $whereCmp
-          $whereSearch
-    ) dd
-) final_tabel WHERE 1=1
+SELECT dd.*,
+       CASE WHEN ab2_type IS NOT NULL THEN 'OK' ELSE '-' END AS cek
+FROM (
+    SELECT 
+        a.namaDokumen, 
+        a.kodeDokumen, 
+        a.nomorDaftar, 
+        DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d') as tanggalDaftar, 
+        a.nomorAju, 
+        a.namaPerusahaan, 
+        a.namaProses, 
+        a.namaRespon, 
+        a.pdf,
+        (SELECT max(x.AB) FROM bc_1ab2 x WHERE x.NOMOR_AJU = a.nomorAju) as ab2_type
+    FROM bc_ceisa_data a
+    WHERE 1=1
+      $whereTgl
+      $whereDoc
+      $whereCmp
+      $whereSearch
+) dd WHERE 1=1
 ";
 
 if ($cek_filter === 'OK') {
-    $sql .= " AND cek = 'OK'";
+    $sql .= " AND ab2_type IS NOT NULL";
 } elseif ($cek_filter === '-') {
-    $sql .= " AND cek = '-'";
+    $sql .= " AND ab2_type IS NULL";
 }
 $sql .= " ORDER BY tanggalDaftar DESC, nomorAju DESC";
 

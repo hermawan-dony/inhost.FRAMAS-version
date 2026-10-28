@@ -132,6 +132,18 @@ class CeisaJsonBuilder
         WHERE nomor_aju = ?");
         if ($cleanStmt5) { $cleanStmt5->bind_param("s", $nomor_aju); $cleanStmt5->execute(); $cleanStmt5->close(); }
 
+        // Normalisasi entitas: Jika NPWP 15 digit, ubah jadi 16 digit (diawali '0') dan set kode_jenis_identitas = '6'
+        $cleanEntNpwp = $koneksi->prepare("UPDATE bc_ceisa_entitas SET 
+            nomor_identitas = CONCAT('0', nomor_identitas),
+            kode_jenis_identitas = '6'
+        WHERE nomor_aju = ? AND (kode_jenis_identitas = '5' OR kode_jenis_identitas = '' OR kode_jenis_identitas IS NULL) AND CHAR_LENGTH(nomor_identitas) = 15 AND nomor_identitas REGEXP '^[0-9]+$'");
+        if ($cleanEntNpwp) { $cleanEntNpwp->bind_param("s", $nomor_aju); $cleanEntNpwp->execute(); $cleanEntNpwp->close(); }
+
+        $cleanEntNpwp16 = $koneksi->prepare("UPDATE bc_ceisa_entitas SET 
+            kode_jenis_identitas = '6'
+        WHERE nomor_aju = ? AND (kode_jenis_identitas = '5' OR kode_jenis_identitas = '' OR kode_jenis_identitas IS NULL) AND CHAR_LENGTH(nomor_identitas) = 16 AND nomor_identitas REGEXP '^[0-9]+$'");
+        if ($cleanEntNpwp16) { $cleanEntNpwp16->bind_param("s", $nomor_aju); $cleanEntNpwp16->execute(); $cleanEntNpwp16->close(); }
+
         // Normalisasi format tanggal MM-DD-YYYY di tabel bc_ceisa_entitas ke YYYY-MM-DD
         $cleanDate = $koneksi->prepare("UPDATE bc_ceisa_entitas SET tanggal_ijin_entitas = STR_TO_DATE(SUBSTRING(tanggal_ijin_entitas, 1, 10), '%m-%d-%Y') WHERE nomor_aju = ? AND tanggal_ijin_entitas IS NOT NULL AND tanggal_ijin_entitas LIKE '__-__-____%'");
         if ($cleanDate) { $cleanDate->bind_param("s", $nomor_aju); $cleanDate->execute(); $cleanDate->close(); }
@@ -144,8 +156,16 @@ class CeisaJsonBuilder
         $cleanStatus = $koneksi->prepare("UPDATE bc_ceisa_entitas SET kode_status = '1' WHERE nomor_aju = ? AND kode_entitas IN ('3', '7') AND (kode_status IS NULL OR TRIM(kode_status) = '' OR TRIM(kode_status) NOT IN ('0','1','2','3','4','5','6','7','8','9','10'))");
         if ($cleanStatus) { $cleanStatus->bind_param("s", $nomor_aju); $cleanStatus->execute(); $cleanStatus->close(); }
 
+        // Normalisasi kode_jenis_api pada entitas 1 (Importir), 2 (Eksportir), 3 (Pengusaha TPB), 7 (Pemilik), 8 (Penerima), 9 (Pengirim) jika kosong/invalid
+        $cleanApi = $koneksi->prepare("UPDATE bc_ceisa_entitas SET kode_jenis_api = '02' WHERE nomor_aju = ? AND (kode_entitas IN ('1', '2', '3', '7', '8', '9') OR ? IN ('40', '41')) AND (kode_jenis_api IS NULL OR TRIM(kode_jenis_api) = '' OR TRIM(kode_jenis_api) NOT IN ('01', '02'))");
+        if ($cleanApi) { $cleanApi->bind_param("ss", $nomor_aju, $kode_dokumen); $cleanApi->execute(); $cleanApi->close(); }
+
         // Normalisasi & Perbaikan Otomatis Bahan Baku Tarif yang Tertukar Seri (misal ke seri 25)
         self::autoRepairBahanBakuTarif($koneksi, $nomor_aju);
+
+        // Normalisasi tarif_fasilitas: Pastikan bernilai 100 untuk seluruh tarif berfasilitas jika NULL atau 0
+        $cleanTarFas = $koneksi->prepare("UPDATE bc_ceisa_barangtarif SET tarif_fasilitas = 100.00 WHERE nomor_aju = ? AND (tarif_fasilitas IS NULL OR tarif_fasilitas = 0) AND kode_fasilitas IN ('2','3','4','5','6','7')");
+        if ($cleanTarFas) { $cleanTarFas->bind_param("s", $nomor_aju); $cleanTarFas->execute(); $cleanTarFas->close(); }
 
         // 4. Pastikan Ukuran Maksimum GROUP_CONCAT Cukup Besar
         $koneksi->query("SET SESSION group_concat_max_len = 100000000");
@@ -196,14 +216,107 @@ class CeisaJsonBuilder
         // Pastikan seluruh tanggal di dalam JSON bersih dan berformat YYYY-MM-DD
         self::recursiveNormalizeDates($decoded);
 
-        // Pastikan CIF Header sama persis dengan total penjumlahan CIF seluruh barang (mencegah error selisih sen di CEISA 4.0)
-        if (isset($decoded['barang']) && is_array($decoded['barang']) && count($decoded['barang']) > 0) {
-            $sumBarangCif = 0;
-            foreach ($decoded['barang'] as $b) {
-                $sumBarangCif += (float)($b['cif'] ?? 0);
+        // Sanitasi & Normalisasi Entitas: 
+        // 1. Nomor Identitas NPWP (15/16 digit) dikonversi ke format standar NITKU (22 digit)
+        // 2. Cegah error "is an invalid date [CODE:1034]" jika tanggal ijin kosong/invalid
+        if (isset($decoded['entitas']) && is_array($decoded['entitas'])) {
+            foreach ($decoded['entitas'] as &$ent) {
+                // Normalisasi NITKU 22 Digit untuk nomor identitas
+                if (isset($ent['nomorIdentitas'])) {
+                    $rawId = preg_replace('/[^0-9]/', '', (string)$ent['nomorIdentitas']);
+                    if (strlen($rawId) === 15) {
+                        $ent['nomorIdentitas'] = '0' . $rawId . '000000';
+                        $ent['kodeJenisIdentitas'] = '6';
+                    } elseif (strlen($rawId) === 16) {
+                        $ent['nomorIdentitas'] = $rawId . '000000';
+                        $ent['kodeJenisIdentitas'] = '6';
+                    } elseif (strlen($rawId) === 22) {
+                        $ent['nomorIdentitas'] = $rawId;
+                        $ent['kodeJenisIdentitas'] = '6';
+                    }
+                }
+
+                if (isset($ent['tanggalIjinEntitas'])) {
+                    $tglIjin = trim((string)$ent['tanggalIjinEntitas']);
+                    if ($tglIjin === '' || $tglIjin === '0000-00-00' || strtolower($tglIjin) === 'null' || $tglIjin === '-') {
+                        unset($ent['tanggalIjinEntitas']);
+                    } else {
+                        $normTgl = self::normalizeDateStr($tglIjin);
+                        if (empty($normTgl) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $normTgl)) {
+                            unset($ent['tanggalIjinEntitas']);
+                        } else {
+                            $ent['tanggalIjinEntitas'] = $normTgl;
+                        }
+                    }
+                }
+                if (isset($ent['nomorIjinEntitas'])) {
+                    $noIjin = trim((string)$ent['nomorIjinEntitas']);
+                    if ($noIjin === '' || $noIjin === '-') {
+                        unset($ent['nomorIjinEntitas']);
+                        unset($ent['tanggalIjinEntitas']);
+                    }
+                }
+                // Normalisasi & Proteksi kodeJenisApi: CEISA 4.0 hanya menerima enum ['01', '02'].
+                // Untuk entitas utama (1=Importir, 2=Eksportir, 3=Pengusaha TPB, 7=Pemilik Barang, 8=Penerima, 9=Pengirim)
+                // serta seluruh entitas pada dokumen lokal (BC 40, BC 41): WAJIB ada di schema JSON CEISA 4.0.
+                // Jika kosong/invalid, default ke '02' (API-P) agar tidak memicu error CODE:1028 (missing required field) maupun CODE:1008 (enum violation).
+                // Hanya entitas non-pemegang API (seperti 4=PPJK, 5=Pemasok LN, 6=Pengangkut, 10=Penjual LN, 11=Pembeli LN, 12=Penerima LN) yang dihapus agar tidak memicu CODE:1008.
+                $kdEnt = (string)($ent['kodeEntitas'] ?? '');
+                $api = trim((string)($ent['kodeJenisApi'] ?? ''));
+                if ($api === '1') $api = '01';
+                if ($api === '2') $api = '02';
+                if (in_array($api, ['01', '02'], true)) {
+                    $ent['kodeJenisApi'] = $api;
+                } elseif (in_array($kdEnt, ['1', '2', '3', '7', '8', '9'], true) || in_array($kode_dokumen, ['40', '41'], true)) {
+                    $ent['kodeJenisApi'] = '02';
+                } else {
+                    unset($ent['kodeJenisApi']);
+                }
             }
-            if (isset($decoded['cif'])) {
-                $decoded['cif'] = round($sumBarangCif, 2);
+            unset($ent);
+        }
+
+        // Normalisasi Dokumen Lampiran:
+        // Khusus BC 3.0 (PEB), CEISA 4.0 memvalidasi secara ketat skema Dokumen:
+        // Dokumen #1 WAJIB berkode '380' (Invoice), Dokumen #2 WAJIB berkode '217' (Packing List).
+        if (isset($decoded['dokumen']) && is_array($decoded['dokumen']) && count($decoded['dokumen']) > 0) {
+            if ($kode_dokumen === '30') {
+                usort($decoded['dokumen'], function ($a, $b) {
+                    $orderA = ($a['kodeDokumen'] === '380') ? 1 : (($a['kodeDokumen'] === '217') ? 2 : 3);
+                    $orderB = ($b['kodeDokumen'] === '380') ? 1 : (($b['kodeDokumen'] === '217') ? 2 : 3);
+                    if ($orderA !== $orderB) {
+                        return $orderA <=> $orderB;
+                    }
+                    return intval($a['seriDokumen'] ?? 0) <=> intval($b['seriDokumen'] ?? 0);
+                });
+            }
+            $seriDocCounter = 1;
+            foreach ($decoded['dokumen'] as &$doc) {
+                $doc['seriDokumen'] = $seriDocCounter++;
+            }
+            unset($doc);
+        }
+
+        // BC 40: Aturan Resmi Bea Cukai CEISA 4.0: Nilai CIF header, CIF barang, dan CIF Rupiah barang WAJIB DIKOSONGKAN
+        if ($kode_dokumen === '40') {
+            unset($decoded['cif']);
+            if (isset($decoded['barang']) && is_array($decoded['barang'])) {
+                foreach ($decoded['barang'] as &$b) {
+                    unset($b['cif']);
+                    unset($b['cifRupiah']);
+                }
+                unset($b);
+            }
+        } else {
+            // Pastikan CIF Header sama persis dengan total penjumlahan CIF seluruh barang (mencegah error selisih sen di CEISA 4.0)
+            if (isset($decoded['barang']) && is_array($decoded['barang']) && count($decoded['barang']) > 0) {
+                $sumBarangCif = 0;
+                foreach ($decoded['barang'] as $b) {
+                    $sumBarangCif += (float)($b['cif'] ?? 0);
+                }
+                if (isset($decoded['cif'])) {
+                    $decoded['cif'] = round($sumBarangCif, 2);
+                }
             }
         }
 

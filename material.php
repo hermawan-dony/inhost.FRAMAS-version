@@ -53,11 +53,11 @@ try {
 
 // Cek data transaksi bc_1ab2 yang satuannya berbeda dari bc_material
 $cntDiffSatuan = 0;
-$cmpFilterDiffSat = !empty($sessionCmpId) ? " AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '') AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
+$cmpFilterDiffSat = !empty($sessionCmpId) ? " AND t.cmp_id = '$escSessionCmp' AND m.cmp_id = '$escSessionCmp'" : "";
 try {
     $qDiffSat = $koneksi->query("SELECT COUNT(DISTINCT m.KODE_BARANG) 
                                  FROM bc_material m
-                                 JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
+                                 JOIN bc_1ab2 t ON m.cmp_id = t.cmp_id AND m.KODE_BARANG = t.KODE_BARANG
                                  WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
                                  $cmpFilterDiffSat");
     if ($qDiffSat && $rD = $qDiffSat->fetch_row()) {
@@ -748,11 +748,11 @@ if ($action === 'move_klas') {
 // 8. AJAX: SINKRONKAN SEMUA KLAS DARI bc_material KE bc_1ab2
 if ($action === 'sync_all_klas_to_1ab2') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpFilterMat  = !empty($sessionCmpId) ? "AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
-    $cmpFilter1ab2 = !empty($sessionCmpId) ? "AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '')" : "";
+    $cmpFilterMat  = !empty($sessionCmpId) ? "AND m.cmp_id = '$escSessionCmp'" : "";
+    $cmpFilter1ab2 = !empty($sessionCmpId) ? "AND t.cmp_id = '$escSessionCmp'" : "";
 
     $sqlSync = "UPDATE bc_1ab2 t
-                JOIN bc_material m ON t.KODE_BARANG = m.KODE_BARANG AND (t.cmp_id = m.cmp_id OR t.cmp_id = '' OR m.cmp_id = '')
+                JOIN bc_material m ON t.cmp_id = m.cmp_id AND t.KODE_BARANG = m.KODE_BARANG
                 SET t.KLAS = m.KLAS
                 WHERE 1=1 $cmpFilterMat $cmpFilter1ab2
                   AND (t.KLAS != m.KLAS OR t.KLAS IS NULL OR TRIM(t.KLAS) = '' OR TRIM(t.KLAS) = '-')";
@@ -1019,9 +1019,9 @@ if ($action === 'merge_kode') {
 if ($action === 'get_diff_satuan_report') {
     header('Content-Type: application/json; charset=utf-8');
 
-    $cmpFilterMat   = !empty($sessionCmpId) ? "AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
-    $cmpFilter1ab2  = !empty($sessionCmpId) ? "AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '')" : "";
-    $cmpFilterSo    = !empty($sessionCmpId) ? "AND (s.cmp_id = '$escSessionCmp' OR s.cmp_id = '')" : "";
+    $cmpFilterMat   = !empty($sessionCmpId) ? "AND m.cmp_id = '$escSessionCmp'" : "";
+    $cmpFilter1ab2  = !empty($sessionCmpId) ? "AND t.cmp_id = '$escSessionCmp'" : "";
+    $cmpFilterSo    = !empty($sessionCmpId) ? "AND s.cmp_id = '$escSessionCmp'" : "";
 
     $report = [];
     $totalTrans1ab2 = 0;
@@ -1035,7 +1035,7 @@ if ($action === 'get_diff_satuan_report') {
         'bc_1ab2' AS TABEL,
         COUNT(1) AS JML_TRANSAKSI
     FROM bc_material m
-    JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
+    JOIN bc_1ab2 t ON m.cmp_id = t.cmp_id AND m.KODE_BARANG = t.KODE_BARANG
     WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
       AND m.KODE_SATUAN IS NOT NULL AND TRIM(m.KODE_SATUAN) != '' AND TRIM(m.KODE_SATUAN) != '-'
     $cmpFilterMat $cmpFilter1ab2
@@ -1084,7 +1084,7 @@ if ($action === 'get_diff_satuan_report') {
         'bc_so' AS TABEL,
         COUNT(1) AS JML_TRANSAKSI
     FROM bc_material m
-    JOIN bc_so s ON m.KODE_BARANG = s.kode_barang AND (m.cmp_id = s.cmp_id OR m.cmp_id = '' OR s.cmp_id = '')
+    JOIN bc_so s ON m.cmp_id = s.cmp_id AND m.KODE_BARANG = s.kode_barang
     WHERE (s.unit != m.KODE_SATUAN OR s.unit IS NULL OR TRIM(s.unit) = '' OR TRIM(s.unit) = '-')
       AND m.KODE_SATUAN IS NOT NULL AND TRIM(m.KODE_SATUAN) != '' AND TRIM(m.KODE_SATUAN) != '-'
     $cmpFilterMat $cmpFilterSo
@@ -1168,7 +1168,7 @@ if ($action === 'sync_satuan') {
 
         // 1. UPDATE bc_1ab2 (IT Inventory)
         $q1 = $koneksi->query("UPDATE bc_1ab2 a
-                               JOIN bc_material b ON a.KODE_BARANG = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
+                               JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.KODE_BARANG = b.KODE_BARANG
                                SET a.UNIT = b.KODE_SATUAN
                                WHERE (a.UNIT != b.KODE_SATUAN OR a.UNIT IS NULL OR TRIM(a.UNIT) = '' OR TRIM(a.UNIT) = '-')
                                  AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1177,7 +1177,7 @@ if ($action === 'sync_satuan') {
 
         // 2. UPDATE bc_1ab2_revisi (Revisi IT Inventory)
         $q1Rev = $koneksi->query("UPDATE bc_1ab2_revisi a
-                                  JOIN bc_material b ON a.KODE_BARANG = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
+                                  JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.KODE_BARANG = b.KODE_BARANG
                                   SET a.UNIT = b.KODE_SATUAN
                                   WHERE (a.UNIT != b.KODE_SATUAN OR a.UNIT IS NULL OR TRIM(a.UNIT) = '' OR TRIM(a.UNIT) = '-')
                                     AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1195,7 +1195,7 @@ if ($action === 'sync_satuan') {
 
         // 4. UPDATE bc_so0 (Saldo Awal Stock Opname)
         $qSo0 = $koneksi->query("UPDATE bc_so0 a
-                                 JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
+                                 JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_barang = b.KODE_BARANG
                                  SET a.unit = b.KODE_SATUAN
                                  WHERE (a.unit != b.KODE_SATUAN OR a.unit IS NULL OR TRIM(a.unit) = '' OR TRIM(a.unit) = '-')
                                    AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1204,7 +1204,7 @@ if ($action === 'sync_satuan') {
 
         // 5. UPDATE bc_so (Stock Opname)
         $qSo = $koneksi->query("UPDATE bc_so a
-                                JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
+                                JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_barang = b.KODE_BARANG
                                 SET a.unit = b.KODE_SATUAN
                                 WHERE (a.unit != b.KODE_SATUAN OR a.unit IS NULL OR TRIM(a.unit) = '' OR TRIM(a.unit) = '-')
                                   AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1213,7 +1213,7 @@ if ($action === 'sync_satuan') {
 
         // 6. UPDATE bc_ceisa_tracebb (Traceability Bahan Baku)
         $qTr = $koneksi->query("UPDATE bc_ceisa_tracebb a
-                                JOIN bc_material b ON a.kode_brg = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
+                                JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_brg = b.KODE_BARANG
                                 SET a.sat = b.KODE_SATUAN
                                 WHERE (a.sat != b.KODE_SATUAN OR a.sat IS NULL OR TRIM(a.sat) = '' OR TRIM(a.sat) = '-')
                                   AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'

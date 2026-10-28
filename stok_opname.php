@@ -50,7 +50,7 @@ if ($action === 'list') {
         a.tgl_so, a.kode_barang, b.URAIAN, b.KLAS, a.unit, a.stok, a.sesuai, 
         a.aktual, a.selisih, a.note, a.set_by, a.tipe, a.no_spp
     FROM bc_so a
-    LEFT JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (b.cmp_id = a.cmp_id OR b.cmp_id = '' OR a.cmp_id = '' OR b.cmp_id IS NULL)
+    LEFT JOIN bc_material b ON b.cmp_id = a.cmp_id AND b.KODE_BARANG = a.kode_barang
     $whereSql
     ORDER BY a.tgl_so DESC, b.KLAS ASC, a.kode_barang ASC
     LIMIT 500";

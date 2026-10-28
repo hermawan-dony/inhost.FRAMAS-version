@@ -96,9 +96,9 @@ if (empty($allowedBcInbound) && empty($allowedBcOutbound)) {
     foreach ($allBcCatalog as $code => $info) {
         $codeStr = (string)$code;
         $isPermitted = !empty($_SESSION['is_super_admin']) || 
-                       in_array('*', $companyAllowedDocs) || 
-                       in_array($codeStr, $companyAllowedDocs) ||
-                       ($codeStr === '27IN' && in_array('27', $companyAllowedDocs));
+                       in_array('*', $effectiveAllowedDocs) || 
+                       in_array($codeStr, $effectiveAllowedDocs) ||
+                       ($codeStr === '27IN' && in_array('27', $effectiveAllowedDocs));
         if ($isPermitted) {
             if (($info['type'] ?? '') === 'inbound') {
                 $allowedBcInbound[$code] = $info['label'];
@@ -109,6 +109,32 @@ if (empty($allowedBcInbound) && empty($allowedBcOutbound)) {
     }
 }
 $allowedBcOptions = $allowedBcInbound + $allowedBcOutbound;
+
+// Tentukan Dokumen BC Terakhir yang dipilih User / Default (DIPISAHKAN PER USER & PER PERUSAHAAN)
+$currentUserId = trim($_SESSION['user_id'] ?? 'user');
+$cleanUserKey  = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($currentUserId));
+$cleanCmpKey   = preg_replace('/[^a-zA-Z0-9_-]/', '', $filterCmp);
+
+$uCmpKey  = 'ceisa_last_bc_' . $cleanUserKey . '_' . $cleanCmpKey;
+$uUserKey = 'ceisa_last_bc_' . $cleanUserKey;
+
+$lastSelectedBc = $_COOKIE[$uCmpKey] 
+    ?? ($_SESSION[$uCmpKey] 
+    ?? ($_COOKIE[$uUserKey] 
+    ?? ($_SESSION[$uUserKey] ?? '')));
+
+if (!empty($selectedAjuParam) && isset($koneksi) && $koneksi) {
+    $qDoc = $koneksi->query("SELECT kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '" . $koneksi->real_escape_string($selectedAjuParam) . "' LIMIT 1");
+    if ($qDoc && $rDoc = $qDoc->fetch_assoc()) {
+        $lastSelectedBc = trim($rDoc['kode_dokumen'] ?? '');
+    }
+}
+
+$firstAllowedKey = !empty($allowedBcOptions) ? (string)array_keys($allowedBcOptions)[0] : '23';
+// Pastikan dokumen yang dipilih VALID dan DI-IZINKAN untuk USER AKTIF ini
+$defaultSelectedBc = (!empty($lastSelectedBc) && isset($allowedBcOptions[$lastSelectedBc])) 
+    ? (string)$lastSelectedBc 
+    : $firstAllowedKey;
 
 $whereConditions = [];
 if (!empty($filterCmp)) {
@@ -174,75 +200,13 @@ if (isset($koneksi) && $koneksi) {
 require_once __DIR__ . '/erp/ErpManager.php';
 $action = $_REQUEST['action'] ?? '';
 
-// Helper: Tarik data nilai bawaan dari Dokumen AJU Terakhir dengan kode dokumen BC yang sama
-if (!function_exists('getLatestAjuHeaderDefaults')) {
-    function getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId = '') {
-        $bc2 = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
-        $escCmp = $koneksi->real_escape_string($cmpId);
-        $escBc  = $koneksi->real_escape_string($bcClean);
-        $escBc2 = $koneksi->real_escape_string($bc2);
-
-        $sql = "
-            SELECT nomor_aju, cmp_id, kode_dokumen, kode_kantor, kode_jenis_tpb,
-                   kode_tujuan_pengiriman, kode_tujuan_pemasukan, kode_tujuan_pengeluaran,
-                   kode_valuta, nama_pernyataan, jabatan_pernyataan, kota_pernyataan,
-                   tanggal_pernyataan
-            FROM bc_ceisa_header
-            WHERE (cmp_id = '$escCmp' OR '$escCmp' = '')
-              AND (
-                  kode_dokumen = '$escBc' 
-                  OR kode_dokumen = '$escBc2' 
-                  OR kode_dokumen LIKE '{$escBc}%' 
-                  OR kode_dokumen LIKE '%{$escBc}'
-              )
-            ORDER BY 
-              IF(cmp_id = '$escCmp', 0, 1),
-              IF(kode_dokumen = '$escBc', 0, 1),
-              nomor_aju DESC
-            LIMIT 1
-        ";
-
-        $q = $koneksi->query($sql);
-        if ($q && $r = $q->fetch_assoc()) {
-            $aju = $r['nomor_aju'];
-            $a = '';
-            $b = '';
-            $seq = 0;
-            if (strlen($aju) >= 26) {
-                $a = substr($aju, 0, 4);
-                $b = substr($aju, 6, 6);
-                $seq = intval(substr($aju, -6));
-            }
-
-            return [
-                'found'                  => true,
-                'nomor_aju'              => $aju,
-                'cmp_id'                 => $r['cmp_id'],
-                'kode_dokumen'           => $r['kode_dokumen'],
-                'kode_kantor'            => $r['kode_kantor'] ?: '',
-                'kode_jenis_tpb'         => $r['kode_jenis_tpb'] ?: '',
-                'kode_tujuan_pengiriman' => $r['kode_tujuan_pengiriman'] ?: '',
-                'kode_tujuan_pemasukan'  => $r['kode_tujuan_pemasukan'] ?: '',
-                'kode_tujuan_pengeluaran'=> $r['kode_tujuan_pengeluaran'] ?: '',
-                'kode_valuta'            => $r['kode_valuta'] ?: 'USD',
-                'nama_ttd'               => $r['nama_pernyataan'] ?: '',
-                'jabatan_ttd'            => $r['jabatan_pernyataan'] ?: '',
-                'kota_ttd'               => $r['kota_pernyataan'] ?: '',
-                'tanggal_pernyataan'     => $r['tanggal_pernyataan'] ?: '',
-                'a'                      => $a,
-                'b'                      => $b,
-                'seq'                    => $seq
-            ];
-        }
-
-        return ['found' => false];
-    }
-}
-
 // 1. Ambil Konfigurasi Format Penomoran AJU & Default Header
 if ($action === 'get_config_aju') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $cmpId   = trim($_GET['cmp_id'] ?? '');
+    if (empty($cmpId)) {
+        $cmpId = trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($filterCmp ?? '')));
+    }
     $bcRaw   = trim($_GET['bc'] ?? '23');
     $bcClean = preg_replace('/[^0-9]/', '', $bcRaw);
     $bc2     = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
@@ -254,58 +218,255 @@ if ($action === 'get_config_aju') {
     $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
     $comp = $qCmp ? $qCmp->fetch_assoc() : [];
 
-    // Cari data dokumen AJU terakhir yang memiliki kode dokumen BC yang sama
-    $latestAju = getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId);
+    // Cari dokumen AJU terakhir di bc_ceisa_header untuk perusahaan dan jenis dokumen BC ini
+    $whereCmp = !empty($cmpId) ? "a.cmp_id = '$escCmp'" : "1=1";
+    $whereBc = "(a.kode_dokumen = '$escBc' OR a.kode_dokumen = '$escBc2'";
+    if ($bcClean === '27') $whereBc .= " OR a.kode_dokumen = '27IN'";
+    $whereBc .= " OR (CHAR_LENGTH(a.nomor_aju) = 26 AND SUBSTRING(a.nomor_aju, 5, 2) = '$escBc2'))";
+
+    // Definisi filter dokumen yang SUDAH MENDAPATKAN NOMOR DAFTAR resmi dari Bea Cukai (bukan draft/perekaman)
+    $condDaftarValid = "a.nomor_daftar IS NOT NULL AND TRIM(a.nomor_daftar) != '' AND a.nomor_daftar != '-' AND a.nomor_daftar != '0' AND a.nomor_daftar != '000000'";
+    $condRange60Days = "(
+        (a.tanggal_daftar IS NOT NULL AND a.tanggal_daftar != '0000-00-00' AND a.tanggal_daftar >= DATE_SUB(CURDATE(), INTERVAL 60 DAY))
+        OR (a.tanggal_pernyataan IS NOT NULL AND a.tanggal_pernyataan != '0000-00-00' AND a.tanggal_pernyataan >= DATE_SUB(CURDATE(), INTERVAL 60 DAY))
+        OR (SUBSTRING(a.nomor_aju, 13, 8) >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 60 DAY), '%Y%m%d'))
+    )";
+
+    // 1. Deteksi seluruh variasi format penomoran AJU yang SUDAH NOMOR DAFTAR dalam range 60 hari terakhir
+    $availableFormats = [];
+    $isUsingFallback = false;
+
+    // Coba prioritas utama: Bernomor Daftar & Range <= 60 Hari
+    $sqlFmt = "
+        SELECT 
+            SUBSTRING(a.nomor_aju, 1, 4) AS a,
+            SUBSTRING(a.nomor_aju, 7, 6) AS b,
+            MAX(CAST(SUBSTRING(a.nomor_aju, 21, 6) AS UNSIGNED)) AS max_seq,
+            COUNT(*) AS total_dokumen,
+            MAX(COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan)) AS last_date
+        FROM bc_ceisa_header a
+        WHERE $whereCmp AND $whereBc AND CHAR_LENGTH(a.nomor_aju) = 26
+          AND $condDaftarValid AND $condRange60Days
+        GROUP BY SUBSTRING(a.nomor_aju, 1, 4), SUBSTRING(a.nomor_aju, 7, 6)
+        ORDER BY last_date DESC, max_seq DESC
+    ";
+    $qFmt = $koneksi->query($sqlFmt);
+
+    // Fallback 1: Jika tidak ada dalam 60 hari, cari dokumen bernomor daftar terdahulu
+    if (!$qFmt || $qFmt->num_rows === 0) {
+        $sqlFmt = "
+            SELECT 
+                SUBSTRING(a.nomor_aju, 1, 4) AS a,
+                SUBSTRING(a.nomor_aju, 7, 6) AS b,
+                MAX(CAST(SUBSTRING(a.nomor_aju, 21, 6) AS UNSIGNED)) AS max_seq,
+                COUNT(*) AS total_dokumen,
+                MAX(COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan)) AS last_date
+            FROM bc_ceisa_header a
+            WHERE $whereCmp AND $whereBc AND CHAR_LENGTH(a.nomor_aju) = 26
+              AND $condDaftarValid
+            GROUP BY SUBSTRING(a.nomor_aju, 1, 4), SUBSTRING(a.nomor_aju, 7, 6)
+            ORDER BY last_date DESC, max_seq DESC
+        ";
+        $qFmt = $koneksi->query($sqlFmt);
+        if ($qFmt && $qFmt->num_rows > 0) {
+            $isUsingFallback = true;
+        }
+    }
+
+    // Fallback 2: Jika belum pernah ada dokumen bernomor daftar (perusahaan baru), ambil riwayat staging apa pun
+    if (!$qFmt || $qFmt->num_rows === 0) {
+        $sqlFmt = "
+            SELECT 
+                SUBSTRING(a.nomor_aju, 1, 4) AS a,
+                SUBSTRING(a.nomor_aju, 7, 6) AS b,
+                MAX(CAST(SUBSTRING(a.nomor_aju, 21, 6) AS UNSIGNED)) AS max_seq,
+                COUNT(*) AS total_dokumen,
+                MAX(COALESCE(NULLIF(a.tanggal_pernyataan, ''), SUBSTRING(a.nomor_aju, 13, 8))) AS last_date
+            FROM bc_ceisa_header a
+            WHERE $whereCmp AND $whereBc AND CHAR_LENGTH(a.nomor_aju) = 26
+            GROUP BY SUBSTRING(a.nomor_aju, 1, 4), SUBSTRING(a.nomor_aju, 7, 6)
+            ORDER BY last_date DESC, max_seq DESC
+        ";
+        $qFmt = $koneksi->query($sqlFmt);
+    }
+
+    if ($qFmt && $qFmt->num_rows > 0) {
+        while ($rFmt = $qFmt->fetch_assoc()) {
+            $fA = trim($rFmt['a'] ?? '');
+            $fB = trim($rFmt['b'] ?? '');
+            if (empty($fA) || empty($fB)) continue;
+
+            $escFA = $koneksi->real_escape_string($fA);
+            $escFB = $koneksi->real_escape_string($fB);
+
+            // Ambil detail dokumen AJU terakhir bernomor daftar untuk format ini
+            $sqlDtl = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.tanggal_pernyataan,
+                              a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan,
+                              a.kode_kantor, a.kode_jenis_tpb, a.kode_tujuan_pengiriman,
+                              a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran, a.kode_valuta
+                       FROM bc_ceisa_header a
+                       WHERE $whereCmp AND $whereBc AND CHAR_LENGTH(a.nomor_aju) = 26
+                         AND SUBSTRING(a.nomor_aju, 1, 4) = '$escFA' AND SUBSTRING(a.nomor_aju, 7, 6) = '$escFB'
+                       ORDER BY (a.nomor_daftar IS NOT NULL AND a.nomor_daftar != '' AND a.nomor_daftar != '-') DESC,
+                                COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan) DESC,
+                                a.nomor_daftar DESC, a.nomor_aju DESC
+                       LIMIT 1";
+            $qDtl = $koneksi->query($sqlDtl);
+            $rDtl = ($qDtl && $qDtl->num_rows > 0) ? $qDtl->fetch_assoc() : [];
+
+            $isLocalDoc = in_array($bcClean, ['40', '41', '25', '261', '262', '613']);
+
+            $availableFormats[] = [
+                'a'             => $fA,
+                'b'             => $fB,
+                'max_seq'       => intval($rFmt['max_seq']),
+                'total_dokumen' => intval($rFmt['total_dokumen']),
+                'last_date'     => $rFmt['last_date'],
+                'last_aju'      => $rDtl['nomor_aju'] ?? '',
+                'nomor_daftar'  => $rDtl['nomor_daftar'] ?? '',
+                'tanggal_daftar'=> $rDtl['tanggal_daftar'] ?? '',
+                'nama_ttd'      => $rDtl['nama_pernyataan'] ?? '',
+                'jabatan_ttd'   => $rDtl['jabatan_pernyataan'] ?? '',
+                'kota_ttd'      => $rDtl['kota_pernyataan'] ?? '',
+                'kode_kantor'   => !empty($rDtl['kode_kantor']) ? $rDtl['kode_kantor'] : $fA,
+                'kode_jenis_tpb'=> $rDtl['kode_jenis_tpb'] ?? '',
+                'kode_tujuan_pengiriman' => $rDtl['kode_tujuan_pengiriman'] ?? '',
+                'kode_tujuan_pemasukan'  => !empty($rDtl['kode_tujuan_pemasukan']) ? $rDtl['kode_tujuan_pemasukan'] : ($bcClean === '40' ? '1' : ''),
+                'kode_tujuan_pengeluaran'=> $rDtl['kode_tujuan_pengeluaran'] ?? '',
+                'kode_valuta'   => (!empty($rDtl['kode_valuta']) && (!$isLocalDoc || $rDtl['kode_valuta'] === 'IDR')) ? $rDtl['kode_valuta'] : ($isLocalDoc ? 'IDR' : 'USD')
+            ];
+        }
+    }
+
+    // 2. Ambil dokumen AJU terakhir utama: prioritaskan dokumen SUDAH NOMOR DAFTAR dalam range max 60 hari
+    $sqlLast = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                       a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                       a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+                FROM bc_ceisa_header a
+                WHERE $whereCmp AND $whereBc AND $condDaftarValid AND $condRange60Days
+                ORDER BY COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan) DESC, a.nomor_daftar DESC, a.nomor_aju DESC
+                LIMIT 1";
+    $qLast = $koneksi->query($sqlLast);
+
+    // Fallback 1: Jika dalam 60 hari belum ada yang dapat nomor daftar, cari nomor daftar terdahulu
+    if (!$qLast || $qLast->num_rows === 0) {
+        $sqlLast = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                           a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                           a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+                    FROM bc_ceisa_header a
+                    WHERE $whereCmp AND $whereBc AND $condDaftarValid
+                    ORDER BY COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan) DESC, a.nomor_daftar DESC, a.nomor_aju DESC
+                    LIMIT 1";
+        $qLast = $koneksi->query($sqlLast);
+    }
+
+    // Fallback 2: Jika belum pernah ada dokumen bernomor daftar sama sekali, ambil riwayat staging
+    if (!$qLast || $qLast->num_rows === 0) {
+        $sqlLast = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                           a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                           a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+                    FROM bc_ceisa_header a
+                    WHERE $whereCmp AND $whereBc
+                    ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC
+                    LIMIT 1";
+        $qLast = $koneksi->query($sqlLast);
+    }
+    $lastAju = ($qLast && $qLast->num_rows > 0) ? $qLast->fetch_assoc() : null;
+
+    $latestAjuData = null;
+    if ($lastAju) {
+        $nomorAjuLast = trim($lastAju['nomor_aju'] ?? '');
+        $aLast = (strlen($nomorAjuLast) === 26) ? substr($nomorAjuLast, 0, 4) : '';
+        $bLast = (strlen($nomorAjuLast) === 26) ? substr($nomorAjuLast, 6, 6) : '';
+        $seqLast = (strlen($nomorAjuLast) === 26) ? intval(substr($nomorAjuLast, 20, 6)) : 0;
+        $kodeKantorLast = !empty($lastAju['kode_kantor']) ? $lastAju['kode_kantor'] : (!empty($lastAju['kode_kantor_bongkar']) ? $lastAju['kode_kantor_bongkar'] : (!empty($lastAju['kode_kantor_tujuan']) ? $lastAju['kode_kantor_tujuan'] : $aLast));
+
+        $isLocalDoc = in_array($bcClean, ['40', '41', '25', '261', '262', '613']);
+        $defValutaForDoc = $isLocalDoc ? 'IDR' : 'USD';
+
+        $latestAjuData = [
+            'nomor_aju'              => $nomorAjuLast,
+            'nomor_daftar'           => $lastAju['nomor_daftar'] ?? '',
+            'tanggal_daftar'         => $lastAju['tanggal_daftar'] ?? '',
+            'kode_dokumen'           => $lastAju['kode_dokumen'],
+            'a'                      => $aLast,
+            'b'                      => $bLast,
+            'seq'                    => $seqLast,
+            'kode_kantor'            => $kodeKantorLast,
+            'kode_jenis_tpb'         => $lastAju['kode_jenis_tpb'] ?? '',
+            'kode_tujuan_pengiriman' => $lastAju['kode_tujuan_pengiriman'] ?? '',
+            'kode_tujuan_pemasukan'  => $lastAju['kode_tujuan_pemasukan'] ?? '',
+            'kode_tujuan_pengeluaran'=> $lastAju['kode_tujuan_pengeluaran'] ?? '',
+            'kode_valuta'            => (!empty($lastAju['kode_valuta']) && (!$isLocalDoc || $lastAju['kode_valuta'] === 'IDR')) ? $lastAju['kode_valuta'] : $defValutaForDoc,
+            'nama_ttd'               => $lastAju['nama_pernyataan'] ?? '',
+            'jabatan_ttd'            => $lastAju['jabatan_pernyataan'] ?? '',
+            'kota_ttd'               => $lastAju['kota_pernyataan'] ?? '',
+            'tanggal_pernyataan'     => $lastAju['tanggal_pernyataan'] ?? '',
+        ];
+    }
+
+    $isLocalDoc = in_array($bcClean, ['40', '41', '25', '261', '262', '613']);
+    $defValutaForDoc = $isLocalDoc ? 'IDR' : 'USD';
 
     // Prioritaskan pencarian exact match bcClean, fallback ke bc2
     $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
+    $isSaved = false;
     if ($qSet && $rSet = $qSet->fetch_assoc()) {
-        $a = $rSet['a'] ?? ($rSet['A'] ?? '');
-        $b = $rSet['b'] ?? ($rSet['B'] ?? '');
-        $aju = intval($rSet['aju'] ?? ($rSet['AJU'] ?? 0));
-        $nama_ttd = $rSet['nama_ttd'] ?? ($rSet['NAMA_TTD'] ?? '');
-        $jabatan_ttd = $rSet['jabatan_ttd'] ?? ($rSet['JABATAN_TTD'] ?? '');
-        $kota_ttd = $rSet['kota_ttd'] ?? ($rSet['KOTA_TTD'] ?? '');
-        $kode_kantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a));
-        $kode_jenis_tpb = $rSet['kode_jenis_tpb'] ?? ($rSet['KODE_JENIS_TPB'] ?? '');
-        $kode_tujuan_pengiriman = $rSet['kode_tujuan_pengiriman'] ?? ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? '');
-        $kode_tujuan_pemasukan = $rSet['kode_tujuan_pemasukan'] ?? ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? ($bcClean === '40' ? '1' : ''));
-        $kode_tujuan_pengeluaran = $rSet['kode_tujuan_pengeluaran'] ?? ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? '');
-        $kode_valuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : 'USD');
-        $header_defaults = $rSet['header_defaults'] ?? ($rSet['HEADER_DEFAULTS'] ?? '');
+        $isSaved = true;
+        $a = $rSet['a'];
+        $b = $rSet['b'];
+        $aju = intval($rSet['aju']);
+        $nama_ttd = !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($latestAjuData['nama_ttd'] ?? '');
+        $jabatan_ttd = !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($latestAjuData['jabatan_ttd'] ?? '');
+        $kota_ttd = !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($latestAjuData['kota_ttd'] ?? '');
+        $kode_kantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : (!empty($latestAjuData['kode_kantor']) ? $latestAjuData['kode_kantor'] : $a));
+        $kode_jenis_tpb = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($latestAjuData['kode_jenis_tpb'] ?? '');
+        $kode_tujuan_pengiriman = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($latestAjuData['kode_tujuan_pengiriman'] ?? '');
+        $kode_tujuan_pemasukan = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($latestAjuData['kode_tujuan_pemasukan']) ? $latestAjuData['kode_tujuan_pemasukan'] : ($bcClean === '40' ? '1' : ''));
+        $kode_tujuan_pengeluaran = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($latestAjuData['kode_tujuan_pengeluaran'] ?? '');
+        $kode_valuta = (!empty($rSet['kode_valuta']) && (!$isLocalDoc || $rSet['kode_valuta'] === 'IDR')) ? $rSet['kode_valuta'] : $defValutaForDoc;
+        $header_defaults = $rSet['header_defaults'] ?? '';
     } else {
-        $a = !empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000';
-        $a = str_pad($a, 4, '0', STR_PAD_LEFT);
-        $b = substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6);
-        $b = str_pad($b, 6, '0', STR_PAD_RIGHT);
-        $aju = 0;
-        $nama_ttd = '';
-        $jabatan_ttd = '';
-        $kota_ttd = '';
-        $kode_kantor = !empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a;
-        $kode_jenis_tpb = '';
-        $kode_tujuan_pengiriman = '';
-        $kode_tujuan_pemasukan = ($bcClean === '40' ? '1' : '');
-        $kode_tujuan_pengeluaran = '';
-        $kode_valuta = 'USD';
+        // Belum disimpan di setaju: otomatis gunakan data dari format history atau AJU Terakhir jika ada!
+        if (!empty($availableFormats)) {
+            $topFmt = $availableFormats[0];
+            $a = $topFmt['a'];
+            $b = $topFmt['b'];
+            $aju = intval($topFmt['max_seq']);
+        } elseif ($latestAjuData) {
+            $a = !empty($latestAjuData['a']) ? $latestAjuData['a'] : (!empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000');
+            $b = !empty($latestAjuData['b']) ? $latestAjuData['b'] : substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6);
+            $aju = intval($latestAjuData['seq'] ?? 0);
+        } else {
+            $a = !empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000';
+            $a = str_pad($a, 4, '0', STR_PAD_LEFT);
+            $b = substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6);
+            $b = str_pad($b, 6, '0', STR_PAD_RIGHT);
+            $aju = 0;
+        }
+
+        if ($latestAjuData) {
+            $kode_kantor = !empty($latestAjuData['kode_kantor']) ? $latestAjuData['kode_kantor'] : $a;
+            $kode_jenis_tpb = $latestAjuData['kode_jenis_tpb'] ?? '';
+            $kode_tujuan_pengiriman = $latestAjuData['kode_tujuan_pengiriman'] ?? '';
+            $kode_tujuan_pemasukan = !empty($latestAjuData['kode_tujuan_pemasukan']) ? $latestAjuData['kode_tujuan_pemasukan'] : ($bcClean === '40' ? '1' : '');
+            $kode_tujuan_pengeluaran = $latestAjuData['kode_tujuan_pengeluaran'] ?? '';
+            $kode_valuta = (!empty($latestAjuData['kode_valuta']) && (!$isLocalDoc || $latestAjuData['kode_valuta'] === 'IDR')) ? $latestAjuData['kode_valuta'] : $defValutaForDoc;
+            $nama_ttd = $latestAjuData['nama_ttd'] ?? '';
+            $jabatan_ttd = $latestAjuData['jabatan_ttd'] ?? '';
+            $kota_ttd = $latestAjuData['kota_ttd'] ?? '';
+        } else {
+            $nama_ttd = '';
+            $jabatan_ttd = '';
+            $kota_ttd = '';
+            $kode_kantor = !empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a;
+            $kode_jenis_tpb = '';
+            $kode_tujuan_pengiriman = '';
+            $kode_tujuan_pemasukan = ($bcClean === '40' ? '1' : '');
+            $kode_tujuan_pengeluaran = '';
+            $kode_valuta = $defValutaForDoc;
+        }
         $header_defaults = '';
-    }
-
-    // Tarik otomatis nilai bawaan dari AJU terakhir jika masih kosong
-    if ($latestAju['found']) {
-        if (empty($kode_kantor) && !empty($latestAju['kode_kantor'])) $kode_kantor = $latestAju['kode_kantor'];
-        if (empty($kode_jenis_tpb) && !empty($latestAju['kode_jenis_tpb'])) $kode_jenis_tpb = $latestAju['kode_jenis_tpb'];
-        if (empty($kode_tujuan_pengiriman) && !empty($latestAju['kode_tujuan_pengiriman'])) $kode_tujuan_pengiriman = $latestAju['kode_tujuan_pengiriman'];
-        if (empty($kode_tujuan_pemasukan) && !empty($latestAju['kode_tujuan_pemasukan'])) $kode_tujuan_pemasukan = $latestAju['kode_tujuan_pemasukan'];
-        if (empty($kode_tujuan_pengeluaran) && !empty($latestAju['kode_tujuan_pengeluaran'])) $kode_tujuan_pengeluaran = $latestAju['kode_tujuan_pengeluaran'];
-        if ((empty($kode_valuta) || $kode_valuta === 'USD') && !empty($latestAju['kode_valuta'])) $kode_valuta = $latestAju['kode_valuta'];
-        if (empty($nama_ttd) && !empty($latestAju['nama_ttd'])) $nama_ttd = $latestAju['nama_ttd'];
-        if (empty($jabatan_ttd) && !empty($latestAju['jabatan_ttd'])) $jabatan_ttd = $latestAju['jabatan_ttd'];
-        if (empty($kota_ttd) && !empty($latestAju['kota_ttd'])) $kota_ttd = $latestAju['kota_ttd'];
-
-        if (($a === '0000' || empty($a)) && !empty($latestAju['a'])) $a = $latestAju['a'];
-        if (($b === '000000' || empty($b)) && !empty($latestAju['b'])) $b = $latestAju['b'];
-        if ($aju === 0 && !empty($latestAju['seq'])) $aju = $latestAju['seq'];
     }
 
     echo json_encode([
@@ -313,9 +474,11 @@ if ($action === 'get_config_aju') {
         'data' => [
             'cmp_id'                 => $cmpId,
             'bc'                     => $bcClean,
+            'is_saved'               => $isSaved,
             'a'                      => $a,
             'b'                      => $b,
             'aju'                    => $aju,
+            'available_formats'      => $availableFormats,
             'nama_ttd'               => $nama_ttd,
             'jabatan_ttd'            => $jabatan_ttd,
             'kota_ttd'               => $kota_ttd,
@@ -326,41 +489,119 @@ if ($action === 'get_config_aju') {
             'kode_tujuan_pengeluaran'=> $kode_tujuan_pengeluaran,
             'kode_valuta'            => $kode_valuta,
             'header_defaults'        => $header_defaults,
-            'latest_aju'             => $latestAju,
+            'latest_aju'             => $latestAjuData,
             'preview'                => sprintf('%04s%02s%06s%s%06d', $a, $bc2, $b, date('Ymd'), $aju + 1)
         ]
     ]);
     exit;
 }
 
-// 1b. Tarik Langsung Nilai Bawaan Header dari AJU Terakhir dengan Dokumen BC yang Sama
 if ($action === 'get_latest_aju_defaults') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $cmpId   = trim($_GET['cmp_id'] ?? '');
+    if (empty($cmpId)) {
+        $cmpId = trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($filterCmp ?? '')));
+    }
     $bcRaw   = trim($_GET['bc'] ?? '23');
     $bcClean = preg_replace('/[^0-9]/', '', $bcRaw);
+    $bc2     = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
 
-    $latestAju = getLatestAjuHeaderDefaults($koneksi, $bcClean, $cmpId);
-    if ($latestAju['found']) {
+    $escCmp = $koneksi->real_escape_string($cmpId);
+    $escBc  = $koneksi->real_escape_string($bcClean);
+    $escBc2 = $koneksi->real_escape_string($bc2);
+
+    $whereCmp = !empty($cmpId) ? "a.cmp_id = '$escCmp'" : "1=1";
+    $whereBc = "(a.kode_dokumen = '$escBc' OR a.kode_dokumen = '$escBc2'";
+    if ($bcClean === '27') $whereBc .= " OR a.kode_dokumen = '27IN'";
+    $whereBc .= ")";
+
+    $condDaftarValid = "a.nomor_daftar IS NOT NULL AND TRIM(a.nomor_daftar) != '' AND a.nomor_daftar != '-' AND a.nomor_daftar != '0' AND a.nomor_daftar != '000000'";
+    $condRange60Days = "(
+        (a.tanggal_daftar IS NOT NULL AND a.tanggal_daftar != '0000-00-00' AND a.tanggal_daftar >= DATE_SUB(CURDATE(), INTERVAL 60 DAY))
+        OR (a.tanggal_pernyataan IS NOT NULL AND a.tanggal_pernyataan != '0000-00-00' AND a.tanggal_pernyataan >= DATE_SUB(CURDATE(), INTERVAL 60 DAY))
+        OR (SUBSTRING(a.nomor_aju, 13, 8) >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 60 DAY), '%Y%m%d'))
+    )";
+
+    // Prioritas 1: Dokumen yang sudah bernomor daftar resmi dalam max 60 hari
+    $sql = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                   a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                   a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+            FROM bc_ceisa_header a
+            WHERE $whereCmp AND $whereBc AND $condDaftarValid AND $condRange60Days
+            ORDER BY COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan) DESC, a.nomor_daftar DESC, a.nomor_aju DESC
+            LIMIT 1";
+
+    $q = $koneksi->query($sql);
+    // Fallback 1: Jika dalam 60 hari belum ada, cari nomor daftar terdahulu
+    if (!$q || $q->num_rows === 0) {
+        $sql = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                       a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                       a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+                FROM bc_ceisa_header a
+                WHERE $whereCmp AND $whereBc AND $condDaftarValid
+                ORDER BY COALESCE(NULLIF(a.tanggal_daftar, '0000-00-00'), a.tanggal_pernyataan) DESC, a.nomor_daftar DESC, a.nomor_aju DESC
+                LIMIT 1";
+        $q = $koneksi->query($sql);
+    }
+    // Fallback 2: Jika belum pernah ada dokumen bernomor daftar sama sekali
+    if (!$q || $q->num_rows === 0) {
+        $sql = "SELECT a.nomor_aju, a.nomor_daftar, a.tanggal_daftar, a.kode_dokumen, a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                       a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                       a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan, a.tanggal_pernyataan
+                FROM bc_ceisa_header a
+                WHERE $whereCmp AND $whereBc
+                ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC
+                LIMIT 1";
+        $q = $koneksi->query($sql);
+    }
+    if ($q && $r = $q->fetch_assoc()) {
+        $nomorAju = trim($r['nomor_aju'] ?? '');
+        $a = (strlen($nomorAju) === 26) ? substr($nomorAju, 0, 4) : '';
+        $b = (strlen($nomorAju) === 26) ? substr($nomorAju, 6, 6) : '';
+        $seq = (strlen($nomorAju) === 26) ? intval(substr($nomorAju, 20, 6)) : 0;
+        $kodeKantor = !empty($r['kode_kantor']) ? $r['kode_kantor'] : (!empty($r['kode_kantor_bongkar']) ? $r['kode_kantor_bongkar'] : (!empty($r['kode_kantor_tujuan']) ? $r['kode_kantor_tujuan'] : $a));
+
         echo json_encode([
             'status' => 'OK',
-            'data'   => $latestAju,
-            'message'=> "Berhasil menarik nilai dari AJU Terakhir: {$latestAju['nomor_aju']}"
+            'found'  => true,
+            'data'   => [
+                'nomor_aju'              => $nomorAju,
+                'kode_dokumen'           => $r['kode_dokumen'],
+                'a'                      => $a,
+                'b'                      => $b,
+                'seq'                    => $seq,
+                'kode_kantor'            => $kodeKantor,
+                'kode_jenis_tpb'         => $r['kode_jenis_tpb'] ?? '',
+                'kode_tujuan_pengiriman' => $r['kode_tujuan_pengiriman'] ?? '',
+                'kode_tujuan_pemasukan'  => $r['kode_tujuan_pemasukan'] ?? '',
+                'kode_tujuan_pengeluaran'=> $r['kode_tujuan_pengeluaran'] ?? '',
+                'kode_valuta'            => (!empty($r['kode_valuta']) && (!in_array($bcClean, ['40', '41', '25', '261', '262', '613']) || $r['kode_valuta'] === 'IDR')) ? $r['kode_valuta'] : (in_array($bcClean, ['40', '41', '25', '261', '262', '613']) ? 'IDR' : 'USD'),
+                'nama_ttd'               => $r['nama_pernyataan'] ?? '',
+                'jabatan_ttd'            => $r['jabatan_pernyataan'] ?? '',
+                'kota_ttd'               => $r['kota_pernyataan'] ?? '',
+                'tanggal_pernyataan'     => $r['tanggal_pernyataan'] ?? '',
+            ]
         ]);
+        exit;
     } else {
         echo json_encode([
-            'status' => 'NOT_FOUND',
-            'message'=> "Belum ada dokumen AJU sebelumnya dengan jenis dokumen BC $bcClean untuk perusahaan ini."
+            'status'  => 'OK',
+            'found'   => false,
+            'message' => "Tidak ditemukan dokumen AJU [BC $bcClean] sebelumnya untuk perusahaan ini."
         ]);
+        exit;
     }
-    exit;
 }
 
 // 2. Simpan Konfigurasi Penomoran AJU & Default Header ke bc_ceisa_setaju
 if ($action === 'save_config_aju') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $cmpId       = trim($_POST['cmp_id'] ?? '');
+    if (empty($cmpId)) {
+        $cmpId   = trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($filterCmp ?? '')));
+    }
     $bcClean     = preg_replace('/[^0-9]/', '', $_POST['bc'] ?? '23');
+    $isLocalDoc  = in_array($bcClean, ['40', '41', '25', '261', '262', '613']);
     $a           = str_pad(substr(preg_replace('/[^0-9]/', '', $_POST['a'] ?? '0000'), 0, 4), 4, '0', STR_PAD_LEFT);
     $b           = str_pad(substr(preg_replace('/[^A-Za-z0-9]/', '', $_POST['b'] ?? '000000'), 0, 6), 6, '0', STR_PAD_RIGHT);
     $aju         = intval($_POST['aju'] ?? 0);
@@ -372,7 +613,10 @@ if ($action === 'save_config_aju') {
     $kode_tujuan_pengiriman = trim($_POST['kode_tujuan_pengiriman'] ?? '');
     $kode_tujuan_pemasukan = trim($_POST['kode_tujuan_pemasukan'] ?? '');
     $kode_tujuan_pengeluaran = trim($_POST['kode_tujuan_pengeluaran'] ?? '');
-    $kode_valuta = strtoupper(trim($_POST['kode_valuta'] ?? 'USD'));
+    $kode_valuta = strtoupper(trim($_POST['kode_valuta'] ?? ($isLocalDoc ? 'IDR' : 'USD')));
+    if ($isLocalDoc && ($kode_valuta === 'USD' || empty($kode_valuta))) {
+        $kode_valuta = 'IDR';
+    }
 
     $escCmp   = $koneksi->real_escape_string($cmpId);
     $escBc    = $koneksi->real_escape_string($bcClean);
@@ -388,20 +632,28 @@ if ($action === 'save_config_aju') {
     $escKeluar= $koneksi->real_escape_string($kode_tujuan_pengeluaran);
     $escVal   = $koneksi->real_escape_string($kode_valuta);
 
-    $sql = "INSERT INTO bc_ceisa_setaju (
-                cmp_id, bc, a, b, aju, nama_ttd, jabatan_ttd, kota_ttd,
-                kode_kantor, kode_jenis_tpb, kode_tujuan_pengiriman,
-                kode_tujuan_pemasukan, kode_tujuan_pengeluaran, kode_valuta
-            ) VALUES (
-                '$escCmp', '$escBc', '$escA', '$escB', $aju, '$escNama', '$escJab', '$escKota',
-                '$escKantor', '$escTpb', '$escTujuan', '$escMasuk', '$escKeluar', '$escVal'
-            )
-            ON DUPLICATE KEY UPDATE 
-                a = '$escA', b = '$escB', aju = $aju, 
-                nama_ttd = '$escNama', jabatan_ttd = '$escJab', kota_ttd = '$escKota',
-                kode_kantor = '$escKantor', kode_jenis_tpb = '$escTpb',
-                kode_tujuan_pengiriman = '$escTujuan', kode_tujuan_pemasukan = '$escMasuk',
-                kode_tujuan_pengeluaran = '$escKeluar', kode_valuta = '$escVal'";
+    $bc2 = substr(str_pad($bcClean, 2, '0', STR_PAD_LEFT), 0, 2);
+    $escBc2 = $koneksi->real_escape_string($bc2);
+
+    $qCheck = $koneksi->query("SELECT cmp_id, bc FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') LIMIT 1");
+    if ($qCheck && $qCheck->num_rows > 0) {
+        $sql = "UPDATE bc_ceisa_setaju SET
+                    a = '$escA', b = '$escB', aju = $aju, 
+                    nama_ttd = '$escNama', jabatan_ttd = '$escJab', kota_ttd = '$escKota',
+                    kode_kantor = '$escKantor', kode_jenis_tpb = '$escTpb',
+                    kode_tujuan_pengiriman = '$escTujuan', kode_tujuan_pemasukan = '$escMasuk',
+                    kode_tujuan_pengeluaran = '$escKeluar', kode_valuta = '$escVal'
+                WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2')";
+    } else {
+        $sql = "INSERT INTO bc_ceisa_setaju (
+                    cmp_id, bc, a, b, aju, nama_ttd, jabatan_ttd, kota_ttd,
+                    kode_kantor, kode_jenis_tpb, kode_tujuan_pengiriman,
+                    kode_tujuan_pemasukan, kode_tujuan_pengeluaran, kode_valuta
+                ) VALUES (
+                    '$escCmp', '$escBc', '$escA', '$escB', $aju, '$escNama', '$escJab', '$escKota',
+                    '$escKantor', '$escTpb', '$escTujuan', '$escMasuk', '$escKeluar', '$escVal'
+                )";
+    }
 
     if ($koneksi->query($sql)) {
         echo json_encode(['status' => 'OK', 'message' => 'Konfigurasi AJU & Nilai Bawaan Header berhasil disimpan!']);
@@ -414,7 +666,10 @@ if ($action === 'save_config_aju') {
 // 2b. Ambil Default Header untuk Dokumen Aktif
 if ($action === 'get_header_defaults') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId   = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $cmpId   = trim($_GET['cmp_id'] ?? '');
+    if (empty($cmpId)) {
+        $cmpId = trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ($filterCmp ?? '')));
+    }
     $kodeBc  = trim($_GET['kode_dokumen'] ?? '23');
     $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
     $cleanBc2= substr(str_pad($cleanBc, 2, '0', STR_PAD_LEFT), 0, 2);
@@ -429,20 +684,33 @@ if ($action === 'get_header_defaults') {
     $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
     $rSet = ($qSet && $qSet->num_rows > 0) ? $qSet->fetch_assoc() : [];
 
-    // Fallback: Tarik nilai dari dokumen AJU terakhir jika belum disetel di setaju
-    $latestAju = getLatestAjuHeaderDefaults($koneksi, $cleanBc, $cmpId);
+    // Cari nilai dari AJU Terakhir sebagai fallback cerdas
+    $whereBc = "(a.kode_dokumen = '$escBc' OR a.kode_dokumen = '$escBc2'";
+    if ($cleanBc === '27') $whereBc .= " OR a.kode_dokumen = '27IN'";
+    $whereBc .= ")";
+    $whereCmp = !empty($cmpId) ? "a.cmp_id = '$escCmp'" : "1=1";
+    $qLast = $koneksi->query("SELECT a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                                     a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                                     a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan
+                              FROM bc_ceisa_header a
+                              WHERE $whereCmp AND $whereBc
+                              ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC
+                              LIMIT 1");
+    $lastHdr = ($qLast && $qLast->num_rows > 0) ? $qLast->fetch_assoc() : [];
 
-    $defaults = [
-        'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($latestAju['kode_kantor']) ? $latestAju['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : '')),
-        'kode_jenis_tpb'         => !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($latestAju['kode_jenis_tpb'] ?? ''),
-        'kode_tujuan_pengiriman' => !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($latestAju['kode_tujuan_pengiriman'] ?? ''),
-        'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($latestAju['kode_tujuan_pemasukan']) ? $latestAju['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')),
-        'kode_tujuan_pengeluaran'=> !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($latestAju['kode_tujuan_pengeluaran'] ?? ''),
-        'kode_valuta'            => !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($latestAju['kode_valuta']) ? $latestAju['kode_valuta'] : 'USD'),
-        'nama_pernyataan'        => !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($latestAju['nama_ttd'] ?? ''),
-        'jabatan_pernyataan'     => !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($latestAju['jabatan_ttd'] ?? ''),
-        'kota_pernyataan'        => !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($latestAju['kota_ttd'] ?? ''),
-        'source_nomor_aju'       => ($latestAju && !empty($latestAju['found'])) ? $latestAju['nomor_aju'] : null,
+        $isLocalDoc = in_array($cleanBc, ['40', '41', '25', '261', '262', '613']);
+        $defVal = $isLocalDoc ? 'IDR' : 'USD';
+
+        $defaults = [
+        'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($lastHdr['kode_kantor']) ? $lastHdr['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : '')),
+        'kode_jenis_tpb'         => !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($lastHdr['kode_jenis_tpb'] ?? ''),
+        'kode_tujuan_pengiriman' => !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($lastHdr['kode_tujuan_pengiriman'] ?? ''),
+        'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($lastHdr['kode_tujuan_pemasukan']) ? $lastHdr['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')),
+        'kode_tujuan_pengeluaran'=> !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($lastHdr['kode_tujuan_pengeluaran'] ?? ''),
+        'kode_valuta'            => (!empty($rSet['kode_valuta']) && (!$isLocalDoc || $rSet['kode_valuta'] === 'IDR')) ? $rSet['kode_valuta'] : (!empty($lastHdr['kode_valuta']) && (!$isLocalDoc || $lastHdr['kode_valuta'] === 'IDR') ? $lastHdr['kode_valuta'] : $defVal),
+        'nama_pernyataan'        => !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($lastHdr['nama_pernyataan'] ?? ''),
+        'jabatan_pernyataan'     => !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($lastHdr['jabatan_pernyataan'] ?? ''),
+        'kota_pernyataan'        => !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($lastHdr['kota_pernyataan'] ?? ''),
     ];
 
     echo json_encode(['status' => 'OK', 'data' => $defaults]);
@@ -615,6 +883,13 @@ if ($action === 'search_entitas_history') {
     $kodeEntitas = trim($_GET['kode_entitas'] ?? '');
 
     $whereClauses = ["IFNULL(a.nama_entitas, '') <> ''"];
+    if (!empty($cmpId)) {
+        $escCmp = $koneksi->real_escape_string($cmpId);
+        $whereClauses[] = "a.cmp_id = '$escCmp'";
+    } else if (empty($_SESSION['is_super_admin'])) {
+        $whereClauses[] = "1 = 0";
+    }
+
     if (!empty($q)) {
         $escQ = $koneksi->real_escape_string($q);
         $whereClauses[] = "(a.nama_entitas LIKE '%$escQ%' OR a.nomor_identitas LIKE '%$escQ%' OR a.alamat_entitas LIKE '%$escQ%')";
@@ -650,6 +925,14 @@ if ($action === 'search_entitas_history') {
     $data = [];
     if ($res) {
         while ($row = $res->fetch_assoc()) {
+            $cleanNomor = preg_replace('/[^0-9]/', '', $row['nomor_identitas'] ?? '');
+            if (strlen($cleanNomor) === 22 && substr($cleanNomor, -6) === '000000') {
+                $row['nomor_identitas'] = substr($cleanNomor, 0, 16);
+                $row['kode_jenis_identitas'] = '6';
+            } elseif (strlen($cleanNomor) === 15) {
+                $row['nomor_identitas'] = '0' . $cleanNomor;
+                $row['kode_jenis_identitas'] = '6';
+            }
             $data[] = $row;
         }
     }
@@ -687,6 +970,8 @@ if ($action === 'reset_entitas_default') {
         $comp = $rCmp;
     }
     $npwp   = $comp['npwp'] ?? '';
+    $npwp16 = !empty($comp['npwp16']) ? trim($comp['npwp16']) : (!empty($npwp) ? str_pad($npwp, 16, '0', STR_PAD_LEFT) : '');
+    $nitku  = !empty($comp['nitku']) ? trim($comp['nitku']) : (!empty($npwp16) ? $npwp16 . '000000' : (!empty($npwp) ? str_pad($npwp, 16, '0', STR_PAD_LEFT) . '000000' : ''));
     $nama   = $comp['cmp_name'] ?? '';
     $alamat = $comp['alamat'] ?? '';
     $nib    = $comp['nib'] ?? '';
@@ -736,25 +1021,45 @@ if ($action === 'reset_entitas_default') {
             // Apakah entitas ini adalah perusahaan sendiri?
             // 3 = Pengusaha TPB, 7 = Pemilik Barang, 2 = Importir / Eksportir
             $isOwnCompany = in_array($kd, ['3', '7', '2']);
-            $nomorId = $isOwnCompany ? $npwp : '';
+            $rawNpwp = $isOwnCompany ? (!empty($nitku) ? $nitku : (!empty($npwp16) ? $npwp16 . '000000' : trim($npwp))) : '';
+            $cleanNpwp = preg_replace('/[^0-9]/', '', $rawNpwp);
+            if (strlen($cleanNpwp) === 15) {
+                $cleanNpwp = '0' . $cleanNpwp . '000000'; // Standar NITKU 22 Digit Badan CEISA 4.0
+            } elseif (strlen($cleanNpwp) === 16) {
+                $cleanNpwp = $cleanNpwp . '000000'; // Standar NITKU 22 Digit Badan CEISA 4.0
+            }
+            $nomorId = !empty($cleanNpwp) ? $cleanNpwp : $rawNpwp;
             $namaEnt = $isOwnCompany ? $nama : '';
             $almtEnt = $isOwnCompany ? $alamat : '';
             $nibEnt  = $isOwnCompany ? $nib : '';
-            $jenisId = $isOwnCompany ? '5' : '5'; // 5 = NPWP 16 Digit / NITKU
+            $jenisId = '6'; // Default NPWP 16 DIGIT (Standar Resmi CEISA 4.0)
             $kdNegara= $isOwnCompany ? 'ID' : '';
+
+            $noIjin = ($kd === '3') ? trim((string)($comp['nomor_skep'] ?? '')) : '';
+            $rawTglIjin = ($kd === '3') ? trim((string)($comp['tanggal_skep'] ?? '')) : '';
+            $tglIjin = '';
+            if (!empty($rawTglIjin) && !empty($noIjin)) {
+                require_once __DIR__ . '/CeisaJsonBuilder.php';
+                $tglIjin = CeisaJsonBuilder::normalizeDateStr($rawTglIjin);
+            }
 
             $escNomorId = $koneksi->real_escape_string($nomorId);
             $escNamaEnt = $koneksi->real_escape_string($namaEnt);
             $escAlmtEnt = $koneksi->real_escape_string($almtEnt);
             $escNibEnt  = $koneksi->real_escape_string($nibEnt);
             $escKdNeg   = $koneksi->real_escape_string($kdNegara);
+            $escNoIjin  = !empty($noIjin) ? "'" . $koneksi->real_escape_string($noIjin) . "'" : "NULL";
+            $escTglIjin = !empty($tglIjin) ? "'" . $koneksi->real_escape_string($tglIjin) . "'" : "NULL";
+            $kodeJenisApi = in_array($kd, ['1', '2', '3', '7', '8', '9']) ? '02' : '';
 
             $sqlIns = "INSERT INTO bc_ceisa_entitas (
                 cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
-                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara
+                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara,
+                nomor_ijin_entitas, tanggal_ijin_entitas, kode_jenis_api
             ) VALUES (
                 '$escCmp', '$escAju', $seri, '$kd', '$jenisId',
-                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg'
+                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg',
+                $escNoIjin, $escTglIjin, '$kodeJenisApi'
             )";
             $koneksi->query($sqlIns);
 
@@ -766,9 +1071,10 @@ if ($action === 'reset_entitas_default') {
                 'nama_entitas'          => $namaEnt,
                 'alamat_entitas'        => $almtEnt,
                 'nib_entitas'           => $nibEnt,
-                'nomor_ijin_entitas'    => '',
-                'tanggal_ijin_entitas'  => '',
-                'kode_negara'           => $kdNegara
+                'nomor_ijin_entitas'    => $noIjin,
+                'tanggal_ijin_entitas'  => $tglIjin,
+                'kode_negara'           => $kdNegara,
+                'kode_jenis_api'        => $kodeJenisApi
             ];
             $seri++;
         }
@@ -933,7 +1239,11 @@ if ($action === 'get_filter_settings') {
     $colFlag = 'v' . $bc;
     $chkCol = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_varheader LIKE '$colFlag'");
     if (!$chkCol || $chkCol->num_rows == 0) {
-        $colFlag = 'v23';
+        if ($bc === '261' || $bc === '262') {
+            $koneksi->query("ALTER TABLE bc_ceisa_varheader ADD COLUMN `$colFlag` TINYINT(1) DEFAULT 1");
+        } else {
+            $colFlag = 'v23';
+        }
     }
 
     $companyColSetting = [];
@@ -967,6 +1277,23 @@ if ($action === 'get_filter_settings') {
             $cid = $vr['col_id'];
             $baseVis = (int)($vr['base_visible'] ?? 0);
             
+            // Aturan default standar Bea Cukai untuk BC 261 / BC 262
+            if ($bc === '261' && $tbl === 'header' && in_array($cid, [
+                'nomor_daftar', 'tanggal_daftar', 
+                'kode_cara_bayar', 'kode_jenis_tpb', 
+                'kode_tujuan_pemasukan', 'kode_tujuan_pengeluaran', 'kode_lokasi_bayar', 
+                'asuransi', 'freight', 'harga_penyerahan', 'nilai_barang', 'dasar_pengenaan_pajak'
+            ], true)) {
+                $baseVis = 0;
+            } elseif ($bc === '262' && $tbl === 'header' && in_array($cid, [
+                'nomor_daftar', 'tanggal_daftar', 
+                'kode_cara_bayar', 'kode_jenis_tpb', 
+                'kode_tujuan_pengiriman', 'kode_tujuan_pengeluaran', 'kode_lokasi_bayar', 
+                'asuransi', 'freight', 'harga_penyerahan', 'nilai_barang', 'dasar_pengenaan_pajak'
+            ], true)) {
+                $baseVis = 0;
+            }
+
             // Tentukan status saat ini
             $currVis = $baseVis;
             if ($hasCompanyColCustom && isset($companyColSetting[$tbl][$cid])) {
@@ -1167,17 +1494,23 @@ if ($action === 'get_ndpbm') {
 
     if (!empty($bearer)) {
         $curl = curl_init();
-        curl_setopt_array($curl, [
-            CURLOPT_URL => "https://apis-gw.beacukai.go.id/openapi/kurs/" . urlencode(strtolower($valuta)),
-            CURLOPT_SSL_VERIFYHOST => false,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 6,
-            CURLOPT_HTTPHEADER => [
-                "Authorization: Bearer $bearer",
-                "Content-Type: application/json"
-            ]
-        ]);
+        $kursUrl = "https://apis-gw.beacukai.go.id/openapi/kurs/" . urlencode(strtolower($valuta));
+        $kursHeaders = [
+            "Authorization: Bearer $bearer",
+            "Content-Type: application/json"
+        ];
+        if (function_exists('ceisa_prepare_curl')) {
+            ceisa_prepare_curl($curl, $kursUrl, $kursHeaders, 10);
+        } else {
+            curl_setopt_array($curl, [
+                CURLOPT_URL => $kursUrl,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+                CURLOPT_HTTPHEADER => $kursHeaders
+            ]);
+        }
         $res = curl_exec($curl);
         $err = curl_error($curl);
         curl_close($curl);
@@ -1234,6 +1567,15 @@ if ($action === 'create_new_aju') {
     $valuta  = strtoupper(trim($_POST['valuta'] ?? 'USD'));
     $tanggal = trim($_POST['tanggal_pernyataan'] ?? date('Y-m-d'));
 
+    $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
+    $isLocalDoc = in_array($cleanBc, ['40', '41', '25', '261', '262', '613']);
+    if ($isLocalDoc && ($valuta === 'USD' || empty($valuta))) {
+        $valuta = 'IDR';
+    }
+    if ($valuta === 'IDR' && $ndpbm <= 0) {
+        $ndpbm = 1.0;
+    }
+
     if (empty($cmpId)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Perusahaan (cmp_id) tidak valid atau belum dipilih.']);
         exit;
@@ -1247,7 +1589,6 @@ if ($action === 'create_new_aju') {
         exit;
     }
 
-    $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
     $cleanBc2 = substr(str_pad($cleanBc, 2, '0', STR_PAD_LEFT), 0, 2);
     $ymd = date('Ymd', strtotime($tanggal));
 
@@ -1280,31 +1621,47 @@ if ($action === 'create_new_aju') {
         $koneksi->query("INSERT INTO bc_ceisa_setaju (cmp_id, bc, a, b, aju) VALUES ('$escCmp', '$escBc', '$a', '$b', $nextSeq)");
         $rSet = ['a' => $a, 'b' => $b, 'aju' => $nextSeq];
     } else {
-        $aRaw = $rSet['a'] ?? ($rSet['A'] ?? (!empty($comp['kode_kantor']) ? substr(preg_replace('/[^0-9]/', '', $comp['kode_kantor']), 0, 4) : '0000'));
-        $a = str_pad(substr($aRaw, 0, 4), 4, '0', STR_PAD_LEFT);
-        $bRaw = $rSet['b'] ?? ($rSet['B'] ?? substr(preg_replace('/[^A-Za-z0-9]/', '', $cmpId), 0, 6));
-        $b = str_pad(substr($bRaw, 0, 6), 6, '0', STR_PAD_RIGHT);
-        $curAju = intval($rSet['aju'] ?? ($rSet['AJU'] ?? 0));
-        $nextSeq = $curAju + 1;
+        $a = str_pad(substr($rSet['a'] ?? '0000', 0, 4), 4, '0', STR_PAD_LEFT);
+        $b = str_pad(substr($rSet['b'] ?? '000000', 0, 6), 6, '0', STR_PAD_RIGHT);
+        $nextSeq = intval($rSet['aju'] ?? 0) + 1;
         $koneksi->query("UPDATE bc_ceisa_setaju SET aju = $nextSeq WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2')");
     }
 
-    // Default header values dari profil perusahaan, konfigurasi setaju, dan fallback AJU terakhir
-    $latestAju = getLatestAjuHeaderDefaults($koneksi, $cleanBc, $cmpId);
+    // Fallback cerdas ke AJU Terakhir jika di setaju kosong
+    $whereBc = "(a.kode_dokumen = '$escBc' OR a.kode_dokumen = '$escBc2'";
+    if ($cleanBc === '27') $whereBc .= " OR a.kode_dokumen = '27IN'";
+    $whereBc .= ")";
+    $whereCmp = !empty($cmpId) ? "a.cmp_id = '$escCmp'" : "1=1";
+    $qLast = $koneksi->query("SELECT a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                                     a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                                     a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan
+                              FROM bc_ceisa_header a
+                              WHERE $whereCmp AND $whereBc
+                              ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC
+                              LIMIT 1");
+    $lastHdr = ($qLast && $qLast->num_rows > 0) ? $qLast->fetch_assoc() : [];
 
-    $defKantor = !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($rSet['KODE_KANTOR']) ? $rSet['KODE_KANTOR'] : (!empty($latestAju['kode_kantor']) ? $latestAju['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a)));
-    $defTpb    = !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($rSet['KODE_JENIS_TPB'] ?? ($latestAju['kode_jenis_tpb'] ?? ''));
-    $defTujuan = !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($rSet['KODE_TUJUAN_PENGIRIMAN'] ?? ($latestAju['kode_tujuan_pengiriman'] ?? ''));
-    $defMasuk  = !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : ($rSet['KODE_TUJUAN_PEMASUKAN'] ?? (!empty($latestAju['kode_tujuan_pemasukan']) ? $latestAju['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')));
-    $defKeluar = !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($rSet['KODE_TUJUAN_PENGELUARAN'] ?? ($latestAju['kode_tujuan_pengeluaran'] ?? ''));
-    $defValuta = !empty($rSet['kode_valuta']) ? $rSet['kode_valuta'] : (!empty($rSet['KODE_VALUTA']) ? $rSet['KODE_VALUTA'] : (!empty($latestAju['kode_valuta']) ? $latestAju['kode_valuta'] : $valuta));
-    $defNama   = !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($rSet['NAMA_TTD'] ?? ($latestAju['nama_ttd'] ?? ''));
-    $defJab    = !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($rSet['JABATAN_TTD'] ?? ($latestAju['jabatan_ttd'] ?? ''));
-    $defKota   = !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($rSet['KOTA_TTD'] ?? ($latestAju['kota_ttd'] ?? ''));
+    // Default header values dari input form / profil perusahaan / setaju / AJU terakhir
+    $defKantor = !empty($_POST['kode_kantor']) ? trim($_POST['kode_kantor']) : (!empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($lastHdr['kode_kantor']) ? $lastHdr['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : $a)));
+    $defTpb    = !empty($_POST['kode_jenis_tpb']) ? trim($_POST['kode_jenis_tpb']) : (!empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($lastHdr['kode_jenis_tpb'] ?? ''));
+    $defTujuan = !empty($_POST['kode_tujuan_pengiriman']) ? trim($_POST['kode_tujuan_pengiriman']) : (!empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($lastHdr['kode_tujuan_pengiriman'] ?? ''));
+    $defMasuk  = !empty($_POST['kode_tujuan_pemasukan']) ? trim($_POST['kode_tujuan_pemasukan']) : (!empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($lastHdr['kode_tujuan_pemasukan']) ? $lastHdr['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')));
+    $defKeluar = !empty($_POST['kode_tujuan_pengeluaran']) ? trim($_POST['kode_tujuan_pengeluaran']) : (!empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($lastHdr['kode_tujuan_pengeluaran'] ?? ''));
+    $defValuta = !empty($_POST['valuta']) ? trim($_POST['valuta']) : ((!empty($rSet['kode_valuta']) && (!$isLocalDoc || $rSet['kode_valuta'] === 'IDR')) ? $rSet['kode_valuta'] : (!empty($lastHdr['kode_valuta']) && (!$isLocalDoc || $lastHdr['kode_valuta'] === 'IDR') ? $lastHdr['kode_valuta'] : $valuta));
+    if ($isLocalDoc && ($defValuta === 'USD' || empty($defValuta))) {
+        $defValuta = 'IDR';
+    }
+    if ($defValuta === 'IDR') {
+        $ndpbm = 1.0;
+    }
+    $defNama   = !empty($_POST['nama_pernyataan']) ? trim($_POST['nama_pernyataan']) : (!empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($lastHdr['nama_pernyataan'] ?? ''));
+    $defJab    = !empty($_POST['jabatan_pernyataan']) ? trim($_POST['jabatan_pernyataan']) : (!empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($lastHdr['jabatan_pernyataan'] ?? ''));
+    $defKota   = !empty($_POST['kota_pernyataan']) ? trim($_POST['kota_pernyataan']) : (!empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($lastHdr['kota_pernyataan'] ?? ''));
 
     // Nomor AJU 26 Digit: A (4) + BC (2) + B (6) + YYYYMMDD (8) + SEQ (6)
     $nomorAju = sprintf('%04s%02s%06s%08s%06d', $a, $cleanBc2, $b, $ymd, $nextSeq);
     $escAju   = $koneksi->real_escape_string($nomorAju);
+    $escBc    = $koneksi->real_escape_string($cleanBc);
     $escKantor= $koneksi->real_escape_string($defKantor);
     $escVal   = $koneksi->real_escape_string($defValuta);
     $escTpb   = $koneksi->real_escape_string($defTpb);
@@ -1348,6 +1705,8 @@ if ($action === 'create_new_aju') {
 
         // 4. Insert Entitas Default berdasarkan Urutan Konfigurasi Dokumen BC (bc_ceisa_entidx)
         $npwp   = $koneksi->real_escape_string($comp['npwp'] ?? '');
+        $npwp16 = !empty($comp['npwp16']) ? trim($comp['npwp16']) : (!empty($npwp) ? str_pad($npwp, 16, '0', STR_PAD_LEFT) : '');
+        $nitku  = !empty($comp['nitku']) ? trim($comp['nitku']) : (!empty($npwp16) ? $npwp16 . '000000' : (!empty($npwp) ? str_pad($npwp, 16, '0', STR_PAD_LEFT) . '000000' : ''));
         $nama   = $koneksi->real_escape_string($comp['cmp_name'] ?? '');
         $alamat = $koneksi->real_escape_string($comp['alamat'] ?? '');
         $nib    = $koneksi->real_escape_string($comp['nib'] ?? '');
@@ -1389,25 +1748,45 @@ if ($action === 'create_new_aju') {
         foreach ($entRows as $er) {
             $kd = $er['kode_entitas'];
             $isOwn = in_array($kd, ['3', '7', '2']);
-            $nomorId = $isOwn ? $npwp : '';
+            $rawNpwp = $isOwn ? (!empty($nitku) ? $nitku : (!empty($npwp16) ? $npwp16 . '000000' : trim($comp['npwp'] ?? ''))) : '';
+            $cleanNpwp = preg_replace('/[^0-9]/', '', $rawNpwp);
+            if (strlen($cleanNpwp) === 15) {
+                $cleanNpwp = '0' . $cleanNpwp . '000000'; // Standar NITKU 22 Digit Badan CEISA 4.0
+            } elseif (strlen($cleanNpwp) === 16) {
+                $cleanNpwp = $cleanNpwp . '000000'; // Standar NITKU 22 Digit Badan CEISA 4.0
+            }
+            $nomorId = !empty($cleanNpwp) ? $cleanNpwp : $rawNpwp;
             $namaEnt = $isOwn ? $nama : '';
             $almtEnt = $isOwn ? $alamat : '';
             $nibEnt  = $isOwn ? $nib : '';
-            $jenisId = '5';
+            $jenisId = '6'; // Default NPWP 16 DIGIT (Standar Resmi CEISA 4.0)
             $kdNeg   = $isOwn ? 'ID' : '';
+
+            $noIjin = ($kd === '3') ? trim((string)($comp['nomor_skep'] ?? '')) : '';
+            $rawTglIjin = ($kd === '3') ? trim((string)($comp['tanggal_skep'] ?? '')) : '';
+            $tglIjin = '';
+            if (!empty($rawTglIjin) && !empty($noIjin)) {
+                require_once __DIR__ . '/CeisaJsonBuilder.php';
+                $tglIjin = CeisaJsonBuilder::normalizeDateStr($rawTglIjin);
+            }
 
             $escNomorId = $koneksi->real_escape_string($nomorId);
             $escNamaEnt = $koneksi->real_escape_string($namaEnt);
             $escAlmtEnt = $koneksi->real_escape_string($almtEnt);
             $escNibEnt  = $koneksi->real_escape_string($nibEnt);
             $escKdNeg   = $koneksi->real_escape_string($kdNeg);
+            $escNoIjin  = !empty($noIjin) ? "'" . $koneksi->real_escape_string($noIjin) . "'" : "NULL";
+            $escTglIjin = !empty($tglIjin) ? "'" . $koneksi->real_escape_string($tglIjin) . "'" : "NULL";
+            $kodeJenisApi = in_array($kd, ['1', '2', '3', '7', '8', '9']) ? '02' : '';
 
             $koneksi->query("INSERT INTO bc_ceisa_entitas (
                 cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
-                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara
+                nomor_identitas, nama_entitas, alamat_entitas, nib_entitas, kode_negara,
+                nomor_ijin_entitas, tanggal_ijin_entitas, kode_jenis_api
             ) VALUES (
                 '$escCmp', '$escAju', $seriEnt, '$kd', '$jenisId',
-                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg'
+                '$escNomorId', '$escNamaEnt', '$escAlmtEnt', '$escNibEnt', '$escKdNeg',
+                $escNoIjin, $escTglIjin, '$kodeJenisApi'
             )");
             $seriEnt++;
         }
@@ -1563,17 +1942,22 @@ if ($action === 'erp_preview') {
     exit;
 }
 
-// 8. Eksekusi Integrasi ERP ke Staging CEISA 4.0 (Mendukung Single & Multi-Dokumen)
+// 8. Eksekusi Integrasi ERP ke Staging CEISA 4.0
 if ($action === 'erp_integrate') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? 'FRM-1'));
+    $cmpId       = trim($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
     $nomorAju    = trim($_POST['nomor_aju'] ?? '');
-    $docId       = $_POST['doc_nos'] ?? ($_POST['doc_id'] ?? '');
+    $docId       = trim($_POST['doc_id'] ?? '');
     $kodeBc      = trim($_POST['kode_dokumen'] ?? '');
-    $docType     = trim($_POST['doc_type'] ?? ($_POST['type'] ?? ''));
 
-    if (empty($docId)) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Pilih minimal satu dokumen ERP untuk diintegrasikan.']);
+    if (empty($nomorAju) || empty($docId)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU dan ID Dokumen ERP harus diisi.']);
+        exit;
+    }
+
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAju) . "'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomorAju sudah MASUK IT Inventory! Dokumen terkunci."]);
         exit;
     }
 
@@ -1583,43 +1967,38 @@ if ($action === 'erp_integrate') {
         exit;
     }
 
-    // Jika nomor AJU belum ada, buat otomatis nomor AJU baru
-    if (empty($nomorAju)) {
-        $cleanBc = preg_replace('/[^0-9]/', '', $kodeBc);
-        if (empty($cleanBc)) $cleanBc = '27';
-        $resC = $koneksi->query("SELECT npwp FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($cmpId) . "' LIMIT 1");
-        $npwpC = ($resC && $rC = $resC->fetch_assoc()) ? $rC['npwp'] : '010816000000000';
-        $kodeDok6 = str_pad($cleanBc, 6, '0', STR_PAD_LEFT);
-        $kdCmp6   = substr(preg_replace('/[^0-9]/', '', $npwpC), 0, 6);
-        if (strlen($kdCmp6) < 6) $kdCmp6 = str_pad($kdCmp6, 6, '0', STR_PAD_RIGHT);
-        $tgl8     = date('Ymd');
-        $prefixAju = $kodeDok6 . $kdCmp6 . $tgl8;
-        $qSeq = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju LIKE '{$prefixAju}%' ORDER BY nomor_aju DESC LIMIT 1");
-        $lastSeq = 0;
-        if ($qSeq && $rSeq = $qSeq->fetch_assoc()) {
-            $lastSeq = (int)substr($rSeq['nomor_aju'], -6);
-        }
-        $newSeq = str_pad($lastSeq + 1, 6, '0', STR_PAD_LEFT);
-        $nomorAju = $prefixAju . $newSeq;
-    } else {
-        $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '" . $koneksi->real_escape_string($nomorAju) . "'")->fetch_row()[0] ?? 0;
-        if ($chkIt > 0) {
-            echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomorAju sudah MASUK IT Inventory! Dokumen terkunci."]);
-            exit;
-        }
-    }
-
-    $res = $driver->integrate($nomorAju, $docId, $kodeBc, ['type' => $docType]);
-    $res['nomor_aju'] = $nomorAju;
+    $res = $driver->integrate($nomorAju, $docId, $kodeBc);
 
     echo json_encode($res);
+    exit;
+}
+
+if ($action === 'set_last_bc') {
+    header('Content-Type: application/json; charset=utf-8');
+    $bc = trim($_REQUEST['bc'] ?? '');
+    $cmp = trim($_REQUEST['cmp_id'] ?? '');
+    $currentUserId = trim($_SESSION['user_id'] ?? 'user');
+    $cleanUser = preg_replace('/[^a-zA-Z0-9_-]/', '', strtolower($currentUserId));
+    $cleanCmp  = preg_replace('/[^a-zA-Z0-9_-]/', '', $cmp);
+    if (!empty($bc)) {
+        $uCmpKey  = 'ceisa_last_bc_' . $cleanUser . '_' . $cleanCmp;
+        $uUserKey = 'ceisa_last_bc_' . $cleanUser;
+
+        if (!empty($cleanCmp)) {
+            $_SESSION[$uCmpKey] = $bc;
+            setcookie($uCmpKey, $bc, time() + 31536000, '/');
+        }
+        $_SESSION[$uUserKey] = $bc;
+        setcookie($uUserKey, $bc, time() + 31536000, '/');
+    }
+    echo json_encode(['status' => 'OK', 'bc' => $bc, 'user' => $cleanUser]);
     exit;
 }
 
 if ($action === 'load_all') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_REQUEST['nomor_aju'] ?? ($_GET['nomor_aju'] ?? ''));
-    $requestedBc = trim($_REQUEST['kode_dokumen'] ?? ($_GET['kode_dokumen'] ?? '23'));
+    $requestedBc = trim($_REQUEST['kode_dokumen'] ?? ($_GET['kode_dokumen'] ?? $defaultSelectedBc));
 
     $response = [
         'status' => 'OK',
@@ -1656,8 +2035,52 @@ if ($action === 'load_all') {
         foreach (array_keys($tables) as $key) {
             $response['tables'][$key] = ($key === 'header' || $key === 'kesiapanbarang') ? [] : [];
         }
+
+        $activeCmp = trim($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+        $cleanBc   = preg_replace('/[^0-9]/', '', $requestedBc);
+        $cleanBc2  = substr(str_pad($cleanBc, 2, '0', STR_PAD_LEFT), 0, 2);
+        $escBc     = $koneksi->real_escape_string($cleanBc);
+        $escBc2    = $koneksi->real_escape_string($cleanBc2);
+        $escCmp    = $koneksi->real_escape_string($activeCmp);
+
+        $qCmp = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '$escCmp' LIMIT 1");
+        $comp = ($qCmp && $qCmp->num_rows > 0) ? $qCmp->fetch_assoc() : [];
+
+        $qSet = $koneksi->query("SELECT * FROM bc_ceisa_setaju WHERE cmp_id = '$escCmp' AND (bc = '$escBc' OR bc = '$escBc2') ORDER BY IF(bc = '$escBc', 0, 1) LIMIT 1");
+        $rSet = ($qSet && $qSet->num_rows > 0) ? $qSet->fetch_assoc() : [];
+
+        // Fallback cerdas ke AJU Terakhir
+        $whereBc = "(a.kode_dokumen = '$escBc' OR a.kode_dokumen = '$escBc2'";
+        if ($cleanBc === '27') $whereBc .= " OR a.kode_dokumen = '27IN'";
+        $whereBc .= ")";
+        $whereCmp = !empty($activeCmp) ? "a.cmp_id = '$escCmp'" : "1=1";
+        $qLast = $koneksi->query("SELECT a.kode_kantor, a.kode_kantor_bongkar, a.kode_kantor_tujuan,
+                                         a.kode_jenis_tpb, a.kode_tujuan_pengiriman, a.kode_tujuan_pemasukan, a.kode_tujuan_pengeluaran,
+                                         a.kode_valuta, a.nama_pernyataan, a.jabatan_pernyataan, a.kota_pernyataan
+                                  FROM bc_ceisa_header a
+                                  WHERE $whereCmp AND $whereBc
+                                  ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC
+                                  LIMIT 1");
+        $lastHdr = ($qLast && $qLast->num_rows > 0) ? $qLast->fetch_assoc() : [];
+
+        $isLocalDoc = in_array($cleanBc, ['40', '41', '25', '261', '262', '613']);
+        $defVal = $isLocalDoc ? 'IDR' : 'USD';
+
         $response['tables']['header'] = [
-            'kode_dokumen' => $requestedBc
+            'nomor_aju'              => '',
+            'kode_dokumen'           => $requestedBc,
+            'cmp_id'                 => $activeCmp,
+            'tanggal_pernyataan'     => date('Y-m-d'),
+            'kode_kantor'            => !empty($rSet['kode_kantor']) ? $rSet['kode_kantor'] : (!empty($lastHdr['kode_kantor']) ? $lastHdr['kode_kantor'] : (!empty($comp['kode_kantor']) ? $comp['kode_kantor'] : '')),
+            'kode_jenis_tpb'         => !empty($rSet['kode_jenis_tpb']) ? $rSet['kode_jenis_tpb'] : ($lastHdr['kode_jenis_tpb'] ?? ''),
+            'kode_tujuan_pengiriman' => !empty($rSet['kode_tujuan_pengiriman']) ? $rSet['kode_tujuan_pengiriman'] : ($lastHdr['kode_tujuan_pengiriman'] ?? ''),
+            'kode_tujuan_pemasukan'  => !empty($rSet['kode_tujuan_pemasukan']) ? $rSet['kode_tujuan_pemasukan'] : (!empty($lastHdr['kode_tujuan_pemasukan']) ? $lastHdr['kode_tujuan_pemasukan'] : ($cleanBc === '40' ? '1' : '')),
+            'kode_tujuan_pengeluaran'=> !empty($rSet['kode_tujuan_pengeluaran']) ? $rSet['kode_tujuan_pengeluaran'] : ($lastHdr['kode_tujuan_pengeluaran'] ?? ''),
+            'kode_valuta'            => (!empty($rSet['kode_valuta']) && (!$isLocalDoc || $rSet['kode_valuta'] === 'IDR')) ? $rSet['kode_valuta'] : (!empty($lastHdr['kode_valuta']) && (!$isLocalDoc || $lastHdr['kode_valuta'] === 'IDR') ? $lastHdr['kode_valuta'] : $defVal),
+            'nama_pernyataan'        => !empty($rSet['nama_ttd']) ? $rSet['nama_ttd'] : ($lastHdr['nama_pernyataan'] ?? ''),
+            'jabatan_pernyataan'     => !empty($rSet['jabatan_ttd']) ? $rSet['jabatan_ttd'] : ($lastHdr['jabatan_pernyataan'] ?? ''),
+            'kota_pernyataan'        => !empty($rSet['kota_ttd']) ? $rSet['kota_ttd'] : ($lastHdr['kota_pernyataan'] ?? ''),
+            'ndpbm'                  => ($isLocalDoc ? 1.0 : 0)
         ];
     } else {
         $escaped = "'" . $koneksi->real_escape_string($nomor_aju) . "'";
@@ -1692,6 +2115,52 @@ if ($action === 'load_all') {
                         unset($v);
                         $rows[] = $r;
                     }
+
+                    // Auto-heal entitas: Standar CEISA 4.0 mewajibkan NPWP 16 DIGIT (kode 6)
+                    if ($key === 'entitas') {
+                        foreach ($rows as &$erow) {
+                            $cleanId = preg_replace('/[^0-9]/', '', $erow['nomor_identitas'] ?? '');
+                            $currJenis = trim($erow['kode_jenis_identitas'] ?? '');
+                            $needsDbUpdate = false;
+                            
+                            // Normalisasi nomor identitas 22 digit (akhiran 000000) atau kelebihan digit
+                            if (strlen($cleanId) === 22 && substr($cleanId, -6) === '000000') {
+                                $cleanId = substr($cleanId, 0, 16);
+                                $erow['nomor_identitas'] = $cleanId;
+                                $erow['kode_jenis_identitas'] = '6';
+                                $needsDbUpdate = true;
+                            } elseif (strlen($cleanId) > 16 && substr($cleanId, -6) === '000000') {
+                                $cleanId = substr($cleanId, 0, 16);
+                                $erow['nomor_identitas'] = $cleanId;
+                                $erow['kode_jenis_identitas'] = '6';
+                                $needsDbUpdate = true;
+                            }
+
+                            if (strlen($cleanId) === 15) {
+                                $erow['nomor_identitas'] = '0' . $cleanId;
+                                $erow['kode_jenis_identitas'] = '6';
+                                $needsDbUpdate = true;
+                            } elseif (strlen($cleanId) === 16) {
+                                if ($currJenis !== '6' || $erow['nomor_identitas'] !== $cleanId) {
+                                    $erow['nomor_identitas'] = $cleanId;
+                                    $erow['kode_jenis_identitas'] = '6';
+                                    $needsDbUpdate = true;
+                                }
+                            } elseif (empty($currJenis) || $currJenis === '5') {
+                                $erow['kode_jenis_identitas'] = '6';
+                                $needsDbUpdate = true;
+                            }
+
+                            if ($needsDbUpdate && !empty($nomor_aju)) {
+                                $seriInt = intval($erow['seri'] ?? 1);
+                                $escNewNomor = $koneksi->real_escape_string($erow['nomor_identitas']);
+                                $escNewJenis = $koneksi->real_escape_string($erow['kode_jenis_identitas']);
+                                $koneksi->query("UPDATE bc_ceisa_entitas SET nomor_identitas = '$escNewNomor', kode_jenis_identitas = '$escNewJenis' WHERE nomor_aju = $escaped AND seri = $seriInt");
+                            }
+                        }
+                        unset($erow);
+                    }
+
                     $response['tables'][$key] = $rows;
                 }
             } else {
@@ -1703,6 +2172,9 @@ if ($action === 'load_all') {
     // Ambil aturan visibilitas kolom & referensi dropdown dari bc_ceisa_varheader
     $kode_dokumen = trim($response['tables']['header']['kode_dokumen'] ?? ($requestedBc ?: '23'));
     $cleanBc = preg_replace('/[^0-9]/', '', $kode_dokumen);
+    if ($cleanBc !== '30') {
+        $response['tables']['kesiapanbarang'] = [];
+    }
     $activeCmp = trim($response['tables']['header']['cmp_id'] ?? ($_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? '')));
     $escCmp = $koneksi->real_escape_string($activeCmp);
     $escBc = $koneksi->real_escape_string($cleanBc);
@@ -1710,7 +2182,11 @@ if ($action === 'load_all') {
     $colFlag = 'v' . $cleanBc;
     $chkCol = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_varheader LIKE '$colFlag'");
     if (!$chkCol || $chkCol->num_rows == 0) {
-        $colFlag = 'v23';
+        if ($cleanBc === '261' || $cleanBc === '262') {
+            $koneksi->query("ALTER TABLE bc_ceisa_varheader ADD COLUMN `$colFlag` TINYINT(1) DEFAULT 1");
+        } else {
+            $colFlag = 'v23';
+        }
     }
 
     // 1. Cek override kolom: Company dahulu, jika tidak ada fallback ke Global
@@ -1744,6 +2220,26 @@ if ($action === 'load_all') {
             $t = $vr['tabel'];
             $colId = $vr['col_id'];
             $vis = isset($colOverrides[$t][$colId]) ? $colOverrides[$t][$colId] : (int)($vr['is_visible'] ?? 0);
+
+            // Default bawaan sistem pabean: Sembunyikan field yang tidak berlaku untuk BC 261 / BC 262 jika belum dioverride oleh perusahaan
+            if (!isset($colOverrides[$t][$colId])) {
+                if ($cleanBc === '261' && $t === 'header' && in_array($colId, [
+                    'nomor_daftar', 'tanggal_daftar', 
+                    'kode_cara_bayar', 'kode_jenis_tpb', 
+                    'kode_tujuan_pemasukan', 'kode_tujuan_pengeluaran', 'kode_lokasi_bayar', 
+                    'asuransi', 'freight', 'harga_penyerahan', 'nilai_barang', 'dasar_pengenaan_pajak'
+                ], true)) {
+                    $vis = 0;
+                } elseif ($cleanBc === '262' && $t === 'header' && in_array($colId, [
+                    'nomor_daftar', 'tanggal_daftar', 
+                    'kode_cara_bayar', 'kode_jenis_tpb', 
+                    'kode_tujuan_pengiriman', 'kode_tujuan_pengeluaran', 'kode_lokasi_bayar', 
+                    'asuransi', 'freight', 'harga_penyerahan', 'nilai_barang', 'dasar_pengenaan_pajak'
+                ], true)) {
+                    $vis = 0;
+                }
+            }
+
             $varRules[$t][$colId] = [
                 'txt' => $vr['col_txt'],
                 'visible' => $vis,
@@ -1826,13 +2322,47 @@ if ($action === 'load_all') {
 
         if (!empty($otherReffs)) {
             $escReffs = "'" . implode("', '", array_map([$koneksi, 'real_escape_string'], $otherReffs)) . "'";
-            $rRes = $koneksi->query("SELECT reff, kode, teks FROM bc_ceisa_reff WHERE reff IN ($escReffs) AND (status IS NULL OR status <> 'N') ORDER BY reff ASC, (kode + 0) ASC, kode ASC");
+            $rRes = $koneksi->query("SELECT reff, grup, kode, teks FROM bc_ceisa_reff WHERE reff IN ($escReffs) AND (status IS NULL OR status <> 'N') ORDER BY reff ASC, (kode + 0) ASC, kode ASC");
             if ($rRes) {
+                $rawByReff = [];
                 while ($rr = $rRes->fetch_assoc()) {
-                    $reffOptions[$rr['reff']][] = [
-                        'kode' => $rr['kode'],
-                        'teks' => $rr['teks']
-                    ];
+                    $rawByReff[$rr['reff']][] = $rr;
+                }
+
+                foreach ($rawByReff as $rfName => $items) {
+                    $matchedItems = [];
+                    $generalItems = [];
+                    foreach ($items as $item) {
+                        $grp = trim($item['grup'] ?? '');
+                        if ($grp === '' || $grp === '-') {
+                            $generalItems[] = $item;
+                            continue;
+                        }
+                        if (!empty($cleanBc)) {
+                            $grpList = array_map('trim', preg_split('/[;,]+/', $grp));
+                            if (in_array($cleanBc, $grpList, true)) {
+                                $matchedItems[] = $item;
+                            }
+                        }
+                    }
+
+                    // Prioritaskan opsi spesifik jenis dokumen (misal TUJUAN PENGIRIMAN grup 40 untuk BC 40)
+                    // Jika tidak ada grup spesifik, fallback ke opsi umum (grup '-' atau kosong)
+                    // Jika tidak ada keduanya (hanya milik dokumen lain), opsi dibiarkan kosong agar tidak dobel/salah
+                    $chosen = !empty($matchedItems) ? $matchedItems : (!empty($generalItems) ? $generalItems : []);
+
+                    $seenKodes = [];
+                    foreach ($chosen as $c) {
+                        $kd = (string)$c['kode'];
+                        if (isset($seenKodes[$kd])) {
+                            continue;
+                        }
+                        $seenKodes[$kd] = true;
+                        $reffOptions[$rfName][] = [
+                            'kode' => $c['kode'],
+                            'teks' => $c['teks']
+                        ];
+                    }
                 }
             }
         }
@@ -1937,17 +2467,6 @@ if ($action === 'delete_aju') {
 
     $escAju = $koneksi->real_escape_string($nomor_aju);
 
-    // Cek apakah dokumen ada
-    $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
-    $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
-    $chkData = $koneksi->query("SELECT nomorAju FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
-    $hasData = ($chkData && $chkData->num_rows > 0);
-
-    if (!$hasHdr && !$hasData) {
-        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju tidak ditemukan di database."]);
-        exit;
-    }
-
     // Cek apakah dokumen sudah terkunci / masuk IT Inventory (bc_1ab2)
     $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '$escAju'");
     if ($chkIt && ($rIt = $chkIt->fetch_row()) && (int)$rIt[0] > 0) {
@@ -1957,6 +2476,12 @@ if ($action === 'delete_aju') {
         ]);
         exit;
     }
+
+    // Cek apakah dokumen ada di header atau data
+    $chkHdr = $koneksi->query("SELECT nomor_aju, cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+    $hasHdr = ($chkHdr && $chkHdr->num_rows > 0);
+    $chkData = $koneksi->query("SELECT nomorAju, cmp_id FROM bc_ceisa_data WHERE nomorAju = '$escAju' LIMIT 1");
+    $hasData = ($chkData && $chkData->num_rows > 0);
 
     $stagingTables = [
         'bc_ceisa_header', 'bc_ceisa_barang', 'bc_ceisa_barangtarif', 'bc_ceisa_barangdokumen',
@@ -1992,6 +2517,14 @@ if ($action === 'delete_aju') {
         }
     }
 
+    if (!$hasHdr && !$hasData && empty($deletedCounts)) {
+        echo json_encode([
+            'status' => 'OK',
+            'message' => "Dokumen AJU $nomor_aju sudah tidak ada di database (sudah terhapus sebelumnya). Form telah dibersihkan."
+        ]);
+        exit;
+    }
+
     echo json_encode([
         'status' => 'OK',
         'message' => "Dokumen AJU $nomor_aju beserta seluruh data staging berhasil dihapus.",
@@ -2004,6 +2537,8 @@ if ($action === 'search_reff') {
     header('Content-Type: application/json; charset=utf-8');
     $reff = trim($_GET['reff'] ?? '');
     $q    = trim($_GET['q'] ?? '');
+    $bc   = trim($_GET['bc'] ?? ($_GET['kode_dokumen'] ?? ''));
+    $cleanBc = preg_replace('/[^0-9]/', '', $bc);
 
     if (empty($reff)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Parameter reff diperlukan.']);
@@ -2014,13 +2549,51 @@ if ($action === 'search_reff') {
     $escQ    = $koneksi->real_escape_string($q);
     $whereQ  = !empty($escQ) ? "AND (kode LIKE '%$escQ%' OR teks LIKE '%$escQ%')" : "";
 
-    $res = $koneksi->query("SELECT kode, teks FROM bc_ceisa_reff WHERE reff = '$escReff' $whereQ AND (status IS NULL OR status <> 'N') ORDER BY kode ASC LIMIT 50");
+    $res = $koneksi->query("SELECT grup, kode, teks FROM bc_ceisa_reff WHERE reff = '$escReff' $whereQ AND (status IS NULL OR status <> 'N') ORDER BY (kode + 0) ASC, kode ASC LIMIT 200");
     $items = [];
+    $rawItems = [];
     if ($res) {
         while ($r = $res->fetch_assoc()) {
-            $items[] = $r;
+            $rawItems[] = $r;
         }
     }
+
+    $matchedItems = [];
+    $generalItems = [];
+    foreach ($rawItems as $r) {
+        $grp = trim($r['grup'] ?? '');
+        if ($grp === '' || $grp === '-') {
+            $generalItems[] = $r;
+            continue;
+        }
+        if (!empty($cleanBc)) {
+            $grpList = array_map('trim', preg_split('/[;,]+/', $grp));
+            if (in_array($cleanBc, $grpList, true)) {
+                $matchedItems[] = $r;
+            }
+        }
+    }
+
+    $chosen = (!empty($cleanBc) && !empty($matchedItems))
+        ? $matchedItems
+        : (!empty($generalItems) ? $generalItems : $rawItems);
+
+    $seen = [];
+    foreach ($chosen as $c) {
+        $kd = (string)$c['kode'];
+        if (isset($seen[$kd])) {
+            continue;
+        }
+        $seen[$kd] = true;
+        $items[] = [
+            'kode' => $c['kode'],
+            'teks' => $c['teks']
+        ];
+        if (count($items) >= 50) {
+            break;
+        }
+    }
+
     echo json_encode(['status' => 'OK', 'reff' => $reff, 'data' => $items]);
     exit;
 }
@@ -2078,6 +2651,278 @@ if ($action === 'save_header') {
     exit;
 }
 
+if ($action === 'save_all_tabs') {
+    header('Content-Type: application/json; charset=utf-8');
+    $nomor_aju   = trim($_POST['nomor_aju'] ?? '');
+    $headerData  = json_decode($_POST['header'] ?? '{}', true);
+    $tablesData  = json_decode($_POST['tables'] ?? '{}', true);
+    $kesiapan    = json_decode($_POST['kesiapan'] ?? 'null', true);
+
+    if (empty($nomor_aju)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor AJU tidak boleh kosong.']);
+        exit;
+    }
+
+    // Kunci IT Inventory: Cegah update jika dokumen sudah masuk IT Inventory
+    $escAju = $koneksi->real_escape_string($nomor_aju);
+    $chkIt = $koneksi->query("SELECT COUNT(1) FROM bc_1ab2 WHERE nomor_aju = '$escAju'")->fetch_row()[0] ?? 0;
+    if ($chkIt > 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Dokumen AJU $nomor_aju sudah MASUK IT Inventory! Dokumen terkunci dan tidak dapat diedit atau disimpan."]);
+        exit;
+    }
+
+    $tableMap = [
+        'barang'           => 'bc_ceisa_barang',
+        'entitas'          => 'bc_ceisa_entitas',
+        'dokumen'          => 'bc_ceisa_dokumen',
+        'bahanbaku'        => 'bc_ceisa_bahanbaku',
+        'barangtarif'      => 'bc_ceisa_barangtarif',
+        'bahanbakutarif'   => 'bc_ceisa_bahanbakutarif',
+        'kemasan'          => 'bc_ceisa_kemasan',
+        'pengangkut'       => 'bc_ceisa_pengangkut',
+        'kontainer'        => 'bc_ceisa_kontainer',
+        'pungutan'         => 'bc_ceisa_pungutan',
+        'bankdevisa'       => 'bc_ceisa_bankdevisa',
+        'jaminan'          => 'bc_ceisa_jaminan',
+        'komponenbiaya'    => 'bc_ceisa_komponenbiaya',
+        'barangdokumen'    => 'bc_ceisa_barangdokumen',
+        'barangentitas'    => 'bc_ceisa_barangentitas',
+        'barangspekkhusus' => 'bc_ceisa_barangspekkhusus',
+        'barangvd'         => 'bc_ceisa_barangvd',
+        'bahanbakudokumen' => 'bc_ceisa_bahanbakudokumen',
+        'barangbom'        => 'bc_ceisa_barangbom',
+        'tracebb'          => 'bc_ceisa_tracebb'
+    ];
+
+    $koneksi->begin_transaction();
+    try {
+        // 1. Simpan Header jika ada
+        if (!empty($headerData) && is_array($headerData)) {
+            $cRes = $koneksi->query("DESCRIBE bc_ceisa_header");
+            $validCols = [];
+            while ($cr = $cRes->fetch_assoc()) {
+                $validCols[$cr['Field']] = true;
+            }
+            $setPairs = [];
+            foreach ($headerData as $k => $v) {
+                if ($k === 'nomor_aju' || !isset($validCols[$k])) continue;
+                if ($v === '' || $v === null) {
+                    $setPairs[] = "`$k` = NULL";
+                } else {
+                    if (is_string($v) && preg_match('/^-?[\d,]+(?:\.\d+)?$/', trim($v)) && strpos($v, ',') !== false) {
+                        $v = str_replace(',', '', trim($v));
+                    }
+                    $valEsc = $koneksi->real_escape_string($v);
+                    $setPairs[] = "`$k` = '$valEsc'";
+                }
+            }
+            if (!empty($setPairs)) {
+                $updateSql = "UPDATE bc_ceisa_header SET " . implode(', ', $setPairs) . " WHERE nomor_aju = '$escAju'";
+                $koneksi->query($updateSql);
+            }
+        }
+
+        // 2. Ambil cmp_id dari header / session / request
+        $cmp_id = '';
+        $hRes = $koneksi->query("SELECT cmp_id FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+        if ($hRes && $hr = $hRes->fetch_assoc()) {
+            $cmp_id = trim((string)($hr['cmp_id'] ?? ''));
+        }
+        if (empty($cmp_id)) {
+            $cmp_id = trim((string)($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''))));
+        }
+
+        // 3. Simpan setiap tabel
+        $savedCounts = [];
+        if (!empty($tablesData) && is_array($tablesData)) {
+            foreach ($tablesData as $tKey => $rows) {
+                if (!isset($tableMap[$tKey])) continue;
+                if (!is_array($rows)) continue;
+
+                $targetTable = $tableMap[$tKey];
+                $cRes = $koneksi->query("DESCRIBE `$targetTable`");
+                $validCols = [];
+                while ($cr = $cRes->fetch_assoc()) {
+                    $validCols[$cr['Field']] = true;
+                }
+
+                // Hapus baris lama untuk nomor_aju ini
+                if ($tKey === 'barangbom') {
+                    $koneksi->query("DELETE FROM `bc_ceisa_barangbom` WHERE aju = '$escAju'");
+                } elseif ($tKey === 'tracebb') {
+                    $koneksi->query("DELETE FROM `bc_ceisa_tracebb` WHERE aju = '$escAju' OR nomor_aju = '$escAju'");
+                } else {
+                    $koneksi->query("DELETE FROM `$targetTable` WHERE nomor_aju = '$escAju'");
+                }
+
+                $cnt = 0;
+                foreach ($rows as $row) {
+                    $filteredRow = [];
+                    foreach ($row as $k => $v) {
+                        if (isset($validCols[$k])) {
+                            if ($v === '' || $v === null) {
+                                $filteredRow[$k] = null;
+                            } else {
+                                if (is_string($v) && preg_match('/^-?[\d,]+(?:\.\d+)?$/', trim($v)) && strpos($v, ',') !== false) {
+                                    $v = str_replace(',', '', trim($v));
+                                }
+                                // Normalisasi tanggal otomatis
+                                if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'tgl') !== false || $k === 'jatuh_tempo')) {
+                                    require_once __DIR__ . '/CeisaJsonBuilder.php';
+                                    $normDate = CeisaJsonBuilder::normalizeDateStr(trim($v));
+                                    $v = !empty($normDate) ? $normDate : null;
+                                }
+                                $filteredRow[$k] = $v;
+                            }
+                        }
+                    }
+
+                    // Normalisasi entitas: Pastikan standar CEISA 4.0 format NITKU 22 DIGIT (NPWP 16 + '000000') (kode '6') & tanggal ijin valid
+                    if ($tKey === 'entitas') {
+                        $cleanNomor = preg_replace('/[^0-9]/', '', $filteredRow['nomor_identitas'] ?? '');
+                        $currJenis = trim($filteredRow['kode_jenis_identitas'] ?? '');
+                        if (strlen($cleanNomor) === 15) {
+                            $filteredRow['nomor_identitas'] = '0' . $cleanNomor . '000000';
+                            $filteredRow['kode_jenis_identitas'] = '6';
+                        } elseif (strlen($cleanNomor) === 16) {
+                            $filteredRow['nomor_identitas'] = $cleanNomor . '000000';
+                            $filteredRow['kode_jenis_identitas'] = '6';
+                        } elseif (strlen($cleanNomor) === 22) {
+                            $filteredRow['nomor_identitas'] = $cleanNomor;
+                            $filteredRow['kode_jenis_identitas'] = '6';
+                        } elseif (empty($currJenis) || $currJenis === '5') {
+                            $filteredRow['kode_jenis_identitas'] = '6';
+                        }
+
+                        $rawNoIjin = trim((string)($filteredRow['nomor_ijin_entitas'] ?? ''));
+                        $rawTglIjin = trim((string)($filteredRow['tanggal_ijin_entitas'] ?? ''));
+                        if (empty($rawNoIjin)) {
+                            $filteredRow['nomor_ijin_entitas'] = null;
+                            $filteredRow['tanggal_ijin_entitas'] = null;
+                        } elseif (!empty($rawTglIjin)) {
+                            require_once __DIR__ . '/CeisaJsonBuilder.php';
+                            $normTgl = CeisaJsonBuilder::normalizeDateStr($rawTglIjin);
+                            $filteredRow['tanggal_ijin_entitas'] = (!empty($normTgl) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $normTgl)) ? $normTgl : null;
+                        } else {
+                            $filteredRow['tanggal_ijin_entitas'] = null;
+                        }
+
+                        $rawApi = trim((string)($filteredRow['kode_jenis_api'] ?? ''));
+                        if ($rawApi === '1') $rawApi = '01';
+                        if ($rawApi === '2') $rawApi = '02';
+                        if (!in_array($rawApi, ['01', '02'], true)) {
+                            $rawApi = in_array((string)($filteredRow['kode_entitas'] ?? ''), ['1', '2', '3', '7', '8', '9'], true) ? '02' : null;
+                        }
+                        $filteredRow['kode_jenis_api'] = $rawApi;
+                    }
+
+                    if ($tKey === 'barangbom') {
+                        $filteredRow['aju'] = $nomor_aju;
+                        if (isset($validCols['cmp_id'])) $filteredRow['cmp_id'] = $cmp_id;
+                    } elseif ($tKey === 'tracebb') {
+                        $filteredRow['aju'] = $nomor_aju;
+                        $filteredRow['nomor_aju'] = $nomor_aju;
+                        if (isset($validCols['cmp_id'])) $filteredRow['cmp_id'] = $cmp_id;
+                    } else {
+                        $filteredRow['nomor_aju'] = $nomor_aju;
+                        if (isset($validCols['cmp_id'])) $filteredRow['cmp_id'] = $cmp_id;
+                    }
+
+                    if (!empty($filteredRow)) {
+                        $cols = array_keys($filteredRow);
+                        $colList = implode(', ', array_map(function($c) { return "`$c`"; }, $cols));
+                        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+                        $stmt = $koneksi->prepare("INSERT INTO `$targetTable` ($colList) VALUES ($placeholders)");
+                        if ($stmt) {
+                            $types = '';
+                            $vals = [];
+                            foreach ($filteredRow as $val) {
+                                if (is_int($val)) $types .= 'i';
+                                elseif (is_float($val)) $types .= 'd';
+                                else $types .= 's';
+                                $vals[] = $val;
+                            }
+                            $stmt->bind_param($types, ...$vals);
+                            $stmt->execute();
+                            $stmt->close();
+                            $cnt++;
+                        }
+                    }
+                }
+                $savedCounts[$tKey] = $cnt;
+            }
+        }
+
+        // 4. Kesiapan barang jika ada (HANYA untuk dokumen BC 3.0 dan jika ada data riil)
+        $cleanBcForKesiapan = preg_replace('/[^0-9]/', '', (string)($headerData['kode_dokumen'] ?? ''));
+        if (empty($cleanBcForKesiapan)) {
+            $hBcRes = $koneksi->query("SELECT kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '$escAju' LIMIT 1");
+            if ($hBcRes && $hRow = $hBcRes->fetch_assoc()) {
+                $cleanBcForKesiapan = preg_replace('/[^0-9]/', '', (string)($hRow['kode_dokumen'] ?? ''));
+            }
+        }
+
+        if ($cleanBcForKesiapan === '30' && $kesiapan !== null && is_array($kesiapan)) {
+            $hasRealKesiapanData = false;
+            foreach ($kesiapan as $k => $v) {
+                if (!in_array($k, ['nomor_aju', 'cmp_id', 'user_id', 'upd_time'], true) && $v !== null && trim((string)$v) !== '') {
+                    $hasRealKesiapanData = true;
+                    break;
+                }
+            }
+            if ($hasRealKesiapanData) {
+                $cRes = $koneksi->query("DESCRIBE bc_ceisa_kesiapanbarang");
+                if ($cRes) {
+                    $validCols = [];
+                    while ($cr = $cRes->fetch_assoc()) $validCols[$cr['Field']] = true;
+                    $koneksi->query("DELETE FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = '$escAju'");
+                    $kesRow = [];
+                    foreach ($kesiapan as $k => $v) {
+                        if (isset($validCols[$k])) $kesRow[$k] = ($v === '' ? null : $v);
+                    }
+                    $kesRow['nomor_aju'] = $nomor_aju;
+                    if (isset($validCols['cmp_id'])) {
+                        $kesRow['cmp_id'] = $cmp_id;
+                    }
+                    if (!empty($kesRow)) {
+                        $cols = array_keys($kesRow);
+                        $colList = implode(', ', array_map(function($c) { return "`$c`"; }, $cols));
+                        $placeholders = implode(', ', array_fill(0, count($cols), '?'));
+                        $stmt = $koneksi->prepare("INSERT INTO bc_ceisa_kesiapanbarang ($colList) VALUES ($placeholders)");
+                        if ($stmt) {
+                            $types = str_repeat('s', count($cols));
+                            $stmt->bind_param($types, ...array_values($kesRow));
+                            $stmt->execute();
+                            $stmt->close();
+                        }
+                    }
+                }
+            } else {
+                $koneksi->query("DELETE FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = '$escAju'");
+            }
+        } else {
+            // Bukan BC 3.0 atau tidak ada data kesiapan: bersihkan record jika pernah ada
+            $koneksi->query("DELETE FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = '$escAju'");
+        }
+
+        $koneksi->commit();
+
+        // 5. Sinkronisasi otomatis total header jika barang tersimpan
+        require_once __DIR__ . '/ceisa_calc_helper.php';
+        ceisa_sync_header_totals($koneksi, $nomor_aju);
+
+        echo json_encode([
+            'status' => 'OK',
+            'message' => "Seluruh data dokumen ($nomor_aju) berhasil disimpan!",
+            'counts' => $savedCounts
+        ]);
+    } catch (\Throwable $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan semua tab: ' . $e->getMessage()]);
+    }
+    exit;
+}
+
 if ($action === 'save_table') {
     header('Content-Type: application/json; charset=utf-8');
     $nomor_aju = trim($_POST['nomor_aju'] ?? '');
@@ -2125,7 +2970,10 @@ if ($action === 'save_table') {
     $cmp_id = '';
     $hRes = $koneksi->query("SELECT cmp_id FROM bc_ceisa_header WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "' LIMIT 1");
     if ($hRes && $hr = $hRes->fetch_assoc()) {
-        $cmp_id = $hr['cmp_id'];
+        $cmp_id = trim((string)($hr['cmp_id'] ?? ''));
+    }
+    if (empty($cmp_id)) {
+        $cmp_id = trim((string)($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''))));
     }
 
     // Ambil kolom yang valid di tabel target
@@ -2163,10 +3011,59 @@ if ($action === 'save_table') {
                         // Normalisasi tanggal
                         if (is_string($v) && (strpos($k, 'tanggal') !== false || strpos($k, 'tgl') !== false || $k === 'jatuh_tempo')) {
                             require_once __DIR__ . '/CeisaJsonBuilder.php';
-                            $v = CeisaJsonBuilder::normalizeDateStr($v);
+                            $normDate = CeisaJsonBuilder::normalizeDateStr(trim($v));
+                            $v = !empty($normDate) ? $normDate : null;
                         }
                         $filteredRow[$k] = $v;
                     }
+                }
+            }
+
+            // Normalisasi entitas: Pastikan standar CEISA 4.0 format NITKU 22 DIGIT (NPWP 16 + '000000') (kode '6') & tanggal ijin valid
+            if ($tableKey === 'entitas') {
+                $cleanNomor = preg_replace('/[^0-9]/', '', $filteredRow['nomor_identitas'] ?? '');
+                $currJenis = trim($filteredRow['kode_jenis_identitas'] ?? '');
+                if (strlen($cleanNomor) === 15) {
+                    $filteredRow['nomor_identitas'] = '0' . $cleanNomor . '000000';
+                    $filteredRow['kode_jenis_identitas'] = '6';
+                } elseif (strlen($cleanNomor) === 16) {
+                    $filteredRow['nomor_identitas'] = $cleanNomor . '000000';
+                    $filteredRow['kode_jenis_identitas'] = '6';
+                } elseif (strlen($cleanNomor) === 22) {
+                    $filteredRow['nomor_identitas'] = $cleanNomor;
+                    $filteredRow['kode_jenis_identitas'] = '6';
+                } elseif (empty($currJenis) || $currJenis === '5') {
+                    $filteredRow['kode_jenis_identitas'] = '6';
+                }
+
+                $rawNoIjin = trim((string)($filteredRow['nomor_ijin_entitas'] ?? ''));
+                $rawTglIjin = trim((string)($filteredRow['tanggal_ijin_entitas'] ?? ''));
+                if (empty($rawNoIjin)) {
+                    $filteredRow['nomor_ijin_entitas'] = null;
+                    $filteredRow['tanggal_ijin_entitas'] = null;
+                } elseif (!empty($rawTglIjin)) {
+                    require_once __DIR__ . '/CeisaJsonBuilder.php';
+                    $normTgl = CeisaJsonBuilder::normalizeDateStr($rawTglIjin);
+                    $filteredRow['tanggal_ijin_entitas'] = (!empty($normTgl) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $normTgl)) ? $normTgl : null;
+                } else {
+                    $filteredRow['tanggal_ijin_entitas'] = null;
+                }
+
+                $rawApi = trim((string)($filteredRow['kode_jenis_api'] ?? ''));
+                if ($rawApi === '1') $rawApi = '01';
+                if ($rawApi === '2') $rawApi = '02';
+                if (!in_array($rawApi, ['01', '02'], true)) {
+                    $rawApi = in_array((string)($filteredRow['kode_entitas'] ?? ''), ['1', '2', '3', '7', '8', '9'], true) ? '02' : null;
+                }
+                $filteredRow['kode_jenis_api'] = $rawApi;
+            }
+
+            // Normalisasi barangtarif / bahanbakutarif: Pastikan tarif_fasilitas default 100% jika ada kode fasilitas (2,3,4,5,6,7)
+            if (($tableKey === 'barangtarif' || $tableKey === 'bahanbakutarif') && isset($validCols['tarif_fasilitas'])) {
+                $kdFas = trim((string)($filteredRow['kode_fasilitas'] ?? ''));
+                $tarFas = floatval($filteredRow['tarif_fasilitas'] ?? 0);
+                if (in_array($kdFas, ['2', '3', '4', '5', '6', '7'], true) && $tarFas <= 0) {
+                    $filteredRow['tarif_fasilitas'] = 100.00;
                 }
             }
 
@@ -2255,13 +3152,35 @@ if ($action === 'save_kesiapanbarang') {
     }
 
     $cmp_id = '';
-    $hRes = $koneksi->query("SELECT cmp_id FROM bc_ceisa_header WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "' LIMIT 1");
+    $cleanBc = '';
+    $hRes = $koneksi->query("SELECT cmp_id, kode_dokumen FROM bc_ceisa_header WHERE nomor_aju = '" . $koneksi->real_escape_string($nomor_aju) . "' LIMIT 1");
     if ($hRes && $hr = $hRes->fetch_assoc()) {
-        $cmp_id = $hr['cmp_id'];
+        $cmp_id = trim((string)($hr['cmp_id'] ?? ''));
+        $cleanBc = preg_replace('/[^0-9]/', '', (string)($hr['kode_dokumen'] ?? ''));
+    }
+    if ($cleanBc !== '30') {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Tab Kesiapan Barang hanya berlaku untuk dokumen BC 3.0 (PEB Ekspor)!']);
+        exit;
+    }
+    if (empty($cmp_id)) {
+        $cmp_id = trim((string)($_POST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? ''))));
     }
 
     $escAju = $koneksi->real_escape_string($nomor_aju);
     $koneksi->query("DELETE FROM bc_ceisa_kesiapanbarang WHERE nomor_aju = '$escAju'");
+
+    // Cek apakah ada data operasional riil yang diinput selain nomor_aju dan cmp_id
+    $hasRealData = false;
+    foreach ($data as $k => $v) {
+        if ($k !== 'nomor_aju' && $k !== 'cmp_id' && $v !== '' && $v !== null) {
+            $hasRealData = true;
+            break;
+        }
+    }
+    if (!$hasRealData) {
+        echo json_encode(['status' => 'OK', 'message' => 'Data kesiapan barang kosong, tabel telah dibersihkan.']);
+        exit;
+    }
 
     $filteredRow = ['nomor_aju' => $nomor_aju];
     if (isset($validCols['cmp_id']) && !empty($cmp_id)) {
@@ -2405,9 +3324,8 @@ if ($action === 'calc_pungutan') {
     $newPungutan = [];
     foreach ($finalSummary as $item) {
         $kp = strtoupper($item['kode_pungutan']);
-        if ($kp === 'PPNLOKAL' && $item['total'] == 0) continue;
-
-        $nilai = round($item['total'], 2);
+        // Aturan resmi Bea Cukai CEISA 4.0 (PMK 190): Nilai pungutan per jenis pungutan dibulatkan ke atas dalam ribuan rupiah penuh (CEIL)
+        $nilai = ($item['total'] > 0) ? (ceil($item['total'] / 1000) * 1000) : 0;
         $newPungutan[] = [
             'cmp_id' => $cmp_id,
             'nomor_aju' => $nomor_aju,
@@ -2817,7 +3735,50 @@ if ($action === 'get_material_picker') {
     $search = trim($_GET['search'] ?? '');
     $klas = trim($_GET['klas'] ?? '');
     $limit = intval($_GET['limit'] ?? 60);
-    $res = ceisa_get_material_picker($koneksi, $search, $klas, $limit);
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $res = ceisa_get_material_picker($koneksi, $search, $klas, $limit, $cmpId);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Get Partners for Staging Barang History (bc_ceisa_barang)
+if ($action === 'get_staging_barang_partners') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $nomor_aju = trim($_GET['nomor_aju'] ?? '');
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $clientPartner = trim($_GET['active_partner'] ?? '');
+    $res = ceisa_get_staging_barang_partners($koneksi, $nomor_aju, $cmpId, $clientPartner);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Get Staging Barang History List (bc_ceisa_barang)
+if ($action === 'get_staging_barang_picker') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $nomor_aju = trim($_GET['nomor_aju'] ?? '');
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $partner = trim($_GET['partner'] ?? '');
+    $search = trim($_GET['search'] ?? '');
+    $limit = intval($_GET['limit'] ?? 120);
+    $res = ceisa_get_staging_barang_picker($koneksi, $nomor_aju, $cmpId, $partner, $search, $limit);
+    echo json_encode($res);
+    exit;
+}
+
+// Quick Picker: Insert from Staging Barang History (bc_ceisa_barang)
+if ($action === 'insert_from_staging_history') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/ceisa_calc_helper.php';
+    $nomor_aju = trim($_POST['nomor_aju'] ?? '');
+    $rawItems = $_POST['items'] ?? '[]';
+    $items = json_decode($rawItems, true);
+    if (!is_array($items) || empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Format item history barang tidak valid.']);
+        exit;
+    }
+    $res = ceisa_insert_from_staging_history($koneksi, $nomor_aju, $items);
     echo json_encode($res);
     exit;
 }
@@ -2861,7 +3822,8 @@ if ($action === 'get_incoming_picker') {
     $search = trim($_GET['search'] ?? '');
     $bc = trim($_GET['bc'] ?? '');
     $limit = intval($_GET['limit'] ?? 60);
-    $res = ceisa_get_incoming_picker($koneksi, $search, $bc, $limit);
+    $cmpId = trim($_GET['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? ''));
+    $res = ceisa_get_incoming_picker($koneksi, $search, $bc, $limit, $cmpId);
     echo json_encode($res);
     exit;
 }
@@ -5290,7 +6252,7 @@ $isEditMode = !empty($selectedAjuParam);
                         <?php endforeach; ?>
                     <?php endif; ?>
                 </select>
-                <button class="btn btn-secondary btn-sm" onclick="reloadCurrentAju()">🔄</button>
+                <button class="btn btn-secondary btn-sm" onclick="reloadCurrentAju(true)" title="Segarkan Data (Otomatis simpan perubahan terkini)">🔄</button>
             </div>
             <!-- Setup AJU Baru & ERP Integration Buttons -->
             <button id="btnToggleEntry" class="btn btn-warning btn-sm <?= $isEditMode ? '' : 'active' ?>" onclick="toggleEntryPanel()" style="<?= $isEditMode ? 'display:none;' : '' ?>">
@@ -5381,7 +6343,7 @@ $isEditMode = !empty($selectedAjuParam);
             </div>
             <button type="button" class="btn btn-secondary btn-sm" onclick="downloadCeisaExcel()" title="Unduh file Excel 21 sheet resmi CEISA 4.0">📥 Unduh Excel</button>
             <button class="btn btn-secondary btn-sm" onclick="previewJson()">👁️ Preview JSON</button>
-            <button class="btn btn-success btn-sm" onclick="saveCurrentTab()">💾 Simpan Perubahan</button>
+            <button class="btn btn-success btn-sm" id="btnTopSaveAll" onclick="saveAllTabs()" style="font-weight:700; background:#10b981; border-color:#059669; padding:5px 12px; box-shadow:0 1px 3px rgba(0,0,0,0.2);" title="Simpan seluruh data dokumen (Header dan semua tab sekaligus ke database)">💾 Simpan Perubahan</button>
             <button class="btn btn-primary btn-sm" id="btnTopTransferCeisa" onclick="transferCeisa()">🚀 Transfer ke CEISA</button>
         </div>
     </div>
@@ -5407,7 +6369,6 @@ $isEditMode = !empty($selectedAjuParam);
             </div>
         </div>
         <div style="display:flex; gap:12px; align-items:center;">
-            <span id="metaFilterStatus" style="font-size:11px; color:var(--text-muted);">Saring: Kolom & Tab Aktif</span>
             <span id="metaPostedBadge" class="badge" style="background:var(--border); color:var(--text-muted);">Status Memuat...</span>
         </div>
     </div>
@@ -5433,24 +6394,18 @@ $isEditMode = !empty($selectedAjuParam);
                     <span>1. Jenis Dokumen BC</span>
                 </div>
                 <select id="entryDocBc" onchange="onEntryBcChange(this.value)" style="font-weight:700; color:var(--primary);">
-                    <?php 
-                    $firstBc = true;
-                    if (!empty($allowedBcInbound)): ?>
+                    <?php if (!empty($allowedBcInbound)): ?>
                     <optgroup label="── PEMASUKAN (INBOUND) ──">
                         <?php foreach ($allowedBcInbound as $bcCode => $bcLabel): ?>
-                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
-                        <?php 
-                            $firstBc = false;
-                        endforeach; ?>
+                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= ((string)$bcCode === (string)$defaultSelectedBc) ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                        <?php endforeach; ?>
                     </optgroup>
                     <?php endif; ?>
                     <?php if (!empty($allowedBcOutbound)): ?>
                     <optgroup label="── PENGELUARAN (OUTBOUND) ──">
                         <?php foreach ($allowedBcOutbound as $bcCode => $bcLabel): ?>
-                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= $firstBc ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
-                        <?php 
-                            $firstBc = false;
-                        endforeach; ?>
+                            <option value="<?= htmlspecialchars($bcCode) ?>" <?= ((string)$bcCode === (string)$defaultSelectedBc) ? 'selected' : '' ?>><?= htmlspecialchars($bcLabel) ?></option>
+                        <?php endforeach; ?>
                     </optgroup>
                     <?php endif; ?>
                 </select>
@@ -5677,6 +6632,20 @@ $isEditMode = !empty($selectedAjuParam);
                             <label>Kode Tutup PU <span class="reff-badge" onclick="openReffLookup('TUTUP PU', 'hdr_kode_tutup_pu')">TUTUP PU 🔍</span></label>
                             <select id="hdr_kode_tutup_pu" data-reff="TUTUP PU"></select>
                         </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="nomor_bukti_bayar">
+                                <label>Nomor Bukti Bayar</label>
+                                <input type="text" id="hdr_nomor_bukti_bayar">
+                            </div>
+                            <div class="field-group" data-col="tanggal_bukti_bayar">
+                                <label>Tanggal Bukti Bayar</label>
+                                <div class="input-date-group">
+                                    <input type="text" id="hdr_tanggal_bukti_bayar" class="hdr-date-input" placeholder="" maxlength="10" title="Format: yyyy-mm-dd">
+                                    <input type="date" class="hdr-date-native" tabindex="-1">
+                                    <button type="button" class="btn-hdr-date" onclick="triggerHdrDatePicker(this)">📅</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- S4: Nilai Transaksi & Pabean -->
@@ -5742,6 +6711,56 @@ $isEditMode = !empty($selectedAjuParam);
                                 <input type="text" inputmode="decimal" id="hdr_dasar_pengenaan_pajak" class="input-number">
                             </div>
                         </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="tarif_ppn_pajak">
+                                <label>Tarif PPN Pajak (%)</label>
+                                <input type="text" inputmode="decimal" id="hdr_tarif_ppn_pajak" class="input-number">
+                            </div>
+                            <div class="field-group" data-col="ppn_pajak">
+                                <label>PPN Pajak</label>
+                                <input type="text" inputmode="decimal" id="hdr_ppn_pajak" class="input-number">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="tarif_ppnbm_pajak">
+                                <label>Tarif PPnBM Pajak (%)</label>
+                                <input type="text" inputmode="decimal" id="hdr_tarif_ppnbm_pajak" class="input-number">
+                            </div>
+                            <div class="field-group" data-col="ppnbm_pajak">
+                                <label>PPnBM Pajak</label>
+                                <input type="text" inputmode="decimal" id="hdr_ppnbm_pajak" class="input-number">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="uang_muka">
+                                <label>Uang Muka</label>
+                                <input type="text" inputmode="decimal" id="hdr_uang_muka" class="input-number">
+                            </div>
+                            <div class="field-group" data-col="nilai_jasa">
+                                <label>Nilai Jasa</label>
+                                <input type="text" inputmode="decimal" id="hdr_nilai_jasa" class="input-number">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="biaya_tambahan">
+                                <label>Biaya Tambahan</label>
+                                <input type="text" inputmode="decimal" id="hdr_biaya_tambahan" class="input-number">
+                            </div>
+                            <div class="field-group" data-col="biaya_pengurang">
+                                <label>Biaya Pengurang</label>
+                                <input type="text" inputmode="decimal" id="hdr_biaya_pengurang" class="input-number">
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="vd">
+                                <label>Voluntary Declaration (VD)</label>
+                                <input type="text" inputmode="decimal" id="hdr_vd" class="input-number">
+                            </div>
+                            <div class="field-group" data-col="total_dana_sawit">
+                                <label>Total Dana Sawit</label>
+                                <input type="text" inputmode="decimal" id="hdr_total_dana_sawit" class="input-number">
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -5798,6 +6817,26 @@ $isEditMode = !empty($selectedAjuParam);
                             <div class="field-group" data-col="kode_lokasi_bayar">
                                 <label>Lokasi Bayar <span class="reff-badge" onclick="openReffLookup('LOKASI BAYAR', 'hdr_kode_lokasi_bayar')">LOKASI BAYAR 🔍</span></label>
                                 <select id="hdr_kode_lokasi_bayar" data-reff="LOKASI BAYAR"></select>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="kode_jenis_nilai">
+                                <label>Jenis Nilai <span class="reff-badge" onclick="openReffLookup('JENIS NILAI', 'hdr_kode_jenis_nilai')">REFF 🔍</span></label>
+                                <input type="text" id="hdr_kode_jenis_nilai">
+                            </div>
+                            <div class="field-group" data-col="kode_asal_barang_ftz">
+                                <label>Asal Barang FTZ <span class="reff-badge" onclick="openReffLookup('ASAL BARANG FTZ', 'hdr_kode_asal_barang_ftz')">REFF 🔍</span></label>
+                                <select id="hdr_kode_asal_barang_ftz" data-reff="ASAL BARANG FTZ"></select>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" data-col="kode_tujuan_tpb">
+                                <label>Tujuan TPB <span class="reff-badge" onclick="openReffLookup('TUJUAN TPB', 'hdr_kode_tujuan_tpb')">REFF 🔍</span></label>
+                                <input type="text" id="hdr_kode_tujuan_tpb">
+                            </div>
+                            <div class="field-group" data-col="kode_jenis_prosedur">
+                                <label>Jenis Prosedur <span class="reff-badge" onclick="openReffLookup('JENIS PROSEDUR', 'hdr_kode_jenis_prosedur')">REFF 🔍</span></label>
+                                <input type="text" id="hdr_kode_jenis_prosedur">
                             </div>
                         </div>
                     </div>
@@ -5967,9 +7006,9 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-secondary btn-sm" onclick="fixHsCode()" title="Isi otomatis Pos Tarif (HS Code) yang kosong dari data historis atau referensi">🔍 FIX HS CODE</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="fixNetto()" title="Isi otomatis Netto yang kosong berdasarkan rasio historis per satuan">⚖️ FIX NETTO</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="editSeriBarang()" title="Tata ulang nomor urut Seri Barang 1..N">🔢 Edit Seri</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openStagingHistoryPickerModal()" style="font-weight:700; background:#4f46e5; border-color:#4338ca; color:#fff;" title="Pilih dan masukkan barang dari histori transaksi staging bc_ceisa_barang dengan prorata NW, GW, dan Price dari dokumen terakhir">📋 Ambil dari History Staging</button>
                     <button type="button" class="btn btn-primary btn-sm" onclick="openMaterialPickerModal()" style="font-weight:700;" title="Pilih dan masukkan barang dari master material bc_material">📦 Tambah dari Master Barang</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow('barang')">➕ Tambah Barang</button>
-                    <button type="button" class="btn btn-success btn-sm" onclick="saveTable('barang')">💾 Simpan Barang</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6001,7 +7040,6 @@ $isEditMode = !empty($selectedAjuParam);
                             <button type="button" class="btn btn-primary btn-xs" onclick="loadAllBomBarang()" title="Ambil BOM seluruh barang dari master bc_ceisa_bom (ue_bomall)">📥 Load ALL BOM Barang</button>
                             <button type="button" class="btn btn-warning btn-xs" onclick="openBomMaterialPickerModal()" style="font-weight:700; background:#eab308; border-color:#ca8a04; color:#000;" title="Pilih & masukkan komponen dari master barang (bc_material)">📦 Tambah dari Master Barang</button>
                             <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('barangbom')">➕ Tambah BOM Manual</button>
-                            <button type="button" class="btn btn-success btn-xs" onclick="saveTable('barangbom')">💾 Simpan BOM</button>
                         </div>
                     </div>
                     <div class="grid-wrap" style="max-height:180px;">
@@ -6033,7 +7071,6 @@ $isEditMode = !empty($selectedAjuParam);
                             <button type="button" class="btn btn-info btn-xs" onclick="openIncomingPickerModal('trace')" style="background:#0891b2; border-color:#0e7490; color:#fff;" title="Pilih manual dokumen pemasukan eks-BC dari IT Inventory">📥 Tambah Dokumen Asal</button>
                             <button type="button" class="btn btn-success btn-xs" onclick="transferTraceToBahanBaku()" style="font-weight:700;">🔄 Transfer Data Trace ke Bahan Baku</button>
                             <button type="button" class="btn btn-secondary btn-xs" onclick="addRow('tracebb')">➕ Tambah Trace Manual</button>
-                            <button type="button" class="btn btn-success btn-xs" onclick="saveTable('tracebb')">💾 Simpan Trace</button>
                         </div>
                     </div>
                     <div class="grid-wrap" style="max-height:200px;">
@@ -6068,7 +7105,6 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-outline-primary btn-sm" onclick="openModalSettingEntidx()" style="font-weight:600; border:1px solid var(--primary); color:var(--primary); background:transparent;" title="Pengaturan urutan default entitas per dokumen BC (bc_ceisa_entidx)">⚙️ Setting List Entitas Default</button>
                     <button type="button" class="btn btn-info btn-sm" onclick="resetEntitasToDefault()" style="font-weight:600; color:#fff;" title="Susun ulang entitas dokumen ini sesuai setting default urutan entitas BC">⚡ Reset Entitas Default</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="addRow('entitas')">➕ Tambah Entitas</button>
-                    <button type="button" class="btn btn-success btn-sm" onclick="saveTable('entitas')">💾 Simpan Entitas</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6078,7 +7114,7 @@ $isEditMode = !empty($selectedAjuParam);
                             <th style="width:45px;" data-col="seri">Seri</th>
                             <th style="width:130px; max-width:130px;" data-col="kode_entitas">Kode Entitas</th>
                             <th style="min-width:180px;" data-col="nama_entitas">Nama Entitas</th>
-                            <th style="width:195px; min-width:185px;" data-col="nomor_identitas">Nomor Identitas (NPWP)</th>
+                            <th style="width:210px; min-width:200px;" data-col="nomor_identitas">Nomor Identitas (NPWP / NITKU)</th>
                             <th style="width:125px; max-width:125px;" data-col="kode_jenis_identitas">Jenis Identitas</th>
                             <th style="min-width:200px;" data-col="alamat_entitas">Alamat Entitas</th>
                             <th style="min-width:110px;" data-col="nib_entitas">NIB</th>
@@ -6101,7 +7137,6 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-outline-primary btn-sm" onclick="openModalSettingDocidx()" style="font-weight:600; border:1px solid var(--primary); color:var(--primary); background:transparent;" title="Pengaturan urutan default dokumen lampiran per dokumen BC (bc_ceisa_docidx)">⚙️ Setting List Dokumen Default</button>
                     <button type="button" class="btn btn-info btn-sm" onclick="resetDokumenToDefault()" style="font-weight:600; color:#fff;" title="Susun ulang dokumen lampiran dokumen ini sesuai setting default urutan dokumen BC">⚡ Reset Dokumen Default</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('dokumen')">➕ Tambah Dokumen</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('dokumen')">💾 Simpan Dokumen</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6132,7 +7167,6 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-secondary btn-sm" onclick="seqBahanBaku()" title="Urutkan Seri Bahan Baku 1..N per Seri Barang">🔢 Urutkan Seri BB</button>
                     <button type="button" class="btn btn-primary btn-sm" onclick="openIncomingPickerModal('bahanbaku')" style="font-weight:700;" title="Pilih dan masukkan dokumen pemasukan eks-BC dari IT Inventory">📥 Tambah dari Dokumen Masuk (Eks BC)</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbaku')">➕ Tambah Bahan Baku</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('bahanbaku')">💾 Simpan Bahan Baku</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6186,7 +7220,6 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('barang')" title="Hitung ulang nilai bayar/fasilitas tarif barang">⚡ Hitung Tarif</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangtarif')">➕ Tambah Tarif</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barangtarif')">💾 Simpan Barang Tarif</button>
                 </div>
             </div>
 
@@ -6235,7 +7268,6 @@ $isEditMode = !empty($selectedAjuParam);
                     <button type="button" class="btn btn-secondary btn-sm" onclick="openTarifBmModal()" title="Buka master tarif Bea Masuk (BM) per HS Code">⚙️ Konfig Tarif BM</button>
                     <button type="button" class="btn btn-secondary btn-sm" onclick="hitungTarif('bahanbaku')" title="Hitung ulang nilai bayar/fasilitas tarif bahan baku">⚡ Hitung Tarif BB</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbakutarif')">➕ Tambah Tarif BB</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('bahanbakutarif')">💾 Simpan Tarif BB</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6275,7 +7307,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Kemasan <span class="tbl-tech-name">(<code>bc_ceisa_kemasan</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('kemasan')">➕ Tambah Kemasan</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('kemasan')">💾 Simpan Kemasan</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6309,7 +7340,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Sarana Pengangkut <span class="tbl-tech-name">(<code>bc_ceisa_pengangkut</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('pengangkut')">➕ Tambah Pengangkut</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('pengangkut')">💾 Simpan Pengangkut</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6336,7 +7366,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Kontainer <span class="tbl-tech-name">(<code>bc_ceisa_kontainer</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('kontainer')">➕ Tambah Kontainer</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('kontainer')">💾 Simpan Kontainer</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6363,7 +7392,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <div style="display:flex; gap:8px;">
                     <button type="button" class="btn btn-warning btn-sm" onclick="hitungPungutan()" title="Kalkulasi otomatis total pungutan negara dari data Tarif Dokumen sesuai aturan CEISA 4.0">⚡ Hitung Pungutan</button>
                     <button class="btn btn-secondary btn-sm" onclick="addRow('pungutan')">➕ Tambah Pungutan</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('pungutan')">💾 Simpan Pungutan</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6397,7 +7425,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Bank Devisa <span class="tbl-tech-name">(<code>bc_ceisa_bankdevisa</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bankdevisa')">➕ Tambah Bank</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('bankdevisa')">💾 Simpan Bank</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6421,7 +7448,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Jaminan <span class="tbl-tech-name">(<code>bc_ceisa_jaminan</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('jaminan')">➕ Tambah Jaminan</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('jaminan')">💾 Simpan Jaminan</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6463,7 +7489,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Komponen Biaya <span class="tbl-tech-name">(<code>bc_ceisa_komponenbiaya</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('komponenbiaya')">➕ Tambah Biaya</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('komponenbiaya')">💾 Simpan Biaya</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6527,7 +7552,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Dokumen Fasilitas Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangdokumen</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangdokumen')">➕ Tambah Dokumen Barang</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barangdokumen')">💾 Simpan Dokumen Barang</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6551,7 +7575,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Relasi Entitas Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangentitas</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangentitas')">➕ Tambah Entitas Barang</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barangentitas')">💾 Simpan Entitas Barang</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6574,7 +7597,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Spesifikasi Khusus Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangspekkhusus</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangspekkhusus')">➕ Tambah Spek Khusus</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barangspekkhusus')">💾 Simpan Spek Khusus</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6598,7 +7620,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Voluntary Declaration (VD) Barang <span class="tbl-tech-name">(<code>bc_ceisa_barangvd</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('barangvd')">➕ Tambah Nilai VD</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('barangvd')">💾 Simpan Nilai VD</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6636,7 +7657,6 @@ $isEditMode = !empty($selectedAjuParam);
                 <span style="font-size:12px; color:var(--text-muted);">Tabel Dokumen Bahan Baku <span class="tbl-tech-name">(<code>bc_ceisa_bahanbakudokumen</code>)</span></span>
                 <div style="display:flex; gap:8px;">
                     <button class="btn btn-secondary btn-sm" onclick="addRow('bahanbakudokumen')">➕ Tambah BB Dokumen</button>
-                    <button class="btn btn-success btn-sm" onclick="saveTable('bahanbakudokumen')">💾 Simpan BB Dokumen</button>
                 </div>
             </div>
             <div class="grid-wrap">
@@ -6725,7 +7745,7 @@ $isEditMode = !empty($selectedAjuParam);
                     </div>
                 </div>
                 <div style="margin-top:16px;">
-                    <button class="btn btn-success" onclick="saveKesiapanBarang()">💾 Simpan Kesiapan Barang</button>
+                    <button class="btn btn-success" onclick="saveAllTabs()">💾 Simpan Perubahan</button>
                 </div>
             </div>
         </div>
@@ -7411,17 +8431,17 @@ $isEditMode = !empty($selectedAjuParam);
     <!-- CONFIG AJU & DEFAULT HEADER MODAL (bc_ceisa_setaju) -->
     <div class="modal-overlay" id="modalConfigAju">
         <div class="modal" style="max-width:680px; width:95vw;">
-            <div class="modal-header">
-                <h3>⚙️ Konfigurasi Format AJU & Nilai Bawaan Header</h3>
-                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalConfigAju')">✕</button>
+            <div class="modal-header" style="padding:6px 12px;">
+                <h3 style="margin:0; font-size:11.5px; font-weight:700; color:var(--text-main);">⚙️ Konfigurasi Format AJU &amp; Nilai Bawaan Header</h3>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalConfigAju')" style="padding:1px 6px; height:18px; font-size:10px;">✕</button>
             </div>
-            <div class="modal-body" style="max-height:calc(85vh - 120px); overflow-y:auto;">
-                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:10px; margin-bottom:12px;">
-                    <div style="font-size:10px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">LIVE PREVIEW NOMOR AJU (26 DIGIT):</div>
-                    <div id="cfgPreviewAju" style="font-family:monospace; font-size:13px; font-weight:700; color:var(--primary); background:var(--bg-card); padding:8px; border:1px dashed var(--primary); border-radius:4px; text-align:center;">
+            <div class="modal-body" style="max-height:calc(85vh - 100px); overflow-y:auto; padding:8px 12px;">
+                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px; margin-bottom:8px;">
+                    <div style="font-size:9px; font-weight:700; color:var(--text-muted); margin-bottom:3px;">LIVE PREVIEW NOMOR AJU (26 DIGIT):</div>
+                    <div id="cfgPreviewAju" style="font-family:monospace; font-size:11.5px; font-weight:700; color:var(--primary); background:var(--bg-card); padding:5px 8px; border:1px dashed var(--primary); border-radius:3px; text-align:center;">
                         00002301081620261016000001
                     </div>
-                    <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--text-muted); margin-top:4px;">
+                    <div style="display:flex; justify-content:space-between; font-size:8px; color:var(--text-muted); margin-top:3px;">
                         <span>A: 4 digit Kantor</span>
                         <span>BC: 2 digit</span>
                         <span>B: 6 digit Unik</span>
@@ -7430,10 +8450,10 @@ $isEditMode = !empty($selectedAjuParam);
                     </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
                     <div>
-                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">Jenis Dokumen BC:</label>
-                        <select id="cfgBc" onchange="loadConfigAjuForBc(this.value)" style="width:100%;">
+                        <label style="font-size:9px; font-weight:600; display:block; margin-bottom:2px;">Jenis Dokumen BC:</label>
+                        <select id="cfgBc" onchange="loadConfigAjuForBc(this.value)" style="width:100%; height:23px; font-size:9.5px; padding:1px 6px;">
                             <optgroup label="── PEMASUKAN (INBOUND) ──">
                                 <option value="16">BC 1.6</option>
                                 <option value="20">BC 2.0</option>
@@ -7457,71 +8477,97 @@ $isEditMode = !empty($selectedAjuParam);
                         </select>
                     </div>
                     <div>
-                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">Sequence Terakhir (bigint):</label>
-                        <input type="number" id="cfgAju" min="0" value="0" style="width:100%;" oninput="updateConfigAjuPreview()">
+                        <label style="font-size:9px; font-weight:600; display:block; margin-bottom:2px;">Sequence Terakhir (bigint):</label>
+                        <input type="number" id="cfgAju" min="0" value="0" style="width:100%; height:23px; font-size:9.5px; padding:1px 6px;" oninput="onManualConfigInput()">
                     </div>
                 </div>
 
-                <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:12px;">
+                <!-- SELECTOR FORMAT AJU DARI HISTORY STAGING -->
+                <div id="sectionFormatAjuHistory" style="display:none; background:rgba(24, 144, 255, 0.03); border:1px solid rgba(24, 144, 255, 0.25); border-radius:6px; padding:7px 9px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                        <label style="font-size:9.5px; font-weight:700; color:var(--primary); margin:0; display:flex; align-items:center; gap:5px;">
+                            <span>🔢 FORMAT PENOMORAN DOKUMEN BER-NOMOR DAFTAR (MAX 60 HARI):</span>
+                        </label>
+                        <span id="badgeFormatCount" class="badge" style="font-size:8.5px; font-weight:600; background:var(--primary); color:#fff; padding:1px 6px; border-radius:10px;">
+                            0 Format Ditemukan
+                        </span>
+                    </div>
+
+                    <div id="alertMultiFormat" style="display:none; font-size:9px; color:#874d00; background:#fffbe6; border:1px solid #ffe58f; padding:5px 8px; border-radius:4px; margin-bottom:6px; line-height:1.35;">
+                        <div style="font-weight:700; display:flex; align-items:center; gap:4px; margin-bottom:1px;">
+                            <span>⚠️ Ditemukan <span id="txtMultiFormatCount">2</span> format penomoran yang berbeda di riwayat 60 hari terakhir:</span>
+                        </div>
+                        <span>Silakan pilih salah satu format di bawah ini agar penomoran &amp; nilai bawaan dokumen langsung diselaraskan:</span>
+                    </div>
+
+                    <!-- KARTU OPSI PILIHAN INTERAKTIF (TAMPIL BILA ADA FORMAT BERBEDA) -->
+                    <div id="cfgFormatCards" style="display:none; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:6px; margin-bottom:6px;"></div>
+
+                    <select id="cfgFormatSelector" onchange="onSelectFormatAju(this.value)" style="width:100%; font-family:inherit; font-size:9.5px; line-height:1.3; height:24px; min-height:24px; padding:2px 6px; font-weight:600; border-radius:4px; border:1px solid var(--border); background:var(--bg-card); color:var(--text); cursor:pointer;">
+                        <option value="">-- Pilih Format Riwayat Staging --</option>
+                    </select>
+
+                    <div id="cfgFormatDetailInfo" style="font-size:8.5px; margin-top:5px; line-height:1.35;"></div>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
                     <div>
-                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">A - Kode Kantor Penomoran (4 Digit):</label>
-                        <input type="text" id="cfgA" maxlength="4" value="0000" style="width:100%; font-family:monospace;" oninput="updateConfigAjuPreview()">
+                        <label style="font-size:9px; font-weight:600; display:block; margin-bottom:2px;">A - Kode Kantor Penomoran (4 Digit):</label>
+                        <input type="text" id="cfgA" maxlength="4" value="0000" style="width:100%; height:23px; font-size:9.5px; padding:1px 6px; font-family:monospace;" oninput="onManualConfigInput()">
                     </div>
                     <div>
-                        <label style="font-size:10px; font-weight:600; display:block; margin-bottom:2px;">B - Unik Perusahaan (6 Digit):</label>
-                        <input type="text" id="cfgB" maxlength="6" value="010816" style="width:100%; font-family:monospace;" oninput="updateConfigAjuPreview()">
+                        <label style="font-size:9px; font-weight:600; display:block; margin-bottom:2px;">B - Unik Perusahaan (6 Karakter):</label>
+                        <input type="text" id="cfgB" maxlength="6" value="010816" style="width:100%; height:23px; font-size:9.5px; padding:1px 6px; font-family:monospace;" oninput="onManualConfigInput()">
                     </div>
                 </div>
 
                 <!-- SECTION NILAI BAWAAN HEADER -->
-                <div style="border-top:1px solid var(--border); padding-top:10px; margin-top:10px; margin-bottom:12px;">
-                    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-                        <span style="font-size:10px; font-weight:700; color:var(--primary); display:flex; align-items:center; gap:4px;">
-                            📋 NILAI BAWAAN HEADER (INIT OTOMATIS SAAT BUAT DOKUMEN BARU)
-                        </span>
-                        <button type="button" class="btn btn-outline-primary btn-xs" onclick="pullDefaultsFromLatestAju()" style="padding:2px 8px; font-size:10px; font-weight:600; cursor:pointer;" title="Tarik otomatis nilai dari dokumen AJU terakhir untuk jenis dokumen BC ini">
+                <div id="sectionNilaiBawaanHeader" style="border-top:1px solid var(--border); padding-top:6px; margin-top:6px; margin-bottom:8px; border-radius:4px; padding:6px 6px 8px 6px;">
+                    <div style="font-size:9px; font-weight:700; color:var(--primary); margin-bottom:6px; display:flex; align-items:center; justify-content:space-between; gap:6px;">
+                        <span>📋 NILAI BAWAAN HEADER (INIT OTOMATIS SAAT BUAT DOKUMEN BARU)</span>
+                        <button type="button" class="btn btn-secondary btn-xs" id="btnPullLatestAju" onclick="pullLatestAjuDefaults()" title="Tarik otomatis nilai bawaan dari dokumen AJU terakhir yang ada di database sesuai Jenis Dokumen BC yang dipilih" style="font-size:8.5px; padding:1px 6px; height:18px; font-weight:600; color:var(--primary); border-color:var(--primary); background:rgba(24,144,255,0.08); cursor:pointer;">
                             ⚡ Tarik dari AJU Terakhir
                         </button>
                     </div>
-                    <div id="cfgLatestAjuBadge" style="display:none; font-size:9.5px; background:rgba(24,144,255,0.08); border:1px solid rgba(24,144,255,0.25); border-left:3px solid var(--primary); padding:5px 8px; border-radius:4px; margin-bottom:10px; color:var(--text); line-height:1.4;"></div>
+                    <div id="cfgLatestAjuBadge" style="display:none; font-size:8.5px; padding:2px 6px; border-radius:3px; margin-bottom:6px;"></div>
 
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:6px;">
                         <div>
-                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Kode Kantor Pabean (6 Digit):</label>
-                            <input type="text" id="cfgKodeKantor" placeholder="Contoh: 051000" maxlength="8" style="width:100%;">
+                            <label style="font-size:8.5px; font-weight:600; display:block; margin-bottom:2px;">Kode Kantor Pabean (6 Digit):</label>
+                            <input type="text" id="cfgKodeKantor" placeholder="Contoh: 051000" maxlength="8" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                         </div>
                         <div>
-                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Jenis TPB:</label>
-                            <select id="cfgKodeJenisTpb" style="width:100%;">
+                            <label style="font-size:8.5px; font-weight:600; display:block; margin-bottom:2px;">Jenis TPB:</label>
+                            <select id="cfgKodeJenisTpb" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                                 <option value="">-- Tidak Disetel --</option>
                             </select>
                         </div>
                     </div>
 
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:6px;">
                         <div>
-                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pengiriman:</label>
-                            <select id="cfgKodeTujuanPengiriman" style="width:100%;">
+                            <label style="font-size:8.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pengiriman:</label>
+                            <select id="cfgKodeTujuanPengiriman" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                                 <option value="">-- Tidak Disetel --</option>
                             </select>
                         </div>
                         <div>
-                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pemasukan / Pengeluaran:</label>
-                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                                <select id="cfgKodeTujuanPemasukan" style="width:100%;" title="Tujuan Pemasukan">
+                            <label style="font-size:8.5px; font-weight:600; display:block; margin-bottom:2px;">Tujuan Pemasukan / Pengeluaran:</label>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+                                <select id="cfgKodeTujuanPemasukan" style="width:100%; height:22px; font-size:9px; padding:1px 4px;" title="Tujuan Pemasukan">
                                     <option value="">Pemasukan...</option>
                                 </select>
-                                <select id="cfgKodeTujuanPengeluaran" style="width:100%;" title="Tujuan Pengeluaran">
+                                <select id="cfgKodeTujuanPengeluaran" style="width:100%; height:22px; font-size:9px; padding:1px 4px;" title="Tujuan Pengeluaran">
                                     <option value="">Pengeluaran...</option>
                                 </select>
                             </div>
                         </div>
                     </div>
 
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
                         <div>
-                            <label style="font-size:9.5px; font-weight:600; display:block; margin-bottom:2px;">Valuta Bawaan:</label>
-                            <select id="cfgKodeValuta" style="width:100%;">
+                            <label style="font-size:8.5px; font-weight:600; display:block; margin-bottom:2px;">Valuta Bawaan:</label>
+                            <select id="cfgKodeValuta" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                                 <option value="USD">USD - DOLLAR AMERIKA SERIKAT</option>
                                 <option value="IDR">IDR - RUPIAH INDONESIA</option>
                                 <option value="EUR">EUR - EURO</option>
@@ -7536,7 +8582,7 @@ $isEditMode = !empty($selectedAjuParam);
                             </select>
                         </div>
                         <div style="display:flex; align-items:center;">
-                            <div style="font-size:9px; color:var(--text-muted); line-height:1.4; background:var(--bg-base); padding:6px 8px; border-radius:4px; border:1px solid var(--border); width:100%;">
+                            <div style="font-size:8px; color:var(--text-muted); line-height:1.3; background:var(--bg-base); padding:4px 6px; border-radius:3px; border:1px solid var(--border); width:100%;">
                                 💡 <em>Nilai di atas otomatis diterapkan saat membuat dokumen AJU baru atau via tombol <strong>⚡ Terapkan Nilai Bawaan</strong> di Header.</em>
                             </div>
                         </div>
@@ -7544,160 +8590,132 @@ $isEditMode = !empty($selectedAjuParam);
                 </div>
 
                 <!-- SECTION DATA PENANDATANGAN -->
-                <div style="border-top:1px solid var(--border); padding-top:10px;">
-                    <div style="font-size:10px; font-weight:700; color:var(--text-muted); margin-bottom:6px;">DATA TANDA TANGAN PEMBERITAHU (PERNYATAAN DOKUMEN):</div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                <div style="border-top:1px solid var(--border); padding-top:6px;">
+                    <div style="font-size:9px; font-weight:700; color:var(--text-muted); margin-bottom:4px;">DATA TANDA TANGAN PEMBERITAHU (PERNYATAAN DOKUMEN):</div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px;">
                         <div>
-                            <label style="font-size:9.5px; display:block; margin-bottom:2px;">Nama TTD:</label>
-                            <input type="text" id="cfgNamaTtd" style="width:100%;">
+                            <label style="font-size:8.5px; display:block; margin-bottom:1px;">Nama TTD:</label>
+                            <input type="text" id="cfgNamaTtd" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                         </div>
                         <div>
-                            <label style="font-size:9.5px; display:block; margin-bottom:2px;">Jabatan:</label>
-                            <input type="text" id="cfgJabatanTtd" style="width:100%;">
+                            <label style="font-size:8.5px; display:block; margin-bottom:1px;">Jabatan:</label>
+                            <input type="text" id="cfgJabatanTtd" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                         </div>
                         <div>
-                            <label style="font-size:9.5px; display:block; margin-bottom:2px;">Kota:</label>
-                            <input type="text" id="cfgKotaTtd" style="width:100%;">
+                            <label style="font-size:8.5px; display:block; margin-bottom:1px;">Kota:</label>
+                            <input type="text" id="cfgKotaTtd" style="width:100%; height:22px; font-size:9px; padding:1px 4px;">
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closeModal('modalConfigAju')">Batal</button>
-                <button class="btn btn-primary" onclick="saveConfigAju()">💾 Simpan Konfigurasi</button>
+            <div class="modal-footer" style="padding:6px 12px;">
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalConfigAju')" style="height:22px; font-size:9.5px; padding:0 10px;">Batal</button>
+                <button class="btn btn-primary btn-sm" onclick="saveConfigAju()" style="height:22px; font-size:9.5px; padding:0 10px;">💾 Simpan Konfigurasi</button>
             </div>
         </div>
     </div>
 
     <!-- ERP INTEGRATION MODAL -->
-    <!-- MODAL INTEGRASI WINLINE ERP DENGAN TAB, MULTI-SELECT & SUMMARY BAR -->
     <div class="modal-overlay" id="modalErpIntegration">
-        <div class="modal" style="max-width:1120px; width:96vw; max-height:92vh; display:flex; flex-direction:column;">
-            <div class="modal-header" style="background:linear-gradient(135deg, rgba(24, 144, 255, 0.12), transparent); padding:8px 14px;">
-                <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
-                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <h3 style="color:var(--primary); margin:0; display:flex; align-items:center; gap:6px; font-size:13px;">
-                            <span>🔌 Integrasi Winline ERP</span>
-                            <span id="erpModalDriverBadge" class="badge" style="background:#1890ff; color:#fff; font-size:9.5px;">FRAMAS (Winline)</span>
-                        </h3>
-                        <span style="font-size:10px; color:var(--text-muted); padding-left:8px; border-left:1px solid var(--border);">
-                            Perusahaan: <strong id="erpCompanyLabel" style="color:var(--text-main);">-</strong> | 
-                            AJU: <strong id="erpAjuLabel" style="color:var(--primary);">-</strong>
-                        </span>
+        <div class="modal" style="max-width:920px; width:95vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(99, 102, 241, 0.1), transparent);">
+                <div>
+                    <h3 style="color:#6366f1; display:flex; align-items:center; gap:6px;">
+                        <span>🔌 Integrasi Database ERP</span>
+                        <span id="erpModalDriverBadge" class="badge" style="background:#6366f1; color:#fff; font-size:10px;">FRAMAS</span>
+                    </h3>
+                    <div id="erpModalDriverDesc" style="font-size:10px; color:var(--text-muted); margin-top:2px;">
+                        Integrasi sistem ERP ke tabel staging CEISA 4.0 (Header, Barang, Dokumen, Kemasan).
                     </div>
-                    <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">✕</button>
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">✕</button>
             </div>
-
-            <div class="modal-body" style="padding:10px 14px; overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:8px;">
-                <!-- Type Tabs -->
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; background:var(--bg-base); padding:6px 10px; border-radius:4px; border:1px solid var(--border);">
-                    <div style="display:inline-flex; gap:4px;" id="erpTypeTabs">
-                        <button type="button" class="btn btn-sm btn-primary erp-tab-btn" data-type="sales_invoice" onclick="switchErpTab('sales_invoice')">
-                            🛒 Sales Invoice (BC 2.7 & BC 3.0)
-                        </button>
-                        <button type="button" class="btn btn-sm btn-secondary erp-tab-btn" data-type="dn_transfer" onclick="switchErpTab('dn_transfer')">
-                            🚚 DN Transfer (Antar Framas)
-                        </button>
-                        <button type="button" class="btn btn-sm btn-secondary erp-tab-btn" data-type="purchase_order" onclick="switchErpTab('purchase_order')">
-                            📦 Purchase Order (Pemasukan)
-                        </button>
+            <div class="modal-body" style="display:flex; flex-direction:column; gap:10px;">
+                <!-- SETTING PROFIL & DRIVER SELECTOR -->
+                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <div style="display:flex; gap:12px; align-items:center;">
+                        <span style="font-size:10px; color:var(--text-muted);">Perusahaan: <strong id="erpCompanyLabel" style="color:var(--text-main);">-</strong></span>
+                        <span style="font-size:10px; color:var(--text-muted);">AJU Aktif: <strong id="erpAjuLabel" style="color:var(--primary);">-</strong></span>
                     </div>
-                    <span id="erpTabDesc" style="font-size:10px; color:var(--text-muted); font-style:italic;">
-                        Faktur Penjualan (Sales Invoice) Winline ke Customer.
-                    </span>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span style="font-size:10px; color:var(--text-muted);">Driver ERP:</span>
+                        <div style="display:inline-flex; align-items:center; gap:6px; background:rgba(99, 102, 241, 0.08); border:1px solid rgba(99, 102, 241, 0.25); border-radius:4px; padding:3px 9px;" title="Driver ERP dikonfigurasi melalui Administrator - Kelola Perusahaan">
+                            <span id="erpDriverDisplay" style="font-weight:700; color:#6366f1; font-size:11px;">Memuat...</span>
+                            <span style="font-size:9px; color:var(--text-muted); background:var(--bg-card); border:1px solid var(--border); padding:1px 5px; border-radius:3px; display:inline-flex; align-items:center; gap:3px;">
+                                🔒 Kelola Perusahaan
+                            </span>
+                        </div>
+                    </div>
                 </div>
 
-                <!-- Filter Controls -->
-                <div style="background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-                    <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                        <div style="display:flex; align-items:center; gap:4px;">
-                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);" id="erpDateLabel">Tanggal Transaksi:</label>
-                            <input type="date" id="erpFilterDate" class="form-control" value="<?= date('Y-m-d') ?>" style="height:24px; font-size:10.5px; padding:2px 6px;">
-                        </div>
-                        <div style="display:flex; align-items:center; gap:4px;">
-                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);">Pencarian:</label>
-                            <input type="text" id="erpFilterQuery" class="form-control" placeholder="No Dokumen / Ref / Partner..." style="height:24px; font-size:10.5px; width:160px;" onkeyup="if(event.key==='Enter') searchErpDocuments()">
-                        </div>
-                        <div style="display:flex; align-items:center; gap:4px;">
-                            <label style="font-size:10px; font-weight:600; color:var(--text-muted);">Target BC:</label>
-                            <select id="erpFilterTargetBc" class="form-control" style="height:24px; font-size:10.5px; width:130px;">
-                                <option value="">Semua Target</option>
-                                <option value="27">BC 2.7 (TPB)</option>
-                                <option value="30">BC 3.0 (PEB)</option>
-                                <option value="23">BC 2.3 (Impor)</option>
-                                <option value="40">BC 4.0 (Lokal)</option>
+                <!-- FILTER SEARCH ERP -->
+                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:6px; padding:8px 10px;">
+                    <div style="display:grid; grid-template-columns:1.2fr 1fr 1fr 1fr auto; gap:8px; align-items:end;">
+                        <div>
+                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Jenis Transaksi:</label>
+                            <select id="erpFilterType" style="width:100%; font-weight:600;">
+                                <option value="outbound">Outbound (Delivery Order / Sales Invoice)</option>
+                                <option value="inbound">Inbound (Purchase Order / Goods Receipt)</option>
                             </select>
                         </div>
-                        <button type="button" class="btn btn-primary btn-sm" onclick="searchErpDocuments()" style="height:24px; font-size:10.5px;">
-                            🔍 Muat Data
-                        </button>
-                        <button type="button" class="btn btn-secondary btn-sm" onclick="resetErpFilter()" style="height:24px; font-size:10.5px;">
-                            🔄 Reset
-                        </button>
-                    </div>
-                    <div>
-                        <span id="erpRecordCountText" style="font-size:10px; font-weight:600; color:var(--text-muted);">Memuat...</span>
-                    </div>
-                </div>
-
-                <!-- Table with Multi-Select Checkboxes -->
-                <div style="border:1px solid var(--border); border-radius:4px; max-height:350px; overflow-y:auto; overflow-x:auto; background:var(--bg-card);">
-                    <table class="datagrid" style="width:100%; font-size:10.5px; border-collapse:collapse;" id="erpTableMain">
-                        <thead>
-                            <tr style="position:sticky; top:0; background:var(--bg-base); z-index:2; border-bottom:1px solid var(--border);">
-                                <th style="width:28px; text-align:center;">
-                                    <input type="checkbox" id="erpCheckAll" onchange="toggleErpCheckAll(this)" title="Pilih Semua">
-                                </th>
-                                <th style="width:25px; text-align:center;">#</th>
-                                <th style="width:75px;">Status H2H</th>
-                                <th style="width:105px;">No Dokumen</th>
-                                <th style="width:95px;">No Ref</th>
-                                <th style="width:75px;">Tanggal</th>
-                                <th>Partner (Customer / Supplier / Plant)</th>
-                                <th style="width:90px;">Target Dokumen</th>
-                                <th style="width:65px; text-align:right;">Total Qty</th>
-                                <th style="width:60px; text-align:right;">Kemasan</th>
-                                <th style="width:65px; text-align:right;">Netto (kg)</th>
-                                <th style="width:65px; text-align:right;">Bruto (kg)</th>
-                                <th style="width:75px; text-align:center;">Aksi</th>
-                            </tr>
-                        </thead>
-                        <tbody id="erpTableBody">
-                            <tr>
-                                <td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">
-                                    Klik tombol <strong>"Muat Data"</strong> untuk mengambil transaksi dari Winline ERP.
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Summary Multi-Select Bar -->
-                <div id="erpMultiBar" style="background:#001529; color:#fff; padding:6px 14px; border-radius:4px; display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; font-size:11px;">
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <span id="erpMultiCountBadge" style="background:#1890ff; color:#fff; font-size:9.5px; font-weight:700; padding:2px 8px; border-radius:3px;">0 Dokumen Terpilih</span>
                         <div>
-                            Qty: <strong id="erpMultiTotalQty" style="color:#40a9ff;">0</strong> |
-                            Netto: <strong id="erpMultiTotalNetto" style="color:#40a9ff;">0.00</strong> kg |
-                            Bruto: <strong id="erpMultiTotalBruto" style="color:#40a9ff;">0.00</strong> kg
+                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">No Referensi / DO / PO:</label>
+                            <input type="text" id="erpFilterQuery" placeholder="Cari nomor DO / PO..." style="width:100%;" onkeyup="if(event.key==='Enter') searchErpDocuments()">
+                        </div>
+                        <div>
+                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Tgl Dari:</label>
+                            <input type="date" id="erpFilterDateFrom" value="<?= date('Y-m-01') ?>" style="width:100%;">
+                        </div>
+                        <div>
+                            <label style="font-size:9.5px; color:var(--text-muted); display:block; margin-bottom:2px;">Tgl Sampai:</label>
+                            <input type="date" id="erpFilterDateTo" value="<?= date('Y-m-d') ?>" style="width:100%;">
+                        </div>
+                        <div>
+                            <button type="button" class="btn btn-primary" onclick="searchErpDocuments()" style="padding:6px 14px;">
+                                🔍 Cari Data
+                            </button>
                         </div>
                     </div>
-                    <div style="display:flex; gap:6px;">
-                        <button type="button" class="btn btn-secondary btn-xs" onclick="clearErpSelection()">Batal</button>
-                        <button type="button" class="btn btn-success btn-xs" id="btnErpExecMulti" onclick="executeErpIntegration()" style="font-weight:700;">
-                            ⚡ Masukkan Terpilih ke Dokumen AJU
-                        </button>
+                </div>
+
+                <!-- SPLIT VIEW: DAFTAR DOKUMEN & RINCIAN BARANG -->
+                <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:10px; height:320px;">
+                    <!-- LEFT LIST OF ERP DOCUMENTS -->
+                    <div style="border:1px solid var(--border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden;">
+                        <div style="background:var(--bg-base); padding:6px 10px; font-size:10px; font-weight:700; border-bottom:1px solid var(--border); display:flex; justify-content:space-between;">
+                            <span>DAFTAR DOKUMEN ERP</span>
+                            <span id="erpDocCount" style="color:var(--text-muted);">0 dokumen</span>
+                        </div>
+                        <div id="erpDocList" style="flex:1; overflow-y:auto; padding:4px;">
+                            <div style="padding:20px; text-align:center; color:var(--text-muted); font-size:11px;">
+                                Klik tombol <strong>"Cari Data"</strong> untuk memuat transaksi dari ERP.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT PREVIEW OF ITEMS & DETAILS -->
+                    <div style="border:1px solid var(--border); border-radius:6px; display:flex; flex-direction:column; overflow:hidden;">
+                        <div style="background:var(--bg-base); padding:6px 10px; font-size:10px; font-weight:700; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
+                            <span>RINCIAN BARANG & DOKUMEN</span>
+                            <span id="erpSelectedDocId" class="badge" style="background:var(--primary); color:#fff; font-size:9px;">Belum Dipilih</span>
+                        </div>
+                        <div id="erpDocPreviewArea" style="flex:1; overflow-y:auto; padding:8px; font-size:10px;">
+                            <div style="padding:40px 20px; text-align:center; color:var(--text-muted);">
+                                Pilih salah satu dokumen di sebelah kiri untuk melihat rincian barang.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <div class="modal-footer" style="padding:6px 14px; background:var(--bg-base); border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center;">
-                <div style="font-size:10px; color:var(--text-muted);">
-                    💡 <strong>Multi-Integrasi:</strong> Centang satu atau banyak dokumen Winline untuk digabungkan ke berkas AJU. Seluruh barang, dokumen pelengkap, kemasan, dan entitas resmi otomatis terisi.
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:10px; color:var(--text-muted);" id="erpIntegrationHelpTip">
+                    💡 Data akan otomatis mengisi <strong>Header</strong>, <strong>Barang</strong>, <strong>Dokumen</strong>, dan <strong>Kemasan</strong>.
                 </div>
-                <div>
-                    <button class="btn btn-secondary btn-sm" onclick="closeModal('modalErpIntegration')">Tutup</button>
+                <div style="display:flex; gap:6px;">
+                    <button class="btn btn-secondary" onclick="closeModal('modalErpIntegration')">Batal</button>
+                    <button class="btn btn-primary btn-erp" id="btnExecuteIntegration" onclick="executeErpIntegration()" disabled>
+                        ⚡ Masukkan ke Dokumen AJU (Staging)
+                    </button>
                 </div>
             </div>
         </div>
@@ -8131,6 +9149,70 @@ $isEditMode = !empty($selectedAjuParam);
         </div>
     </div>
 
+    <!-- QUICK PICKER MODAL: HISTORY STAGING BARANG (bc_ceisa_barang) -->
+    <div class="modal-overlay" id="modalStagingHistoryPicker">
+        <div class="modal" style="max-width:1050px; width:95vw;">
+            <div class="modal-header" style="background:linear-gradient(135deg, rgba(79, 70, 229, 0.1), transparent); padding:8px 14px;">
+                <div>
+                    <h3 style="color:#4f46e5; font-size:12.5px; font-weight:700; display:flex; align-items:center; gap:6px; margin:0;">
+                        <span>📋 Tambah Barang dari History Staging (<code>bc_ceisa_barang</code>)</span>
+                    </h3>
+                    <div style="font-size:9.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                        Pilih barang dari transaksi pabean sebelumnya. Pos Tarif (HS Code), Uraian, Merek, Tipe, Satuan, serta NW, GW, dan Price otomatis dibuat <b>prorata per unit</b> dari dokumen terakhir yang pernah dibuat.
+                    </div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalStagingHistoryPicker')" style="padding:2px 8px; font-size:11px;">✕</button>
+            </div>
+            <div class="modal-body" style="padding:10px 14px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; background:var(--card-bg, #f8fafc); padding:6px 10px; border-radius:5px; border:1px solid var(--border);">
+                    <div style="display:flex; gap:8px; flex:1; min-width:320px; align-items:center; flex-wrap:wrap;">
+                        <div style="display:flex; align-items:center; gap:5px;">
+                            <label style="font-size:10px; font-weight:700; white-space:nowrap; color:var(--text-color);">Partner (Supplier/Customer):</label>
+                            <select id="filterPartnerStagingPicker" onchange="loadStagingPickerList()" style="min-width:260px; max-width:420px; font-size:10px; padding:3px 8px; height:26px; font-weight:600; border-radius:4px; border:1px solid var(--border); background:var(--bg-card); color:var(--text);">
+                                <option value="ALL">-- Semua Supplier / Customer --</option>
+                            </select>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:5px; flex:1; min-width:180px;">
+                            <input type="text" id="searchStagingPicker" placeholder="Cari Kode Barang / Uraian / Pos Tarif (HS)..." onkeyup="debounceSearchStaging()" style="flex:1; font-size:10px; padding:3px 8px; height:26px; border-radius:4px; border:1px solid var(--border); background:var(--bg-card); color:var(--text);">
+                        </div>
+                    </div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <span id="badgeSelectedStagingCount" style="font-size:9.5px; font-weight:700; color:#4f46e5; background:rgba(79, 70, 229, 0.1); padding:3px 7px; border-radius:4px;">0 item dipilih</span>
+                        <button type="button" class="btn btn-secondary btn-xs" onclick="loadStagingPickerList()" title="Muat ulang daftar barang" style="font-size:9.5px; height:24px; padding:2px 8px;">🔄 Segarkan</button>
+                    </div>
+                </div>
+
+                <div style="max-height:380px; overflow-y:auto; border:1px solid var(--border); border-radius:5px;">
+                    <table class="datagrid" id="tableStagingPicker" style="width:100%; border-collapse:collapse; font-size:10px;">
+                        <thead>
+                            <tr style="background:var(--bg-base); font-size:9.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">
+                                <th style="width:30px; text-align:center; padding:4px 6px;">
+                                    <input type="checkbox" id="chkSelectAllStaging" onchange="toggleSelectAllStaging(this.checked)">
+                                </th>
+                                <th style="width:110px; padding:4px 6px;">Kode Barang</th>
+                                <th style="padding:4px 6px;">Uraian Barang</th>
+                                <th style="width:85px; padding:4px 6px;">HS Code</th>
+                                <th style="width:50px; text-align:center; padding:4px 6px;">Satuan</th>
+                                <th style="width:75px; text-align:right; padding:4px 6px;" title="Net Weight prorata per unit dari dokumen terakhir">NW / Unit</th>
+                                <th style="width:75px; text-align:right; padding:4px 6px;" title="Gross Weight prorata per unit dari dokumen terakhir">GW / Unit</th>
+                                <th style="width:85px; text-align:right; padding:4px 6px;" title="Harga Satuan (Price) dari dokumen terakhir">Price / Unit</th>
+                                <th style="width:150px; padding:4px 6px;" title="Supplier/Customer & AJU terakhir dokumen dibuat">Dokumen Terakhir</th>
+                                <th style="width:75px; text-align:right; padding:4px 6px;" title="Masukkan Jumlah Satuan (Qty) yang ingin ditambahkan">Qty Masuk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tbodyStagingPicker" style="font-size:10px;"></tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; align-items:center; padding:8px 14px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal('modalStagingHistoryPicker')" style="font-size:10.5px; padding:3px 12px;">Batal</button>
+                <button type="button" class="btn btn-primary btn-sm" onclick="insertSelectedStagingItems()" style="font-size:10.5px; font-weight:700; background:#4f46e5; border-color:#4338ca; padding:3px 14px;">
+                    ➕ Masukkan Barang Terpilih ke Dokumen
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- QUICK PICKER MODAL: MASTER BARANG (bc_material) -->
     <div class="modal-overlay" id="modalMaterialPicker">
         <div class="modal" style="max-width:920px; width:95vw;">
@@ -8550,7 +9632,63 @@ $isEditMode = !empty($selectedAjuParam);
         let currentTabRules = null;
         let currentTabSource = 'default';
         let currentColSource = 'varheader';
-        let currentActiveCmpId = '';
+        let currentActiveCmpId = <?= json_encode($filterCmp) ?>;
+        const currentCompanyCmpId = <?= json_encode($filterCmp) ?>;
+        const currentAuthUserId = <?= json_encode($cleanUserKey) ?>;
+
+        function getCurrentEffectiveCmpId() {
+            if (typeof currentActiveCmpId !== 'undefined' && currentActiveCmpId) return currentActiveCmpId;
+            if (typeof currentData !== 'undefined' && currentData && currentData.header && currentData.header.cmp_id) return currentData.header.cmp_id;
+            const urlCmp = new URLSearchParams(window.location.search).get('cmp_id');
+            if (urlCmp) return urlCmp;
+            if (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) return currentCompanyCmpId;
+            return '';
+        }
+
+        // =============================================================
+        // USER-ISOLATED PREFERENCE: Mengingat Dokumen BC Per User & Per Perusahaan
+        // =============================================================
+        function getUserStoragePrefix(cmpId) {
+            const u = currentAuthUserId || 'user';
+            const cleanCmp = (cmpId || '').replace(/[^a-zA-Z0-9_-]/g, '');
+            return cleanCmp ? `ceisa_last_bc_${u}_${cleanCmp}` : `ceisa_last_bc_${u}`;
+        }
+
+        function saveUserBcPreference(bc, cmpId) {
+            if (!bc) return;
+            const cleanBc = String(bc).trim();
+            const effCmp = cmpId || getCurrentEffectiveCmpId();
+            const uKeyCmp = getUserStoragePrefix(effCmp);
+            const uKeyUser = getUserStoragePrefix('');
+            try {
+                if (effCmp) localStorage.setItem(uKeyCmp, cleanBc);
+                localStorage.setItem(uKeyUser, cleanBc);
+                if (effCmp) document.cookie = `${uKeyCmp}=${encodeURIComponent(cleanBc)}; path=/; max-age=31536000; SameSite=Lax`;
+                document.cookie = `${uKeyUser}=${encodeURIComponent(cleanBc)}; path=/; max-age=31536000; SameSite=Lax`;
+                fetch(`editor.php?action=set_last_bc&bc=${encodeURIComponent(cleanBc)}&cmp_id=${encodeURIComponent(effCmp)}`).catch(() => {});
+            } catch(e) {}
+        }
+
+        function getUserBcPreference(cmpId) {
+            const effCmp = cmpId || getCurrentEffectiveCmpId();
+            const uKeyCmp = getUserStoragePrefix(effCmp);
+            const uKeyUser = getUserStoragePrefix('');
+            let saved = null;
+            try {
+                if (effCmp) saved = localStorage.getItem(uKeyCmp);
+                if (!saved) saved = localStorage.getItem(uKeyUser);
+                if (!saved && effCmp) {
+                    const match = document.cookie.match(new RegExp('(^|; )' + uKeyCmp + '=([^;]*)'));
+                    if (match) saved = decodeURIComponent(match[2]);
+                }
+                if (!saved) {
+                    const matchUser = document.cookie.match(new RegExp('(^|; )' + uKeyUser + '=([^;]*)'));
+                    if (matchUser) saved = decodeURIComponent(matchUser[2]);
+                }
+            } catch(e) {}
+            return saved || null;
+        }
+
         let filterModalActiveSubTab = 'tab';
         let filterModalActiveColTable = 'header';
         let filterModalCacheData = null;
@@ -8576,23 +9714,102 @@ $isEditMode = !empty($selectedAjuParam);
             if (btn) {
                 btn.classList.toggle('active', isOpen);
                 btn.innerText = isOpen ? '✕ Tutup Setup' : '✨ Setup AJU Baru';
+                btn.style.display = '';
             }
         }
 
+        function openNewAjuSetup() {
+            toggleEntryPanel(true);
+            const btnEntry = document.getElementById('btnToggleEntry');
+            if (btnEntry) {
+                btnEntry.style.display = '';
+                btnEntry.classList.add('active');
+                btnEntry.innerText = '✕ Tutup Setup';
+            }
+            if (!currentAju) {
+                const entryAjuEl = document.getElementById('entryAjuDisplay');
+                if (entryAjuEl) entryAjuEl.innerText = '- Silakan Buat Dokumen -';
+                applyHeaderDefaults(true);
+            }
+        }
+        window.openNewAjuSetup = openNewAjuSetup;
+
+        window.addEventListener('message', (event) => {
+            if (event.data && (event.data.type === 'OPEN_NEW_AJU_SETUP' || event.data.type === 'NEW_AJU')) {
+                openNewAjuSetup();
+            }
+        });
+
         function onEntryBcChange(bc) {
-            const valuta = document.getElementById('entryValuta')?.value || 'USD';
-            fetchLiveNdpbm(valuta);
+            if (!bc) return;
+            saveUserBcPreference(bc);
+
+            const cleanBc = String(bc).replace(/[^0-9]/g, '');
+            const isLocal = ['40', '41', '25', '261', '262', '613'].includes(cleanBc);
+            const valutaEl = document.getElementById('entryValuta');
+            if (valutaEl) {
+                if (isLocal) {
+                    valutaEl.value = 'IDR';
+                } else if (valutaEl.value === 'IDR') {
+                    valutaEl.value = 'USD';
+                }
+            }
+
+            const currentVal = valutaEl?.value || (isLocal ? 'IDR' : 'USD');
+            if (currentVal === 'IDR') {
+                const input = document.getElementById('entryNdpbmVal');
+                if (input) input.value = '1,00';
+                const badge = document.getElementById('ndpbmSourceBadge');
+                if (badge) badge.innerText = 'RUPIAH (IDR)';
+            } else {
+                fetchLiveNdpbm(currentVal);
+            }
+
+            // Jika dalam mode dokumen baru (belum ada AJU yang tersimpan),
+            // segera perbarui tampilan form editor (tabs & kolom varheader) sesuai BC yang baru dipilih
+            if (!currentAju) {
+                loadAjuData('');
+            }
         }
 
         function resetEntryDraft() {
+            const savedBc = getUserBcPreference();
             const docBcEl = document.getElementById('entryDocBc');
             if (docBcEl && docBcEl.options.length > 0) {
-                docBcEl.selectedIndex = 0;
+                if (savedBc) {
+                    let found = false;
+                    for (let i = 0; i < docBcEl.options.length; i++) {
+                        if (docBcEl.options[i].value === savedBc) {
+                            docBcEl.value = savedBc;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) docBcEl.selectedIndex = 0;
+                } else {
+                    docBcEl.selectedIndex = 0;
+                }
             }
-            document.getElementById('entryValuta').value = 'USD';
+            const activeBc = docBcEl?.value || '23';
+            const cleanBc = String(activeBc).replace(/[^0-9]/g, '');
+            const isLocal = ['40', '41', '25', '261', '262', '613'].includes(cleanBc);
+            const defVal = isLocal ? 'IDR' : 'USD';
+
+            const valEl = document.getElementById('entryValuta');
+            if (valEl) valEl.value = defVal;
             document.getElementById('entryNdpbmDate').value = new Date().toISOString().slice(0, 10);
-            fetchLiveNdpbm('USD');
+            if (defVal === 'IDR') {
+                const input = document.getElementById('entryNdpbmVal');
+                if (input) input.value = '1,00';
+                const badge = document.getElementById('ndpbmSourceBadge');
+                if (badge) badge.innerText = 'RUPIAH (IDR)';
+            } else {
+                fetchLiveNdpbm(defVal);
+            }
             document.getElementById('entryAjuDisplay').innerText = '- Silakan Buat Dokumen -';
+            if (!currentAju) {
+                loadAjuData('');
+            }
             showToast('Draft entri direset');
         }
 
@@ -8652,18 +9869,22 @@ $isEditMode = !empty($selectedAjuParam);
                 fd.append('tanggal_pernyataan', tanggal);
                 fd.append('cmp_id', cmpId);
 
+                // Kirim juga nilai header bawaan yang sudah terisi di form agar otomatis tersimpan ke AJU baru
+                const extraHdrFields = [
+                    'kode_kantor', 'kode_jenis_tpb', 'kode_tujuan_pengiriman', 
+                    'kode_tujuan_pemasukan', 'kode_tujuan_pengeluaran',
+                    'nama_pernyataan', 'jabatan_pernyataan', 'kota_pernyataan'
+                ];
+                extraHdrFields.forEach(k => {
+                    const el = document.getElementById('hdr_' + k);
+                    if (el && el.value) fd.append(k, el.value.trim());
+                });
+
                 const res = await fetch('editor.php?action=create_new_aju', {
                     method: 'POST',
                     body: fd
                 });
-                const text = await res.text();
-                let json;
-                try {
-                    json = JSON.parse(text);
-                } catch(pe) {
-                    const cleanErr = text.replace(/<[^>]*>?/gm, '').trim();
-                    throw new Error("Respon server tidak valid: " + (cleanErr.substring(0, 150) || 'Format JSON rusak'));
-                }
+                const json = await res.json();
                 if (json.status === 'OK') {
                     const newAju = json.nomor_aju;
                     document.getElementById('entryAjuDisplay').innerText = newAju;
@@ -8758,8 +9979,161 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
+        let currentAvailableFormats = [];
+
+        function renderFormatCards(activeIdx) {
+            const cardsContainer = document.getElementById('cfgFormatCards');
+            if (!cardsContainer) return;
+            if (!currentAvailableFormats || currentAvailableFormats.length < 2) {
+                cardsContainer.style.display = 'none';
+                cardsContainer.innerHTML = '';
+                return;
+            }
+            cardsContainer.style.display = 'grid';
+            let cardsHtml = '';
+            currentAvailableFormats.forEach((fmt, i) => {
+                const isSelected = (i === activeIdx);
+                const borderClr = isSelected ? 'var(--primary, #1890ff)' : 'var(--border, #d9d9d9)';
+                const bgClr = isSelected ? 'rgba(24, 144, 255, 0.08)' : 'var(--bg-card, #ffffff)';
+                const checkBadge = isSelected ? `<span style="background:var(--primary, #1890ff); color:#fff; font-size:8px; padding:1px 5px; border-radius:10px; font-weight:700;">✓ TERPILIH</span>` : '';
+                const regBadge = fmt.nomor_daftar ? `<span style="background:#52c41a; color:#fff; font-size:8px; padding:1px 5px; border-radius:10px; font-weight:600;">No. Daftar: ${escapeHtml(fmt.nomor_daftar)}</span>` : `<span style="background:#faad14; color:#fff; font-size:8px; padding:1px 5px; border-radius:10px; font-weight:600;">Draft</span>`;
+
+                cardsHtml += `
+                    <div onclick="onSelectFormatAju(${i})" style="cursor:pointer; border:1.5px solid ${borderClr}; background:${bgClr}; border-radius:4px; padding:5px 7px; transition:all 0.2s ease; box-shadow:${isSelected ? '0 1px 4px rgba(24,144,255,0.18)' : 'none'};">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+                            <strong style="font-size:9.5px; color:${isSelected ? 'var(--primary)' : 'var(--text)'};">Format ${i + 1}: [A: ${escapeHtml(fmt.a)} | B: ${escapeHtml(fmt.b)}]</strong>
+                            <div style="display:flex; gap:3px; align-items:center;">
+                                ${regBadge}
+                                ${checkBadge}
+                            </div>
+                        </div>
+                        <div style="font-size:8.5px; color:var(--text-muted); line-height:1.35;">
+                            <div>Tanggal: <strong>${escapeHtml(fmt.tanggal_daftar || fmt.last_date || '-')}</strong> • Digunakan: <strong>${fmt.total_dokumen}x</strong></div>
+                            <div>TTD: <strong>${escapeHtml(fmt.nama_ttd || '-')}</strong> • Urutan Terakhir: <strong>#${fmt.max_seq}</strong></div>
+                        </div>
+                    </div>
+                `;
+            });
+            cardsContainer.innerHTML = cardsHtml;
+        }
+
+        function renderFormatDetailInfo(fmt) {
+            const el = document.getElementById('cfgFormatDetailInfo');
+            if (!el) return;
+            if (!fmt) {
+                el.innerHTML = '';
+                return;
+            }
+            const nextSeq = (parseInt(fmt.max_seq || 0, 10) + 1);
+            const isReg = !!fmt.nomor_daftar;
+            el.innerHTML = `
+                <div style="background:rgba(24,144,255,0.06); padding:5px 8px; border-radius:4px; border:1px solid rgba(24,144,255,0.25); font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size:9px; line-height:1.4;">
+                    <div style="display:flex; justify-content:space-between; flex-wrap:wrap; gap:4px; margin-bottom:3px;">
+                        <span>📌 <strong>Dokumen Terakhir:</strong> <strong style="color:var(--primary); font-family:monospace; font-size:10px;">${escapeHtml(fmt.last_aju)}</strong></span>
+                        <span style="color:#52c41a; font-weight:700;">➔ Nomor Berikutnya: Urutan #${nextSeq}</span>
+                    </div>
+                    <div style="display:flex; flex-wrap:wrap; gap:8px; color:var(--text-muted); font-size:8.5px;">
+                        <span>${isReg ? `🏛️ No. Daftar: <strong style="color:var(--text);">${escapeHtml(fmt.nomor_daftar)}</strong>` : '📝 Status: Draft'}</span>
+                        <span>📅 Tanggal: <strong style="color:var(--text);">${escapeHtml(fmt.tanggal_daftar || fmt.last_date || '-')}</strong></span>
+                        <span>👤 Penandatangan: <strong style="color:var(--text);">${escapeHtml(fmt.nama_ttd || '-')}</strong></span>
+                        <span>📊 Riwayat: <strong>${fmt.total_dokumen} Dokumen</strong> (Max 60 Hari)</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function onSelectFormatAju(val) {
+            const infoEl = document.getElementById('cfgFormatDetailInfo');
+            const selFmt = document.getElementById('cfgFormatSelector');
+
+            if (val === '__custom__') {
+                if (selFmt) selFmt.value = '__custom__';
+                if (infoEl) {
+                    infoEl.innerHTML = `<span style="color:var(--text-muted); font-size:8.5px;">✎ <em>Mode Input Manual: Silakan atur sendiri Kode Kantor (A), Kode Unik (B), dan Sequence Terakhir sesuai kebutuhan Anda.</em></span>`;
+                }
+                renderFormatCards(-1);
+                updateConfigAjuPreview();
+                return;
+            }
+
+            const idx = parseInt(val, 10);
+            if (isNaN(idx) || !currentAvailableFormats[idx]) return;
+            const fmt = currentAvailableFormats[idx];
+
+            if (selFmt) selFmt.value = String(idx);
+
+            const elA = document.getElementById('cfgA');
+            const elB = document.getElementById('cfgB');
+            const elSeq = document.getElementById('cfgAju');
+
+            if (elA) elA.value = fmt.a;
+            if (elB) elB.value = fmt.b;
+            if (elSeq) elSeq.value = fmt.max_seq;
+
+            // Selaraskan juga nilai penandatangan & header jika tersedia pada format yang dipilih
+            if (fmt.nama_ttd) document.getElementById('cfgNamaTtd').value = fmt.nama_ttd;
+            if (fmt.jabatan_ttd) document.getElementById('cfgJabatanTtd').value = fmt.jabatan_ttd;
+            if (fmt.kota_ttd) document.getElementById('cfgKotaTtd').value = fmt.kota_ttd;
+
+            if (fmt.kode_kantor) document.getElementById('cfgKodeKantor').value = fmt.kode_kantor;
+            if (fmt.kode_jenis_tpb !== undefined) populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', fmt.kode_jenis_tpb);
+            if (fmt.kode_tujuan_pengiriman !== undefined) populateConfigReffSelect('cfgKodeTujuanPengiriman', 'TUJUAN PENGIRIMAN', fmt.kode_tujuan_pengiriman);
+            if (fmt.kode_tujuan_pemasukan !== undefined) populateConfigReffSelect('cfgKodeTujuanPemasukan', 'TUJUAN PEMASUKAN', fmt.kode_tujuan_pemasukan);
+            if (fmt.kode_tujuan_pengeluaran !== undefined) populateConfigReffSelect('cfgKodeTujuanPengeluaran', 'TUJUAN PENGELUARAN', fmt.kode_tujuan_pengeluaran);
+            if (fmt.kode_valuta && document.getElementById('cfgKodeValuta')) {
+                document.getElementById('cfgKodeValuta').value = fmt.kode_valuta;
+            }
+
+            // Update badge info sumber
+            const badge = document.getElementById('cfgLatestAjuBadge');
+            if (badge && fmt.last_aju) {
+                const regTxt = fmt.nomor_daftar ? ` (No. Daftar: <strong>${escapeHtml(fmt.nomor_daftar)}</strong>)` : '';
+                badge.innerHTML = `✓ Nilai bawaan ditarik dari format: <strong>${escapeHtml(fmt.last_aju)}</strong>${regTxt}`;
+                badge.style.color = '#52c41a';
+                badge.style.background = 'rgba(82, 196, 26, 0.1)';
+                badge.style.border = '1px solid rgba(82, 196, 26, 0.25)';
+                badge.style.display = 'inline-block';
+            }
+
+            renderFormatCards(idx);
+            renderFormatDetailInfo(fmt);
+            updateConfigAjuPreview();
+
+            // Efek highlight animasi visual pada field input yang diisi
+            [elA, elB, elSeq].forEach(el => {
+                if (el) {
+                    el.style.transition = 'background-color 0.35s ease';
+                    el.style.backgroundColor = 'rgba(24, 144, 255, 0.2)';
+                    setTimeout(() => { el.style.backgroundColor = ''; }, 800);
+                }
+            });
+        }
+
+        function onManualConfigInput() {
+            const curA = (document.getElementById('cfgA')?.value || '').trim();
+            const curB = (document.getElementById('cfgB')?.value || '').trim();
+            const selFmt = document.getElementById('cfgFormatSelector');
+
+            if (selFmt && currentAvailableFormats && currentAvailableFormats.length > 0) {
+                const matchIdx = currentAvailableFormats.findIndex(f => f.a === curA && f.b === curB);
+                if (matchIdx !== -1) {
+                    selFmt.value = String(matchIdx);
+                    renderFormatCards(matchIdx);
+                    renderFormatDetailInfo(currentAvailableFormats[matchIdx]);
+                } else {
+                    selFmt.value = '__custom__';
+                    renderFormatCards(-1);
+                    const infoEl = document.getElementById('cfgFormatDetailInfo');
+                    if (infoEl) {
+                        infoEl.innerHTML = `<span style="color:var(--text-muted); font-size:8.5px;">✎ <em>Format kustom / input manual (A: ${escapeHtml(curA)}, B: ${escapeHtml(curB)})</em></span>`;
+                    }
+                }
+            }
+            updateConfigAjuPreview();
+        }
+
         async function loadConfigAjuForBc(bc) {
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            const cmpId = getCurrentEffectiveCmpId();
             try {
                 const res = await fetch(`editor.php?action=get_config_aju&bc=${encodeURIComponent(bc)}&cmp_id=${encodeURIComponent(cmpId)}`);
                 const json = await res.json();
@@ -8772,6 +10146,73 @@ $isEditMode = !empty($selectedAjuParam);
                     document.getElementById('cfgJabatanTtd').value = d.jabatan_ttd || '';
                     document.getElementById('cfgKotaTtd').value = d.kota_ttd || '';
 
+                    // Inisialisasi Selector Format dari History Dokumen Staging
+                    currentAvailableFormats = d.available_formats || [];
+                    const secFmt = document.getElementById('sectionFormatAjuHistory');
+                    const selFmt = document.getElementById('cfgFormatSelector');
+                    const alertMulti = document.getElementById('alertMultiFormat');
+                    const badgeFmt = document.getElementById('badgeFormatCount');
+                    const txtMultiCount = document.getElementById('txtMultiFormatCount');
+
+                    if (secFmt && selFmt) {
+                        if (currentAvailableFormats.length > 0) {
+                            secFmt.style.display = 'block';
+                            if (badgeFmt) badgeFmt.innerText = `${currentAvailableFormats.length} Format Ditemukan`;
+
+                            if (currentAvailableFormats.length >= 2) {
+                                if (alertMulti) alertMulti.style.display = 'block';
+                                if (txtMultiCount) txtMultiCount.innerText = currentAvailableFormats.length;
+                            } else {
+                                if (alertMulti) alertMulti.style.display = 'none';
+                            }
+
+                            // Bangun opsi dropdown dengan font dan teks rapi
+                            let htmlOpts = '';
+                            currentAvailableFormats.forEach((fmt, i) => {
+                                const isLatest = (i === 0) ? ' [Terbaru]' : '';
+                                const regStr = fmt.nomor_daftar ? ` • No. Daftar: ${fmt.nomor_daftar}` : '';
+                                const dateStr = fmt.tanggal_daftar ? ` (${fmt.tanggal_daftar})` : (fmt.last_date ? ` (${fmt.last_date})` : '');
+                                const ttdStr = fmt.nama_ttd ? ` • TTD: ${fmt.nama_ttd}` : '';
+                                htmlOpts += `<option value="${i}">Format ${i + 1}${isLatest}: A = ${fmt.a} | B = ${fmt.b} • Urutan: #${fmt.max_seq}${regStr}${dateStr}${ttdStr}</option>`;
+                            });
+                            htmlOpts += `<option value="__custom__">✎ Format Kustom / Input Manual...</option>`;
+                            selFmt.innerHTML = htmlOpts;
+
+                            // Cocokkan apakah nilai d.a & d.b sama dengan salah satu format resmi di riwayat
+                            const matchIdx = currentAvailableFormats.findIndex(f => f.a === d.a && f.b === d.b);
+                            if (matchIdx !== -1) {
+                                selFmt.value = String(matchIdx);
+                                renderFormatCards(matchIdx);
+                                renderFormatDetailInfo(currentAvailableFormats[matchIdx]);
+                            } else if (d.is_saved && d.b) {
+                                // Format kustom tersimpan di bc_ceisa_setaju (misal TESTES)
+                                selFmt.value = '__custom__';
+                                onSelectFormatAju('__custom__');
+                                if (document.getElementById('cfgA')) document.getElementById('cfgA').value = d.a || '0000';
+                                if (document.getElementById('cfgB')) document.getElementById('cfgB').value = d.b || '';
+                                if (document.getElementById('cfgAju')) document.getElementById('cfgAju').value = d.aju || 0;
+                                renderFormatCards(-1);
+                                const infoEl = document.getElementById('cfgFormatDetailInfo');
+                                if (infoEl) {
+                                    infoEl.innerHTML = `<span style="color:var(--text-muted); font-size:8.5px;">✎ <em>Format kustom tersimpan (A: ${escapeHtml(d.a || '0000')}, B: ${escapeHtml(d.b)})</em></span>`;
+                                }
+                                updateConfigAjuPreview();
+                            } else if (currentAvailableFormats.length > 0) {
+                                selFmt.value = '0';
+                                onSelectFormatAju(0);
+                            } else {
+                                selFmt.value = '__custom__';
+                                onSelectFormatAju('__custom__');
+                            }
+                        } else {
+                            secFmt.style.display = 'none';
+                            selFmt.innerHTML = '<option value="__custom__">✎ Input Manual</option>';
+                            renderFormatCards(-1);
+                            const infoEl = document.getElementById('cfgFormatDetailInfo');
+                            if (infoEl) infoEl.innerHTML = '';
+                        }
+                    }
+
                     // Default Header Values
                     document.getElementById('cfgKodeKantor').value = d.kode_kantor || '';
                     populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', d.kode_jenis_tpb);
@@ -8782,15 +10223,24 @@ $isEditMode = !empty($selectedAjuParam);
                         document.getElementById('cfgKodeValuta').value = d.kode_valuta || 'USD';
                     }
 
-                    // Info badge AJU terakhir
+                    // Tampilkan badge status sumber data
                     const badge = document.getElementById('cfgLatestAjuBadge');
                     if (badge) {
-                        if (d.latest_aju && d.latest_aju.found) {
-                            badge.style.display = 'block';
-                            badge.innerHTML = `<strong>⚡ Terisi Otomatis dari AJU Terakhir:</strong> <span style="font-family:monospace; font-weight:700;">${d.latest_aju.nomor_aju}</span> (Dokumen BC ${d.latest_aju.kode_dokumen || bc}) &bull; Kantor: <b>${d.latest_aju.kode_kantor || '-'}</b> &bull; Valuta: <b>${d.latest_aju.kode_valuta || '-'}</b> &bull; TTD: <b>${d.latest_aju.nama_ttd || '-'}</b>`;
+                        if (d.latest_aju) {
+                            if (d.is_saved) {
+                                badge.innerHTML = `⚙️ Disimpan di Konfigurasi (AJU Terakhir: <strong>${escapeHtml(d.latest_aju.nomor_aju)}</strong>)`;
+                                badge.style.color = 'var(--text-muted)';
+                                badge.style.background = 'var(--bg-base)';
+                                badge.style.border = '1px solid var(--border)';
+                            } else {
+                                badge.innerHTML = `✨ Terisi otomatis dari riwayat AJU: <strong>${escapeHtml(d.latest_aju.nomor_aju)}</strong>`;
+                                badge.style.color = '#52c41a';
+                                badge.style.background = 'rgba(82, 196, 26, 0.1)';
+                                badge.style.border = '1px solid rgba(82, 196, 26, 0.25)';
+                            }
+                            badge.style.display = 'inline-block';
                         } else {
                             badge.style.display = 'none';
-                            badge.innerHTML = '';
                         }
                     }
 
@@ -8801,51 +10251,68 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
-        async function pullDefaultsFromLatestAju() {
-            const selBc = document.getElementById('cfgBc');
-            const bc = selBc ? selBc.value : '23';
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+        async function pullLatestAjuDefaults() {
+            const bc = document.getElementById('cfgBc')?.value || '23';
+            const cmpId = getCurrentEffectiveCmpId();
+            const btn = document.getElementById('btnPullLatestAju');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner" style="width:10px;height:10px;display:inline-block;vertical-align:middle;margin-right:3px;"></span> Menarik...';
+            }
 
             try {
                 const res = await fetch(`editor.php?action=get_latest_aju_defaults&bc=${encodeURIComponent(bc)}&cmp_id=${encodeURIComponent(cmpId)}`);
                 const json = await res.json();
-                if (json.status === 'OK' && json.data) {
+                if (json.status === 'OK' && json.found && json.data) {
                     const d = json.data;
                     if (d.kode_kantor) document.getElementById('cfgKodeKantor').value = d.kode_kantor;
-                    if (d.kode_jenis_tpb) populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', d.kode_jenis_tpb);
-                    if (d.kode_tujuan_pengiriman) populateConfigReffSelect('cfgKodeTujuanPengiriman', 'TUJUAN PENGIRIMAN', d.kode_tujuan_pengiriman);
-                    if (d.kode_tujuan_pemasukan) populateConfigReffSelect('cfgKodeTujuanPemasukan', 'TUJUAN PEMASUKAN', d.kode_tujuan_pemasukan);
-                    if (d.kode_tujuan_pengeluaran) populateConfigReffSelect('cfgKodeTujuanPengeluaran', 'TUJUAN PENGELUARAN', d.kode_tujuan_pengeluaran);
+                    populateConfigReffSelect('cfgKodeJenisTpb', 'JENIS TPB', d.kode_jenis_tpb || '');
+                    populateConfigReffSelect('cfgKodeTujuanPengiriman', 'TUJUAN PENGIRIMAN', d.kode_tujuan_pengiriman || '');
+                    populateConfigReffSelect('cfgKodeTujuanPemasukan', 'TUJUAN PEMASUKAN', d.kode_tujuan_pemasukan || '');
+                    populateConfigReffSelect('cfgKodeTujuanPengeluaran', 'TUJUAN PENGELUARAN', d.kode_tujuan_pengeluaran || '');
                     if (d.kode_valuta && document.getElementById('cfgKodeValuta')) {
                         document.getElementById('cfgKodeValuta').value = d.kode_valuta;
                     }
-                    if (d.nama_ttd) document.getElementById('cfgNamaTtd').value = d.nama_ttd;
-                    if (d.jabatan_ttd) document.getElementById('cfgJabatanTtd').value = d.jabatan_ttd;
-                    if (d.kota_ttd) document.getElementById('cfgKotaTtd').value = d.kota_ttd;
+                    document.getElementById('cfgNamaTtd').value = d.nama_ttd || '';
+                    document.getElementById('cfgJabatanTtd').value = d.jabatan_ttd || '';
+                    document.getElementById('cfgKotaTtd').value = d.kota_ttd || '';
 
-                    // Update A, B, Sequence jika tersedia
+                    // Jika kode penomoran A & B ada di nomor AJU, perbarui dan sesuaikan selector
                     if (d.a) document.getElementById('cfgA').value = d.a;
                     if (d.b) document.getElementById('cfgB').value = d.b;
-                    if (d.seq) document.getElementById('cfgAju').value = d.seq;
+                    if (d.seq !== undefined && d.seq !== null) document.getElementById('cfgAju').value = d.seq;
 
-                    updateConfigAjuPreview();
+                    onManualConfigInput();
 
+                    // Update badge info
                     const badge = document.getElementById('cfgLatestAjuBadge');
                     if (badge) {
-                        badge.style.display = 'block';
-                        badge.innerHTML = `<strong>⚡ Menggunakan Nilai AJU Terakhir:</strong> <span style="font-family:monospace; font-weight:700;">${d.nomor_aju}</span> (Dokumen BC ${d.kode_dokumen || bc}) &bull; Kantor: <b>${d.kode_kantor || '-'}</b> &bull; Valuta: <b>${d.kode_valuta || '-'}</b> &bull; TTD: <b>${d.nama_ttd || '-'}</b>`;
+                        badge.innerHTML = `✓ Nilai bawaan ditarik dari AJU terakhir: <strong>${escapeHtml(d.nomor_aju)}</strong>`;
+                        badge.style.color = '#52c41a';
+                        badge.style.background = 'rgba(82, 196, 26, 0.1)';
+                        badge.style.border = '1px solid rgba(82, 196, 26, 0.25)';
+                        badge.style.display = 'inline-block';
                     }
 
-                    if (typeof showToast === 'function') {
-                        showToast(`✓ Nilai berhasil ditarik dari AJU ${d.nomor_aju}!`);
-                    } else {
-                        alert(`✓ Nilai berhasil ditarik dari AJU ${d.nomor_aju}!`);
+                    // Flash highlight animation on the section
+                    const sec = document.getElementById('sectionNilaiBawaanHeader');
+                    if (sec) {
+                        sec.style.transition = 'background-color 0.4s ease';
+                        sec.style.backgroundColor = 'rgba(82, 196, 26, 0.12)';
+                        setTimeout(() => { sec.style.backgroundColor = ''; }, 1200);
                     }
+
+                    showToast(`✓ Nilai bawaan berhasil ditarik dari AJU ${d.nomor_aju} (BC ${bc})!`);
                 } else {
-                    alert(json.message || `Tidak ditemukan dokumen AJU sebelumnya untuk BC ${bc}.`);
+                    alert(`Tidak ditemukan dokumen AJU [BC ${bc}] sebelumnya untuk perusahaan ini di database.`);
                 }
             } catch(e) {
-                alert('Gagal menarik nilai bawaan dari AJU terakhir: ' + e.message);
+                alert('Gagal menarik nilai bawaan: ' + e.message);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '⚡ Tarik dari AJU Terakhir';
+                }
             }
         }
 
@@ -8878,7 +10345,7 @@ $isEditMode = !empty($selectedAjuParam);
             const kode_tujuan_pemasukan = document.getElementById('cfgKodeTujuanPemasukan')?.value || '';
             const kode_tujuan_pengeluaran = document.getElementById('cfgKodeTujuanPengeluaran')?.value || '';
             const kode_valuta = document.getElementById('cfgKodeValuta')?.value || 'USD';
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            const cmpId = getCurrentEffectiveCmpId();
 
             const fd = new FormData();
             fd.append('bc', bc);
@@ -8913,7 +10380,7 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
-        async function applyHeaderDefaults() {
+        async function applyHeaderDefaults(silent = false) {
             const kodeBc = (typeof currentData !== 'undefined' && currentData.header && currentData.header.kode_dokumen)
                 ? currentData.header.kode_dokumen
                 : (document.getElementById('hdr_kode_dokumen')?.value || document.getElementById('entryDocBc')?.value || '23');
@@ -8954,18 +10421,19 @@ $isEditMode = !empty($selectedAjuParam);
                         }
                     });
 
-                    const srcInfo = d.source_nomor_aju ? ` (sumber AJU: ${d.source_nomor_aju})` : '';
-                    if (typeof showToast === 'function') {
-                        showToast(`✓ Berhasil menerapkan ${applied} nilai bawaan header${srcInfo}!`);
-                    } else {
-                        alert(`✓ Berhasil menerapkan ${applied} nilai bawaan header${srcInfo}!`);
+                    if (!silent) {
+                        if (typeof showToast === 'function') {
+                            showToast(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                        } else {
+                            alert(`✓ Berhasil menerapkan ${applied} nilai bawaan header!`);
+                        }
                     }
-                } else {
+                } else if (!silent) {
                     alert('Nilai bawaan belum dikonfigurasi untuk jenis dokumen ini. Silakan atur pada menu "⚙️ Konfig AJU".');
                 }
             } catch (err) {
                 console.error('Error applying header defaults:', err);
-                alert('Gagal mengambil nilai bawaan header: ' + err.message);
+                if (!silent) alert('Gagal mengambil nilai bawaan header: ' + err.message);
             }
         }
 
@@ -9013,304 +10481,230 @@ $isEditMode = !empty($selectedAjuParam);
             }
         }
 
-        let currentErpType = 'sales_invoice';
-        let erpSelectedDocNos = new Set();
-        let globalErpData = [];
-
         async function openErpModal() {
+            if (!currentAju) {
+                alert('Silakan pilih atau buat dokumen AJU terlebih dahulu sebelum integrasi ERP!');
+                toggleEntryPanel(true);
+                return;
+            }
             await loadErpProfile();
-            document.getElementById('erpAjuLabel').innerText = currentAju ? currentAju : '(Dokumen AJU Baru)';
+            if (!activeErpDriver) {
+                alert('Sistem ERP belum dikonfigurasi untuk perusahaan ini.');
+                return;
+            }
+            document.getElementById('erpAjuLabel').innerText = currentAju;
 
-            const kodeBc = (currentData?.header?.kode_dokumen || document.getElementById('entryDocBc')?.value || '27').replace(/[^0-9]/g, '');
-            if (['23', '40', '16'].includes(kodeBc)) {
-                currentErpType = 'purchase_order';
-            } else if (kodeBc === '27') {
-                currentErpType = 'sales_invoice';
-            } else {
-                currentErpType = 'sales_invoice';
+            const kodeBc = (currentData.header?.kode_dokumen || document.getElementById('entryDocBc')?.value || '23').replace(/[^0-9]/g, '');
+            const typeSel = document.getElementById('erpFilterType');
+            if (typeSel) {
+                if (['30', '25', '27', '41', '261', '33'].includes(kodeBc)) {
+                    typeSel.value = 'outbound';
+                } else {
+                    typeSel.value = 'inbound';
+                }
             }
 
-            switchErpTab(currentErpType, false);
             document.getElementById('modalErpIntegration').style.display = 'flex';
             searchErpDocuments();
         }
 
-        function switchErpTab(type, autoSearch = true) {
-            currentErpType = type;
-            document.querySelectorAll('.erp-tab-btn').forEach(btn => {
-                if (btn.dataset.type === type) {
-                    btn.classList.remove('btn-secondary');
-                    btn.classList.add('btn-primary');
-                } else {
-                    btn.classList.remove('btn-primary');
-                    btn.classList.add('btn-secondary');
-                }
-            });
-
-            const descEl = document.getElementById('erpTabDesc');
-            const dateLbl = document.getElementById('erpDateLabel');
-            const targetBcSel = document.getElementById('erpFilterTargetBc');
-
-            if (type === 'sales_invoice') {
-                if (descEl) descEl.innerText = 'Faktur Penjualan (Sales Invoice) Winline ke Customer (BC 2.7 & BC 3.0).';
-                if (dateLbl) dateLbl.innerText = 'Tanggal Transaksi:';
-                if (targetBcSel) targetBcSel.value = '27';
-            } else if (type === 'dn_transfer') {
-                if (descEl) descEl.innerText = 'Delivery Note (DN%) Winline Antar Plant Framas (BC 2.7).';
-                if (dateLbl) dateLbl.innerText = 'Tanggal Transaksi:';
-                if (targetBcSel) targetBcSel.value = '27';
-            } else {
-                if (descEl) descEl.innerText = 'Pesanan Pembelian (PO%) Bahan Baku dari Supplier (BC 2.3 & BC 4.0).';
-                if (dateLbl) dateLbl.innerText = 'Tanggal PO:';
-                if (targetBcSel) targetBcSel.value = '23';
-            }
-
-            clearErpSelection();
-            if (autoSearch) {
-                searchErpDocuments();
-            }
-        }
-
         async function searchErpDocuments() {
             const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            const q = document.getElementById('erpFilterQuery')?.value.trim() || '';
-            const dt = document.getElementById('erpFilterDate')?.value || '<?= date('Y-m-d') ?>';
-            const targetBc = document.getElementById('erpFilterTargetBc')?.value || '';
-            const countText = document.getElementById('erpRecordCountText');
-            const tbody = document.getElementById('erpTableBody');
+            const docType = document.getElementById('erpFilterType')?.value || 'outbound';
+            const q = document.getElementById('erpFilterQuery')?.value || '';
+            const dt1 = document.getElementById('erpFilterDateFrom')?.value || '';
+            const dt2 = document.getElementById('erpFilterDateTo')?.value || '';
+            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
 
-            if (tbody) {
-                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);"><div class="spinner"></div> Mengambil data ${currentErpType} dari SQL Server Winline...</td></tr>`;
+            const listEl = document.getElementById('erpDocList');
+            if (listEl) {
+                listEl.innerHTML = `
+                    <div class="app-loader-container" style="padding:30px 15px;">
+                        <div class="app-loader-icon-wrap" style="width:44px;height:44px;">
+                            <div class="app-loader-spinner spinner-primary" style="width:44px;height:44px;"></div>
+                            <div class="app-loader-center-icon" style="font-size:18px;">🔌</div>
+                        </div>
+                        <div class="app-loader-title" style="font-size:13px; color:#1890ff;">Mencari Dokumen di Database ERP...</div>
+                        <div class="app-loader-progress-track" style="max-width:200px; margin-top:8px;">
+                            <div class="app-loader-progress-bar"></div>
+                        </div>
+                    </div>
+                `;
             }
-            if (countText) countText.innerText = 'Memuat data...';
-            clearErpSelection();
 
             try {
-                const url = `editor.php?action=erp_search&cmp_id=${encodeURIComponent(cmpId)}&doc_type=${encodeURIComponent(currentErpType)}&date_from=${encodeURIComponent(dt)}&date_to=${encodeURIComponent(dt)}&search_q=${encodeURIComponent(q)}&kode_dokumen=${encodeURIComponent(targetBc)}`;
+                const url = `editor.php?action=erp_search&cmp_id=${encodeURIComponent(cmpId)}&doc_type=${encodeURIComponent(docType)}&search_q=${encodeURIComponent(q)}&date_from=${encodeURIComponent(dt1)}&date_to=${encodeURIComponent(dt2)}&kode_dokumen=${encodeURIComponent(kodeBc)}`;
                 const res = await fetch(url);
                 const json = await res.json();
-
                 if (json.status === 'OK') {
-                    globalErpData = json.results || [];
-                    renderErpDocumentTable(globalErpData);
+                    erpSearchResults = json.results || [];
+                    renderErpDocumentList(erpSearchResults);
                 } else {
-                    if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:25px; color:var(--danger);">${escapeHtml(json.message || 'Gagal memuat data')}</td></tr>`;
-                    if (countText) countText.innerText = 'Gagal memuat';
+                    listEl.innerHTML = `<div style="padding:15px; color:var(--danger);">${json.message || 'Gagal mencari data'}</div>`;
                 }
             } catch(e) {
-                if (tbody) tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:25px; color:var(--danger);">${escapeHtml(e.message)}</td></tr>`;
-                if (countText) countText.innerText = 'Error';
+                listEl.innerHTML = `<div style="padding:15px; color:var(--danger);">${e.message}</div>`;
             }
         }
 
-        function renderErpDocumentTable(data) {
-            const tbody = document.getElementById('erpTableBody');
-            const countText = document.getElementById('erpRecordCountText');
-            if (countText) countText.innerText = `${data.length} data ditemukan`;
+        function renderErpDocumentList(docs) {
+            const listEl = document.getElementById('erpDocList');
+            const countEl = document.getElementById('erpDocCount');
+            if (countEl) countEl.innerText = `${docs.length} dokumen`;
 
-            if (!data || data.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:30px; color:var(--text-muted);">Tidak ada transaksi ${currentErpType} pada tanggal ini.</td></tr>`;
+            if (!docs || docs.length === 0) {
+                listEl.innerHTML = '<div style="padding:20px; text-align:center; color:var(--text-muted);">Tidak ada transaksi yang cocok.</div>';
                 return;
             }
 
-            let html = '';
-            data.forEach((r, idx) => {
-                const isIntegrated = (r.status_h2h === 'integrated');
-                const isSelected   = erpSelectedDocNos.has(r.doc_id);
-                const statusBadge  = isIntegrated 
-                    ? `<span style="font-size:9px; background:rgba(82,196,26,0.12); color:#52c41a; padding:1px 5px; border-radius:3px; font-weight:600;" title="AJU: ${escapeHtml(r.nomor_aju)}">Terintegrasi</span>` 
-                    : `<span style="font-size:9px; background:rgba(24,144,255,0.12); color:#1890ff; padding:1px 5px; border-radius:3px; font-weight:600;">Siap H2H</span>`;
-
-                const trClass = isSelected ? 'style="background:rgba(24,144,255,0.06);"' : '';
-
+            let html = '<div style="display:flex; flex-direction:column; gap:4px;">';
+            docs.forEach((d, idx) => {
+                const simBadge = d.is_simulated ? '<span style="font-size:8px; background:rgba(234,179,8,0.2); color:#eab308; padding:1px 4px; border-radius:3px; margin-left:4px;">Simulasi ERP</span>' : '';
                 html += `
-                    <tr id="erp-row-${escapeHtml(r.doc_id)}" ${trClass}>
-                        <td style="text-align:center;">
-                            <input type="checkbox" class="erp-doc-chk" value="${escapeHtml(r.doc_id)}" 
-                                ${isSelected ? 'checked' : ''} 
-                                onchange="toggleErpRowSelect('${escapeHtml(r.doc_id)}', this.checked)">
-                        </td>
-                        <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
-                        <td>${statusBadge}</td>
-                        <td style="font-family:monospace; font-weight:700; color:var(--primary);">
-                            ${escapeHtml(r.doc_id)}
-                        </td>
-                        <td style="font-family:monospace; color:var(--text-muted);">${escapeHtml(r.ref_no || '-')}</td>
-                        <td>${escapeHtml(r.doc_date)}</td>
-                        <td>
-                            <div style="font-weight:600;">${escapeHtml(r.partner_name)}</div>
-                            <div style="font-size:9px; color:var(--text-muted);">${escapeHtml(r.partner_addr || '')}</div>
-                        </td>
-                        <td>
-                            <span class="badge" style="background:rgba(24,144,255,0.1); color:#1890ff; font-size:9.5px; font-weight:600;">
-                                BC ${escapeHtml(r.target_bc)}
-                            </span>
-                        </td>
-                        <td style="text-align:right; font-weight:600;">${Number(r.total_qty).toLocaleString()}</td>
-                        <td style="text-align:right;">${Number(r.total_kemas).toLocaleString()}</td>
-                        <td style="text-align:right;">${Number(r.total_netto).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                        <td style="text-align:right;">${Number(r.total_bruto).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                        <td style="text-align:center;">
-                            <button type="button" class="btn btn-secondary btn-xs" onclick="previewErpSingleDoc('${escapeHtml(r.doc_id)}', '${escapeHtml(r.target_bc)}')">
-                                👁 Rincian
-                            </button>
-                        </td>
+                    <div class="erp-item-card" id="erp-card-${idx}" onclick="selectErpDoc('${escapeHtml(d.doc_id)}', ${idx})" style="background:var(--bg-card); border:1px solid var(--border); border-radius:4px; padding:6px 8px; cursor:pointer; transition:all 0.15s ease;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong style="color:var(--primary); font-size:11px;">${escapeHtml(d.doc_id)}</strong>
+                            <span style="font-size:9px; color:var(--text-muted);">${escapeHtml(d.doc_date)}</span>
+                        </div>
+                        <div style="font-size:9.5px; margin:2px 0; color:var(--text-main); font-weight:600;">
+                            ${escapeHtml(d.partner_name || '-')} ${simBadge}
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:9px; color:var(--text-muted);">
+                            <span>${d.total_items} items | Net: ${parseFloat(d.total_netto).toFixed(1)} kg</span>
+                            <strong style="color:var(--success);">${escapeHtml(d.valuta)} ${parseFloat(d.total_fob).toLocaleString('id-ID')}</strong>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            listEl.innerHTML = html;
+
+            if (docs.length > 0) {
+                selectErpDoc(docs[0].doc_id, 0);
+            }
+        }
+
+        async function selectErpDoc(docId, idx) {
+            selectedErpDocId = docId;
+            document.querySelectorAll('.erp-item-card').forEach(c => {
+                c.style.borderColor = 'var(--border)';
+                c.style.background = 'var(--bg-card)';
+            });
+            const selCard = document.getElementById(`erp-card-${idx}`);
+            if (selCard) {
+                selCard.style.borderColor = 'var(--primary)';
+                selCard.style.background = 'rgba(56, 189, 248, 0.08)';
+            }
+            document.getElementById('erpSelectedDocId').innerText = docId;
+
+            const previewArea = document.getElementById('erpDocPreviewArea');
+            if (previewArea) previewArea.innerHTML = '<div style="padding:30px; text-align:center;"><span class="spinner"></span> Mengambil rincian barang...</div>';
+
+            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
+            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
+
+            try {
+                const res = await fetch(`editor.php?action=erp_preview&cmp_id=${encodeURIComponent(cmpId)}&driver_name=${encodeURIComponent(activeErpDriver)}&doc_id=${encodeURIComponent(docId)}&kode_dokumen=${encodeURIComponent(kodeBc)}`);
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    renderErpPreview(json.preview);
+                    document.getElementById('btnExecuteIntegration').disabled = false;
+                }
+            } catch(e) {
+                previewArea.innerHTML = `<div style="padding:15px; color:var(--danger);">${e.message}</div>`;
+            }
+        }
+
+        function renderErpPreview(preview) {
+            const previewArea = document.getElementById('erpDocPreviewArea');
+            if (!preview) return;
+
+            const hdr = preview.header || {};
+            const items = preview.items || [];
+            const docs = preview.documents || [];
+            const pkgs = preview.packages || [];
+
+            let html = `
+                <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                        <span>Dokumen Invoice: <strong>${escapeHtml(hdr.invoice_no || '-')}</strong></span>
+                        <span>Valuta: <strong>${escapeHtml(hdr.valuta || 'USD')}</strong></span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; font-weight:700;">
+                        <span>Total Nilai: <span style="color:var(--success);">${escapeHtml(hdr.valuta)} ${parseFloat(hdr.total_fob).toLocaleString('id-ID')}</span></span>
+                        <span>Netto: ${parseFloat(hdr.total_netto).toFixed(2)} kg | Bruto: ${parseFloat(hdr.total_bruto).toFixed(2)} kg</span>
+                    </div>
+                </div>
+
+                <div style="font-weight:700; margin-bottom:4px; font-size:10px;">📦 Rincian Item Barang (${items.length} seri):</div>
+                <div style="border:1px solid var(--border); border-radius:4px; overflow-x:auto; margin-bottom:8px;">
+                    <table class="datagrid" style="width:100%; font-size:9.5px;">
+                        <thead>
+                            <tr>
+                                <th style="width:30px; text-align:center;">#</th>
+                                <th>Kode Barang</th>
+                                <th>Uraian Barang</th>
+                                <th style="text-align:right;">Qty</th>
+                                <th>Satuan</th>
+                                <th style="text-align:right;">Harga Satuan</th>
+                                <th style="text-align:right;">FOB / Nilai</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+
+            items.forEach(it => {
+                html += `
+                    <tr>
+                        <td style="text-align:center;">${it.seri_barang}</td>
+                        <td style="font-family:monospace; font-weight:600;">${escapeHtml(it.kode_barang)}</td>
+                        <td>${escapeHtml(it.uraian)}</td>
+                        <td style="text-align:right; font-weight:600;">${parseFloat(it.jumlah_satuan).toLocaleString('id-ID')}</td>
+                        <td>${escapeHtml(it.kode_satuan)}</td>
+                        <td style="text-align:right;">${parseFloat(it.harga_satuan).toLocaleString('id-ID')}</td>
+                        <td style="text-align:right; font-weight:700; color:var(--success);">${parseFloat(it.fob).toLocaleString('id-ID')}</td>
                     </tr>
                 `;
             });
 
-            tbody.innerHTML = html;
-            updateErpMultiBar();
-        }
+            html += `
+                        </tbody>
+                    </table>
+                </div>
 
-        function toggleErpCheckAll(master) {
-            const chks = document.querySelectorAll('.erp-doc-chk');
-            chks.forEach(chk => {
-                chk.checked = master.checked;
-                const docId = chk.value;
-                if (master.checked) {
-                    erpSelectedDocNos.add(docId);
-                    document.getElementById(`erp-row-${docId}`)?.setAttribute('style', 'background:rgba(24,144,255,0.06);');
-                } else {
-                    erpSelectedDocNos.delete(docId);
-                    document.getElementById(`erp-row-${docId}`)?.removeAttribute('style');
-                }
-            });
-            updateErpMultiBar();
-        }
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                    <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px;">
+                        <div style="font-weight:700; margin-bottom:3px;">📄 Dokumen Pelengkap (${docs.length}):</div>
+                        ${docs.map(d => `<div>• Kode ${d.kode_dokumen}: <strong>${escapeHtml(d.nomor_dokumen)}</strong> (${d.tanggal_dokumen})</div>`).join('')}
+                    </div>
+                    <div style="background:var(--bg-base); border:1px solid var(--border); border-radius:4px; padding:6px 8px;">
+                        <div style="font-weight:700; margin-bottom:3px;">📦 Kemasan (${pkgs.length}):</div>
+                        ${pkgs.map(p => `<div>• ${p.jumlah_kemasan} ${p.kode_kemasan} (Merek: ${escapeHtml(p.merek || '-')})</div>`).join('')}
+                    </div>
+                </div>
+            `;
 
-        function toggleErpRowSelect(docId, isChecked) {
-            if (isChecked) {
-                erpSelectedDocNos.add(docId);
-                document.getElementById(`erp-row-${docId}`)?.setAttribute('style', 'background:rgba(24,144,255,0.06);');
-            } else {
-                erpSelectedDocNos.delete(docId);
-                document.getElementById(`erp-row-${docId}`)?.removeAttribute('style');
-                const chkAll = document.getElementById('erpCheckAll');
-                if (chkAll) chkAll.checked = false;
-            }
-            updateErpMultiBar();
-        }
-
-        function clearErpSelection() {
-            erpSelectedDocNos.clear();
-            document.querySelectorAll('.erp-doc-chk').forEach(c => c.checked = false);
-            document.querySelectorAll('#erpTableBody tr').forEach(r => r.removeAttribute('style'));
-            const chkAll = document.getElementById('erpCheckAll');
-            if (chkAll) chkAll.checked = false;
-            updateErpMultiBar();
-        }
-
-        function updateErpMultiBar() {
-            const bar = document.getElementById('erpMultiBar');
-            const count = erpSelectedDocNos.size;
-            if (count > 0) {
-                bar.style.display = 'flex';
-                document.getElementById('erpMultiCountBadge').innerText = `${count} Dokumen Terpilih`;
-
-                let totQty = 0, totNet = 0, totBrt = 0;
-                globalErpData.forEach(r => {
-                    if (erpSelectedDocNos.has(r.doc_id)) {
-                        totQty += Number(r.total_qty || 0);
-                        totNet += Number(r.total_netto || 0);
-                        totBrt += Number(r.total_bruto || 0);
-                    }
-                });
-                document.getElementById('erpMultiTotalQty').innerText = totQty.toLocaleString();
-                document.getElementById('erpMultiTotalNetto').innerText = totNet.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-                document.getElementById('erpMultiTotalBruto').innerText = totBrt.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-            } else {
-                bar.style.display = 'none';
-            }
-        }
-
-        function resetErpFilter() {
-            document.getElementById('erpFilterDate').value = '<?= date('Y-m-d') ?>';
-            document.getElementById('erpFilterQuery').value = '';
-            document.getElementById('erpFilterTargetBc').value = '';
-            searchErpDocuments();
-        }
-
-        async function previewErpSingleDoc(docId, targetBc) {
-            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            try {
-                const res = await fetch(`editor.php?action=erp_preview&cmp_id=${encodeURIComponent(cmpId)}&doc_id=${encodeURIComponent(docId)}&kode_dokumen=${encodeURIComponent(targetBc)}`);
-                const json = await res.json();
-                if (json.status === 'OK' && json.preview) {
-                    const p = json.preview;
-                    const items = p.items || [];
-                    let itemHtml = items.map((it, i) => `<tr>
-                        <td style="text-align:center;">${i+1}</td>
-                        <td style="font-family:monospace; font-weight:600;">${escapeHtml(it.kode_barang)}</td>
-                        <td>${escapeHtml(it.uraian)}</td>
-                        <td style="text-align:right;">${Number(it.jumlah_satuan).toLocaleString()} ${escapeHtml(it.kode_satuan)}</td>
-                        <td style="text-align:right;">${Number(it.harga_satuan).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                        <td style="text-align:right; font-weight:600; color:#52c41a;">${Number(it.fob).toLocaleString(undefined, {minimumFractionDigits:2})}</td>
-                    </tr>`).join('');
-
-                    Swal.fire({
-                        title: `Rincian Dokumen: ${escapeHtml(docId)}`,
-                        html: `
-                            <div style="text-align:left; font-size:11px; margin-bottom:10px;">
-                                <strong>Partner:</strong> ${escapeHtml(p.header?.partner_name || '-')}<br>
-                                <strong>Valuta:</strong> ${escapeHtml(p.header?.valuta || 'USD')} | <strong>Total FOB:</strong> ${Number(p.header?.total_fob || 0).toLocaleString(undefined, {minimumFractionDigits:2})}<br>
-                                <strong>Netto:</strong> ${Number(p.header?.total_netto || 0).toFixed(2)} kg | <strong>Bruto:</strong> ${Number(p.header?.total_bruto || 0).toFixed(2)} kg
-                            </div>
-                            <div style="max-height:240px; overflow-y:auto; border:1px solid #d9d9d9; border-radius:4px;">
-                                <table style="width:100%; font-size:10px; border-collapse:collapse;" border="1" bordercolor="#eee">
-                                    <thead><tr style="background:#f5f5f5;"><th>#</th><th>Kode</th><th>Uraian</th><th>Qty</th><th>Harga</th><th>Total</th></tr></thead>
-                                    <tbody>${itemHtml}</tbody>
-                                </table>
-                            </div>
-                        `,
-                        width: '700px',
-                        confirmButtonText: 'Tutup'
-                    });
-                } else {
-                    alert('Gagal mengambil rincian: ' + (json.message || ''));
-                }
-            } catch(e) {
-                alert('Error: ' + e.message);
-            }
+            previewArea.innerHTML = html;
         }
 
         async function executeErpIntegration() {
-            const arr = Array.from(erpSelectedDocNos);
-            if (arr.length === 0) {
-                alert('Pilih minimal satu dokumen Winline ERP yang ingin diintegrasikan.');
-                return;
-            }
+            if (!currentAju || !selectedErpDocId) return;
 
-            const cfm = await Swal.fire({
-                title: 'Konfirmasi Integrasi ERP',
-                html: `Apakah Anda yakin ingin mengintegrasikan <b>${arr.length} dokumen</b> Winline terpilih ke dalam Dokumen AJU?<br><br>Dokumen terpilih:<br><code style="font-size:11px;">${arr.slice(0, 5).join(', ')}${arr.length > 5 ? '...' : ''}</code><br><br><small style="color:var(--text-muted);">Header, Rincian Barang, Dokumen Pendukung, Kemasan, dan Entitas akan otomatis terisi.</small>`,
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonColor: '#1890ff',
-                cancelButtonColor: '#d9d9d9',
-                confirmButtonText: `⚡ Ya, Masukkan ${arr.length} Dokumen!`,
-                cancelButtonText: 'Batal'
-            });
-
-            if (!cfm.isConfirmed) return;
-
-            const btn = document.getElementById('btnErpExecMulti');
+            const btn = document.getElementById('btnExecuteIntegration');
             if (btn) {
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner"></span> Mengintegrasikan ke Staging...';
             }
 
             const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '';
-            const firstDoc = globalErpData.find(d => d.doc_id === arr[0]);
-            const filterBc = document.getElementById('erpFilterTargetBc')?.value;
-            const targetBc = (firstDoc && firstDoc.target_bc) ? firstDoc.target_bc : (filterBc || (currentData?.header?.kode_dokumen || '27').replace(/[^0-9]/g, ''));
+            const kodeBc = (currentData.header?.kode_dokumen || '23').replace(/[^0-9]/g, '');
 
             try {
                 const fd = new FormData();
-                fd.append('nomor_aju', currentAju || '');
-                fd.append('doc_nos', JSON.stringify(arr));
-                fd.append('doc_type', currentErpType);
-                fd.append('kode_dokumen', targetBc);
+                fd.append('nomor_aju', currentAju);
+                fd.append('doc_id', selectedErpDocId);
+                fd.append('driver_name', activeErpDriver);
+                fd.append('kode_dokumen', kodeBc);
                 fd.append('cmp_id', cmpId);
 
                 const res = await fetch('editor.php?action=erp_integrate', {
@@ -9318,43 +10712,19 @@ $isEditMode = !empty($selectedAjuParam);
                     body: fd
                 });
                 const json = await res.json();
-
                 if (json.status === 'OK') {
                     closeModal('modalErpIntegration');
-
-                    const resultingAju = json.nomor_aju || currentAju;
-                    if (!currentAju && resultingAju) {
-                        currentAju = resultingAju;
-                        const sel = document.getElementById('selectAju');
-                        if (sel) {
-                            const opt = document.createElement('option');
-                            opt.value = resultingAju;
-                            opt.textContent = `[BC ${targetBc}] ${resultingAju} - BARU`;
-                            sel.prepend(opt);
-                            sel.value = resultingAju;
-                        }
-                        const url = new URL(window.location);
-                        url.searchParams.set('nomor_aju', resultingAju);
-                        window.history.replaceState({}, '', url);
-                    }
-
-                    await loadAjuData(resultingAju);
-
-                    Swal.fire({
-                        title: 'Integrasi ERP Sukses!',
-                        html: `${escapeHtml(json.message)}<br><br><b>Nomor AJU:</b> <code style="font-size:13px; color:#1890ff;">${escapeHtml(resultingAju)}</code>`,
-                        icon: 'success',
-                        confirmButtonText: 'OK'
-                    });
+                    await loadAjuData(currentAju);
+                    showToast(json.message || 'Integrasi ERP berhasil! Seluruh data staging terisi.');
                 } else {
-                    Swal.fire('Gagal Integrasi', escapeHtml(json.message || 'Terjadi kesalahan.'), 'error');
+                    alert('Gagal integrasi ERP: ' + (json.message || ''));
                 }
             } catch(e) {
-                Swal.fire('Error', escapeHtml(e.message), 'error');
+                alert('Kesalahan jaringan: ' + e.message);
             } finally {
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = '⚡ Masukkan Terpilih ke Dokumen AJU';
+                    btn.innerHTML = '⚡ Masukkan ke Dokumen AJU (Staging)';
                 }
             }
         }
@@ -10127,14 +11497,17 @@ $isEditMode = !empty($selectedAjuParam);
         const headerFields = [
             'nomor_aju', 'kode_dokumen', 'kode_kantor', 'nomor_daftar', 'tanggal_daftar',
             'nomor_bc11', 'tanggal_bc11', 'nomor_pos', 'nomor_sub_pos', 'kode_tutup_pu',
+            'nomor_bukti_bayar', 'tanggal_bukti_bayar',
             'kode_cara_bayar', 'kode_cara_dagang', 'kode_jenis_impor', 'kode_jenis_ekspor',
             'kode_kategori_ekspor', 'kode_jenis_tpb', 'kode_tujuan_pemasukan', 'kode_tujuan_pengeluaran',
-            'kode_tujuan_pengiriman', 'kode_lokasi_bayar',
+            'kode_tujuan_pengiriman', 'kode_lokasi_bayar', 'kode_jenis_nilai', 'kode_asal_barang_ftz', 'kode_tujuan_tpb', 'kode_jenis_prosedur',
             'kode_pelabuhan_muat', 'kode_pelabuhan_bongkar', 'kode_pelabuhan_transit', 'kode_pelabuhan_tujuan',
             'kode_pelabuhan_ekspor', 'kode_kantor_muat', 'kode_kantor_bongkar', 'kode_kantor_tujuan',
             'kode_tps', 'kode_negara_tujuan', 'tanggal_tiba', 'tanggal_ekspor',
             'kode_valuta', 'ndpbm', 'kode_incoterm', 'nilai_incoterm', 'fob', 'cif', 'asuransi', 'freight',
             'harga_penyerahan', 'nilai_barang', 'kode_jasa_kena_pajak', 'dasar_pengenaan_pajak',
+            'tarif_ppn_pajak', 'ppn_pajak', 'tarif_ppnbm_pajak', 'ppnbm_pajak',
+            'uang_muka', 'nilai_jasa', 'biaya_tambahan', 'biaya_pengurang', 'vd', 'total_dana_sawit',
             'bruto', 'netto', 'volume', 'nama_pernyataan', 'jabatan_pernyataan', 'kota_pernyataan', 'tanggal_pernyataan'
         ];
 
@@ -10743,6 +12116,7 @@ $isEditMode = !empty($selectedAjuParam);
                 { key: 'nilai_bayar', type: 'number', label: 'Nilai Bayar', decimals: 2 },
                 { key: 'nilai_fasilitas', type: 'number', label: 'Nilai Fasilitas', decimals: 2 },
                 { key: 'kode_fasilitas', type: 'select', label: 'Kd Fasilitas', reff: 'FASILITAS TARIF', width: '120px', minWidth: '120px', maxWidth: '120px' },
+                { key: 'tarif_fasilitas', type: 'number', label: 'Tarif Fas (%)', decimals: 2, width: '90px', minWidth: '90px', maxWidth: '90px' },
                 { key: 'jumlah_satuan', type: 'number', label: 'Jml Satuan', decimals: 4 }
             ],
             bahanbakutarif: [
@@ -10894,6 +12268,53 @@ $isEditMode = !empty($selectedAjuParam);
                 }
             });
 
+            // Auto-hitung PPN ketika DPP / Harga Penyerahan dan Tarif PPN diisi
+            function calcHeaderPpnAuto() {
+                const elTarif = document.getElementById('hdr_tarif_ppn_pajak');
+                const elDpp = document.getElementById('hdr_dasar_pengenaan_pajak');
+                const elHp = document.getElementById('hdr_harga_penyerahan');
+                const elPpn = document.getElementById('hdr_ppn_pajak');
+                if (!elPpn) return;
+
+                const tarif = parseInputNumber(elTarif ? elTarif.value : 0);
+                const dppVal = parseInputNumber(elDpp ? elDpp.value : 0);
+                const hpVal = parseInputNumber(elHp ? elHp.value : 0);
+                const base = (!isNaN(dppVal) && dppVal > 0) ? dppVal : ((!isNaN(hpVal) && hpVal > 0) ? hpVal : 0);
+
+                if (!isNaN(tarif) && tarif > 0 && base > 0) {
+                    const curPpn = parseInputNumber(elPpn.value);
+                    if (isNaN(curPpn) || curPpn === 0 || elPpn.dataset.autoCalculated === '1') {
+                        const decUang = headerNumberDecimals.ppn_pajak !== undefined ? headerNumberDecimals.ppn_pajak : 2;
+                        const hitung = Math.round(base * (tarif / 100) * 100) / 100;
+                        elPpn.value = formatCeisaNumber(hitung, decUang);
+                        elPpn.dataset.autoCalculated = '1';
+                    }
+                }
+            }
+
+            const elHpInp = document.getElementById('hdr_harga_penyerahan');
+            const elDppInp = document.getElementById('hdr_dasar_pengenaan_pajak');
+            const elTarifPpnInp = document.getElementById('hdr_tarif_ppn_pajak');
+            const elPpnInp = document.getElementById('hdr_ppn_pajak');
+
+            if (elPpnInp) {
+                elPpnInp.addEventListener('input', () => { elPpnInp.dataset.autoCalculated = '0'; });
+            }
+            if (elHpInp) {
+                elHpInp.addEventListener('change', () => {
+                    if (elDppInp && (!elDppInp.value || parseInputNumber(elDppInp.value) === 0)) {
+                        elDppInp.value = elHpInp.value;
+                    }
+                    calcHeaderPpnAuto();
+                });
+            }
+            if (elDppInp) {
+                elDppInp.addEventListener('change', calcHeaderPpnAuto);
+            }
+            if (elTarifPpnInp) {
+                elTarifPpnInp.addEventListener('change', calcHeaderPpnAuto);
+            }
+
             const entryNdpbmEl = document.getElementById('entryNdpbmVal');
             if (entryNdpbmEl) {
                 entryNdpbmEl.addEventListener('focus', () => entryNdpbmEl.select());
@@ -10927,6 +12348,21 @@ $isEditMode = !empty($selectedAjuParam);
                 const btnEntry = document.getElementById('btnToggleEntry');
                 if (btnEntry) btnEntry.style.display = '';
                 if (sel) sel.value = '';
+
+                // Pulihkan jenis dokumen BC terakhir yang dipilih user dari preference spesifik user ini
+                const savedBc = getUserBcPreference();
+                const entryBcEl = document.getElementById('entryDocBc');
+                if (savedBc && entryBcEl) {
+                    for (let i = 0; i < entryBcEl.options.length; i++) {
+                        if (entryBcEl.options[i].value === savedBc) {
+                            entryBcEl.value = savedBc;
+                            break;
+                        }
+                    }
+                }
+                if (entryBcEl && entryBcEl.value) {
+                    saveUserBcPreference(entryBcEl.value);
+                }
                 await loadAjuData('');
                 loadErpProfile();
             }
@@ -10951,6 +12387,18 @@ $isEditMode = !empty($selectedAjuParam);
                 toggleEntryPanel(true);
                 const btnEntry = document.getElementById('btnToggleEntry');
                 if (btnEntry) btnEntry.style.display = '';
+
+                // Pulihkan jenis dokumen terakhir yang dipilih spesifik user ini
+                const savedBc = getUserBcPreference();
+                const entryBcEl = document.getElementById('entryDocBc');
+                if (savedBc && entryBcEl) {
+                    for (let i = 0; i < entryBcEl.options.length; i++) {
+                        if (entryBcEl.options[i].value === savedBc) {
+                            entryBcEl.value = savedBc;
+                            break;
+                        }
+                    }
+                }
                 await loadAjuData('');
                 return;
             }
@@ -10963,14 +12411,19 @@ $isEditMode = !empty($selectedAjuParam);
             await loadAjuData(aju);
         }
 
-        async function reloadCurrentAju() {
-            const btnReload = document.querySelector('button[onclick="reloadCurrentAju()"]');
+        async function reloadCurrentAju(preserveUnsaved = false) {
+            const btnReload = document.querySelector('button[onclick^="reloadCurrentAju"]');
             if (btnReload) {
                 btnReload.disabled = true;
                 btnReload.innerHTML = '<span class="spinner" style="width:12px;height:12px;display:inline-block;"></span>';
             }
             try {
-                if (currentAju) await loadAjuData(currentAju);
+                if (currentAju) {
+                    if (preserveUnsaved) {
+                        await saveAllTabs(true, true);
+                    }
+                    await loadAjuData(currentAju);
+                }
             } finally {
                 if (btnReload) {
                     btnReload.disabled = false;
@@ -11115,6 +12568,9 @@ $isEditMode = !empty($selectedAjuParam);
                             entryBcEl.appendChild(opt);
                         }
                         entryBcEl.value = kodeDokumen;
+
+                        // Simpan preferensi dokumen terakhir yang dibuka/diedit untuk user aktif ini
+                        saveUserBcPreference(kodeDokumen);
                     }
                     const entryValutaEl = document.getElementById('entryValuta');
                     if (entryValutaEl && currentData.header?.kode_valuta) entryValutaEl.value = currentData.header.kode_valuta;
@@ -11177,15 +12633,6 @@ $isEditMode = !empty($selectedAjuParam);
                     applyColumnVisibility(currentVarRules);
                     applyTabVisibility(kodeDokumen, currentData, currentTabRules);
                     loadErpProfile();
-
-                    // Status filter di banner
-                    const metaFilterEl = document.getElementById('metaFilterStatus');
-                    if (metaFilterEl) {
-                        const tabLabel = currentTabSource === 'company' ? `Khusus [${currentActiveCmpId}]` : 'Global';
-                        const colLabel = currentColSource === 'company' ? `Khusus [${currentActiveCmpId}]` : (currentColSource === 'global' ? 'Global' : 'Bawaan');
-                        const decLabel = json.decimal_source === 'company' ? `Khusus [${currentActiveCmpId}]` : (json.decimal_source === 'global' ? 'Global' : 'Bawaan');
-                        metaFilterEl.innerText = `Saring: Tab (${tabLabel}) • Kolom (${colLabel}) • Desimal (${decLabel})`;
-                    }
                 } else {
                     showError('Gagal memuat data AJU: ' + (json.message || 'Error'));
                 }
@@ -11603,6 +13050,19 @@ $isEditMode = !empty($selectedAjuParam);
                     if (e.target && (e.target.closest('.btn-danger') || e.target.closest('button'))) return;
                     openLookupEntitasModal(this);
                 });
+                // Standar CEISA 4.0: Default Jenis Identitas adalah 6 (NPWP 16 DIGIT)
+                if (!data.kode_jenis_identitas || data.kode_jenis_identitas === '5') {
+                    data.kode_jenis_identitas = '6';
+                }
+                if (data.nomor_identitas) {
+                    let cleanDigits = String(data.nomor_identitas).replace(/[^0-9]/g, '');
+                    if (cleanDigits.length === 15) {
+                        data.nomor_identitas = '0' + cleanDigits;
+                        data.kode_jenis_identitas = '6';
+                    } else if (cleanDigits.length === 16) {
+                        data.kode_jenis_identitas = '6';
+                    }
+                }
             }
 
             conf.forEach(col => {
@@ -11632,7 +13092,12 @@ $isEditMode = !empty($selectedAjuParam);
                     sel.appendChild(optEmpty);
 
                     let valFound = false;
-                    const cleanCode = String(rawVal).trim();
+                    let cleanCode = String(rawVal).trim();
+                    if (tableKey === 'entitas' && col.key === 'kode_jenis_identitas') {
+                        if (!cleanCode || cleanCode === '5') {
+                            cleanCode = '6';
+                        }
+                    }
 
                     opts.forEach(o => {
                         const opt = document.createElement('option');
@@ -11854,6 +13319,32 @@ $isEditMode = !empty($selectedAjuParam);
                         inp.title = 'Pilih dari ' + col.reff;
                     }
 
+                    // Auto format NPWP 16 digit pada tabel entitas
+                    if (tableKey === 'entitas' && col.key === 'nomor_identitas') {
+                        const autoFormatNpwp16 = () => {
+                            let val = inp.value.trim().replace(/[^0-9]/g, '');
+                            if (val.length === 22 && val.endsWith('000000')) {
+                                val = val.slice(0, 16);
+                                inp.value = val;
+                                autoSizeCellInput(inp, col.label, false);
+                            }
+                            if (val.length === 15) {
+                                val = '0' + val;
+                                inp.value = val;
+                                autoSizeCellInput(inp, col.label, false);
+                            }
+                            if (val.length === 16) {
+                                const selJenis = tr.querySelector('select[data-col="kode_jenis_identitas"]');
+                                if (selJenis && (!selJenis.value || selJenis.value === '5')) {
+                                    selJenis.value = '6';
+                                    selJenis.dispatchEvent(new Event('change'));
+                                }
+                            }
+                        };
+                        inp.addEventListener('blur', autoFormatNpwp16);
+                        inp.addEventListener('change', autoFormatNpwp16);
+                    }
+
                     td.appendChild(inp);
                 }
 
@@ -11967,6 +13458,8 @@ $isEditMode = !empty($selectedAjuParam);
                 newObj['id'] = 'tr_' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
                 newObj['satuan'] = 'PCE';
                 newObj['qty_use'] = 1.0000;
+            } else if (tableKey === 'entitas') {
+                newObj['kode_jenis_identitas'] = '6'; // Default NPWP 16 DIGIT (Standar Resmi CEISA 4.0)
             }
 
             const tr = createGridRow(tableKey, newObj, currentCount);
@@ -12002,6 +13495,13 @@ $isEditMode = !empty($selectedAjuParam);
         let _recapTarifDirty = true; // flag: perlu reload recap tarif
 
         function switchTab(tabName) {
+            // 0. Amankan form/grid tab aktif saat ini ke memory currentData sebelum berganti tab
+            if (activeTab === 'header') {
+                collectHeaderFormData();
+            } else if (activeTab && gridConfigs[activeTab]) {
+                collectTableData(activeTab);
+            }
+
             activeTab = tabName;
             const seq = ++_tabSwitchSeq;
 
@@ -12208,12 +13708,22 @@ $isEditMode = !empty($selectedAjuParam);
             // Pertahankan tab tetap terlihat jika tabel tersebut memiliki data (sehingga tidak ada data hilang)
             if (tables) {
                 Object.keys(tables).forEach(t => {
-                    if (Array.isArray(tables[t]) && tables[t].length > 0) {
-                        allowedTabs.add(t);
-                    } else if (t === 'kesiapanbarang' && tables[t] && Object.keys(tables[t]).length > 0) {
+                    if (t === 'kesiapanbarang') {
+                        if (bc === '30' && tables[t] && typeof tables[t] === 'object') {
+                            const hasRealKesiapan = Object.entries(tables[t]).some(([k, v]) => 
+                                !['nomor_aju', 'cmp_id', 'user_id', 'upd_time'].includes(k) && v !== null && String(v).trim() !== ''
+                            );
+                            if (hasRealKesiapan) allowedTabs.add('kesiapanbarang');
+                        }
+                    } else if (Array.isArray(tables[t]) && tables[t].length > 0) {
                         allowedTabs.add(t);
                     }
                 });
+            }
+
+            // Kesiapan Barang HANYA UNTUK BC 3.0 (PEB Ekspor). Jika bukan BC 3.0, hapus secara mutlak!
+            if (bc !== '30') {
+                allowedTabs.delete('kesiapanbarang');
             }
 
             document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
@@ -12832,7 +14342,10 @@ $isEditMode = !empty($selectedAjuParam);
             const tbody = document.querySelector('#tableReffResults tbody');
             tbody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding:15px; color:var(--text-muted);">Memuat data...</td></tr>';
             try {
-                const res = await fetch(`editor.php?action=search_reff&reff=${encodeURIComponent(activeLookupReff)}&q=${encodeURIComponent(query)}`);
+                const kodeBc = (typeof currentData !== 'undefined' && currentData.header && currentData.header.kode_dokumen)
+                    ? currentData.header.kode_dokumen
+                    : (document.getElementById('hdr_kode_dokumen')?.value || document.getElementById('entryDocBc')?.value || '');
+                const res = await fetch(`editor.php?action=search_reff&reff=${encodeURIComponent(activeLookupReff)}&q=${encodeURIComponent(query)}&bc=${encodeURIComponent(kodeBc)}`);
                 const json = await res.json();
                 if (json.status === 'OK') {
                     tbody.innerHTML = '';
@@ -12896,58 +14409,113 @@ $isEditMode = !empty($selectedAjuParam);
                 return;
             }
 
-            Swal.fire({
-                title: '⚠️ Konfirmasi Hapus Data AJU',
-                html: `
-                    <div style="font-size:13px; text-align:left; line-height:1.5;">
-                        <p>Anda akan <strong>MENGHAPUS PERMANEN</strong> seluruh data staging dokumen ini:</p>
-                        <div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#ff4d4f;">
-                            AJU: ${escapeHtml(currentAju)}
-                        </div>
-                        <p style="color:var(--text-muted, #666); font-size:12px;">Data tabel Header, Barang, Entitas, Dokumen, Kemasan, Pengangkut, Kontainer, Pungutan, dan respon pabean terkait akan dibersihkan dari database.</p>
-                        <div style="margin-top:12px; font-weight:600; color:#ff4d4f;">
-                            Ketik <span style="background:#ff4d4f; color:#fff; padding:1px 6px; border-radius:3px; letter-spacing:1px;">YA</span> untuk mengonfirmasi:
-                        </div>
-                    </div>
-                `,
-                input: 'text',
-                inputPlaceholder: 'Ketik YA di sini...',
-                inputAttributes: {
-                    autocapitalize: 'characters',
-                    autocomplete: 'off',
-                    spellcheck: 'false'
-                },
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonColor: '#ff4d4f',
-                cancelButtonColor: '#8c8c8c',
-                confirmButtonText: '🗑️ Hapus Data AJU',
-                cancelButtonText: 'Batal',
-                showLoaderOnConfirm: true,
-                inputValidator: (val) => {
-                    if (!val || val.trim().toUpperCase() !== 'YA') {
-                        return 'Wajib mengetik "YA" dengan benar untuk konfirmasi penghapusan.';
-                    }
-                },
-                preConfirm: (val) => {
-                    const formData = new FormData();
-                    formData.append('action', 'delete_aju');
-                    formData.append('nomor_aju', currentAju);
-                    formData.append('confirm', val.trim());
+            const jmlBarang = (currentData && Array.isArray(currentData.barang)) ? currentData.barang.length : 0;
 
-                    return fetch('editor.php', { method: 'POST', body: formData })
-                        .then(r => r.json())
-                        .then(res => {
-                            if (res.status !== 'OK') {
-                                throw new Error(res.message || 'Gagal menghapus data AJU.');
-                            }
-                            return res;
-                        })
-                        .catch(err => {
-                            Swal.showValidationMessage(`${err.message}`);
-                        });
-                }
-            }).then((result) => {
+            let swalConfig;
+            if (jmlBarang > 0) {
+                // Jika memiliki data barang: WAJIB konfirmasi dengan mengetik "YA"
+                swalConfig = {
+                    title: '⚠️ Konfirmasi Hapus Data AJU',
+                    html: `
+                        <div style="font-size:13px; text-align:left; line-height:1.5;">
+                            <p>Anda akan <strong>MENGHAPUS PERMANEN</strong> seluruh data staging dokumen ini:</p>
+                            <div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#ff4d4f;">
+                                AJU: ${escapeHtml(currentAju)}
+                            </div>
+                            <div style="background:rgba(255, 77, 79, 0.08); padding:8px 12px; border-radius:6px; border:1px solid rgba(255, 77, 79, 0.2); margin:10px 0; font-size:12px; color:#cf1322;">
+                                ⚠️ Dokumen ini memiliki <strong>${jmlBarang} data barang</strong>.
+                            </div>
+                            <p style="color:var(--text-muted, #666); font-size:12px;">Data tabel Header, Barang, Entitas, Dokumen, Kemasan, Pengangkut, Kontainer, Pungutan, dan respon pabean terkait akan dibersihkan dari database.</p>
+                            <div style="margin-top:12px; font-weight:600; color:#ff4d4f;">
+                                Ketik <span style="background:#ff4d4f; color:#fff; padding:1px 6px; border-radius:3px; letter-spacing:1px;">YA</span> untuk mengonfirmasi:
+                            </div>
+                        </div>
+                    `,
+                    input: 'text',
+                    inputPlaceholder: 'Ketik YA di sini...',
+                    inputAttributes: {
+                        autocapitalize: 'characters',
+                        autocomplete: 'off',
+                        spellcheck: 'false'
+                    },
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonColor: '#ff4d4f',
+                    cancelButtonColor: '#8c8c8c',
+                    confirmButtonText: '🗑️ Hapus Data AJU',
+                    cancelButtonText: 'Batal',
+                    reverseButtons: true,
+                    showLoaderOnConfirm: true,
+                    inputValidator: (val) => {
+                        if (!val || val.trim().toUpperCase() !== 'YA') {
+                            return 'Wajib mengetik "YA" (huruf besar) untuk konfirmasi penghapusan.';
+                        }
+                    },
+                    preConfirm: (val) => {
+                        const formData = new FormData();
+                        formData.append('action', 'delete_aju');
+                        formData.append('nomor_aju', currentAju);
+                        formData.append('confirm', val.trim().toUpperCase());
+
+                        return fetch('editor.php', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(res => {
+                                if (res.status !== 'OK') {
+                                    throw new Error(res.message || 'Gagal menghapus data AJU.');
+                                }
+                                return res;
+                            })
+                            .catch(err => {
+                                Swal.showValidationMessage(`${err.message}`);
+                            });
+                    }
+                };
+            } else {
+                // Dokumen tanpa barang (0 barang): konfirmasi Yes / No langsung tanpa input teks
+                swalConfig = {
+                    title: 'Hapus Data Dokumen AJU?',
+                    html: `
+                        <div style="font-size:13px; text-align:left; line-height:1.5;">
+                            <p>Apakah Anda yakin ingin menghapus data dokumen pengajuan ini?</p>
+                            <div style="background:#fffbe6; padding:8px 12px; border-radius:6px; border:1px solid #ffe58f; margin:10px 0; font-family:monospace; font-size:13px; font-weight:700; color:#d46b08;">
+                                AJU: ${escapeHtml(currentAju)}
+                            </div>
+                            <div style="background:#f5f5f5; padding:6px 10px; border-radius:4px; margin:10px 0; font-size:12px; color:#595959;">
+                                ℹ️ Dokumen ini tidak memiliki rincian barang (0 barang).
+                            </div>
+                            <p style="color:var(--text-muted, #666); font-size:12px;">Data tabel Header, Entitas, Dokumen, Kemasan, Pengangkut, Kontainer, dan data staging terkait akan dibersihkan dari database.</p>
+                        </div>
+                    `,
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#ff4d4f',
+                    cancelButtonColor: '#8c8c8c',
+                    confirmButtonText: '🗑️ Ya, Hapus',
+                    cancelButtonText: 'Batal',
+                    reverseButtons: true,
+                    showLoaderOnConfirm: true,
+                    preConfirm: () => {
+                        const formData = new FormData();
+                        formData.append('action', 'delete_aju');
+                        formData.append('nomor_aju', currentAju);
+                        formData.append('confirm', 'YA');
+
+                        return fetch('editor.php', { method: 'POST', body: formData })
+                            .then(r => r.json())
+                            .then(res => {
+                                if (res.status !== 'OK') {
+                                    throw new Error(res.message || 'Gagal menghapus data AJU.');
+                                }
+                                return res;
+                            })
+                            .catch(err => {
+                                Swal.showValidationMessage(`${err.message}`);
+                            });
+                    }
+                };
+            }
+
+            Swal.fire(swalConfig).then((result) => {
                 if (result.isConfirmed && result.value) {
                     Swal.fire({
                         title: 'Berhasil Dihapus',
@@ -12965,24 +14533,7 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         async function saveCurrentTab() {
-            if (!currentAju) {
-                showWarning('Silakan buat dokumen baru melalui panel "✨ Setup AJU Baru" atau pilih dokumen AJU yang ada untuk disimpan.', 'Form Kosong');
-                return;
-            }
-            if (isCurrentDocLocked) {
-                showWarning(
-                    `Dokumen AJU <strong>${escapeHtml(currentAju)}</strong> sudah MASUK IT Inventory!<br><small style="color:var(--text-muted);">Dokumen berstatus Read-Only dan tidak dapat diedit atau disimpan.<br>Silakan lakukan Unposting di menu Daftar Dokumen untuk membuka kunci edit.</small>`,
-                    'Dokumen Terkunci'
-                );
-                return;
-            }
-            if (activeTab === 'header') {
-                await saveHeader();
-            } else if (activeTab === 'kesiapanbarang') {
-                await saveKesiapanBarang();
-            } else {
-                await saveTable(activeTab);
-            }
+            await saveAllTabs();
         }
 
         // ============================================================
@@ -13026,19 +14577,20 @@ $isEditMode = !empty($selectedAjuParam);
                     errors.push({ section: 'Header', field: 'Tanggal Pernyataan', message: 'Tanggal pernyataan / aju wajib diisi (yyyy-mm-dd).' });
                 }
 
-                // 3. Aturan Khusus Dokumen TPB (BC 4.0, 2.3, 2.5, 2.6.1, 2.6.2, 2.7)
-                if (['40', '23', '25', '261', '262', '27'].includes(cleanBc)) {
+                // 3. Aturan Khusus Dokumen TPB (BC 4.0, 2.3, 2.5, 2.7)
+                // CATATAN: BC 2.6.1 dan BC 2.6.2 (Subkontrak) tidak memiliki field kodeJenisTpb di skema CEISA 4.0
+                if (['40', '23', '25', '27'].includes(cleanBc)) {
                     if (!d.kode_jenis_tpb || d.kode_jenis_tpb.trim() === '') {
                         errors.push({ section: 'Header', field: 'Jenis TPB', message: 'Jenis TPB wajib dipilih (misal: Kawasan Berikat).' });
                     }
                 }
 
                 // 4. Tujuan Pengiriman / Pemasukan / Pengeluaran
-                if (['40', '27', '261', '262'].includes(cleanBc)) {
+                if (['40', '27', '261'].includes(cleanBc)) {
                     if (!d.kode_tujuan_pengiriman || d.kode_tujuan_pengiriman.trim() === '') {
                         errors.push({ section: 'Header', field: 'Tujuan Pengiriman', message: 'Kode tujuan pengiriman wajib dipilih.' });
                     }
-                } else if (cleanBc === '23') {
+                } else if (['262', '23'].includes(cleanBc)) {
                     if (!d.kode_tujuan_pemasukan || d.kode_tujuan_pemasukan.trim() === '') {
                         errors.push({ section: 'Header', field: 'Tujuan Pemasukan', message: 'Kode tujuan pemasukan wajib dipilih.' });
                     }
@@ -13220,9 +14772,37 @@ $isEditMode = !empty($selectedAjuParam);
                     }
                     if (!r.nomor_identitas || r.nomor_identitas.trim() === '' || r.nomor_identitas.trim() === '-') {
                         errors.push({ section: sec, field: 'Nomor Identitas (NPWP)', message: 'Nomor NPWP / NIK / Identitas wajib diisi.' });
+                    } else {
+                        const cleanId = String(r.nomor_identitas).replace(/[^0-9]/g, '');
+                        if (cleanId.length > 0 && cleanId.length !== 15 && cleanId.length !== 16 && cleanId.length !== 22) {
+                            errors.push({ section: sec, field: 'Nomor Identitas (NITKU)', message: `Nomor NPWP harus 15 atau 16 digit (atau format NITKU 22 digit). Saat ini: ${cleanId.length} digit.` });
+                        }
                     }
                     if (!r.kode_jenis_identitas || r.kode_jenis_identitas.trim() === '') {
                         errors.push({ section: sec, field: 'Jenis Identitas', message: 'Jenis identitas wajib dipilih (NPWP 15/16 Digit, NIK, dll).' });
+                    }
+
+                    // Untuk TPB (BC 4.0, 2.3, 2.7, dll): Entitas Pengusaha TPB (kode 3) wajib memiliki Nomor Ijin & Tanggal Ijin SKEP
+                    if (String(r.kode_entitas).trim() === '3' && ['40', '23', '25', '261', '262', '27'].includes(cleanBc)) {
+                        const noIjinTpb = (r.nomor_ijin_entitas || '').trim();
+                        if (!noIjinTpb || noIjinTpb === '-') {
+                            errors.push({ section: sec, field: 'Nomor Izin Pengusaha TPB', message: 'Nomor Izin SKEP Pengusaha TPB wajib diisi sesuai izin resmi Bea Cukai.' });
+                        }
+                    }
+
+                    // Validasi Nomor Ijin & Tanggal Ijin Entitas
+                    const noIjin = (r.nomor_ijin_entitas || '').trim();
+                    const tglIjin = (r.tanggal_ijin_entitas || '').trim();
+                    if (noIjin !== '' && noIjin !== '-') {
+                        if (!tglIjin || tglIjin === '-') {
+                            errors.push({ section: sec, field: 'Tanggal Ijin Entitas', message: `Nomor Ijin terisi ("${noIjin}"), maka Tanggal Ijin Entitas wajib diisi format YYYY-MM-DD (contoh: 2026-08-31).` });
+                        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(tglIjin)) {
+                            errors.push({ section: sec, field: 'Format Tanggal Ijin Entitas', message: `Format Tanggal Ijin ("${tglIjin}") salah. Wajib menggunakan format YYYY-MM-DD (contoh: 2026-08-31).` });
+                        }
+                    } else if (tglIjin !== '' && tglIjin !== '-') {
+                        if (!/^\d{4}-\d{2}-\d{2}$/.test(tglIjin)) {
+                            errors.push({ section: sec, field: 'Format Tanggal Ijin Entitas', message: `Format Tanggal Ijin ("${tglIjin}") salah. Wajib menggunakan format YYYY-MM-DD (contoh: 2026-08-31).` });
+                        }
                     }
                 });
 
@@ -13247,7 +14827,9 @@ $isEditMode = !empty($selectedAjuParam);
                         errors.push({ section: sec, field: 'Nomor Dokumen', message: 'Nomor dokumen pelengkap wajib diisi.' });
                     }
                     if (!r.tanggal_dokumen || r.tanggal_dokumen.trim() === '') {
-                        errors.push({ section: sec, field: 'Tanggal Dokumen', message: 'Tanggal dokumen pelengkap wajib diisi (yyyy-mm-dd).' });
+                        errors.push({ section: sec, field: 'Tanggal Dokumen', message: 'Tanggal dokumen pelengkap wajib diisi (YYYY-MM-DD).' });
+                    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(r.tanggal_dokumen.trim())) {
+                        errors.push({ section: sec, field: 'Format Tanggal Dokumen', message: `Format Tanggal Dokumen ("${r.tanggal_dokumen}") salah. Wajib YYYY-MM-DD (contoh: 2026-08-31).` });
                     }
                 });
 
@@ -13287,8 +14869,11 @@ $isEditMode = !empty($selectedAjuParam);
                 rows.forEach((r, idx) => {
                     const seri = r.seri || (idx + 1);
                     const sec = `Pengangkut #${seri}`;
-                    if (!r.nama_pengangkut || r.nama_pengangkut.trim() === '' || r.nama_pengangkut.trim() === '-') {
-                        errors.push({ section: sec, field: 'Nama Pengangkut', message: 'Nama sarana pengangkut / nomor polisi wajib diisi.' });
+                    // Khusus BC 261 & BC 262 (subkontrak lokal), nama_pengangkut di staging seringkali kosong dan di template JSON otomatis fallback ke '-'
+                    if (!['261', '262'].includes(cleanBc)) {
+                        if (!r.nama_pengangkut || r.nama_pengangkut.trim() === '' || r.nama_pengangkut.trim() === '-') {
+                            errors.push({ section: sec, field: 'Nama Pengangkut', message: 'Nama sarana pengangkut / nomor polisi wajib diisi.' });
+                        }
                     }
                     if (!r.kode_cara_angkut || r.kode_cara_angkut.trim() === '') {
                         errors.push({ section: sec, field: 'Cara Pengangkutan', message: 'Cara pengangkutan wajib dipilih (Darat, Laut, Udara).' });
@@ -13439,7 +15024,7 @@ $isEditMode = !empty($selectedAjuParam);
             return res.isConfirmed;
         }
 
-        async function saveHeader(force = false) {
+        function collectHeaderFormData() {
             const data = {};
             headerFields.forEach(f => {
                 const el = document.getElementById('hdr_' + f);
@@ -13449,66 +15034,33 @@ $isEditMode = !empty($selectedAjuParam);
                         v = stripNumberCommas(v);
                     }
                     data[f] = v;
+                } else if (currentData && currentData.header && currentData.header[f] !== undefined) {
+                    data[f] = currentData.header[f];
                 }
             });
-
-            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
-            if (!force) {
-                const bc = getActiveDocBc();
-                const errors = getAllMandatoryErrors(bc);
-                if (errors.length > 0) {
-                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
-                    if (!proceed) return;
-                }
+            if (currentData) {
+                currentData.header = { ...(currentData.header || {}), ...data };
             }
-
-            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"]');
-            saveBtns.forEach(b => {
-                b.disabled = true;
-                b._origHtml = b.innerHTML;
-                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
-            });
-
-            const formData = new FormData();
-            formData.append('action', 'save_header');
-            formData.append('nomor_aju', currentAju);
-            for (const [k, v] of Object.entries(data)) {
-                formData.append(`data[${k}]`, v);
-            }
-
-            try {
-                const res = await fetch('editor.php', { method: 'POST', body: formData });
-                const json = await res.json();
-                if (json.status === 'OK') {
-                    showSuccess('Header berhasil diperbarui!');
-                } else {
-                    showError(json.message);
-                }
-            } catch (err) {
-                showError('Error: ' + err.message);
-            } finally {
-                saveBtns.forEach(b => {
-                    b.disabled = false;
-                    if (b._origHtml) b.innerHTML = b._origHtml;
-                });
-            }
+            return data;
         }
 
-        async function saveTable(tableKey, force = false) {
-            if (!currentAju) return;
+        function collectTableData(tableKey) {
             const tbody = document.querySelector(`#table-${tableKey} tbody`);
-            if (!tbody) return;
+            // Jika tabel datagrid ada di DOM dan sudah pernah dirender atau memiliki baris
+            if (tbody && (_tableRendered[tableKey] || tbody.querySelectorAll('tr:not(.tr-empty)').length > 0)) {
+                if (tableKey === 'barangbom') {
+                    syncDomToBomData();
+                    return currentData.barangbom || [];
+                }
+                if (tableKey === 'tracebb') {
+                    syncDomToTraceData();
+                    return currentData.tracebb || [];
+                }
 
-            let rows = [];
-            if (tableKey === 'barangbom') {
-                syncDomToBomData();
-                rows = currentData.barangbom || [];
-            } else if (tableKey === 'tracebb') {
-                syncDomToTraceData();
-                rows = currentData.tracebb || [];
-            } else {
                 const trs = tbody.querySelectorAll('tr');
+                const rows = [];
                 trs.forEach(tr => {
+                    if (tr.classList.contains('tr-empty') || tr.classList.contains('empty-row')) return;
                     const rowObj = {};
                     tr.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
                         if (el.dataset.col) {
@@ -13519,61 +15071,143 @@ $isEditMode = !empty($selectedAjuParam);
                             rowObj[el.dataset.col] = v;
                         }
                     });
-                    rows.push(rowObj);
+                    const hasVal = Object.values(rowObj).some(val => val !== '' && val !== null && val !== undefined);
+                    if (hasVal) {
+                        rows.push(rowObj);
+                    }
                 });
+                if (currentData) {
+                    currentData[tableKey] = rows;
+                }
+                return rows;
             }
 
-            if (tableKey === 'barang') {
-                currentData.barang = rows;
+            // Jika tabel belum pernah dibuka/dirender di DOM, gunakan data yang ada di memory currentData
+            return (currentData && Array.isArray(currentData[tableKey])) ? currentData[tableKey] : [];
+        }
+
+        async function saveAllTabs(force = true, silent = false) {
+            if (!currentAju) {
+                if (!silent) showWarning('Silakan buat dokumen baru melalui panel "✨ Setup AJU Baru" atau pilih dokumen AJU yang ada untuk disimpan.', 'Form Kosong');
+                return false;
+            }
+            if (isCurrentDocLocked) {
+                if (!silent) showWarning(
+                    `Dokumen AJU <strong>${escapeHtml(currentAju)}</strong> sudah MASUK IT Inventory!<br><small style="color:var(--text-muted);">Dokumen berstatus Read-Only dan tidak dapat diedit atau disimpan.<br>Silakan lakukan Unposting di menu Daftar Dokumen untuk membuka kunci edit.</small>`,
+                    'Dokumen Terkunci'
+                );
+                return false;
             }
 
-            // Validasi Seluruh Tab/Sheet Mandatory Dokumen
-            if (!force) {
-                const bc = getActiveDocBc();
-                const errors = getAllMandatoryErrors(bc);
-                if (errors.length > 0) {
-                    const proceed = await promptMandatoryWarning('Semua Tab', errors, bc);
-                    if (!proceed) return;
+            // 1. Kumpulkan seluruh data dari DOM & Memory (termasuk tab aktif yang sedang diedit)
+            const headerData = collectHeaderFormData();
+            const allTableKeys = [
+                'barang', 'entitas', 'dokumen', 'bahanbaku', 'barangtarif',
+                'bahanbakutarif', 'kemasan', 'pengangkut', 'kontainer', 'pungutan',
+                'bankdevisa', 'jaminan', 'komponenbiaya', 'barangdokumen',
+                'barangentitas', 'barangspekkhusus', 'barangvd', 'bahanbakudokumen',
+                'barangbom', 'tracebb'
+            ];
+            const tablesData = {};
+            allTableKeys.forEach(tKey => {
+                tablesData[tKey] = collectTableData(tKey);
+            });
+
+            // 2. Kesiapan barang jika ada (HANYA untuk dokumen BC 3.0 jika ada data riil)
+            let kesiapanData = null;
+            const docBcClean = String(headerData.kode_dokumen || (currentData && currentData.header && currentData.header.kode_dokumen) || '').replace(/[^0-9]/g, '');
+            if (docBcClean === '30') {
+                const kesiapanEl = document.getElementById('kesiapanForm');
+                if (kesiapanEl) {
+                    const tempKesiapan = {};
+                    let hasVal = false;
+                    kesiapanEl.querySelectorAll('input[data-col], select[data-col], textarea[data-col]').forEach(el => {
+                        if (el.dataset.col) {
+                            const val = el.value !== undefined ? el.value.trim() : '';
+                            tempKesiapan[el.dataset.col] = val;
+                            if (val !== '' && !['nomor_aju', 'cmp_id', 'user_id', 'upd_time'].includes(el.dataset.col)) {
+                                hasVal = true;
+                            }
+                        }
+                    });
+                    if (hasVal) kesiapanData = tempKesiapan;
+                } else if (currentData && currentData.kesiapanbarang && typeof currentData.kesiapanbarang === 'object') {
+                    const hasVal = Object.entries(currentData.kesiapanbarang).some(([k, v]) => 
+                        !['nomor_aju', 'cmp_id', 'user_id', 'upd_time'].includes(k) && v !== null && String(v).trim() !== ''
+                    );
+                    if (hasVal) kesiapanData = currentData.kesiapanbarang;
                 }
             }
 
-            const saveBtns = document.querySelectorAll(`button[onclick="saveCurrentTab()"], button[onclick="saveTable('${tableKey}')"]`);
-            saveBtns.forEach(b => {
-                b.disabled = true;
-                b._origHtml = b.innerHTML;
-                b.innerHTML = '<span class="spinner"></span> Menyimpan...';
-            });
+            // 3. Loading State pada seluruh tombol simpan jika not silent
+            const saveBtns = document.querySelectorAll('button[onclick="saveCurrentTab()"], button[onclick="saveAllTabs()"], button[id="btnTopSaveAll"], button[onclick^="saveTable("]');
+            if (!silent) {
+                saveBtns.forEach(b => {
+                    b.disabled = true;
+                    if (!b._origHtml) b._origHtml = b.innerHTML;
+                    b.innerHTML = '<span class="spinner" style="width:12px; height:12px; display:inline-block; vertical-align:middle; margin-right:4px;"></span> Menyimpan...';
+                });
+            }
 
             const formData = new FormData();
-            formData.append('action', 'save_table');
+            formData.append('action', 'save_all_tabs');
             formData.append('nomor_aju', currentAju);
-            formData.append('table', tableKey);
-            formData.append('rows', JSON.stringify(rows));
+            formData.append('header', JSON.stringify(headerData));
+            formData.append('tables', JSON.stringify(tablesData));
+            if (kesiapanData) formData.append('kesiapan', JSON.stringify(kesiapanData));
 
             try {
                 const res = await fetch('editor.php', { method: 'POST', body: formData });
                 const json = await res.json();
                 if (json.status === 'OK') {
-                    showSuccess(`Tabel ${tableKey} berhasil disimpan (${rows.length} baris)!`);
-                    const countBadge = document.getElementById('count-' + tableKey);
-                    if (countBadge) countBadge.innerText = rows.length;
+                    // Update counter badges di seluruh tab
+                    Object.keys(tablesData).forEach(t => {
+                        const countBadge = document.getElementById('count-' + t);
+                        if (countBadge) countBadge.innerText = (tablesData[t] || []).length;
+                    });
 
-                    if (tableKey === 'barangbom') {
+                    // Segarkan BOM / Trace jika tab tersebut sedang aktif
+                    if (activeTab === 'barangbom') {
                         renderBomForActiveBarang();
-                    } else if (tableKey === 'tracebb') {
+                    } else if (activeTab === 'tracebb') {
                         renderTraceForActiveBom();
                     }
+
+                    if (!silent) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Tersimpan!',
+                            html: `<b>Seluruh data dokumen (${escapeHtml(currentAju)}) berhasil disimpan!</b><br><small style="color:var(--text-muted);">Header dan seluruh tab dokumen telah tersimpan aman ke database.</small>`,
+                            timer: 2300,
+                            showConfirmButton: false,
+                            toast: true,
+                            position: 'top-end'
+                        });
+                    }
+                    return true;
                 } else {
-                    showError(json.message);
+                    if (!silent) showError(json.message);
+                    return false;
                 }
             } catch (err) {
-                showError('Error: ' + err.message);
+                if (!silent) showError('Error saat menyimpan semua tab: ' + err.message);
+                return false;
             } finally {
-                saveBtns.forEach(b => {
-                    b.disabled = false;
-                    if (b._origHtml) b.innerHTML = b._origHtml;
-                });
+                if (!silent) {
+                    saveBtns.forEach(b => {
+                        b.disabled = false;
+                        if (b._origHtml) b.innerHTML = b._origHtml;
+                    });
+                }
             }
+        }
+
+        async function saveHeader(force = false) {
+            await saveAllTabs(force);
+        }
+
+        async function saveTable(tableKey, force = false) {
+            await saveAllTabs(force);
         }
 
         async function hitungPungutan() {
@@ -13585,6 +15219,9 @@ $isEditMode = !empty($selectedAjuParam);
                 showWarning('Dokumen AJU ini sudah MASUK IT Inventory (terkunci)!');
                 return;
             }
+
+            // Amankan form aktif ke database terlebih dahulu
+            await saveAllTabs(true, true);
 
             const btn = document.querySelector('button[onclick="hitungPungutan()"]');
             const origHtml = btn ? btn.innerHTML : '';
@@ -14134,6 +15771,15 @@ $isEditMode = !empty($selectedAjuParam);
                 );
                 return;
             }
+
+            // Validasi Pre-flight: Periksa kelengkapan dan format data sebelum dikirim ke Gateway CEISA 4.0
+            const activeBc = getActiveDocBc();
+            const preErrors = getAllMandatoryErrors(activeBc);
+            if (preErrors && preErrors.length > 0) {
+                const proceed = await promptMandatoryWarning('Validasi Sebelum Kirim ke Gateway CEISA 4.0', preErrors, activeBc);
+                if (!proceed) return;
+            }
+
             const ok = await showConfirm(
                 `Konfirmasi Pengiriman ke Portal CEISA 4.0:<br><br><strong>Nomor AJU:</strong> <code>${escapeHtml(currentAju)}</code><br><br>Lanjutkan proses transfer sekarang?`,
                 'Konfirmasi Transfer CEISA 4.0',
@@ -14304,9 +15950,7 @@ $isEditMode = !empty($selectedAjuParam);
 
             // Atur pilihan scope perusahaan
             const optCmp = document.getElementById('optEntidxCmpScope');
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
             if (optCmp) {
                 if (currentCmp) {
                     optCmp.textContent = `🏢 Perusahaan: ${currentCmp}`;
@@ -14324,9 +15968,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function loadEntidxList() {
             const bc = document.getElementById('selEntidxBc').value;
             const scope = document.getElementById('selEntidxScope').value;
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
             const cmpId = (scope === 'company') ? currentCmp : '';
 
             const statusEl = document.getElementById('entidxStatusInfo');
@@ -14498,9 +16140,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function saveEntidxSetting() {
             const bc = document.getElementById('selEntidxBc').value;
             const scope = document.getElementById('selEntidxScope').value;
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
 
             const rows = document.querySelectorAll('#tbodyEntidxSetting tr.entidx-row');
             const items = [];
@@ -14552,9 +16192,7 @@ $isEditMode = !empty($selectedAjuParam);
             const activeBc = (currentData && currentData.header && currentData.header.kode_dokumen)
                 ? String(currentData.header.kode_dokumen).trim()
                 : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
 
             if (!activeAju || activeAju === 'MEMUAT...' || activeAju.length < 10) {
                 Swal.fire('Perhatian', 'Silakan pilih atau muat dokumen AJU terlebih dahulu.', 'warning');
@@ -14618,9 +16256,7 @@ $isEditMode = !empty($selectedAjuParam);
 
             // Atur pilihan scope perusahaan
             const optCmp = document.getElementById('optDocidxCmpScope');
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
             if (optCmp) {
                 if (currentCmp) {
                     optCmp.textContent = `🏢 Perusahaan: ${currentCmp}`;
@@ -14638,9 +16274,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function loadDocidxList() {
             const bc = document.getElementById('selDocidxBc').value;
             const scope = document.getElementById('selDocidxScope').value;
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
             const cmpId = (scope === 'company') ? currentCmp : '';
 
             const statusEl = document.getElementById('docidxStatusInfo');
@@ -14816,9 +16450,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function saveDocidxSetting() {
             const bc = document.getElementById('selDocidxBc').value;
             const scope = document.getElementById('selDocidxScope').value;
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
 
             const rows = document.querySelectorAll('#tbodyDocidxSetting tr.docidx-row');
             const items = [];
@@ -14870,9 +16502,7 @@ $isEditMode = !empty($selectedAjuParam);
             const activeBc = (currentData && currentData.header && currentData.header.kode_dokumen)
                 ? String(currentData.header.kode_dokumen).trim()
                 : (document.getElementById('selectBc') ? document.getElementById('selectBc').value : '40');
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
 
             if (!activeAju || activeAju === 'MEMUAT...' || activeAju.length < 10) {
                 Swal.fire('Perhatian', 'Silakan pilih atau muat dokumen AJU terlebih dahulu.', 'warning');
@@ -14975,9 +16605,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function fetchLookupEntitas() {
             const q = document.getElementById('lookupEntitasQuery') ? document.getElementById('lookupEntitasQuery').value.trim() : '';
             const role = document.getElementById('lookupEntitasRoleFilter') ? document.getElementById('lookupEntitasRoleFilter').value.trim() : '';
-            const currentCmp = (typeof currentCompanyCmpId !== 'undefined' && currentCompanyCmpId) 
-                ? currentCompanyCmpId 
-                : (document.getElementById('filterCmpId') ? document.getElementById('filterCmpId').value : '');
+            const currentCmp = getCurrentEffectiveCmpId();
 
             const tbody = document.getElementById('tbodyLookupEntitas');
             const countEl = document.getElementById('lookupEntitasCount');
@@ -15099,12 +16727,21 @@ $isEditMode = !empty($selectedAjuParam);
 
             // Timpa field entitas aktif dengan data hasil history
             setFieldVal('nama_entitas', item.nama_entitas);
-            setFieldVal('nomor_identitas', item.nomor_identitas);
+            let histNomor = item.nomor_identitas || '';
+            let histJenis = item.kode_jenis_identitas || '6';
+            let cleanHist = String(histNomor).replace(/[^0-9]/g, '');
+            if (cleanHist.length === 15) {
+                histNomor = '0' + cleanHist;
+                histJenis = '6';
+            } else if (cleanHist.length === 16) {
+                histJenis = '6';
+            } else if (!histJenis || histJenis === '5') {
+                histJenis = '6';
+            }
+            setFieldVal('nomor_identitas', histNomor);
             setFieldVal('alamat_entitas', item.alamat_entitas);
             setFieldVal('nib_entitas', item.nib_entitas);
-            if (item.kode_jenis_identitas) {
-                setFieldVal('kode_jenis_identitas', item.kode_jenis_identitas);
-            }
+            setFieldVal('kode_jenis_identitas', histJenis);
             if (item.nomor_ijin_entitas) {
                 setFieldVal('nomor_ijin_entitas', item.nomor_ijin_entitas);
             }
@@ -15556,6 +17193,7 @@ $isEditMode = !empty($selectedAjuParam);
             });
 
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=auto_generate_all_tarifs&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15599,6 +17237,7 @@ $isEditMode = !empty($selectedAjuParam);
                 didOpen: () => Swal.showLoading()
             });
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=generate_barang_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15624,6 +17263,7 @@ $isEditMode = !empty($selectedAjuParam);
                 didOpen: () => Swal.showLoading()
             });
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=generate_bahanbaku_tarif&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15646,6 +17286,7 @@ $isEditMode = !empty($selectedAjuParam);
                 didOpen: () => Swal.showLoading()
             });
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=fix_hs_code&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15667,6 +17308,7 @@ $isEditMode = !empty($selectedAjuParam);
                 didOpen: () => Swal.showLoading()
             });
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=fix_netto&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15692,6 +17334,7 @@ $isEditMode = !empty($selectedAjuParam);
             if (!resConfirm.isConfirmed) return;
 
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=edit_seri&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15708,6 +17351,7 @@ $isEditMode = !empty($selectedAjuParam);
         async function seqBahanBaku() {
             if (!currentAju) return;
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=seq_bahanbaku&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15779,6 +17423,7 @@ $isEditMode = !empty($selectedAjuParam);
                 didOpen: () => Swal.showLoading()
             });
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=load_all_bom&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -15810,6 +17455,7 @@ $isEditMode = !empty($selectedAjuParam);
             });
 
             try {
+                await saveAllTabs(true, true);
                 const resp = await fetch(`editor.php?action=transfer_trace_to_bb&nomor_aju=${encodeURIComponent(currentAju)}`);
                 const data = await resp.json();
                 if (data.status === 'OK') {
@@ -16462,7 +18108,8 @@ $isEditMode = !empty($selectedAjuParam);
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat master barang...</td></tr>';
 
             try {
-                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}`);
+                const cmp = encodeURIComponent(getCurrentEffectiveCmpId());
+                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}&cmp_id=${cmp}`);
                 const res = await resp.json();
                 if (res.status === 'OK') {
                     bomMaterialPickerCache = res.data || [];
@@ -16583,6 +18230,281 @@ $isEditMode = !empty($selectedAjuParam);
         }
 
         // =============================================================
+        // QUICK PICKER: HISTORY STAGING BARANG (bc_ceisa_barang)
+        // =============================================================
+
+        let stagingPickerCache = [];
+        let searchStagingTimer = null;
+
+        function getActiveDocumentPartner() {
+            // 1. Periksa baris tabel Entitas di DOM yang sedang aktif/tampil di form editor
+            const trs = document.querySelectorAll('#table-entitas tbody tr');
+            let candidate = null;
+            if (trs && trs.length > 0) {
+                for (let i = 0; i < trs.length; i++) {
+                    const tr = trs[i];
+                    const selKode = tr.querySelector('select[data-col="kode_entitas"]');
+                    const inpNama = tr.querySelector('textarea[data-col="nama_entitas"]') || tr.querySelector('input[data-col="nama_entitas"]');
+                    const inpNpwp = tr.querySelector('input[data-col="nomor_identitas"]');
+
+                    const kode = selKode ? String(selKode.value).trim() : '';
+                    const nama = inpNama ? String(inpNama.value).trim() : '';
+                    const npwp = inpNpwp ? String(inpNpwp.value).trim() : '';
+
+                    if (nama && kode && kode !== '3' && kode !== '7') {
+                        candidate = { nama, npwp, kode };
+                        // Prioritas utama partner perdagangan: 9 (Pengirim), 5 (Penjual), 8 (Penerima), 6 (Pembeli), 1 (Pemasok)
+                        if (['9', '5', '8', '6', '1', '2'].includes(kode)) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+
+            if (candidate) return candidate;
+
+            // 2. Fallback periksa data memori currentData.entitas
+            if (currentData && Array.isArray(currentData.entitas) && currentData.entitas.length > 0) {
+                for (let i = 0; i < currentData.entitas.length; i++) {
+                    const e = currentData.entitas[i];
+                    const kode = String(e.kode_entitas || '').trim();
+                    const nama = String(e.nama_entitas || '').trim();
+                    const npwp = String(e.nomor_identitas || '').trim();
+                    if (nama && kode && kode !== '3' && kode !== '7') {
+                        candidate = { nama, npwp, kode };
+                        if (['9', '5', '8', '6', '1', '2'].includes(kode)) {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+
+            return candidate;
+        }
+
+        async function openStagingHistoryPickerModal() {
+            if (!currentAju) {
+                Swal.fire('Perhatian', 'Pilih dokumen AJU terlebih dahulu.', 'warning');
+                return;
+            }
+            const modal = document.getElementById('modalStagingHistoryPicker');
+            if (!modal) return;
+            modal.style.display = 'flex';
+            const searchInput = document.getElementById('searchStagingPicker');
+            if (searchInput) searchInput.value = '';
+
+            // Muat daftar partner dan set default partner yang sama dengan entitas yang dipilih
+            await loadStagingPickerPartners();
+            loadStagingPickerList();
+        }
+
+        async function loadStagingPickerPartners() {
+            const selectPartner = document.getElementById('filterPartnerStagingPicker');
+            if (!selectPartner) return;
+            selectPartner.innerHTML = '<option value="ALL">-- Memuat Rekomendasi Partner... --</option>';
+
+            const docPartner = getActiveDocumentPartner();
+
+            try {
+                const cmp = encodeURIComponent(getCurrentEffectiveCmpId());
+                const activeParam = docPartner && docPartner.nama ? `&active_partner=${encodeURIComponent(docPartner.nama)}` : '';
+                const resp = await fetch(`editor.php?action=get_staging_barang_partners&nomor_aju=${encodeURIComponent(currentAju)}&cmp_id=${cmp}${activeParam}`);
+                const res = await resp.json();
+                selectPartner.innerHTML = '';
+
+                let active = (docPartner && docPartner.nama) ? docPartner : res.active_partner;
+                let defaultVal = 'ALL';
+
+                if (active && active.nama) {
+                    defaultVal = active.nama;
+                    const optActive = document.createElement('option');
+                    optActive.value = active.nama;
+                    optActive.innerText = `⭐ [Partner Dokumen Ini] ${active.nama}` + (active.npwp ? ` (${active.npwp})` : '');
+                    selectPartner.appendChild(optActive);
+                }
+
+                const optAll = document.createElement('option');
+                optAll.value = 'ALL';
+                optAll.innerText = '-- Semua Supplier / Customer --';
+                selectPartner.appendChild(optAll);
+
+                if (Array.isArray(res.partners)) {
+                    res.partners.forEach(p => {
+                        if (active && active.nama && p.nama.trim().toUpperCase() === active.nama.trim().toUpperCase()) return;
+                        const opt = document.createElement('option');
+                        opt.value = p.nama;
+                        opt.innerText = `${p.nama}` + (p.total_aju ? ` (${p.total_aju} AJU)` : '');
+                        selectPartner.appendChild(opt);
+                    });
+                }
+
+                selectPartner.value = defaultVal;
+            } catch(e) {
+                if (docPartner && docPartner.nama) {
+                    selectPartner.innerHTML = `
+                        <option value="${escapeHtml(docPartner.nama)}">⭐ [Partner Dokumen Ini] ${escapeHtml(docPartner.nama)}</option>
+                        <option value="ALL">-- Semua Supplier / Customer --</option>
+                    `;
+                    selectPartner.value = docPartner.nama;
+                } else {
+                    selectPartner.innerHTML = '<option value="ALL">-- Semua Supplier / Customer --</option>';
+                }
+            }
+        }
+
+        function debounceSearchStaging() {
+            if (searchStagingTimer) clearTimeout(searchStagingTimer);
+            searchStagingTimer = setTimeout(loadStagingPickerList, 300);
+        }
+
+        async function loadStagingPickerList() {
+            const tbody = document.getElementById('tbodyStagingPicker');
+            if (!tbody) return;
+            const search = encodeURIComponent((document.getElementById('searchStagingPicker')?.value || '').trim());
+            const partner = encodeURIComponent(document.getElementById('filterPartnerStagingPicker')?.value || 'ALL');
+
+            tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:18px; font-size:10px;"><span class="spinner" style="width:12px;height:12px;display:inline-block;margin-right:6px;vertical-align:middle;"></span> Memuat history barang staging...</td></tr>';
+
+            try {
+                const cmp = encodeURIComponent(getCurrentEffectiveCmpId());
+                const resp = await fetch(`editor.php?action=get_staging_barang_picker&nomor_aju=${encodeURIComponent(currentAju)}&search=${search}&partner=${partner}&cmp_id=${cmp}`);
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    stagingPickerCache = res.data || [];
+                    renderStagingPickerTable(stagingPickerCache);
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:red; padding:12px; font-size:10px;">Gagal: ${res.message}</td></tr>`;
+                }
+            } catch (e) {
+                tbody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:red; padding:12px; font-size:10px;">Error: ${e.message}</td></tr>`;
+            }
+        }
+
+        function renderStagingPickerTable(list) {
+            const tbody = document.getElementById('tbodyStagingPicker');
+            const chkAll = document.getElementById('chkSelectAllStaging');
+            if (chkAll) chkAll.checked = false;
+            updateSelectedStagingBadge();
+
+            if (!tbody) return;
+            if (list.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--text-muted); font-size:10px; padding:22px;">Tidak ada barang yang cocok dalam history staging untuk partner ini.<br><span style="font-size:9.5px; margin-top:4px; display:inline-block;">Tips: Anda dapat memilih opsi <b>"-- Semua Supplier / Customer --"</b> pada dropdown di atas untuk mencari dari seluruh riwayat supplier lain.</span></td></tr>';
+                return;
+            }
+
+            let html = '';
+            list.forEach((m, idx) => {
+                const kb = escapeHtml(m.kode_barang || '');
+                const uraian = escapeHtml(m.uraian || '');
+                const hs = escapeHtml(m.hs || '');
+                const sat = escapeHtml(m.kode_satuan || 'PCE');
+                const nw = Number(m.nw_per_unit || 0);
+                const gw = Number(m.gw_per_unit || 0);
+                const price = Number(m.price_per_unit || 0);
+                const lastPartner = escapeHtml(m.last_partner || '-');
+                const lastAju = escapeHtml(m.last_aju || '-');
+                const lastDoc = m.last_dokumen ? ` (BC ${escapeHtml(m.last_dokumen)})` : '';
+
+                html += `<tr style="font-size:10px;">
+                    <td style="text-align:center; padding:3px 4px;">
+                        <input type="checkbox" class="chk-staging-row" data-idx="${idx}" onchange="updateSelectedStagingBadge()">
+                    </td>
+                    <td style="font-family:monospace; font-weight:700; font-size:10px; padding:3px 6px;">${kb}</td>
+                    <td style="font-size:10px; padding:3px 6px;">${uraian}</td>
+                    <td style="font-family:monospace; font-size:10px; padding:3px 6px;">${hs}</td>
+                    <td style="text-align:center; font-size:9.5px; padding:3px 4px;">${sat}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:10px; padding:3px 6px;">${nw.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:10px; padding:3px 6px;">${gw.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
+                    <td style="text-align:right; font-family:monospace; font-size:10px; padding:3px 6px;">${price.toLocaleString('id-ID', {minimumFractionDigits: 2, maximumFractionDigits: 4})}</td>
+                    <td style="font-size:9.5px; line-height:1.2; padding:3px 6px;">
+                        <div style="font-weight:600; color:var(--text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:145px;" title="${lastPartner}">${lastPartner}</div>
+                        <div style="color:var(--text-muted); font-family:monospace; font-size:8.5px;">${lastAju}${lastDoc}</div>
+                    </td>
+                    <td style="text-align:right; padding:3px 4px;">
+                        <input type="number" step="0.0001" min="0.0001" value="1.0000" class="input-sm inp-staging-qty" data-idx="${idx}" style="width:65px; height:22px; font-size:10px; padding:1px 4px; text-align:right; font-weight:600;">
+                    </td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+
+        function toggleSelectAllStaging(checked) {
+            document.querySelectorAll('.chk-staging-row').forEach(c => c.checked = checked);
+            updateSelectedStagingBadge();
+        }
+
+        function updateSelectedStagingBadge() {
+            const checkedCount = document.querySelectorAll('.chk-staging-row:checked').length;
+            const badge = document.getElementById('badgeSelectedStagingCount');
+            if (badge) badge.innerText = `${checkedCount} item dipilih`;
+        }
+
+        async function insertSelectedStagingItems() {
+            if (!currentAju) return;
+            const checkedBoxes = document.querySelectorAll('.chk-staging-row:checked');
+            if (checkedBoxes.length === 0) {
+                Swal.fire('Perhatian', 'Pilih minimal satu barang untuk dimasukkan.', 'warning');
+                return;
+            }
+
+            const itemsToInsert = [];
+            checkedBoxes.forEach(chk => {
+                const idx = parseInt(chk.dataset.idx, 10);
+                const mat = stagingPickerCache[idx];
+                if (mat) {
+                    const qtyInp = document.querySelector(`.inp-staging-qty[data-idx="${idx}"]`);
+                    const qtyVal = qtyInp ? parseFloat(qtyInp.value) || 1 : 1;
+                    itemsToInsert.push({
+                        kode_barang: mat.kode_barang,
+                        uraian: mat.uraian,
+                        hs: mat.hs,
+                        kode_satuan: mat.kode_satuan,
+                        merek: mat.merek,
+                        tipe: mat.tipe,
+                        ukuran: mat.ukuran,
+                        spesifikasi_lain: mat.spesifikasi_lain,
+                        kode_kemasan: mat.kode_kemasan,
+                        kemasan_per_unit: mat.kemasan_per_unit,
+                        nw_per_unit: mat.nw_per_unit,
+                        gw_per_unit: mat.gw_per_unit,
+                        price_per_unit: mat.price_per_unit,
+                        kode_negara_asal: mat.kode_negara_asal,
+                        kode_kategori_barang: mat.kode_kategori_barang,
+                        kode_guna_barang: mat.kode_guna_barang,
+                        kode_kondisi_barang: mat.kode_kondisi_barang,
+                        jumlah_satuan: qtyVal
+                    });
+                }
+            });
+
+            Swal.fire({
+                title: 'Memasukkan Barang dari History...',
+                html: `Memproses ${itemsToInsert.length} barang dengan prorata NW, GW, dan Price...`,
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                await saveAllTabs(true, true);
+                const fd = new FormData();
+                fd.append('nomor_aju', currentAju);
+                fd.append('items', JSON.stringify(itemsToInsert));
+
+                const resp = await fetch('editor.php?action=insert_from_staging_history', { method: 'POST', body: fd });
+                const res = await resp.json();
+                if (res.status === 'OK') {
+                    closeModal('modalStagingHistoryPicker');
+                    await Swal.fire('Sukses', res.message, 'success');
+                    await reloadCurrentAju();
+                } else {
+                    Swal.fire('Gagal', res.message, 'error');
+                }
+            } catch(e) {
+                Swal.fire('Error', e.message, 'error');
+            }
+        }
+
+        // =============================================================
         // TAHAP 4: QUICK PICKER MASTER BARANG (bc_material)
         // =============================================================
 
@@ -16610,7 +18532,8 @@ $isEditMode = !empty($selectedAjuParam);
             tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat master barang...</td></tr>';
 
             try {
-                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}`);
+                const cmp = encodeURIComponent(getCurrentEffectiveCmpId());
+                const resp = await fetch(`editor.php?action=get_material_picker&search=${search}&klas=${klas}&cmp_id=${cmp}`);
                 const res = await resp.json();
                 if (res.status === 'OK') {
                     materialPickerCache = res.data || [];
@@ -16707,6 +18630,7 @@ $isEditMode = !empty($selectedAjuParam);
             });
 
             try {
+                await saveAllTabs(true, true);
                 const fd = new FormData();
                 fd.append('nomor_aju', currentAju);
                 fd.append('items', JSON.stringify(itemsToInsert));
@@ -16786,7 +18710,8 @@ $isEditMode = !empty($selectedAjuParam);
             tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:20px;"><span class="spinner" style="width:14px;height:14px;display:inline-block;margin-right:6px;"></span> Memuat saldo pemasukan IT Inventory...</td></tr>';
 
             try {
-                const resp = await fetch(`editor.php?action=get_incoming_picker&search=${search}&bc=${bc}`);
+                const cmp = encodeURIComponent(getCurrentEffectiveCmpId());
+                const resp = await fetch(`editor.php?action=get_incoming_picker&search=${search}&bc=${bc}&cmp_id=${cmp}`);
                 const res = await resp.json();
                 if (res.status === 'OK') {
                     incomingPickerCache = res.data || [];
@@ -16896,6 +18821,7 @@ $isEditMode = !empty($selectedAjuParam);
                 });
 
                 try {
+                    await saveAllTabs(true, true);
                     const fd = new FormData();
                     fd.append('nomor_aju', currentAju);
                     fd.append('seri_barang', targetSeri || activeBarangSeri || 1);
@@ -16931,6 +18857,7 @@ $isEditMode = !empty($selectedAjuParam);
             });
 
             try {
+                await saveAllTabs(true, true);
                 const fd = new FormData();
                 fd.append('nomor_aju', currentAju);
                 fd.append('seri_barang', targetSeri);

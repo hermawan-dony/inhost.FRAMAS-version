@@ -28,8 +28,8 @@ if ($action === 'list') {
 
     $sql = "SELECT 
         a.rowid, a.kantor, a.nomor_aju, a.tanggal_scan, a.user_id, a.status,
-        (SELECT COUNT(1) FROM bc_ceisa_get_data g WHERE g.nomor_aju = a.nomor_aju) AS cek_ceisa,
-        (SELECT COUNT(1) FROM bc_1ab2 inv WHERE inv.NOMOR_AJU = a.nomor_aju AND inv.AB = 'A') AS is_posted,
+        (CASE WHEN EXISTS(SELECT 1 FROM bc_ceisa_get_data g WHERE g.nomor_aju = a.nomor_aju) THEN 1 ELSE 0 END) AS cek_ceisa,
+        (CASE WHEN EXISTS(SELECT 1 FROM bc_1ab2 inv WHERE inv.NOMOR_AJU = a.nomor_aju AND inv.AB = 'A') THEN 1 ELSE 0 END) AS is_posted,
         (SELECT COALESCE(SUM(brg.cif), 0) FROM bc_ceisa_get_barang brg WHERE brg.nomor_aju = a.nomor_aju) AS total_cif,
         (SELECT COUNT(1) FROM bc_ceisa_get_barang brg WHERE brg.nomor_aju = a.nomor_aju) AS total_items
     FROM bc_ceisa_scan27 a

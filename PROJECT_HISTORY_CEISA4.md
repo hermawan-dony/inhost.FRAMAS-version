@@ -8215,6 +8215,33 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
    - Fungsi JS `pullDefaultsFromLatestAju()` mengisi otomatis dropdown/input dan memperbarui live preview nomor AJU 26 digit.
    - Notifikasi toast diperkaya dengan informasi nomor AJU sumber referensi.
 
+---
+
+## 📌 46. PERBAIKAN INTEGRASI UPDATE SYNC, HARMONISASI MULTI-PLANT NPWP, DAN OPTIMASI PERFORMA (28 OKTOBER 2026)
+
+### A. Latar Belakang & Kebutuhan
+1. **Integrasi UPDATE SYNC 20261028.0725**: Penarikan pembaruan logika bisnis dari core sistem (auto-heal fasilitas 100%, NITKU 22 digit, format urutan dokumen BC 3.0, auto-save sebelum transfer) tanpa menimpa kustomisasi lokal Framas.
+2. **Harmonisasi Multi-Plant dengan NPWP Perusahaan**: Di lingkungan Framas terdapat 4 entitas (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`), namun di Portal CEISA 4.0 semuanya tergabung dalam 1 akun pengguna dengan NPWP yang sama (`010816064431000`). Kolom `cmp_id` di `bc_ceisa_data` dikembalikan dan diisi dengan NPWP agar kompatibel dengan sistem upstream sekaligus mengakomodasi seluruh plant Framas.
+3. **Optimasi Performa & Preservasi Flow Lokal**: Memastikan kueri cepat `EXISTS` subquery pada `daftar_dokumen.php`, alokasi memori 512M, kompresi GZIP, serta pengaturan pagination `localStorage` tetap aktif dan terlindungi dari regresi.
+
+### B. Implementasi Teknis & Arsitektur
+1. **Harmonisasi Database & Normalisasi `cmp_id`**:
+   - Menambahkan kolom `cmp_id VARCHAR(50) DEFAULT NULL` dan indeks `idx_cmp_id` pada tabel `bc_ceisa_data`.
+   - Menambahkan kolom `show_unimported_h2h TINYINT(1) DEFAULT 0` pada tabel `bc_ceisa_company`.
+   - Menjalankan normalisasi 38.724 baris data di `bc_ceisa_data` sehingga `cmp_id` terisi dengan NPWP Framas (`010816064431000`).
+2. **Sinkronisasi Tarik Portal CEISA 4.0 ([`ceisa_sync_service.php`](ceisa_sync_service.php))**:
+   - Kueri insert/update `bc_ceisa_data` mengisi `cmp_id` dengan NPWP perusahaan aktif (`$targetCmpId = !empty($core15) ? $core15 : ($npwpClean ?: $cmpId)`).
+3. **Filter Dokumen Multi-Plant & Kueri Cepat ([`daftar_dokumen.php`](daftar_dokumen.php))**:
+   - Filter pencarian mencocokkan NPWP perusahaan:
+     `WHERE (a.cmp_id = '$cleanCmp' OR a.cmp_id = '$cmpNpwp' OR a.idPerusahaan LIKE '%$cmpNpwp%')`.
+   - Menggabungkan fitur upstream (fallback subdomain, widget unimported H2H, browser fallback) tanpa menghilangkan optimasi kueri `EXISTS`, limit memori 512M, `ob_gzhandler`, dan `localStorage` pageSize `ceisa_dokumen_pagesize`.
+4. **Relasi Transfer Dokumen ([`transfer.php`](transfer.php))**:
+   - Menghubungkan tabel staging dan respon portal menggunakan `LEFT JOIN bc_ceisa_data bcd ON kiri.nomor_aju = bcd.nomorAju`, mencegah ketidakcocokan antara plant code lokal dan NPWP portal.
+5. **Form Editor & Generator JSON ([`editor.php`](editor.php), [`CeisaJsonBuilder.php`](CeisaJsonBuilder.php))**:
+   - Integrasi auto-save sebelum transfer dokumen.
+   - Penyaringan dropdown referensi dokumen pelengkap sesuai jenis izin pabean.
+   - Pengecekan tarif fasilitas 100% dan NITKU 22 digit pada payload JSON CEISA.
+
 
 
 
