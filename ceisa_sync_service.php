@@ -463,7 +463,20 @@ try {
             $asalDataVal   = (string)($row['asalData'] ?? '');
             $statusPkbVal  = (string)($row['statusPkb'] ?? '');
 
-            $targetCmpId   = !empty($core15) ? $core15 : (preg_replace('/[^0-9]/', '', $idPrshVal) ?: $cmpId);
+            // Resolusi plant / cmp_id yang presisi (termasuk multi-plant Framas)
+            if (!empty($cmpId) && $cmpId !== 'ALL' && $cmpId !== '*') {
+                $targetCmpId = $cmpId;
+            } elseif (strpos($nomorAju, 'FRM01') !== false) {
+                $targetCmpId = 'FRM-1';
+            } elseif (strpos($nomorAju, 'FRM02') !== false) {
+                $targetCmpId = 'FRM-2';
+            } elseif (strpos($nomorAju, 'FRM03') !== false) {
+                $targetCmpId = 'FRM-3';
+            } elseif (strpos($nomorAju, 'PDPLB') !== false) {
+                $targetCmpId = 'PDPLB';
+            } else {
+                $targetCmpId = !empty($cmpId) ? $cmpId : (!empty($core15) ? $core15 : (preg_replace('/[^0-9]/', '', $idPrshVal) ?: ''));
+            }
 
             $stmtInsertData->bind_param(
                 "ssssssssssssssssssssssssssisssssssssssssss",

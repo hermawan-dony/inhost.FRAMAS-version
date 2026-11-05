@@ -128,9 +128,24 @@ if ($action === 'list') {
             $realCmpId = $cr['cmp_id'];
             $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
             $cmpIsInv = (int)$cr['IS_INV'];
-            $cmpList = array_unique(array_filter([$cleanCmp, $realCmpId, $cmpNpwp]));
-            $escapedCmpList = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $cmpList)) . "'";
-            $where[] = "(a.cmp_id IN ($escapedCmpList) OR a.idPerusahaan LIKE '%$cmpNpwp%')";
+
+            // Cek apakah NPWP digunakan bersama oleh lebih dari 1 entitas/cabang/plant (seperti FRAMAS Multi-Plant)
+            $isMultiPlantNpwp = false;
+            if (!empty($cmpNpwp)) {
+                $qMulti = $koneksi->query("SELECT COUNT(1) FROM bc_ceisa_company WHERE REPLACE(REPLACE(npwp, '-', ''), '.', '') = '$cmpNpwp'");
+                if ($qMulti && (int)$qMulti->fetch_row()[0] > 1) {
+                    $isMultiPlantNpwp = true;
+                }
+            }
+
+            if ($isMultiPlantNpwp) {
+                // Untuk grup multi-plant, isolasi ketat berdasarkan cmp_id plant yang aktif
+                $where[] = "a.cmp_id = '$realCmpId'";
+            } else {
+                $cmpList = array_unique(array_filter([$cleanCmp, $realCmpId, $cmpNpwp]));
+                $escapedCmpList = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $cmpList)) . "'";
+                $where[] = "(a.cmp_id IN ($escapedCmpList) OR a.idPerusahaan LIKE '%$cmpNpwp%')";
+            }
         } else {
             $where[] = "a.cmp_id = '$cleanCmp'";
         }
@@ -213,7 +228,7 @@ if ($action === 'list') {
         COALESCE(cmp.show_unimported_h2h, 0) AS show_unimported_h2h,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d 00:00:00'), '') AS effective_tanggal_respon
     FROM bc_ceisa_data a
-    LEFT JOIN bc_ceisa_company cmp ON (a.cmp_id = cmp.cmp_id OR a.cmp_id = cmp.npwp OR (cmp.subdomain IS NOT NULL AND cmp.subdomain != '' AND a.cmp_id = cmp.subdomain))
+    LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
 
     LEFT JOIN (
         SELECT nomorAju, MIN(nomorRespon) AS nomorRespon, MAX(tanggalRespon) AS tanggalRespon, MAX(pdf) AS pdf
