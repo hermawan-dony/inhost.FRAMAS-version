@@ -144,11 +144,16 @@ if (!function_exists('ceisa_switch_company_db')) {
                 $dbName = 'SNUDB';
             } else {
                 $esc = mysqli_real_escape_string($koneksi, $clean);
-                $q = @mysqli_query($koneksi, "SELECT db_mode, db_name FROM `$masterDb`.`bc_ceisa_company` WHERE (cmp_id = '$esc' OR db_name = '$esc' OR LOWER(subdomain) = LOWER('$esc')) AND is_active = 1 LIMIT 1");
-                if ($q && $r = mysqli_fetch_assoc($q)) {
-                    if (($r['db_mode'] ?? '') === 'dedicated' && !empty($r['db_name'])) {
-                        $dbName = $r['db_name'];
+                try {
+                    $q = @mysqli_query($koneksi, "SELECT db_mode, db_name FROM `$masterDb`.`bc_ceisa_company` WHERE (cmp_id = '$esc' OR db_name = '$esc' OR LOWER(subdomain) = LOWER('$esc')) AND is_active = 1 LIMIT 1");
+                    if ($q && $r = mysqli_fetch_assoc($q)) {
+                        if (($r['db_mode'] ?? '') === 'dedicated' && !empty($r['db_name'])) {
+                            $dbName = $r['db_name'];
+                        }
                     }
+                } catch (Throwable $e) {
+                    // Fallback to master DB if query fails
+                    $dbName = $masterDb;
                 }
             }
         } else {
