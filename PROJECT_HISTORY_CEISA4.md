@@ -8272,3 +8272,32 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
 
 
 
+
+
+---
+
+## 📌 47. PENGGABUNGAN AMAN PEMBARUAN UPSTREAM GITHUB (5 NOVEMBER 2026)
+
+### A. Latar Belakang & Kebutuhan
+1. Penarikan pembaruan besar dari repository utama upstream (`inhost-base/main` / `inhost.web.id` commit `39c28ad`) yang memuat lebih dari 160 commit baru pasca penggabungan PR `feat/perf-query-npwp-sync`.
+2. Penggabungan wajib dilakukan secara aman tanpa merusak flow, koneksi database lokal `framasbc` (MySQL 8.0.45 port 3307), modul Winline ERP, maupun hak akses user multi-plant Framas.
+
+### B. Modul Baru yang Diintegrasikan:
+1. **INHOST TOOLS (`tools/`)**:
+   - Portal utilitas pabean modern: Konverter Excel backup modul TPB BC 2.5 ke CEISA 4.0 (`convert_engine.py`), kamus dataset BTKI 2022 (`build_btki_dataset.py`, `btki_2022.json`), dan engine AI PDF Invoice Extractor.
+2. **Modul Akuntansi & Keuangan Lengkap (`erp/`)**:
+   - Porting PowerBuilder TPB-ERP ke Ant Design compact 9.5px: Chart of Accounts (`chart_of_accounts.php`), Jurnal Umum (`general_journal.php`), Jurnal Voucher (`journal_voucher.php`), Jurnal Penjualan (`sales_journal.php`), Jurnal Pembelian (`purchase_journal.php`), Jurnal Mutasi (`mutation_journal.php`), Neraca Lajur (`financial_reports.php`), Buku Besar Pembantu (`partner_subsidiary.php`), Aktiva Tetap (`fixed_assets.php`), Konfigurasi Akun (`account_config.php`), AR/AP Ledger, Penerimaan Kas/Bank (`ar_receipt.php`), dan Pengeluaran Kas/Bank (`ap_payment.php`).
+3. **e-Faktur Coretax XML Generator & PPN (`erp/`)**:
+   - Generator XML Coretax (`coretax_xml.php`), Import Faktur Pajak Masukan (`vat_in.php`), Faktur Pajak Keluaran (`vat_out.php`), dan ekstraktor PDF Faktur Pajak (`extract_pdf.php`).
+4. **Warehouse QR Label & Traceability**:
+   - Modul Cetak Label QR Gudang Header-Detail (`erp/inv_qr_label.php`) format lembar stiker A4 anti-overlap, auto-resize QR code, dan pustaka barcode (`jsbarcode.all.min.js`, `qrcode.min.js`).
+5. **Pusat Tiket (`ticket.php`)**:
+   - Sistem ticketing terintegrasi WhatsApp Gateway (`wa_helper.php`) untuk pemantauan kendala sistem dan pelaporan lintas user.
+6. **Aset & Komponen UI Modern (`assets/`)**:
+   - Ant Grid (`ant_grid.css`, `ant_grid.js`) dan Ant Searchable Select (`ant_searchable_select.css`, `ant_searchable_select.js`).
+
+### C. Penyelarasan Core Files Tanpa Mengubah Flow Framas:
+1. **`koneksi.php`**: Menambahkan fungsi switch database dinamis `ceisa_switch_company_db()` dengan default fallback tetap pada database lokal `framasbc`, serta memperbarui master katalog dokumen `ceisa_doc_catalog()` dengan pengelompokan Inbound/Outbound dan PPKEK.
+2. **`daftar_dokumen.php`**: Mengintegrasikan fitur ekspor Excel `exportDaftarDokumenExcel()`, badge status H2H/Lokal, dan `session_write_close()` non-blocking.
+3. **`editor.php` & `transfer.php`**: Menerapkan `session_write_close()` untuk mencegah request blocking serta try-catch pada posting IT Inventory.
+4. **`index.php`**: Mendaftarkan routing baru (`tools`, `ticket`, `inv_qr_label`, `coretax_xml`, `erp_*`) dan icon menu navigasi di sidebar.

@@ -1,0 +1,23 @@
+{
+    "balance_credits": 10986.61,
+    "balance_rp": 109866.14,
+    "total_requests": 14,
+    "credits_used_total": 13.39,
+    "raw_upstream": {
+        "active_keys": 2,
+        "base_url": "https:\/\/my.vpsmurah.co.id\/api\/v1",
+        "credits": 10986.6135,
+        "free_daily_limit": 0,
+        "free_daily_remaining": 100,
+        "rupiah_per_credit": 10,
+        "today_credits": 0,
+        "today_requests": 0,
+        "tokens_cache": 1443,
+        "tokens_in": 7635,
+        "tokens_out": 13602,
+        "total_credits": 13.3865,
+        "total_requests": 14
+    },
+    "source": "LIVE_UPSTREAM",
+    "last_updated": "2026-10-30 00:42:17"
+}

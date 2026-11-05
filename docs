@@ -1,0 +1,134 @@
+# PANDUAN ARSITEKTUR SISTEM: WORK ORDER, TRACEABILITY GUDANG & INTEGRASI DOKUMEN PABEAN CEISA 4.0
+**Sistem ERP Multi-Tenant & Kepabeanan Kawasan Berikat CEISA 4.0 (inhost.web.id)**  
+*Dokumen Resmi Standar Operasional Prosedur (SOP) & Arsitektur Database*  
+*Versi: 2.0 | November 2026*
+
+---
+
+## 1. Filosofi "Single Source of Truth" dari IT Inventory (`bc_1ab2`)
+
+Di lingkungan kawasan berikat, alur penerimaan barang di gudang sangat fleksibel:
+- Sebagian perusahaan menjalankan alur formal Purchasing: **Purchase Order (PO) $\rightarrow$ Receive Item (RI) $\rightarrow$ Purchase Invoice (PI)**.
+- Sebagian langsung mencatat **Faktur Pembelian (PI)**.
+- Sebagian menerima barang titipan konsinyasi, subkontrak, atau mutasi antar kawasan berikat (BC 2.7).
+
+Maka, menjadikan dokumen RI atau PI sebagai acuan tunggal label gudang dapat menimbulkan celah ketidaksinkronan data. Sesuai ketentuan **PER-02/BC/2019 juncto PER-6/BC/2026**, seluruh barang pemasukan yang diakui secara sah oleh Bea Cukai **100% wajib tercatat pada Buku Pemasukan IT Inventory (`bc_1ab2` dengan kode `AB = 'A'`)**.
+
+Dengan demikian:
+1. Tabel **`bc_1ab2`** ditetapkan sebagai **Single Source of Truth** untuk seluruh identitas fisik barang masuk dan pencetakan label QR / Barcode gudang.
+2. Setiap kali dokumen pabean pemasukan (BC 2.3 Impor, BC 4.0 Lokal, BC 2.7 Antar KB, BC 1.6 PLB, BC 2.6.2 Subkon) disetujui (SPPB), data otomatis masuk ke `bc_1ab2`.
+3. Dari data ini, tim gudang dapat mencetak stiker QR/Barcode resmi yang memuat **Nomor Pengajuan AJU 26 Digit DJBC**.
+
+---
+
+## 2. Standar Label QR, Barcode 1D, dan Keunikan Nomor AJU 26 Digit
+
+Nomor Pendaftaran Dokumen BC (*Nomor Daftar*) memiliki risiko duplikasi jika terjadi reset penomoran kantor pabean di awal tahun anggaran. Sebaliknya, **Nomor Pengajuan Pabean (Nomor AJU 26 Digit)** dijamin **100% Unik secara global** di seluruh sistem DJBC Indonesia.
+
+### 2.1 Struktur Payload QR Code (2D)
+```text
+AJU|<Nomor_AJU_26_Digit>|<Kode_Barang>|<Seri_Barang>|<Nomor_Daftar_BC>
+```
+*Contoh:* `AJU|000040VOL82420261102000944|100D/2 200M|1|076134`
+
+### 2.2 Pilihan Ukuran Printer Stiker Thermal
+| Ukuran Label | Target Kemasan Fisik | Karakteristik & Penempatan |
+| :--- | :--- | :--- |
+| **Thermal 70 x 40 mm** | Karton, Box, Tabung Benang, Roll Kain | **Standar Rekomendasi ERP**. Memuat Logo Perusahaan, Nomor AJU, BC In, Barcode 1D & QR Code 2D. |
+| **Thermal 50 x 30 mm** | Kantong Plastik, Sparepart, Aksesoris | Format kompak *dense* untuk suku cadang kecil atau kemasan kantong. |
+| **Thermal 100 x 50 mm** | Palet Kayu, Sak Jumbo, Drum Kimia | Visibilitas tinggi dari jarak 2 meter, cocok untuk identitas palet gudang. |
+| **Thermal 100 x 150 mm** | Logistik Kontainer & Standard Shipping | Standar label pengapalan ekspedisi kontainer dan ekspor (Shipping Mark). |
+| **Ukuran Custom (Kustom)** | Sesuai Ketersediaan Stok Stiker | Pengguna bebas menentukan lebar ($mm$) dan tinggi ($mm$). |
+
+---
+
+## 3. Dualisme Work Order: Produksi Sales vs Internal Departemen
+
+Sistem membedakan secara tegas dua jenis Surat Perintah Kerja (Work Order) untuk memisahkan barang komersial dan kebutuhan operasional pabrik:
+
+```mermaid
+flowchart TD
+    subgraph KOMERSIAL["1. Jalur Komersial (Make-to-Order)"]
+        SO["Sales Order (SO)"] --> WOS["WO Produksi (Sales)"]
+        WOS --> ISS1["Issue Bahan Baku (bc_issue_dtl)<br/>Scan Lot AJU dari bc_1ab2"]
+        ISS1 --> FG["Produksi Selesai (Barang Jadi)"]
+        FG --> DO["Delivery Order (DO) / Surat Jalan"]
+        DO --> SI["Sales Invoice (SI)"]
+    end
+
+    subgraph INTERNAL["2. Jalur Non-Komersial (Internal Dept)"]
+        REQ["Permintaan Barang Dept (bc_issue_dept_req)"] --> WOI["WO Internal / Dept<br/>(Maintenance / Moldshop / R&D)"]
+        WOI --> ISS2["Issue Bahan Baku / Sparepart<br/>(bc_issue_dtl)"]
+        ISS2 --> LAP1B["IT Inventory 1B Pengeluaran<br/>(Pemakaian Sendiri / Rusak / Musnah)"]
+    end
+
+    SI --> TRACE["Tabel Trace SI (bc_si_aju_ceisa)"]
+    TRACE --> CEISA["Dokumen CEISA 4.0<br/>(BC 2.5 / 3.0 / 2.7 / 4.1)<br/>Bagian: Eks-BC Bahan Baku"]
+```
+
+### 3.1 WO Tipe PRODUKSI (Sales Order / Komersial)
+- **Dasar Penerbitan**: Diterbitkan atas dasar pesanan pelanggan (**Sales Order / SO**).
+- **Formula**: Mengikat resep Bill of Material (BOM) Barang Jadi yang dipesan.
+- **Alur**: `SO` $\rightarrow$ `WO Produksi` $\rightarrow$ `Issue Bahan Baku (BOM OUT)` $\rightarrow$ `Hasil Produksi (FG IN)` $\rightarrow$ `DO` $\rightarrow$ `Sales Invoice (SI)`.
+- **Akuntansi & Pajak**: Menghasilkan piutang dagang (AR), Jurnal Penjualan, dan e-Faktur Coretax.
+
+### 3.2 WO Tipe INTERNAL (Departemen / Non-Komersial)
+- **Dasar Penerbitan**: Diterbitkan oleh departemen internal (Maintenance, Bengkel Moldshop, R&D/Trial, Fasilitas Pabrik).
+- **Karakteristik**: **TIDAK MEMBUTUHKAN Sales Order maupun Buyer/Customer**.
+- **Alur**: Formulir Permintaan Barang Dept (`bc_issue_dept_req`) $\rightarrow$ `WO Internal` $\rightarrow$ Pengeluaran Bahan $\rightarrow$ **IT Inventory 1B Pengeluaran (Kategori: Pemakaian Sendiri / Subkontrak / Pemusnahan)**.
+- **Akuntansi & Pajak**: Dibukukan sebagai Biaya Operasional Pabrik (Overhead Cost / Maintenance Expense) tanpa menimbulkan faktur pajak penjualan.
+
+---
+
+## 4. Traceability Sales Invoice & Penanganan Pengiriman Parsial
+
+Ketika penjualan dikirim secara bertahap (*partial delivery*), alokasi bahan baku dihitung secara matematis proporsional:
+$$\text{Faktor Alokasi} = \frac{\text{Qty Barang Jadi pada SI}}{\text{Total Target Produksi WO}}$$
+
+**Simulasi Kasus:**
+1. WO Produksi menerbitkan **1.000 pcs** Barang Jadi (menghabiskan Bahan Baku A: 200 kg dan Bahan Baku B: 100 kg).
+2. **Pengiriman ke-1 (SI ke-1: 400 pcs = 40%)**: Sistem mengalokasikan **80 kg Bahan A** dan **40 kg Bahan B** ke dalam tabel penelusuran SI ke-1.
+3. **Pengiriman ke-2 (SI ke-2: 600 pcs = 60%)**: Sistem mengalokasikan sisa **120 kg Bahan A** dan **60 kg Bahan B** ke SI ke-2.
+4. Total pemakaian bahan baku tidak akan pernah mengalami *over-claim* atau tumpang tindih.
+
+---
+
+## 5. Integrasi Otomatis ke Dokumen Pabean CEISA 4.0 (Eks-BC Bahan Baku)
+
+Pada dokumen pengeluaran pabean CEISA 4.0 (**BC 2.5, BC 3.0, BC 2.7, dan BC 4.1**), pengguna wajib melampirkan rincian bahan baku asal:
+- Tabel `bc_si_aju_ceisa` (mengacu pada query DataWindow PB `d_ceisa_eksbc_tpberp.srd`) menyimpan riwayat:
+  - Nomor AJU Dokumen Masuk Asal
+  - Seri Barang Asal
+  - Dokumen BC Asal (BC 2.3, BC 4.0, BC 2.7)
+  - Nomor & Tanggal Pendaftaran BC Asal
+  - Quantity Bahan Baku yang dikonsumsi
+- Di Form Editor CEISA 4.0, tombol **"Tarik Bahan Baku dari Trace SI"** secara otomatis mengisi sub-tab Bahan Baku (`bc_ceisa_bahanbaku` dan `bc_ceisa_bahanbakudokumen`) tanpa entri manual.
+
+---
+
+## 6. Jaminan Keamanan Data Histori (100% Backward Compatible)
+
+Sistem menerapkan arsitektur **Dual-Mode Trace Resolution**:
+1. **Mode Klasik (Transaksi Lama & Penjualan Direct)**:
+   Jika suatu baris Sales Invoice lama tidak memiliki relasi nomor WO, sistem otomatis membaca data riwayat yang sudah tersimpan di `bc_si_aju_ceisa` atau menghitung via resep BOM `bc_bom` dan FIFO `bc_1ab2`.
+2. **Mode Real Issue (Transaksi Baru dengan WO)**:
+   Jika baris Sales Invoice memiliki relasi nomor WO, sistem mengambil nomor AJU riil dari lot fisik yang dikeluarkan saat produksi.
+
+> [!NOTE]
+> Seluruh invoice dan laporan kepatuhan audit masa lalu tetap 100% valid dan dapat dicetak persis seperti semula. Tidak ada data yang hilang atau rusak.
+
+---
+
+## 7. Matriks SOP Operasional Antar Departemen
+
+| Departemen | Tanggung Jawab Operasional | Modul Sistem |
+| :--- | :--- | :--- |
+| **Gudang (Warehouse)** | Cetak label stiker QR & Barcode dari IT Inventory `bc_1ab2`, tempel pada kemasan fisik sebelum disimpan di rak/bin. | Pusat Cetak Label QR (`inv_qr_label.php`) |
+| **PPIC / Planner** | Menerbitkan WO Produksi (dari SO) atau WO Internal (dari Permintaan Dept). | Work Order Manager (`work_order.php`) |
+| **Produksi (Floor)** | Scan QR label bahan baku saat mengeluarkan material ke lini produksi (Issue BOM). | Production Issue (`production_issue.php`) |
+| **Pengiriman (Shipping)** | Menerbitkan Delivery Order (DO / Surat Jalan) sesuai penyelesaian barang jadi WO. | Delivery Order (`sale_do.php`) |
+| **Keuangan (Sales)** | Menerbitkan Sales Invoice (SI), mencetak Laporan Traceability, dan menghasilkan e-Faktur Coretax. | Sales Invoice (`sales_invoice.php`) |
+| **Exim / Kepabeanan** | Menarik data trace pemakaian bahan baku dari SI ke dokumen pabean BC 2.5 / 3.0 / 2.7 / 4.1. | Editor CEISA 4.0 (`editor.php`) |
+
+---
+*Unduh versi dokumen resmi Microsoft Word: [PANDUAN_ARSITEKTUR_WO_TRACEABILITY_CEISA4.docx](/docs/PANDUAN_ARSITEKTUR_WO_TRACEABILITY_CEISA4.docx)*

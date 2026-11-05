@@ -1,0 +1,488 @@
+/**
+ * ============================================================================
+ * Ant Design Enterprise DataGrid CSS (ant_grid.css)
+ * ============================================================================
+ * Standar Tampilan & Interaksi Grid Tabel CEISA 4.0 & ERP Hub:
+ * - Font Poppins & Source Sans Pro (10px data, 9.5px header)
+ * - Sticky header & column sort indicator (▲ / ▼ / ↕)
+ * - Draggable Column Resizer handle
+ * - Enterprise Right-Click Context Menu (Copy, Excel, Filter, Columns, Edit)
+ * - Integrated Column Visibility & Custom Parameter Filter Modals
+ * - Full Dark Mode & Light Mode Auto-Adaptive Theme
+ * ============================================================================
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap');
+
+:root {
+    --app-font: 'Poppins', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --ant-grid-font: var(--app-font);
+    --ant-grid-resizer-w: 5px;
+}
+
+/* Standarisasi FONT UTAMA: Mengikuti Pengaturan Terpusat Aplikasi (--app-font, default: Poppins) */
+html, body, table, input, select, textarea, button, .ant-container, .ant-card, .ant-table, .ant-toolbar, .filter-panel, .kpi-row, .kpi-card, .kpi-container, .dw, table.dw {
+    font-family: var(--app-font) !important;
+}
+
+/* 1. TABLE BASE & TYPOGRAPHY */
+table.ant-grid-table,
+.ant-grid-wrapper table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-family: var(--ant-grid-font) !important;
+    font-size: 10px !important;
+    line-height: 1.4 !important;
+    color: var(--text-main, #262626);
+    background: var(--bg-card, #ffffff);
+}
+
+/* 2. HEADER & STICKY TH */
+table.ant-grid-table thead,
+.ant-grid-wrapper table thead {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
+table.ant-grid-table th,
+.ant-grid-wrapper table th {
+    position: relative;
+    background: var(--table-head-bg, #fafafa);
+    color: var(--text-heading, #1f1f1f);
+    font-size: 9.5px !important;
+    font-weight: 600 !important;
+    padding: 4px 6px !important;
+    text-align: left;
+    border-bottom: 1px solid var(--border-table, var(--border-color, #e8e8e8));
+    border-right: 1px solid var(--border-table, var(--border-color, #e8e8e8));
+    white-space: nowrap;
+    user-select: none;
+    transition: background 0.15s, color 0.15s;
+}
+
+table.ant-grid-table th.sortable,
+.ant-grid-wrapper table th.sortable {
+    cursor: pointer;
+}
+
+table.ant-grid-table th.sortable:hover,
+.ant-grid-wrapper table th.sortable:hover {
+    color: var(--primary, #1890ff);
+    background: var(--row-hover, #f0f7ff);
+}
+
+.ant-grid-sort-icon {
+    display: inline-block;
+    margin-left: 4px;
+    font-size: 9.5px;
+    opacity: 0.35;
+    vertical-align: middle;
+}
+
+th.sort-asc .ant-grid-sort-icon,
+th.sort-desc .ant-grid-sort-icon {
+    opacity: 1 !important;
+    color: var(--primary, #1890ff) !important;
+    font-weight: bold;
+}
+
+/* 3. RESIZER HANDLE */
+.ant-grid-resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: var(--ant-grid-resizer-w);
+    height: 100%;
+    cursor: col-resize !important;
+    user-select: none;
+    z-index: 10;
+}
+
+.ant-grid-resizer:hover,
+.ant-grid-resizing {
+    background-color: var(--primary, #1890ff) !important;
+    opacity: 0.85;
+}
+
+/* 4. BODY CELLS & ROWS */
+table.ant-grid-table td,
+.ant-grid-wrapper table td {
+    padding: 3px 6px !important;
+    font-size: 10px !important;
+    border-bottom: 1px solid var(--border-table, var(--border-light, #e8e8e8));
+    border-right: 1px solid var(--border-table, var(--border-light, #e8e8e8));
+    white-space: nowrap;
+    color: var(--text-main, #262626);
+    vertical-align: middle;
+}
+
+table.ant-grid-table tbody tr:hover td,
+.ant-grid-wrapper table tbody tr:hover td {
+    background-color: var(--row-hover, #f0f7ff) !important;
+}
+
+table.ant-grid-table tbody tr.ant-grid-row-selected td,
+.ant-grid-wrapper table tbody tr.ant-grid-row-selected td {
+    background-color: var(--row-selected, #e6f7ff) !important;
+}
+
+/* 5. RIGHT-CLICK CONTEXT MENU */
+.ant-grid-ctx-menu {
+    position: fixed;
+    z-index: 999999;
+    background: var(--bg-card, #ffffff);
+    border: 1px solid var(--border-color, #d9d9d9);
+    border-radius: 4px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+    min-width: 195px;
+    padding: 4px 0;
+    font-family: var(--ant-grid-font);
+    font-size: 10.5px;
+    color: var(--text-main, #262626);
+    display: none;
+    user-select: none;
+    animation: antCtxFadeIn 0.12s ease-out;
+}
+
+@keyframes antCtxFadeIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.ant-grid-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    cursor: pointer;
+    line-height: 1.3;
+    transition: background 0.1s, color 0.1s;
+}
+
+.ant-grid-ctx-item:hover {
+    background: var(--row-hover, #f0f7ff);
+    color: var(--primary, #1890ff);
+}
+
+.ant-grid-ctx-item i {
+    width: 14px;
+    text-align: center;
+    font-size: 11px;
+}
+
+.ant-grid-ctx-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border-color, #f0f0f0);
+}
+
+.ant-grid-ctx-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* 6. MODAL SYSTEM FOR GRID SETTINGS & FILTER */
+.ant-grid-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 1000000;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(1.5px);
+}
+
+.ant-grid-modal-backdrop.active {
+    display: flex;
+}
+
+.ant-grid-modal {
+    background: var(--bg-card, #ffffff);
+    border: 1px solid var(--border-color, #d9d9d9);
+    border-radius: 4px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    width: 100%;
+    max-width: 440px;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: var(--ant-grid-font);
+    font-size: 10.5px;
+    color: var(--text-main, #262626);
+    animation: antModalZoom 0.15s ease-out;
+}
+
+@keyframes antModalZoom {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.ant-grid-modal-header {
+    padding: 8px 12px;
+    background: var(--table-head-bg, #fafafa);
+    border-bottom: 1px solid var(--border-color, #e8e8e8);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-weight: 600;
+    font-size: 11.5px;
+}
+
+.ant-grid-modal-header .close-btn {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted, #8c8c8c);
+    padding: 2px;
+}
+
+.ant-grid-modal-header .close-btn:hover {
+    color: var(--danger, #ff4d4f);
+}
+
+.ant-grid-modal-body {
+    padding: 10px 12px;
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ant-grid-modal-footer {
+    padding: 6px 12px;
+    background: var(--table-head-bg, #fafafa);
+    border-top: 1px solid var(--border-color, #e8e8e8);
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+
+/* 7. PAGINATION TOOLBAR */
+.ant-grid-pager {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 10px;
+    background: var(--table-head-bg, #fafafa);
+    border-top: 1px solid var(--border-table, var(--border-color, #e8e8e8));
+    font-family: var(--ant-grid-font);
+    font-size: 10px;
+    color: var(--text-muted, #8c8c8c);
+    flex-wrap: wrap;
+    gap: 6px;
+    user-select: none;
+}
+
+.ant-grid-pager-left,
+.ant-grid-pager-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.ant-grid-pager-select {
+    height: 20px;
+    font-size: 9.5px;
+    font-family: inherit;
+    border: 1px solid var(--border-input, #d9d9d9);
+    border-radius: 2px;
+    background: var(--bg-input, #ffffff);
+    color: var(--text-main, #262626);
+    padding: 0 4px;
+    outline: none;
+}
+
+.ant-grid-pager-btn {
+    height: 19px;
+    min-width: 22px;
+    padding: 0 5px;
+    font-size: 9.5px;
+    font-family: inherit;
+    border: 1px solid var(--border-color, #d9d9d9);
+    border-radius: 2px;
+    background: var(--bg-card, #ffffff);
+    color: var(--text-main, #262626);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+
+.ant-grid-pager-btn:hover:not(:disabled) {
+    border-color: var(--primary, #1890ff);
+    color: var(--primary, #1890ff);
+}
+
+.ant-grid-pager-btn.active {
+    background: var(--primary, #1890ff) !important;
+    border-color: var(--primary, #1890ff) !important;
+    color: #ffffff !important;
+    font-weight: 600;
+}
+
+.ant-grid-pager-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* 8. DARK MODE ADJUSTMENTS */
+html.dark-mode .ant-grid-ctx-menu,
+body.dark-mode .ant-grid-ctx-menu,
+html[data-theme="dark"] .ant-grid-ctx-menu {
+    background: #1f1f1f;
+    border-color: #383838;
+    color: #e6e6e6;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+}
+
+html.dark-mode .ant-grid-ctx-item:hover,
+body.dark-mode .ant-grid-ctx-item:hover,
+html[data-theme="dark"] .ant-grid-ctx-item:hover {
+    background: #2b3b55;
+    color: #40a9ff;
+}
+
+html.dark-mode .ant-grid-ctx-divider,
+body.dark-mode .ant-grid-ctx-divider,
+html[data-theme="dark"] .ant-grid-ctx-divider {
+    background: #303030;
+}
+
+html.dark-mode .ant-grid-modal,
+body.dark-mode .ant-grid-modal,
+html[data-theme="dark"] .ant-grid-modal {
+    background: #1f1f1f;
+    border-color: #383838;
+    color: #e6e6e6;
+}
+
+/* 9. STANDARISASI TIPOGRAFI, FORM CONTROLS & COMPACT ERP GRID (9.5px Compact Desktop) */
+:root {
+    --app-font-size: 9.5px;
+    --form-font-size: var(--app-font-size, 9.5px);
+}
+
+html, body {
+    font-size: 10px !important;
+    font-family: var(--app-font) !important;
+}
+
+/* Form Labels & Group Headings */
+.fld-row label,
+.ant-form-label,
+label.ant-label,
+.filter-group label,
+.form-group label,
+.filter-col label {
+    font-size: var(--form-font-size, 9.5px) !important;
+    font-weight: 500 !important;
+    font-family: var(--app-font) !important;
+}
+
+/* Form Controls & Inputs */
+.fld-row input,
+.fld-row select,
+.fld-row textarea,
+.ant-form-control input,
+.ant-form-control select,
+.form-control,
+.form-control-compact,
+.input-text,
+.input-control,
+.select-box,
+.select-control,
+.filter-control,
+input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+select,
+textarea {
+    font-size: var(--form-font-size, 9.5px) !important;
+    font-family: var(--app-font) !important;
+}
+
+/* Compact Toolbar Height: 21px */
+.form-control-compact,
+.input-text,
+.input-control,
+.select-box,
+.select-control,
+.filter-control,
+table.dw input,
+table.ant-grid-table input,
+table.data-table input {
+    height: 21px !important;
+}
+
+/* Standard Buttons: 9.5px, 21px Height, Compact Padding */
+.btn,
+.ant-btn,
+.btn-compact,
+.pill-btn,
+button.btn,
+button.ant-btn {
+    font-size: var(--form-font-size, 9.5px) !important;
+    height: 21px !important;
+    font-family: var(--app-font) !important;
+    padding: 0 8px !important;
+    line-height: 21px !important;
+}
+
+/* Standard Enterprise Tables (Header: 9.5px, Cell: 9.5px, Compact Padding) */
+table.ant-grid-table,
+table.data-table,
+table.ant-table,
+table.erp-table,
+table.dw,
+.ant-grid-wrapper table {
+    font-family: var(--app-font) !important;
+    font-size: 9.5px !important;
+}
+
+table.ant-grid-table thead,
+table.data-table thead,
+table.ant-table thead,
+table.erp-table thead,
+table.dw thead,
+.ant-grid-wrapper table thead {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 5 !important;
+}
+
+table.ant-grid-table th,
+table.data-table th,
+table.ant-table th,
+table.erp-table th,
+table.dw th,
+.ant-grid-wrapper table th {
+    font-size: 9.5px !important;
+    font-weight: 600 !important;
+    padding: 4px 6px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+    white-space: nowrap !important;
+    background: var(--table-head-bg, #fafafa) !important;
+    user-select: none !important;
+}
+
+table.ant-grid-table td,
+table.data-table td,
+table.ant-table td,
+table.erp-table td,
+table.dw td,
+.ant-grid-wrapper table td {
+    font-size: 9.5px !important;
+    padding: 2px 6px !important;
+    line-height: 1.4 !important;
+    white-space: nowrap !important;
+    vertical-align: middle !important;
+}
+

@@ -28,6 +28,9 @@ if (empty($sessionCmpId) && isset($koneksi) && $koneksi) {
         }
     }
 }
+if (!empty($sessionCmpId)) {
+    ceisa_switch_company_db($sessionCmpId);
+}
 $companyTitle = !empty($_SESSION['company_name']) ? $_SESSION['company_name'] : 'PT. SN UNGGUL';
 
 // Ambil daftar profil perusahaan aktif untuk filter
@@ -67,6 +70,10 @@ if (!function_exists('isDocPermitted')) {
         }
         return in_array((string)$d, $targetAllowed);
     }
+}
+
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
 }
 
 // -------------------------------------------------------------
@@ -196,6 +203,9 @@ if ($action === 'list') {
     if ((!$isAdmin || empty($filter_cmp)) && !empty($sessionCmpId)) {
         $filter_cmp = $sessionCmpId;
     }
+    if (!empty($filter_cmp)) {
+        ceisa_switch_company_db($filter_cmp);
+    }
 
     $whereKiri = [];
     $whereOuter = [];
@@ -304,7 +314,7 @@ if ($action === 'list') {
             IFNULL(cmp.npwp, '') AS cmp_npwp,
             IFNULL(cmp.IS_INV, 1) AS is_inv
         FROM bc_ceisa_header a
-        LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
+        LEFT JOIN bc_ceisa_company cmp ON (a.cmp_id = cmp.cmp_id OR a.cmp_id = cmp.npwp OR (cmp.subdomain IS NOT NULL AND cmp.subdomain != '' AND a.cmp_id = cmp.subdomain))
         LEFT JOIN bc_ceisa_bs_entitas b ON a.kode_dokumen = b.kode_dokumen AND (b.cmp_id = a.cmp_id OR b.cmp_id = '' OR b.cmp_id IS NULL)
         LEFT JOIN (
             SELECT cmp_id, nomor_aju, kode_entitas, MIN(nama_entitas) AS nama_entitas, MIN(nomor_identitas) AS nomor_identitas
@@ -394,7 +404,11 @@ if ($action === 'detail_tab') {
             a.uraian, 
             IFNULL(a.jumlah_satuan, 0) AS jumlah_satuan, 
             IFNULL(a.kode_satuan, '') AS kode_satuan, 
-            IFNULL((SELECT klas FROM bc_material m WHERE m.kode_barang = a.kode_barang AND (m.cmp_id = a.cmp_id OR m.cmp_id = '' OR m.cmp_id IS NULL) LIMIT 1), 'Finished Goods') AS klas,
+            COALESCE(
+                (SELECT m.KLAS FROM bc_material m WHERE m.KODE_BARANG = a.kode_barang AND (m.cmp_id = a.cmp_id OR m.cmp_id = '' OR m.cmp_id IS NULL) AND m.KLAS IN (SELECT tipe FROM bc_tipe) LIMIT 1),
+                (SELECT t.tipe FROM bc_tipe t WHERE t.tipe = a.tipe LIMIT 1),
+                'Raw Materials'
+            ) AS klas,
             0.00 AS stok,
             IFNULL(a.harga_penyerahan, 0) AS harga_penyerahan, 
             IFNULL(a.cif, 0) AS cif, 
@@ -725,7 +739,11 @@ if ($action === 'post_it') {
         b.kode_barang,
         b.hs AS POS_TARIF,
         b.uraian,
-        IFNULL(b.tipe, 'Raw Materials') AS KLAS,
+        COALESCE(
+            (SELECT m.KLAS FROM bc_material m WHERE m.KODE_BARANG = b.kode_barang AND (m.cmp_id = h.cmp_id OR m.cmp_id = '' OR m.cmp_id IS NULL) AND m.KLAS IN (SELECT tipe FROM bc_tipe) LIMIT 1),
+            (SELECT t.tipe FROM bc_tipe t WHERE t.tipe = b.tipe LIMIT 1),
+            IF('$ab' = 'A', 'Raw Materials', 'Finished Goods')
+        ) AS KLAS,
         b.kode_satuan AS UNIT,
         b.jumlah_satuan AS QTY,
         IFNULL(h.kode_valuta, 'IDR') AS KURS,
@@ -756,18 +774,22 @@ if ($action === 'post_it') {
     ) e ON h.nomor_aju = e.nomor_aju
     WHERE h.nomor_aju = '$escAju'";
 
-    $ok = $koneksi->query($sqlInsert);
-    if ($ok) {
-        $koneksi->query("INSERT INTO bc_ceisa_aju_posted (cmp_id, nomor_aju, waktu, bc, nomor_daftar, tanggal_daftar) 
-                         VALUES ('{$h['cmp_id']}', '$escAju', NOW(), '$kodeBc', '$noDaftar', '$tglDaftar')
-                         ON DUPLICATE KEY UPDATE nomor_daftar = VALUES(nomor_daftar), tanggal_daftar = VALUES(tanggal_daftar)");
-        echo json_encode([
-            'status' => 'OK', 
-            'message' => "Dokumen AJU $nomor_aju berhasil diposting ke IT Inventory ($abLabel).",
-            'is_it_inv' => 1
-        ]);
-    } else {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal posting: ' . $koneksi->error]);
+    try {
+        $ok = $koneksi->query($sqlInsert);
+        if ($ok) {
+            $koneksi->query("INSERT INTO bc_ceisa_aju_posted (cmp_id, nomor_aju, waktu, bc, nomor_daftar, tanggal_daftar) 
+                             VALUES ('{$h['cmp_id']}', '$escAju', NOW(), '$kodeBc', '$noDaftar', '$tglDaftar')
+                             ON DUPLICATE KEY UPDATE nomor_daftar = VALUES(nomor_daftar), tanggal_daftar = VALUES(tanggal_daftar)");
+            echo json_encode([
+                'status' => 'OK', 
+                'message' => "Dokumen AJU $nomor_aju berhasil diposting ke IT Inventory ($abLabel).",
+                'is_it_inv' => 1
+            ]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal posting: ' . $koneksi->error]);
+        }
+    } catch (Throwable $e) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal posting ke IT Inventory: ' . $e->getMessage()]);
     }
     exit;
 }
@@ -3385,6 +3407,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     </div>
 
     <script>
+        try {
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage({ type: 'IFRAME_LOADED' }, '*');
+            }
+        } catch(e) {}
+
         if (typeof window.showToast !== 'function') {
             window.showToast = function(msg, icon = 'info', duration = 2500) {
                 if (typeof Swal !== 'undefined') {
@@ -3937,7 +3965,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const periode = document.getElementById('filterPeriode').value;
             const tgl1 = document.getElementById('filterTgl1').value;
             const tgl2 = document.getElementById('filterTgl2').value;
-            const cmpId = document.getElementById('filterCmp')?.value || '';
+            const cmpId = document.getElementById('filterCmp')?.value || '<?php echo htmlspecialchars($sessionCmpId, ENT_QUOTES); ?>';
 
             const params = new URLSearchParams({
                 action: 'list',
@@ -4567,7 +4595,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             formData.append('nomor_aju', ajuToPost);
             try {
                 const res = await fetch('transfer.php', { method: 'POST', body: formData });
-                const json = await res.json();
+                const text = await res.text();
+                let json;
+                try {
+                    json = JSON.parse(text);
+                } catch (e) {
+                    json = { status: 'ERROR', message: text.replace(/<[^>]*>/g, '').trim() || 'Respon server tidak valid' };
+                }
                 Swal.close();
                 if (json.status === 'OK') {
                     showSuccess(json.message, 'Berhasil Diposting');

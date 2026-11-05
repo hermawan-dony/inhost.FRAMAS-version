@@ -27,7 +27,9 @@ if (empty($sessionCmpId) && isset($koneksi) && $koneksi) {
         }
     }
 }
-
+if (!empty($sessionCmpId)) {
+    ceisa_switch_company_db($sessionCmpId);
+}
 $appSettings = function_exists('getAppSettings') ? getAppSettings($koneksi, $sessionCmpId) : [];
 $syncIntervalMin = max(15, (int)($appSettings['ceisa_sync_interval_minutes'] ?? 60));
 $syncBatchSize   = max(10, min(1000, (int)($appSettings['ceisa_sync_batch_size'] ?? 50)));
@@ -38,10 +40,10 @@ $targetCompanyAllowedDocs = null;
 $targetCompanyShowUnimportedH2h = 0;
 $companies = [];
 if (isset($koneksi) && $koneksi) {
-    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa, IFNULL(show_unimported_h2h, 0) AS show_unimported_h2h FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, subdomain, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa, IFNULL(show_unimported_h2h, 0) AS show_unimported_h2h FROM bc_ceisa_company ORDER BY cmp_name ASC");
     if ($resComp) {
         while ($r = $resComp->fetch_assoc()) {
-            if ($r['cmp_id'] === $sessionCmpId) {
+            if ($r['cmp_id'] === $sessionCmpId || (!empty($r['subdomain']) && strcasecmp($r['subdomain'], (string)$sessionCmpId) === 0) || ($r['npwp'] === $sessionCmpId)) {
                 $targetCompanyRoles = $r['company_roles'];
                 $targetCompanyAllowedDocs = $r['allowed_docs'];
                 $targetCompanyShowUnimportedH2h = (int)($r['show_unimported_h2h'] ?? 0);
@@ -70,6 +72,10 @@ if (!function_exists('isDocPermitted')) {
         }
         return in_array((string)$d, $targetAllowed);
     }
+}
+
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
 }
 
 // -------------------------------------------------------------
@@ -108,19 +114,23 @@ if ($action === 'list') {
     if (!$isAdmin && !empty($sessionCmpId)) {
         $filter_cmp = $sessionCmpId;
     }
+    if (!empty($filter_cmp) && $filter_cmp !== 'ALL' && $filter_cmp !== '*') {
+        ceisa_switch_company_db($filter_cmp);
+    }
 
     $where = [];
     $cmpIsInv = 1;
     if (!empty($filter_cmp) && $filter_cmp !== 'ALL' && $filter_cmp !== '*') {
         $cleanCmp = $koneksi->real_escape_string($filter_cmp);
         $cmpNpwp = '';
-        $resComp = $koneksi->query("SELECT npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' LIMIT 1");
+        $resComp = $koneksi->query("SELECT cmp_id, npwp, IFNULL(IS_INV, 1) AS IS_INV FROM bc_ceisa_company WHERE cmp_id = '$cleanCmp' OR npwp = '$cleanCmp' OR subdomain = '$cleanCmp' LIMIT 1");
         if ($resComp && $cr = $resComp->fetch_assoc()) {
+            $realCmpId = $cr['cmp_id'];
             $cmpNpwp = preg_replace('/[^0-9]/', '', $cr['npwp']);
             $cmpIsInv = (int)$cr['IS_INV'];
-        }
-        if (!empty($cmpNpwp)) {
-            $where[] = "(a.cmp_id = '$cleanCmp' OR a.cmp_id = '$cmpNpwp' OR a.idPerusahaan LIKE '%$cmpNpwp%')";
+            $cmpList = array_unique(array_filter([$cleanCmp, $realCmpId, $cmpNpwp]));
+            $escapedCmpList = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $cmpList)) . "'";
+            $where[] = "(a.cmp_id IN ($escapedCmpList) OR a.idPerusahaan LIKE '%$cmpNpwp%')";
         } else {
             $where[] = "a.cmp_id = '$cleanCmp'";
         }
@@ -172,6 +182,8 @@ if ($action === 'list') {
         'IDR' AS kode_valuta,
         0 AS bruto,
         a.asalData AS user_id,
+        a.asalData AS asal_data,
+        (CASE WHEN a.asalData = 'S' THEN 1 ELSE 0 END) AS is_h2h,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS upd_time,
         IFNULL(DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d'), '') AS tanggal_pernyataan,
         COALESCE(NULLIF(a.cmp_id, ''), cmp.cmp_id, '') AS cmp_id,
@@ -201,7 +213,7 @@ if ($action === 'list') {
         COALESCE(cmp.show_unimported_h2h, 0) AS show_unimported_h2h,
         COALESCE(DATE_FORMAT(a.tanggalRespon, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(COALESCE(sppb_tbl.tanggalRespon, resp_sppb.tanggal_respon), '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(posted.waktu, '%Y-%m-%d %H:%i:%s'), DATE_FORMAT(a.tanggalDaftar, '%Y-%m-%d 00:00:00'), '') AS effective_tanggal_respon
     FROM bc_ceisa_data a
-    LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id
+    LEFT JOIN bc_ceisa_company cmp ON (a.cmp_id = cmp.cmp_id OR a.cmp_id = cmp.npwp OR (cmp.subdomain IS NOT NULL AND cmp.subdomain != '' AND a.cmp_id = cmp.subdomain))
 
     LEFT JOIN (
         SELECT nomorAju, MIN(nomorRespon) AS nomorRespon, MAX(tanggalRespon) AS tanggalRespon, MAX(pdf) AS pdf
@@ -984,6 +996,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         :root, body[data-theme="light"], html[data-theme="light"] body {
             --bg-body: #f0f2f5;
@@ -2478,6 +2491,34 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         .row-action-item svg {
             flex-shrink: 0;
         }
+
+        /* -------------------------------------------------------------
+           RESPONSIF MOBILE / SMARTPHONE (Max-Width: 768px)
+           ------------------------------------------------------------- */
+        @media (max-width: 768px) {
+            body {
+                padding: 4px !important;
+            }
+            .ant-card-head {
+                padding: 6px 8px !important;
+                flex-direction: column !important;
+                align-items: flex-start !important;
+                gap: 6px !important;
+            }
+            .ant-card-head-actions {
+                width: 100% !important;
+                justify-content: flex-start !important;
+                overflow-x: auto !important;
+                padding-bottom: 2px !important;
+            }
+            .ant-card-body {
+                padding: 4px 6px !important;
+            }
+            .ant-table-wrapper {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch !important;
+            }
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($themeParam) ?>">
@@ -2537,6 +2578,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 <button type="button" class="ant-btn" id="btnModeSelect" onclick="toggleModeSelect()" title="Aktifkan Mode Centang / Pilih Massal Dokumen untuk Unduh Excel">
                     <span id="iconModeSelect">☑️</span>
                     <span id="lblModeSelect">Mode Select</span>
+                </button>
+
+                <!-- Export Excel -->
+                <button type="button" class="ant-btn" id="btnExportExcel" onclick="exportDaftarDokumenExcel()" title="Export daftar dokumen hasil filter ke file Excel (.xlsx)">
+                    <span style="font-size:11px;">📊</span>
+                    <span>Export Excel</span>
                 </button>
             </div>
         </div>
@@ -2729,8 +2776,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                 <th style="width: 75px; text-align: center;">PDF</th>
                                 <th style="width: 155px;" class="th-sortable th-sorted" data-sort-col="tanggal_respon" onclick="sortTable('tanggal_respon')" title="Klik untuk mengurutkan Tanggal Respon (Default: Terakhir / Terbaru)">Tanggal Respon <span class="th-sort-icon">▼</span></th>
                                 <th style="width: 65px; text-align: center;" class="th-sortable" data-sort-col="jalur" onclick="sortTable('jalur')" title="Klik untuk mengurutkan Jalur">Jalur <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 55px; text-align: center;" class="th-sortable" data-sort-col="h2h" onclick="sortTable('h2h')" title="Klik untuk mengurutkan status Host to Host (asalData = S)">H2H <span class="th-sort-icon">⇅</span></th>
+                                <th style="width: 55px; text-align: center;" class="th-sortable" data-sort-col="in_staging" onclick="sortTable('in_staging')" title="Klik untuk mengurutkan status Staging Lokal (bc_ceisa_header)">Lokal <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 250px;" class="th-sortable" data-sort-col="perusahaan" onclick="sortTable('perusahaan')" title="Klik untuk mengurutkan Nama Perusahaan">Nama Perusahaan <span class="th-sort-icon">⇅</span></th>
-                                <th style="width: 180px;" class="th-sortable" data-sort-col="kantor" onclick="sortTable('kantor')" title="Klik untuk mengurutkan Kantor Pabean">Kantor Pabean <span class="th-sort-icon">⇅</span></th>
                                 <th style="width: 90px; text-align: center;" class="th-col-aksi">Aksi</th>
                             </tr>
                             <!-- Header Row 2: Inline Input Filters -->
@@ -2779,17 +2827,23 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                                         </span>
                                     </span>
                                 </th>
-                                <th>
-                                    <span class="ant-input-affix-wrapper">
-                                        <input type="text" class="ant-input" id="tblFilterPerusahaan" placeholder="" oninput="debouncedFilter()">
-                                        <span class="ant-input-suffix">
-                                            <svg viewBox="64 64 896 896" width="11" height="11" fill="currentColor"><path d="M909.6 854.5L649.9 594.8C690.2 542.7 712 479 712 412c0-80.2-31.3-155.4-87.9-212.1-56.6-56.7-132-87.9-212.1-87.9s-155.5 31.3-212.1 87.9C143.2 256.5 112 331.8 112 412c0 80.1 31.3 155.5 87.9 212.1C256.5 680.8 331.8 712 412 712c67 0 130.6-21.8 182.7-62l259.7 259.6a8.2 8.2 0 0 0 11.6 0l43.6-43.5a8.2 8.2 0 0 0 0-11.6zM570.4 570.4C528 612.7 471.8 636 412 636s-116-23.3-158.4-65.6C211.3 528 188 471.8 188 412s23.3-116.1 65.6-158.4C296 211.3 352.2 188 412 188s116.1 23.2 158.4 65.6S636 352.2 636 412s-23.3 116.1-65.6 158.4z"></path></svg>
-                                        </span>
-                                    </span>
+                                <th style="text-align: center;">
+                                    <select class="ant-input" id="tblFilterH2h" onchange="debouncedFilter()" style="padding: 0 1px; font-size: 10px; height: 24px; text-align: center; border-radius: 2px;" title="Filter status Host to Host">
+                                        <option value="">-</option>
+                                        <option value="1">✓</option>
+                                        <option value="0">-</option>
+                                    </select>
+                                </th>
+                                <th style="text-align: center;">
+                                    <select class="ant-input" id="tblFilterLokal" onchange="debouncedFilter()" style="padding: 0 1px; font-size: 10px; height: 24px; text-align: center; border-radius: 2px;" title="Filter status Staging Lokal">
+                                        <option value="">-</option>
+                                        <option value="1">✓</option>
+                                        <option value="0">-</option>
+                                    </select>
                                 </th>
                                 <th>
                                     <span class="ant-input-affix-wrapper">
-                                        <input type="text" class="ant-input" id="tblFilterKantor" placeholder="" oninput="debouncedFilter()">
+                                        <input type="text" class="ant-input" id="tblFilterPerusahaan" placeholder="" oninput="debouncedFilter()">
                                         <span class="ant-input-suffix">
                                             <svg viewBox="64 64 896 896" width="11" height="11" fill="currentColor"><path d="M909.6 854.5L649.9 594.8C690.2 542.7 712 479 712 412c0-80.2-31.3-155.4-87.9-212.1-56.6-56.7-132-87.9-212.1-87.9s-155.5 31.3-212.1 87.9C143.2 256.5 112 331.8 112 412c0 80.1 31.3 155.5 87.9 212.1C256.5 680.8 331.8 712 412 712c67 0 130.6-21.8 182.7-62l259.7 259.6a8.2 8.2 0 0 0 11.6 0l43.6-43.5a8.2 8.2 0 0 0 0-11.6zM570.4 570.4C528 612.7 471.8 636 412 636s-116-23.3-158.4-65.6C211.3 528 188 471.8 188 412s23.3-116.1 65.6-158.4C296 211.3 352.2 188 412 188s116.1 23.2 158.4 65.6S636 352.2 636 412s-23.3 116.1-65.6 158.4z"></path></svg>
                                         </span>
@@ -2800,7 +2854,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         </thead>
                         <tbody class="ant-table-tbody" id="ajuTableBody">
                             <tr>
-                                <td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">
+                                <td colspan="13" style="text-align:center; padding:28px; color:#8c8c8c;">
                                     <span class="spinner"></span> Memuat data dokumen...
                                 </td>
                             </tr>
@@ -3289,21 +3343,57 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (cmpSelect) cmpSelect.value = initialCmp;
         }
 
-        // Peta ID User CEISA per perusahaan untuk memblokir menu InitMFA jika belum diset
-        const companyIdUserMap = <?= json_encode(array_column($companies, 'id_user_ceisa', 'cmp_id')) ?>;
-        // Peta Pengaturan Tampil Kartu Belum Import H2H per Perusahaan
-        const companyShowUnimportedMap = <?= json_encode(array_column($companies, 'show_unimported_h2h', 'cmp_id')) ?>;
+        // Peta ID User CEISA & Pengaturan Kartu Belum Import H2H (Multi-Identifier: cmp_id, npwp, subdomain)
+        <?php
+        $companyIdUserMap = [];
+        $companyShowUnimportedMap = [];
+        if (!empty($companies)) {
+            foreach ($companies as $c) {
+                $uid = trim($c['id_user_ceisa'] ?? '');
+                $showUnimp = (int)($c['show_unimported_h2h'] ?? 0);
+                $keys = array_filter([
+                    $c['cmp_id'] ?? null,
+                    $c['npwp'] ?? null,
+                    !empty($c['npwp']) ? preg_replace('/[^0-9]/', '', $c['npwp']) : null,
+                    !empty($c['subdomain']) ? strtolower(trim($c['subdomain'])) : null,
+                    !empty($c['subdomain']) ? strtoupper(trim($c['subdomain'])) : null,
+                ]);
+                foreach (array_unique($keys) as $k) {
+                    if ($k !== '') {
+                        $companyIdUserMap[$k] = $uid;
+                        $companyShowUnimportedMap[$k] = $showUnimp;
+                    }
+                }
+            }
+        }
+        ?>
+        const companyIdUserMap = <?= json_encode($companyIdUserMap) ?>;
+        const companyShowUnimportedMap = <?= json_encode($companyShowUnimportedMap) ?>;
         let currentShowUnimportedH2H = <?= (int)$targetCompanyShowUnimportedH2h ?>;
 
         function hasIdUserCeisa(cmpId, aju) {
-            const cId = cmpId || document.getElementById('filterCmp')?.value || initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>';
-            if (cId && companyIdUserMap && typeof companyIdUserMap[cId] !== 'undefined') {
-                return !!(companyIdUserMap[cId] && companyIdUserMap[cId].trim());
+            const candidates = [
+                cmpId,
+                cmpId ? cmpId.replace(/[^0-9]/g, '') : '',
+                cmpId ? cmpId.toLowerCase() : '',
+                document.getElementById('filterCmp')?.value,
+                initialCmp,
+                '<?= htmlspecialchars($sessionCmpId) ?>',
+                '<?= htmlspecialchars(strtolower($sessionCmpId)) ?>'
+            ];
+            for (const c of candidates) {
+                if (c && companyIdUserMap && typeof companyIdUserMap[c] !== 'undefined') {
+                    if (companyIdUserMap[c] && companyIdUserMap[c].trim()) {
+                        return true;
+                    }
+                }
             }
             if (aju && typeof ajuData !== 'undefined' && Array.isArray(ajuData)) {
                 const item = ajuData.find(d => d.nomor_aju === aju);
-                if (item && typeof item.id_user_ceisa !== 'undefined') {
-                    return !!(item.id_user_ceisa && item.id_user_ceisa.trim());
+                if (item) {
+                    if (item.id_user_ceisa && item.id_user_ceisa.trim()) return true;
+                    if (item.cmp_id && companyIdUserMap && companyIdUserMap[item.cmp_id]) return true;
+                    if (item.cmp_npwp && companyIdUserMap && companyIdUserMap[item.cmp_npwp]) return true;
                 }
             }
             return false;
@@ -3417,7 +3507,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
 
             const tbody = document.getElementById('ajuTableBody');
             if (!isSilent) {
-                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:24px; color:#8c8c8c;"><span class="spinner"></span> Memuat data dokumen...</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:24px; color:#8c8c8c;"><span class="spinner"></span> Memuat data dokumen...</td></tr>`;
             }
 
             try {
@@ -3427,7 +3517,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     ajuData = json.data;
                     filterClientTable();
                 } else if (!isSilent) {
-                    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#f5222d; padding:24px;">
+                    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#f5222d; padding:24px;">
                         <div style="font-weight:600; margin-bottom:4px;">Gagal memuat dokumen dari server</div>
                         <div style="font-size:11.5px; color:#8c8c8c; margin-bottom:12px;">${escapeHtml(json.message || 'Error tidak diketahui')}</div>
                         <button type="button" class="ant-btn ant-btn-sm" onclick="loadList()">Coba Muat Ulang</button>
@@ -3435,7 +3525,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
             } catch (err) {
                 if (!isSilent) {
-                    tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#f5222d; padding:24px;">
+                    tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#f5222d; padding:24px;">
                         <div style="font-weight:600; margin-bottom:4px;">Gagal mengambil data dari server</div>
                         <div style="font-size:11.5px; color:#8c8c8c; margin-bottom:12px;">${escapeHtml(err.message || 'Periksa koneksi jaringan Anda')}</div>
                         <button type="button" class="ant-btn ant-btn-sm" onclick="loadList()">Coba Muat Ulang</button>
@@ -3784,6 +3874,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             const fDaftar = (document.getElementById('tblFilterDaftar')?.value || '').toLowerCase().trim();
             const fRespon = (document.getElementById('tblFilterRespon')?.value || '').toLowerCase().trim();
             const fJalur = (document.getElementById('tblFilterJalur')?.value || '').toLowerCase().trim();
+            const fH2h = (document.getElementById('tblFilterH2h')?.value || '').trim();
+            const fLokal = (document.getElementById('tblFilterLokal')?.value || '').trim();
             const fPerusahaan = (document.getElementById('tblFilterPerusahaan')?.value || '').toLowerCase().trim();
             const fKantor = (document.getElementById('tblFilterKantor')?.value || '').toLowerCase().trim();
 
@@ -3836,6 +3928,16 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     const jChar = (r.bcd_kodeJalur || '').toLowerCase();
                     if (!jChar || !jChar.includes(fJalur)) return false;
                 }
+                if (fH2h !== '') {
+                    const isH2H = (r.asal_data === 'S' || r.user_id === 'S' || parseInt(r.is_h2h) === 1);
+                    if (fH2h === '1' && !isH2H) return false;
+                    if (fH2h === '0' && isH2H) return false;
+                }
+                if (fLokal !== '') {
+                    const isLokal = (parseInt(r.in_staging || 0, 10) > 0);
+                    if (fLokal === '1' && !isLokal) return false;
+                    if (fLokal === '0' && isLokal) return false;
+                }
                 if (fPerusahaan && !(r.cmp_name || r.bs || '').toLowerCase().includes(fPerusahaan)) return false;
                 if (fKantor && !(r.bcd_namaKantorPendek || r.kode_kantor || '').toLowerCase().includes(fKantor)) return false;
                 return true;
@@ -3861,6 +3963,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 } else if (currentSortCol === 'jalur') {
                     valA = isDocPerekaman(a) ? '' : (a.bcd_kodeJalur || '');
                     valB = isDocPerekaman(b) ? '' : (b.bcd_kodeJalur || '');
+                } else if (currentSortCol === 'h2h') {
+                    valA = (a.asal_data === 'S' || a.user_id === 'S' || parseInt(a.is_h2h) === 1) ? '1' : '0';
+                    valB = (b.asal_data === 'S' || b.user_id === 'S' || parseInt(b.is_h2h) === 1) ? '1' : '0';
+                } else if (currentSortCol === 'in_staging') {
+                    valA = (parseInt(a.in_staging || 0, 10) > 0) ? '1' : '0';
+                    valB = (parseInt(b.in_staging || 0, 10) > 0) ? '1' : '0';
                 } else if (currentSortCol === 'perusahaan') {
                     valA = a.cmp_name || a.bs || ''; valB = b.cmp_name || b.bs || '';
                 } else if (currentSortCol === 'kantor') {
@@ -3973,6 +4081,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (document.getElementById('tblFilterDaftar')) document.getElementById('tblFilterDaftar').value = '';
             if (document.getElementById('tblFilterRespon')) document.getElementById('tblFilterRespon').value = '';
             if (document.getElementById('tblFilterJalur')) document.getElementById('tblFilterJalur').value = '';
+            if (document.getElementById('tblFilterH2h')) document.getElementById('tblFilterH2h').value = '';
+            if (document.getElementById('tblFilterLokal')) document.getElementById('tblFilterLokal').value = '';
             if (document.getElementById('tblFilterPerusahaan')) document.getElementById('tblFilterPerusahaan').value = '';
             if (document.getElementById('tblFilterKantor')) document.getElementById('tblFilterKantor').value = '';
             loadList();
@@ -3981,7 +4091,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         function renderTable() {
             const tbody = document.getElementById('ajuTableBody');
             if (!filteredData || filteredData.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="13" style="text-align:center; padding:28px; color:#8c8c8c;">Tidak ada dokumen AJU yang sesuai dengan filter.</td></tr>`;
                 selectedAju.clear();
                 updateSelectedCount();
                 renderPagination(0, 1, pageSize);
@@ -4107,6 +4217,18 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     `;
                 }
 
+                // Status Host to Host (H2H) dan Staging Lokal
+                const isH2H = (r.asal_data === 'S' || r.user_id === 'S' || parseInt(r.is_h2h) === 1);
+                const isLokal = (parseInt(r.in_staging || 0, 10) > 0);
+
+                const h2hHtml = isH2H
+                    ? '<span class="ant-tag ant-tag-blue" style="font-size:11px; font-weight:700; padding:0 6px; line-height:18px; margin:0; border-radius:2px;" title="Dibuat dengan Host to Host (asalData = S)">✓</span>'
+                    : '<span style="color:#bfbfbf; font-size:12px;">-</span>';
+
+                const lokalHtml = isLokal
+                    ? '<span class="ant-tag ant-tag-green" style="font-size:11px; font-weight:700; padding:0 6px; line-height:18px; margin:0; border-radius:2px;" title="Tersedia di Staging Lokal (bc_ceisa_header)">✓</span>'
+                    : '<span style="color:#bfbfbf; font-size:12px;">-</span>';
+
                 html += `
                     <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}', '${r.kode_proses || ''}', '${r.namaProses ? encodeURIComponent(r.namaProses) : ''}', '${r.nomor_daftar || ''}')">
                         <td style="text-align:center;" class="col-select-mode">
@@ -4135,6 +4257,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <td style="font-size:10.5px; color:#595959;">${tanggalResponDisplay}</td>
                         <td style="text-align:center;">
                             ${jalurHtml}
+                        </td>
+                        <td style="text-align:center;">
+                            ${h2hHtml}
+                        </td>
+                        <td style="text-align:center;">
+                            ${lokalHtml}
                         </td>
                         <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">
                             <div style="display:flex; font-size:10px; color:#8c8c8c; font-family:monospace;">${escapeHtml(companyId)}</div>
@@ -4374,6 +4502,103 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (!checkIdUserCeisaOrAlert(activeCmp, 'Unduh Excel', nomorAju)) return;
             const url = `download_ceisa_excel.php?nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(activeCmp)}`;
             window.open(url, '_blank');
+        }
+
+        function exportDaftarDokumenExcel() {
+            if (typeof XLSX === 'undefined') {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Library Excel Belum Siap',
+                    text: 'Library SheetJS sedang dimuat atau diblokir. Silakan coba beberapa saat lagi.'
+                });
+                return;
+            }
+
+            let dataToExport = [];
+            if (typeof selectedAju !== 'undefined' && selectedAju && selectedAju.size > 0) {
+                dataToExport = ajuData.filter(r => selectedAju.has(r.nomor_aju));
+            } else if (typeof filteredData !== 'undefined' && filteredData && filteredData.length > 0) {
+                dataToExport = filteredData;
+            } else if (typeof ajuData !== 'undefined' && ajuData && ajuData.length > 0) {
+                dataToExport = ajuData;
+            }
+
+            if (!dataToExport || dataToExport.length === 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Tidak Ada Data',
+                    text: 'Tidak ada dokumen AJU yang tersedia untuk diexport.'
+                });
+                return;
+            }
+
+            const headers = [
+                "No",
+                "Kode Dokumen",
+                "Nomor Pengajuan",
+                "Nomor Pendaftaran",
+                "Tanggal Pendaftaran",
+                "Nama Respon",
+                "Nomor Respon",
+                "Tanggal Respon",
+                "Jalur",
+                "H2H",
+                "Lokal",
+                "Nama Perusahaan",
+                "NPWP",
+                "Kantor Pabean",
+                "Status Proses"
+            ];
+
+            const rows = [headers];
+
+            dataToExport.forEach((r, idx) => {
+                const isH2H = (r.asal_data === 'S' || r.user_id === 'S' || parseInt(r.is_h2h) === 1);
+                const isLokal = (parseInt(r.in_staging || 0, 10) > 0);
+                const namaRespon = r.bcd_namaRespon || (parseInt(r.posted) > 0 ? 'SPPB' : (r.namaProses || '-'));
+                const noRespon = r.bcd_nomorRespon || r.sppb_nomor_respon || r.sppb || '';
+                const tglRespon = r.effective_tanggal_respon || r.bcd_tanggalRespon || r.sppb_tanggal_respon || r.posted_waktu || r.tanggal_pernyataan || '';
+                const statusProses = (parseInt(r.posted) > 0 || (r.namaProses && r.namaProses.toLowerCase().includes('selesai'))) ? 'Selesai Proses' : (r.namaProses || 'Belum Selesai');
+
+                rows.push([
+                    idx + 1,
+                    'BC ' + (r.kode_dokumen || r.bc || ''),
+                    r.nomor_aju || '',
+                    (r.nomor_daftar && r.nomor_daftar !== '-') ? r.nomor_daftar : '',
+                    r.tanggal_daftar || '',
+                    namaRespon,
+                    noRespon,
+                    tglRespon,
+                    r.bcd_kodeJalur || 'H',
+                    isH2H ? "Yes" : "",
+                    isLokal ? "Yes" : "",
+                    r.cmp_name || r.bs || '',
+                    r.cmp_npwp || r.id_bs || '',
+                    r.bcd_namaKantorPendek || r.kode_kantor || '',
+                    statusProses
+                ]);
+            });
+
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+
+            const colWidths = headers.map((h, i) => {
+                let maxLen = h.length;
+                for (let r = 1; r < Math.min(rows.length, 100); r++) {
+                    const val = String(rows[r][i] || '');
+                    if (val.length > maxLen) maxLen = val.length;
+                }
+                return { wch: Math.min(maxLen + 3, 40) };
+            });
+            ws['!cols'] = colWidths;
+
+            XLSX.utils.book_append_sheet(wb, ws, "Daftar_Dokumen");
+
+            const todayStr = new Date().toISOString().slice(0, 10);
+            const activeCmpName = (document.getElementById('filterCmp')?.selectedOptions[0]?.text || 'CEISA4').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const fileName = `Daftar_Dokumen_${activeCmpName}_${todayStr}.xlsx`;
+
+            XLSX.writeFile(wb, fileName);
         }
 
         // Context Menu Handler (Klik Kanan Baris Tabel)

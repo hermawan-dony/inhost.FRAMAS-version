@@ -19,6 +19,10 @@ if ($reqPath === 'visitor' || (isset($_GET['tab']) && $_GET['tab'] === 'visitor'
     require_once __DIR__ . '/visitor.php';
     exit;
 }
+if ($reqPath === 'tools' || strpos($reqPath, 'tools/') === 0 || (isset($_GET['tab']) && $_GET['tab'] === 'tools')) {
+    require_once __DIR__ . '/tools/index.php';
+    exit;
+}
 
 // Catat log kunjungan pengguna jika sudah login
 if (!empty($_SESSION['user_id'])) {
@@ -1024,6 +1028,10 @@ $breadcrumbTitlesPhp = [
     'winline_sales_invoice'  => 'Winline ERP — Sales Invoice (BC 2.7, BC 3.0 Customer)',
     'winline_dn_transfer'    => 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
     'winline_purchase_order' => 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
+    'tools'           => 'INHOST TOOLS — Customs & Trade Utilities',
+    'ticket'          => 'Pusat Tiket & Bantuan',
+    'inv_qr_label'    => 'Warehouse - Cetak Label QR Dokumen BC',
+    'coretax_xml'     => 'e-Faktur Coretax XML Generator',
     'tracking'        => 'Tracking Respon Pabean',
     'it_inventory_home' => 'Bea Cukai - Home Dashboard',
     'it_inventory_1a' => 'IT Inventory - 1A Pemasukan Barang',
@@ -1152,6 +1160,17 @@ if ($initialTab === 'editor') {
     $initSrc = "/winline_erp.php?type=dn_transfer&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'winline_purchase_order') {
     $initSrc = "/winline_erp.php?type=purchase_order&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'tools') {
+    $initSrc = "/tools/index.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'ticket' || $initialTab === 'system_tickets') {
+    $initSrc = "/ticket.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'inv_qr_label') {
+    $initSrc = "/erp/inv_qr_label.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'coretax_xml') {
+    $initSrc = "/erp/coretax_xml.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif (strpos($initialTab, 'erp_') === 0) {
+    $subErp = substr($initialTab, 4);
+    $initSrc = "/erp/{$subErp}.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } else {
     $initSrc = "/daftar_dokumen.php?embedded=1{$adminParam}&_t=" . time();
 }
@@ -3993,6 +4012,26 @@ if ($initialTab === 'editor') {
                             <i class="kt-menu__ver-arrow">›</i>
                         </a>
                     </div>
+                    <div class="kt-menu__item <?= ($initialTab === 'tools') ? 'active' : '' ?>" id="nav-item-tools" onclick="switchMainTab('tools')">
+                        <a class="kt-menu__link" title="INHOST TOOLS (Konversi TPB, Kamus BTKI 2022, AI PDF Extractor)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🛠️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880.1 154.2c-38.8-38.8-101.8-38.8-140.6 0L573.7 320l-71.1-71.1a8.03 8.03 0 0 0-11.3 0L396 344.2a8.03 8.03 0 0 0 0 11.3l71.1 71.1-313 313c-38.8 38.8-38.8 101.8 0 140.6 38.8 38.8 101.8 38.8 140.6 0l313-313 71.1 71.1c3.1 3.1 8.2 3.1 11.3 0l95.3-95.3c3.1-3.1 3.1-8.2 0-11.3L717.3 460l165.8-165.8c38.8-38.8 38.8-101.9-3-140z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">INHOST TOOLS</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <div class="kt-menu__item <?= ($initialTab === 'ticket') ? 'active' : '' ?>" id="nav-item-ticket" onclick="switchMainTab('ticket')">
+                        <a class="kt-menu__link" title="Pusat Tiket & Bantuan">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">🎫</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M896 192H128c-17.7 0-32 14.3-32 32v224c35.3 0 64 28.7 64 64s-28.7 64-64 64v224c0 17.7 14.3 32 32 32h768c17.7 0 32-14.3 32-32V576c-35.3 0-64-28.7-64-64s28.7-64 64-64V224c0-17.7-14.3-32-32-32zm-72 568H200V629.4c52.7-22.1 88-74.4 88-133.4 0-59-35.3-111.3-88-133.4V264h624v504z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Pusat Tiket</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
                     <div class="kt-menu__item <?= ($initialTab === 'version_log') ? 'active' : '' ?>" id="nav-item-version_log" onclick="switchMainTab('version_log')">
                         <a class="kt-menu__link">
                             <span class="kt-menu__link-icon">
@@ -4565,6 +4604,14 @@ if ($initialTab === 'editor') {
             if (tabId === 'winline_sales_invoice') return `/winline_erp.php?type=sales_invoice&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'winline_dn_transfer') return `/winline_erp.php?type=dn_transfer&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'winline_purchase_order') return `/winline_erp.php?type=purchase_order&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'tools') return `/tools/index.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'ticket' || tabId === 'system_tickets') return `/ticket.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'inv_qr_label') return `/erp/inv_qr_label.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'coretax_xml') return `/erp/coretax_xml.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId.startsWith('erp_')) {
+                const sub = tabId.substring(4);
+                return `/erp/${encodeURIComponent(sub)}.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            }
             if (tabId === 'manifest_ceisa') return `/manifest_ceisa.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'manifest') {
                 const effectiveAju = (extraParam !== undefined && extraParam !== null) ? extraParam : currentAjuParam;

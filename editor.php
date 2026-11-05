@@ -35,6 +35,9 @@ if (empty($filterCmp) && !empty($selectedAjuParam) && isset($koneksi) && $koneks
         $filterCmp = trim($rAjuCmp['cmp_id'] ?? '');
     }
 }
+if (!empty($filterCmp) && function_exists('ceisa_switch_company_db')) {
+    ceisa_switch_company_db($filterCmp);
+}
 $companyErpName = '-';
 $companyRoles = 'tpb';
 $companyAllowedDocsStr = null;
@@ -199,6 +202,10 @@ if (isset($koneksi) && $koneksi) {
 // -------------------------------------------------------------
 require_once __DIR__ . '/erp/ErpManager.php';
 $action = $_REQUEST['action'] ?? '';
+
+if ($action !== 'set_last_bc' && session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
 
 // 1. Ambil Konfigurasi Format Penomoran AJU & Default Header
 if ($action === 'get_config_aju') {

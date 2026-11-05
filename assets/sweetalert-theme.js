@@ -23,7 +23,7 @@
                 padding: 16px 20px 14px 20px !important;
                 border-radius: 8px !important;
                 box-shadow: 0 10px 32px rgba(0, 0, 0, 0.18) !important;
-                font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+                font-family: var(--app-font, 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif) !important;
             }
 
             /* Scaled Compact Icon */
@@ -177,6 +177,22 @@ function showInfo(msg, title = 'Informasi') {
     });
 }
 
+function showToast(msg, icon = 'info', duration = 2500) {
+    if (typeof Swal !== 'undefined') {
+        return Swal.fire({
+            toast: true,
+            position: 'top-end',
+            icon: icon,
+            title: msg,
+            showConfirmButton: false,
+            timer: duration,
+            timerProgressBar: true
+        });
+    } else {
+        console.log('Toast:', msg);
+    }
+}
+
 async function showConfirm(msg, title = 'Konfirmasi', confirmText = 'Ya, Lanjutkan', cancelText = 'Batal', icon = 'question') {
     if (typeof Swal === 'undefined') {
         return window.confirm(msg);
@@ -221,3 +237,27 @@ window.alert = function(msg) {
         console.warn('Alert:', msg);
     }
 };
+
+// Global Unified App Font Engine (Synchronizes font across all pages & iframes)
+(function initGlobalFontEngine() {
+    function applyFont(fontName) {
+        if (!fontName) {
+            try { fontName = localStorage.getItem('ceisa_app_font'); } catch(e) {}
+        }
+        if (!fontName) fontName = 'Poppins';
+        var fontStack = "'" + fontName + "', 'Source Sans Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+        document.documentElement.style.setProperty('--app-font', fontStack);
+        if (document.body) {
+            document.body.style.setProperty('--app-font', fontStack);
+        }
+    }
+    applyFont();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() { applyFont(); });
+    }
+    window.addEventListener('message', function(e) {
+        if (e.data && (e.data.type === 'SET_FONT' || e.data.type === 'CHANGE_FONT')) {
+            applyFont(e.data.font);
+        }
+    });
+})();
