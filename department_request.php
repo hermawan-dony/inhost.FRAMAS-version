@@ -1654,44 +1654,9 @@ if ($action === 'print_bppb') {
                     </div>
                 </div>
 
-                <div class="form-grid-3">
-                    <div class="form-group">
-                        <label class="form-label">Departemen Pemohon <span style="color:red;">*</span></label>
-                        <select id="fDeptPemohon" class="form-control" onchange="onDeptChange(this.value)">
-                            <option value="Maintenance">Maintenance (Mesin / Part Mesin / Tooling)</option>
-                            <option value="Moldshop">Moldshop (Mold / Sparepart Mold)</option>
-                            <option value="Produksi">Produksi (Raw Material / WIP / Consumables)</option>
-                            <option value="Warehouse">Warehouse / Gudang</option>
-                            <option value="Cutting">Cutting</option>
-                            <option value="Assembling">Assembling</option>
-                            <option value="Sewing">Sewing</option>
-                            <option value="Quality Control">Quality Control (QC)</option>
-                            <option value="GA">General Affair (GA)</option>
-                            <option value="IT">IT / Facility</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Departemen Tujuan di Plant Penerima <span style="color:red;">*</span></label>
-                        <select id="fDeptTujuan" class="form-control">
-                            <option value="GUDANG UTAMA">Gudang Utama (Warehouse)</option>
-                            <option value="GUDANG RAW MATERIAL">Gudang Raw Material</option>
-                            <option value="GUDANG PART & MESIN">Gudang Part & Mesin</option>
-                            <option value="GUDANG FINISH GOOD">Gudang Finish Good</option>
-                            <option value="MOLDSHOP">Moldshop</option>
-                            <option value="MAINTENANCE">Maintenance</option>
-                            <option value="PRODUKSI">Produksi</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Target Tanggal Dibutuhkan</label>
-                        <input type="date" id="fNeedDate" class="form-control" value="<?= date('Y-m-d') ?>">
-                    </div>
-                </div>
-
-                <div class="dept-hint-box" id="deptHintBox">
-                    <i class="fa-solid fa-circle-info"></i>
-                    <span id="deptHintText">Departemen Maintenance aktif: Kategori barang difokuskan ke Mesin, Part Mesin, Tools & Equipment.</span>
-                </div>
+                <!-- Hidden inputs for department compatibility -->
+                <input type="hidden" id="fDeptPemohon" value="General">
+                <input type="hidden" id="fDeptTujuan" value="GUDANG">
 
                 <div class="form-grid-3">
                     <div class="form-group">
@@ -2023,18 +1988,19 @@ if ($action === 'print_bppb') {
             const hintBox = document.getElementById('deptHintBox');
             const hintText = document.getElementById('deptHintText');
             const pickerKlas = document.getElementById('pickerKlas');
+            if (hintBox) hintBox.style.display = 'none';
 
             if (dept === 'Maintenance') {
-                hintText.innerText = 'Departemen Maintenance aktif: Kategori barang difokuskan ke Mesin, Part Mesin, Tools & Equipment.';
+                if (hintText) hintText.innerText = 'Departemen Maintenance aktif: Kategori barang difokuskan ke Mesin, Part Mesin, Tools & Equipment.';
                 if (pickerKlas) pickerKlas.value = 'Part Machine';
             } else if (dept === 'Moldshop') {
-                hintText.innerText = 'Departemen Moldshop aktif: Kategori barang difokuskan ke Mold, Sparepart Mold & Tooling.';
+                if (hintText) hintText.innerText = 'Departemen Moldshop aktif: Kategori barang difokuskan ke Mold, Sparepart Mold & Tooling.';
                 if (pickerKlas) pickerKlas.value = 'Mold';
             } else if (dept === 'Produksi') {
-                hintText.innerText = 'Departemen Produksi aktif: Kategori barang difokuskan ke Raw Materials, WIP & Consumables.';
+                if (hintText) hintText.innerText = 'Departemen Produksi aktif: Kategori barang difokuskan ke Raw Materials, WIP & Consumables.';
                 if (pickerKlas) pickerKlas.value = 'Raw Materials';
             } else {
-                hintText.innerText = `Departemen ${dept} aktif: Silakan pilih item barang sesuai kebutuhan dari master barang atau input manual.`;
+                if (hintText) hintText.innerText = `Departemen ${dept} aktif: Silakan pilih item barang sesuai kebutuhan dari master barang atau input manual.`;
                 if (pickerKlas) pickerKlas.value = 'ALL';
             }
         }

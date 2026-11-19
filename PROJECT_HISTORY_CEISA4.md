@@ -8860,3 +8860,15 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
      - `framas 2`
      - `framas 3`
      - `PDPLB`
+
+---
+
+### Penyederhanaan Form BPPB: Penghapusan Baris Departemen & Tanggal Duplikat (19 November 2026)
+1. **Latar Belakang & Kebutuhan:**
+   - Pengguna meminta untuk menghapus baris formulir input yang ditandai merah pada tangkapan layar ([`prnt.sc/9kRf2RSTEiDV`](https://prnt.sc/9kRf2RSTEiDV)).
+   - Baris tersebut berisi `Departemen Pemohon`, `Departemen Tujuan di Plant Penerima`, serta input duplikat `Target Tanggal Dibutuhkan` dan kotak petunjuk kategori departemen.
+2. **Implementasi & Penyesuaian:**
+   - Baris input `Departemen Pemohon`, `Departemen Tujuan di Plant Penerima`, dan duplikasi `Target Tanggal Dibutuhkan` telah dihapus dari antarmuka formulir modal BPPB ([`department_request.php`](file:///d:/xampp/htdocs/inhost-web-id/department_request.php)).
+   - Nilai kompatibilitas database tetap dijaga dengan aman via hidden inputs (`fDeptPemohon` dan `fDeptTujuan`).
+   - Input `Target Tanggal Dibutuhkan` tetap aktif dan tertata rapi pada baris tanggal utama berdampingan dengan `Tanggal Permintaan` dan `PIC Pemohon`.
+   - Fungsi pendukung JavaScript `onDeptChange` diperbarui dengan null-safety guard agar tidak memicu error ketika elemen petunjuk tidak ada di DOM.
