@@ -32,8 +32,14 @@ if (!empty($cmp_id) && $cmp_id !== 'ALL') {
 }
 
 $escCmp = (!empty($cmp_id) && $cmp_id !== 'ALL' && isset($koneksi) && $koneksi) ? $koneksi->real_escape_string($cmp_id) : '';
-$cmpFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
-$cmpHdrFilter = (!empty($escCmp)) ? " AND (h.cmp_id = '$escCmp' OR h.cmp_id = '')" : "";
+$isFramasMultiPlant = in_array($cmp_id, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB']);
+if ($isFramasMultiPlant) {
+    $cmpFilter = " AND (cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR cmp_id = '' OR cmp_id IS NULL)";
+    $cmpHdrFilter = " AND (h.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR h.cmp_id = '' OR h.cmp_id IS NULL)";
+} else {
+    $cmpFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
+    $cmpHdrFilter = (!empty($escCmp)) ? " AND (h.cmp_id = '$escCmp' OR h.cmp_id = '')" : "";
+}
 
 $is_inv = 1;
 $targetCompanyRoles = 'tpb';
@@ -131,8 +137,13 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_mutasi_detail') {
     $escAkhir = $koneksi->real_escape_string($akhir);
     $escAb    = $koneksi->real_escape_string($ab);
 
-    $cmpDetailFilter = (!empty($escCmp)) ? " AND (a.cmp_id = '$escCmp' OR a.cmp_id = '')" : "";
-    $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+    if (!empty($isFramasMultiPlant)) {
+        $cmpDetailFilter = " AND (a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR a.cmp_id = '' OR a.cmp_id IS NULL)";
+        $cmpIssueFilter  = " AND (na.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR na.cmp_id = '' OR na.cmp_id IS NULL)";
+    } else {
+        $cmpDetailFilter = (!empty($escCmp)) ? " AND (a.cmp_id = '$escCmp' OR a.cmp_id = '')" : "";
+        $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+    }
 
     $sql = "
     SELECT 'Eksternal' AS TIPE, a.KODE_BARANG, a.UNIT AS SATUAN, a.QTY_AKTUAL AS JUMLAH, a.TGL_BUKTI, a.NO_BUKTI, a.NAMA_BS, 
@@ -507,8 +518,13 @@ if ($activeTab === 'home') {
     $escAkhir = $koneksi->real_escape_string($tgl2);
     $escNow   = $koneksi->real_escape_string($as_now);
 
-    $cmpDetailFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
-    $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+    if (!empty($isFramasMultiPlant)) {
+        $cmpDetailFilter = " AND (cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR cmp_id = '' OR cmp_id IS NULL)";
+        $cmpIssueFilter  = " AND (na.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR na.cmp_id = '' OR na.cmp_id IS NULL)";
+    } else {
+        $cmpDetailFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
+        $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+    }
 
     $sql1d = "
     SELECT NI.*, (AWAL + MASUK - KELUAR) AKHIR, 

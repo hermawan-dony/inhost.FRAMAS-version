@@ -63,7 +63,12 @@ if (isset($koneksi) && $koneksi) {
 }
 
 // Resolusi Dokumen BC yang diizinkan untuk perusahaan ini
-$companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+// Khusus Framas: Entitas tunggal mencakup seluruh dokumen TPB dan PLB
+if (in_array($sessionCmpId, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+    $companyAllowedDocs = ['16', '20', '23', '25', '261', '262', '27', '27IN', '28', '30', '33', '331', '40', '41'];
+} else {
+    $companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
+}
 
 // Resolusi Dokumen BC yang berhak diakses pengguna (irisan izin pengguna & perusahaan)
 $effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
@@ -147,25 +152,10 @@ if ($action === 'list') {
                 }
             }
 
-            if ($isMultiPlantNpwp) {
-                // Untuk entitas multi-plant (seperti FRAMAS 1 Entitas di CEISA dengan NPWP bersama):
-                // Dokumen plant aktif diambil dari cmp_id atau penomoran nomorAju khas plant
-                $plantPattern = '';
-                if ($realCmpId === 'FRM-1') {
-                    $plantPattern = "a.nomorAju LIKE '%FRM01%' OR a.nomorAju LIKE '%FRM1%'";
-                } elseif ($realCmpId === 'FRM-2') {
-                    $plantPattern = "a.nomorAju LIKE '%FRM02%' OR a.nomorAju LIKE '%FRM2%'";
-                } elseif ($realCmpId === 'FRM-3') {
-                    $plantPattern = "a.nomorAju LIKE '%FRM03%' OR a.nomorAju LIKE '%FRM3%'";
-                } elseif ($realCmpId === 'PDPLB') {
-                    $plantPattern = "a.nomorAju LIKE '%PDPLB%' OR a.nomorAju LIKE '%PLB%' OR a.kodeDokumen IN ('16','28','33','331')";
-                }
-
-                if (!empty($plantPattern)) {
-                    $where[] = "(a.cmp_id = '$realCmpId' OR ($plantPattern))";
-                } else {
-                    $where[] = "a.cmp_id = '$realCmpId'";
-                }
+            if ($isMultiPlantNpwp || in_array($realCmpId, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+                // Khusus Framas (Entitas Multi-Plant CEISA dengan 1 NPWP Tunggal):
+                // Seluruh data pabean dari seluruh plant (FRM-1, FRM-2, FRM-3, PDPLB) disatukan menjadi 1 DATA UTUH
+                $where[] = "(a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR a.idPerusahaan LIKE '%010816064431000%')";
             } else {
                 $cmpList = array_unique(array_filter([$cleanCmp, $realCmpId, $cmpNpwp]));
                 $escapedCmpList = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $cmpList)) . "'";
@@ -4373,6 +4363,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     ? '<span class="ant-tag ant-tag-green" style="font-size:11px; font-weight:700; padding:0 6px; line-height:18px; margin:0; border-radius:2px;" title="Tersedia di Staging Lokal (bc_ceisa_header)">✓</span>'
                     : '<span style="color:#bfbfbf; font-size:12px;">-</span>';
 
+                let plantBadgeHtml = '';
+                const ajuStr = (r.nomor_aju || '').toUpperCase();
+                const curCmp = (r.cmp_id || '').toUpperCase();
+                if (curCmp === 'FRM-1' || ajuStr.includes('FRM01') || ajuStr.includes('FRM1')) {
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-blue" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 1</span>';
+                } else if (curCmp === 'FRM-2' || ajuStr.includes('FRM02') || ajuStr.includes('FRM2')) {
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 2</span>';
+                } else if (curCmp === 'FRM-3' || ajuStr.includes('FRM03') || ajuStr.includes('FRM3')) {
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-purple" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 3</span>';
+                } else if (curCmp === 'PDPLB' || ajuStr.includes('PDPLB') || ajuStr.includes('PLB')) {
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-orange" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLB</span>';
+                }
+
                 html += `
                     <tr class="ant-table-row ant-table-row-level-0 ${isSelected ? 'selected-row' : ''}" id="row-${r.nomor_aju}" oncontextmenu="openRowContextMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}', '${r.kode_proses || ''}', '${r.namaProses ? encodeURIComponent(r.namaProses) : ''}', '${r.nomor_daftar || ''}')">
                         <td style="text-align:center;" class="col-select-mode">
@@ -4409,7 +4412,10 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                             ${lokalHtml}
                         </td>
                         <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">
-                            <div style="display:flex; font-size:10px; color:#8c8c8c; font-family:monospace;">${escapeHtml(companyId)}</div>
+                            <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:#8c8c8c; font-family:monospace;">
+                                <span>${escapeHtml(companyId)}</span>
+                                ${plantBadgeHtml}
+                            </div>
                             <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
                         </td>
                         <td style="text-align:center; white-space:nowrap;" class="td-col-aksi">

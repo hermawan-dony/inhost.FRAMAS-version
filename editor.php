@@ -141,7 +141,11 @@ $defaultSelectedBc = (!empty($lastSelectedBc) && isset($allowedBcOptions[$lastSe
 
 $whereConditions = [];
 if (!empty($filterCmp)) {
-    $whereConditions[] = "a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'";
+    if (in_array($filterCmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+        $whereConditions[] = "a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')";
+    } else {
+        $whereConditions[] = "a.cmp_id = '" . $koneksi->real_escape_string($filterCmp) . "'";
+    }
 }
 if (empty($_SESSION['is_super_admin']) && !empty($effectiveAllowedDocs) && !in_array('*', $effectiveAllowedDocs)) {
     $filterDocs = array_unique(array_map(function($d) {

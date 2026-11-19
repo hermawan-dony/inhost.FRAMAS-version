@@ -107,7 +107,11 @@ if ($action === 'rekap_dokumen') {
 
     $whereKiri = [];
     if (!empty($filter_cmp)) {
-        $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
+        if (in_array($filter_cmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+            $whereKiri[] = "a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')";
+        } else {
+            $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
+        }
     }
     $whereKiri[] = "(a.user_id != 'CEISA_PORTAL' OR a.user_id IS NULL OR a.user_id = '')";
 
@@ -211,7 +215,11 @@ if ($action === 'list') {
     $whereOuter = [];
 
     if (!empty($filter_cmp)) {
-        $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
+        if (in_array($filter_cmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+            $whereKiri[] = "a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')";
+        } else {
+            $whereKiri[] = "a.cmp_id = '" . $koneksi->real_escape_string($filter_cmp) . "'";
+        }
     }
     if (!empty($filter_bc)) {
         if ($filter_bc === '27IN') {
@@ -269,8 +277,13 @@ if ($action === 'list') {
     $whereOuterSql = !empty($whereOuter) ? 'WHERE ' . implode(' AND ', $whereOuter) : '';
 
     $cmpEsc = !empty($filter_cmp) ? $koneksi->real_escape_string($filter_cmp) : '';
-    $cmpWhereSub = !empty($cmpEsc) ? "WHERE cmp_id = '$cmpEsc'" : "";
-    $cmpAndSub = !empty($cmpEsc) ? "AND cmp_id = '$cmpEsc'" : "";
+    if (in_array($filter_cmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+        $cmpWhereSub = "WHERE cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')";
+        $cmpAndSub = "AND cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')";
+    } else {
+        $cmpWhereSub = !empty($cmpEsc) ? "WHERE cmp_id = '$cmpEsc'" : "";
+        $cmpAndSub = !empty($cmpEsc) ? "AND cmp_id = '$cmpEsc'" : "";
+    }
 
     $sql = "SELECT
         kiri.*,

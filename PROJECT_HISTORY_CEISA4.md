@@ -8521,3 +8521,29 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 4. `database/merge_to_framasbc.ps1`:
    - Pembuatan dan preservasi data `bc_ceisa_sppb` dan `bc_kek_setting` terintegrasi di staging MySQL 5 agar aman pada setiap kali perintah `SYNC DB!`.
 
+---
+
+## [2026-11-19] Unifikasi Data Pabean Framas Menjadi 1 Data Tunggal Lintas Plant
+
+### A. Latar Belakang & Masalah
+- **Keluhan Pengguna**: Angka total dokumen dan KPI di Dashboard Ceisa 4.0 berubah-ubah secara drastis saat berpindah plant:
+  - `FRM-1`: 24.719 dokumen
+  - `FRM-2`: 3.806 dokumen
+  - `FRM-3`: 9.109 dokumen
+  - `PDPLB`: 3.335 dokumen
+- **Penyebab**: Di `daftar_dokumen.php`, query dokumen sebelumnya memfilter `nomorAju` dan `cmp_id` berdasarkan pola plant yang sedang aktif (misal `LIKE '%FRM01%'`, `LIKE '%FRM02%'`, dsb.), sehingga masing-masing plant hanya melihat potongan datanya sendiri.
+- **Kenyataan Bisnis CEISA 4.0**: PT FRAMAS INDONESIA adalah **1 ENTITAS TUNGGAL** di sistem Bea Cukai / CEISA 4.0 dengan NPWP yang sama (`01.081.606.4-431.000` / `0010816064431000000000`). Seluruh dokumen pabean yang ditarik dari Bea Cukai adalah milik entitas Framas secara utuh (total 40.985 dokumen). Pengguna menginstruksikan: *"buat ini jadi 1 data khusus untuk framas"*.
+
+### B. Solusi & Implementasi
+1. **Unifikasi Penuh di `daftar_dokumen.php`**:
+   - Menghapus pemecahan `plantPattern` per plant untuk entitas Framas.
+   - Query dokumen untuk entitas Framas (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB` atau NPWP Framas) otomatis menggabungkan seluruh dokumen Framas (`a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') OR a.idPerusahaan LIKE '%010816064431000%'`).
+   - Izin dokumen pabean (`$companyAllowedDocs`) untuk plant Framas disatukan mencakup seluruh dokumen TPB dan PLB (`16, 20, 23, 25, 261, 262, 27, 27IN, 28, 30, 33, 331, 40, 41`).
+   - Hasilnya: Saat pengguna berada di plant manapun (`FRM-1`, `FRM-2`, `FRM-3`, atau `PDPLB`), angka di Dashboard Ceisa 4.0 **100% KONSISTEN & SAMA PERSIS** yaitu **40.985 DOKUMEN**.
+   - Setiap baris dokumen pada tabel daftar dokumen tetap diberi badge asal plant (`PLANT 1`, `PLANT 2`, `PLANT 3`, atau `PLB`) yang jelas dan elegan di kolom Perusahaan.
+2. **Unifikasi di Modul Lain**:
+   - `transfer.php` (Data Host to Host): Query header disatukan untuk plant Framas (`a.cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')`), menghasilkan angka seragam **8.591 header**.
+   - `editor.php`: Selector dropdown AJU disatukan untuk plant Framas.
+   - `it_inventory.php`: Filter inventory (`cmpFilter`, `cmpDetailFilter`, `cmpIssueFilter`) disatukan untuk seluruh plant Framas.
+
+
