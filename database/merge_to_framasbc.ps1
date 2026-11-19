@@ -236,13 +236,30 @@ CREATE TABLE bc_ceisa_company (
 foreach ($t in $Tenants) {
     $name = $t.Name.Replace("'", "''")
     $alamat = $t.Alamat.Replace("'", "''")
+    $allowed = if ($t.Roles -eq "plb") { "16,28,33,331" } else { "23,25,261,262,27,40,41" }
     Invoke-Mysql5 @"
 INSERT INTO framas.bc_ceisa_company
-  (cmp_id, cmp_name, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, is_active, IS_INV, created_at, updated_at)
+  (cmp_id, cmp_name, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, allowed_docs, username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, token_ceisa, is_active, IS_INV, created_at, updated_at)
 VALUES
-  ('$($t.CmpId)', '$name', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', 1, 1, NOW(), NOW());
+  ('$($t.CmpId)', '$name', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', '$allowed', 'maikelwawoh', 'Framas2007', 'MNTDETJSOBXDG4LMMZJES2CDK5CFGR2E', '1b6fdb63-0b91-4c3e-bd42-27b3cd9fe604', '1322604451', 1, 1, NOW(), NOW());
 "@ | Out-Null
     Log "Seed company $($t.CmpId) <= $($t.Src)"
+}
+
+if (Table-Exists5 "framasbc" "bc_ceisa_company") {
+    Invoke-Mysql5 @"
+UPDATE framas.bc_ceisa_company d
+JOIN framasbc.bc_ceisa_company s ON d.cmp_id = s.cmp_id
+SET 
+  d.username_ceisa = IFNULL(s.username_ceisa, d.username_ceisa),
+  d.password_ceisa = IFNULL(s.password_ceisa, d.password_ceisa),
+  d.secret_mfa     = IFNULL(s.secret_mfa, d.secret_mfa),
+  d.id_user_ceisa  = IFNULL(s.id_user_ceisa, d.id_user_ceisa),
+  d.token_ceisa    = IFNULL(s.token_ceisa, d.token_ceisa),
+  d.allowed_docs   = IFNULL(s.allowed_docs, d.allowed_docs),
+  d.app_password   = IFNULL(s.app_password, d.app_password);
+"@ | Out-Null
+    Log "Preserved company credentials from framasbc"
 }
 
 foreach ($tbl in $SharedTables) {
