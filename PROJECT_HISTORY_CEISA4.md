@@ -8407,3 +8407,32 @@ Agar perintah pengguna **`SYNC DB!`** di kemudian hari tidak menimbulkan error s
    - Seluruh 27 tabel CEISA baru (termasuk `bc_ceisa_sppb`, `bc_material_approval`, `bc_ceisa_manifes_*`, `bc_ppkek_masuk_*`) telah diimpor ke `framasbc` di MySQL 8 dengan collation `utf8mb4_unicode_ci`.
    - Kandidat pencarian skema pada `merge_to_framasbc.ps1` diperluas dengan menambahkan `framasbc` (`@("tpbdb", "tpbfrm3", "tpbplb", "tpbdelta", "framasbc")`) sehingga tabel-tabel CEISA generasi baru otomatis ikut dimigrasikan saat perintah `SYNC DB!` dieksekusi.
    - Menambahkan index `idx_nomor_aju` otomatis untuk setiap tabel bertransaksi `nomor_aju`/`nomorAju`, serta menstandarisasi kolom `NOMOR_AJU` pada `bc_1ab2` menjadi `utf8mb4_unicode_ci` agar proses join dokumen H2H berlangsung secepat kilat (< 1 detik).
+
+
+---
+
+## 📌 51. HARMONISASI MULTI-PLANT 1-ENTITAS CEISA 4.0 & INTEGRASI UPSTREAM COMMIT e21324d (19 NOVEMBER 2026)
+
+### A. Latar Belakang & Identifikasi Masalah
+1. **Layar Dashboard Dokumen Kosong pada Akun Plant FRM-3 (Jois)**:
+   - Pengguna melaporkan bahwa saat login sebagai user jois (Plant FRM-3), menu Daftar Dokumen Bea Cukai menampilkan 0 rekaman dokumen ("Tidak ada dokumen AJU yang sesuai dengan filter").
+   - *Penyebab*: Di Portal CEISA 4.0, seluruh 4 plant PT FRAMAS INDONESIA (FRM-1, FRM-2, FRM-3, PDPLB) terdaftar dalam **1 ENTITAS TUNGGAL** dengan satu NPWP (010816064431000). Pada proses migrasi awal, seluruh data di tabel bc_ceisa_data terisi default cmp_id = 'FRM-1', dan pemetaan penarikan di latar belakang (ceisa_sync_service.php) mengutamakan cmp_id sesi alih-alih nomor AJU. Akibatnya dokumen milik Plant 3 (FRM03) ikut tertandai FRM-1 sehingga disaring keluar pada tampilan Jois.
+2. **Pembaruan Upstream VPS Jakarta (e21324d)**:
+   - Terdapat pembaruan styling tampilan nomor bukti pada IT Inventory dari upstream VPS Jakarta (inhost-base/main commit e21324d).
+
+### B. Solusi & Tindakan yang Diterapkan
+1. **Harmonisasi Routing AJU ke Masing-Masing Plant**:
+   - Diperbarui pada ceisa_sync_service.php dan database framasbc:
+     - Dokumen dengan AJU mengandung FRM01 / FRM1 -> dialokasikan ke **FRM-1** (TPB Kenari).
+     - Dokumen dengan AJU mengandung FRM02 / FRM2 -> dialokasikan ke **FRM-2** (Delta Silicon MM2100).
+     - Dokumen dengan AJU mengandung FRM03 / FRM3 -> dialokasikan ke **FRM-3** (Delta Silicon 6).
+     - Dokumen dengan AJU mengandung PDPLB / PLB atau dokumen jenis 16, 28, 33, 331 -> dialokasikan ke **PDPLB** (PLB MM2100).
+     - Dokumen tanpa kode plant di nomor AJU dipadankan otomatis dengan relasi IT Inventory (bc_1ab2) dan Staging (bc_ceisa_header).
+2. **Penyempurnaan Query Multi-Plant di daftar_dokumen.php**:
+   - Query disesuaikan untuk mencocokkan a.cmp_id = 'realCmpId' ATAU pola nomor AJU plant yang bersangkutan, dipadukan dengan izin jenis dokumen pengguna (allowed_docs).
+3. **Penguatan Permanen di database/merge_to_framasbc.ps1**:
+   - Menambahkan Phase 4 otomatisasi normalisasi multi-plant nomor AJU pada bc_ceisa_data setiap kali perintah pengguna SYNC DB! dijalankan.
+4. **Integrasi Git Commit Upstream e21324d**:
+   - Mengambil pembaruan dari inhost-base/main (commit e21324d):
+     - Menetapkan min-width: 50ch !important dan max-width: 60ch !important pada CSS class .col-nobukti dan header tabel it_inventory.php agar nomor bukti tampil proporsional tanpa terpotong.
+     - Penerapan auto word-break word-break: break-word dan overflow-wrap: break-word untuk menjaga kerapian merge cell.
