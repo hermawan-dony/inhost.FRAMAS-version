@@ -53,3 +53,21 @@ Ketika pengguna memberikan instruksi/perintah **`clone!`** (atau meminta backup 
 2. **Deployment Dilarang**:
    - Operasi `deploy.ps1` dinonaktifkan / tidak boleh dijalankan.
    - Pengembangan difokuskan murni pada environment lokal dan repositori GitHub jika diminta pengguna.
+
+
+## 4. Aturan Perintah "SYNC DB!"
+Ketika pengguna memberikan instruksi/perintah **`SYNC DB!`**:
+1. **Tujuan**: Salin dan satukan (merge) data aktual dari MySQL lama (MySQL 5 port 3306) ke database baru multi-tenant (**`framasbc`** di MySQL 8 port 3307).
+2. **Pemetaan Database Plant ke Multi-Tenant**:
+   - `tpbdb`   $\rightarrow$ Plant **FRM-1** (PT FRAMAS INDONESIA TPB Kenari / Lippo Cikarang)
+   - `tpbdelta` $\rightarrow$ Plant **FRM-2** (PT FRAMAS INDONESIA Delta Silicon MM2100)
+   - `tpbfrm3`  $\rightarrow$ Plant **FRM-3** (PT FRAMAS INDONESIA Plant 3 Delta Silicon 6)
+   - `tpbplb`   $\rightarrow$ Plant **PDPLB** (PT FRAMAS INDONESIA PLB MM2100)
+3. **Mekanisme Eksekusi**:
+   - Jalankan skrip sinkronisasi:
+     ```powershell
+     powershell -ExecutionPolicy Bypass -File database/merge_to_framasbc.ps1
+     ```
+   - Skrip memproses 81 tabel transaksi, ~96.000 baris master referensi, membuat dump staging (~367 MB), dan mengimpor bersih ke database `framasbc` di port 3307.
+   - Memastikan akun Super Administrator `dp` tetap aktif dengan password `K@y010782` (cmp_id: `SYSTEM` dan `*`).
+   - Pantau proses hingga status selesai (`=== DONE ===`), lalu laporkan ringkasan total tabel dan header per plant ke pengguna.
