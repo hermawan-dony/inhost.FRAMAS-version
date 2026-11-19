@@ -8872,3 +8872,42 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - Nilai kompatibilitas database tetap dijaga dengan aman via hidden inputs (`fDeptPemohon` dan `fDeptTujuan`).
    - Input `Target Tanggal Dibutuhkan` tetap aktif dan tertata rapi pada baris tanggal utama berdampingan dengan `Tanggal Permintaan` dan `PIC Pemohon`.
    - Fungsi pendukung JavaScript `onDeptChange` diperbarui dengan null-safety guard agar tidak memicu error ketika elemen petunjuk tidak ada di DOM.
+
+---
+
+### Standarisasi Sumber Data Berdasar KLAS, Penghapusan Input Manual, & Perekaman Eks BC/Tracing Bahan Baku pada BPPB (20 November 2026)
+1. **Latar Belakang & Kebutuhan Pengguna:**
+   - Menghapus tombol dan alur `[ + Input Part Baru / Manual ]` pada formulir BPPB ([`prnt.sc/roS0hwDatBbe`](https://prnt.sc/roS0hwDatBbe)).
+   - Semua barang yang dipilih untuk pengeluaran BPPB wajib bersumber dari data yang ada berdasarkan **KLAS**:
+     - `bc_material` (Master Material Framas)
+     - Atau `bc_1ab2` (IT Inventory Saldo Pemasukan Dokumen Pabean)
+   - Wajib merekam seluruh atribut **Eks BC** untuk keperluan pengisian sheet Bahan Baku dan Dokumen Asal pada BC 2.7:
+     - Nomor AJU Masuk (`ref_nomor_aju`)
+     - Nomor Pendaftaran Masuk (`ref_no_daftar`)
+     - Tanggal Pendaftaran Masuk (`ref_tgl_daftar`)
+     - Seri Barang Asal (`ref_seri_barang`)
+     - Kode Dokumen Pabean Masuk (`ref_bc`: BC 23, 40, 27, 16, 262, dll.)
+   - Untuk barang hasil produksi internal (`Finished Goods`, `Mold` hasil buat sendiri oleh moldshop, atau `Raw Materials` hasil regrind/daur ulang):
+     - Wajib menentukan dan menautkan (trace) asal material/bahan bakunya dari `bc_1ab2`.
+2. **Implementasi Skema Database (`bc_issue_dept_req_dtl`):**
+   - Auto-heal skema menambahkan kolom:
+     - `ref_bc VARCHAR(10) DEFAULT NULL`
+     - `ref_tgl_daftar VARCHAR(15) DEFAULT NULL`
+     - `ref_seri_barang INT(11) DEFAULT 1`
+     - `ref_hs VARCHAR(25) DEFAULT NULL`
+     - `is_internal_produce TINYINT(1) NOT NULL DEFAULT 0`
+     - `trace_material_json TEXT DEFAULT NULL`
+3. **Pencarian Cerdas Berdasarkan KLAS (`action=search_goods` & `action=search_trace_materials`):**
+   - Endpoint `search_goods` mengkueri `bc_1ab2` dengan `HAVING total_qty_masuk > 0` dan mengelompokkan data per dokumen pabean masuk spesifik sehingga seluruh atribut Eks BC terekspos lengkap.
+   - Filter kategori KLAS tersedia lengkap: `ALL`, `Machine`, `Part Machine`, `Tools`, `Mold`, `Raw Materials`, `Finished Goods`, `Work In Progress`, `Consumables`, `Factory Equipment`, `Wastes`.
+   - Endpoint baru `search_trace_materials` khusus mencari saldo dokumen bahan baku di `bc_1ab2` untuk ditautkan ke barang hasil produksi internal.
+4. **Pembaruan Antarmuka & Modal Tracing Bahan Baku (`modalTraceMaterial`):**
+   - Tombol `+ Input Part Baru / Manual` dan fungsi `addManualRow()` dihapus total.
+   - Kolom tabel item menampilkan visual badge Eks BC lengkap: `BC [Dok] No. [NoDaftar] (Tgl [TglDaftar] Seri [Seri]) | AJU: [NoAju]`.
+   - Untuk barang Finished Goods / Mold / Regrind / Master, baris item menampilkan peringatan interaktif `[ Wajib Tautkan Asal Material (Eks BC) ]`.
+   - Modal `modalTraceMaterial` memungkinkan pengguna mencari bahan baku dari `bc_1ab2` dan menghubungkannya dalam 1 klik.
+   - Validasi submit (`submitRequest`) memastikan 100% item memiliki dokumen Eks BC sebelum dapat diajukan / ditransfer ke BC 2.7.
+5. **Integrasi Penuh Transfer Host to Host BC 2.7 (`transfer_h2h`):**
+   - Mengisi otomatis tabel `bc_ceisa_bahanbaku` dengan data Eks Dokumen Pabean (kode asal 0/1, HS code, kode barang asal, nomor/tgl daftar asal, nomor aju asal, seri barang asal, cif, netto, bruto, dll.).
+   - Mendaftarkan dokumen pabean asal (BC 23/40/27/16) ke dalam `bc_ceisa_dokumen`.
+   - Cetak formulir BPPB (`print_bppb`) menyajikan referensi asal pabean / hasil tracing pada tabel barang fisik cetak.

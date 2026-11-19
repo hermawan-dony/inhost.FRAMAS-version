@@ -101,9 +101,15 @@ function ensureDeptReqTables(mysqli $koneksi): void {
       `qty_trace` decimal(18,4) DEFAULT NULL,
       `harga` decimal(18,4) DEFAULT NULL,
       `source_type` varchar(30) DEFAULT 'bc_1ab2',
+      `ref_bc` varchar(10) DEFAULT NULL,
       `ref_nomor_aju` varchar(50) DEFAULT NULL,
       `ref_no_daftar` varchar(50) DEFAULT NULL,
+      `ref_tgl_daftar` varchar(15) DEFAULT NULL,
+      `ref_seri_barang` int(11) DEFAULT 1,
+      `ref_hs` varchar(25) DEFAULT NULL,
       `ref_no_bukti` varchar(100) DEFAULT NULL,
+      `is_internal_produce` tinyint(1) NOT NULL DEFAULT 0,
+      `trace_material_json` text DEFAULT NULL,
       `note` varchar(255) DEFAULT NULL,
       `status` varchar(20) NOT NULL DEFAULT 'PENDING',
       `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
@@ -111,6 +117,22 @@ function ensureDeptReqTables(mysqli $koneksi): void {
       KEY `idx_hdr` (`id_hdr`),
       KEY `idx_kd_brg` (`kode_barang`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Auto-heal kolom Eks BC & Tracing di bc_issue_dept_req_dtl jika belum ada
+    $dtlCols = [
+        'ref_bc'              => "varchar(10) DEFAULT NULL AFTER `source_type`",
+        'ref_tgl_daftar'      => "varchar(15) DEFAULT NULL AFTER `ref_no_daftar`",
+        'ref_seri_barang'     => "int(11) DEFAULT 1 AFTER `ref_tgl_daftar`",
+        'ref_hs'              => "varchar(25) DEFAULT NULL AFTER `ref_seri_barang`",
+        'is_internal_produce' => "tinyint(1) NOT NULL DEFAULT 0 AFTER `ref_no_bukti`",
+        'trace_material_json' => "text DEFAULT NULL AFTER `is_internal_produce`"
+    ];
+    foreach ($dtlCols as $col => $def) {
+        $chk = $koneksi->query("SHOW COLUMNS FROM bc_issue_dept_req_dtl LIKE '{$col}'");
+        if ($chk && $chk->num_rows === 0) {
+            $koneksi->query("ALTER TABLE bc_issue_dept_req_dtl ADD COLUMN `{$col}` {$def}");
+        }
+    }
 }
 ensureDeptReqTables($koneksi);
 
@@ -324,7 +346,7 @@ if ($action === 'get_detail') {
     exit;
 }
 
-// --- C. PENCARIAN BARANG CERDAS (bc_1ab2, bc_issue_dtl, bc_material) ---
+// --- C. PENCARIAN BARANG CERDAS (bc_1ab2 & bc_material) BERDASARKAN KLAS & DOKUMEN PABEAN ASAL ---
 if ($action === 'search_goods') {
     header('Content-Type: application/json; charset=utf-8');
     $q = trim($_GET['q'] ?? '');
@@ -335,153 +357,193 @@ if ($action === 'search_goods') {
 
     $results = [];
 
-    // Filter kategori berdasarkan departemen jika diminta
+    // Filter kategori KLAS
     $klasCond1ab2 = "";
     $klasCondMat = "";
     if (!empty($klas) && $klas !== 'ALL') {
         $escKl = $koneksi->real_escape_string($klas);
-        $klasCond1ab2 = " AND KLAS LIKE '%{$escKl}%' ";
-        $klasCondMat = " AND KLAS LIKE '%{$escKl}%' ";
+        $klasCond1ab2 = " AND b.KLAS LIKE '%{$escKl}%' ";
+        $klasCondMat = " AND m.KLAS LIKE '%{$escKl}%' ";
     } elseif (!empty($dept)) {
         $dLower = strtolower($dept);
         if (strpos($dLower, 'maint') !== false) {
-            $klasCond1ab2 = " AND (KLAS IN ('Machine', 'Part Machine', 'Tools', 'Factory Equipment') OR URAIAN LIKE '%MESIN%' OR URAIAN LIKE '%BEARING%' OR URAIAN LIKE '%PART%') ";
+            $klasCond1ab2 = " AND (b.KLAS IN ('Machine', 'Part Machine', 'Tools', 'Factory Equipment') OR b.URAIAN LIKE '%MESIN%' OR b.URAIAN LIKE '%BEARING%' OR b.URAIAN LIKE '%PART%') ";
+            $klasCondMat  = " AND (m.KLAS IN ('Machine', 'Part Machine', 'Tools', 'Factory Equipment') OR m.URAIAN LIKE '%MESIN%' OR m.URAIAN LIKE '%BEARING%' OR m.URAIAN LIKE '%PART%') ";
         } elseif (strpos($dLower, 'mold') !== false) {
-            $klasCond1ab2 = " AND (KLAS IN ('Mold', 'Tools') OR URAIAN LIKE '%MOLD%' OR URAIAN LIKE '%INJECTION%') ";
+            $klasCond1ab2 = " AND (b.KLAS IN ('Mold', 'Tools') OR b.URAIAN LIKE '%MOLD%' OR b.URAIAN LIKE '%INJECTION%') ";
+            $klasCondMat  = " AND (m.KLAS IN ('Mold', 'Tools') OR m.URAIAN LIKE '%MOLD%' OR m.URAIAN LIKE '%INJECTION%') ";
         } elseif (strpos($dLower, 'prod') !== false) {
-            $klasCond1ab2 = " AND (KLAS IN ('Raw Materials', 'Work In Progress', 'Consumables')) ";
+            $klasCond1ab2 = " AND (b.KLAS IN ('Raw Materials', 'Finished Goods', 'Work In Progress', 'Consumables')) ";
+            $klasCondMat  = " AND (m.KLAS IN ('Raw Materials', 'Finished Goods', 'Work In Progress', 'Consumables')) ";
         }
     }
 
-    // 1. CARI DI bc_1ab2 (Pabean Masuk)
+    // 1. CARI DI bc_1ab2 (IT Inventory Pemasukan Pabean dengan Eks BC Lengkap)
     if ($source === 'all' || $source === 'bc_1ab2') {
         $whereSearch = "";
         if (!empty($escQ)) {
-            $whereSearch = " AND (KODE_BARANG LIKE '%{$escQ}%' OR URAIAN LIKE '%{$escQ}%' OR NAMA_BS LIKE '%{$escQ}%' OR NO_BUKTI LIKE '%{$escQ}%') ";
+            $whereSearch = " AND (b.KODE_BARANG LIKE '%{$escQ}%' OR b.URAIAN LIKE '%{$escQ}%' OR b.NAMA_BS LIKE '%{$escQ}%' OR b.NOMOR_DAFTAR LIKE '%{$escQ}%' OR b.NOMOR_AJU LIKE '%{$escQ}%') ";
         }
         $sql1ab2 = "SELECT 
-            KODE_BARANG, URAIAN, KLAS, UNIT, 
-            COALESCE(MAX(BC), '-') as ref_bc,
-            COALESCE(MAX(NOMOR_DAFTAR), '-') as ref_no_daftar,
-            COALESCE(MAX(TANGGAL_DAFTAR), '-') as ref_tgl_daftar,
-            COALESCE(MAX(NAMA_BS), '-') as ref_supplier,
-            COALESCE(MAX(NOMOR_AJU), '') as ref_nomor_aju,
-            COALESCE(MAX(NO_BUKTI), '') as ref_no_bukti,
-            COALESCE(SUM(QTY_AKTUAL), 0) as total_qty_masuk
-            FROM bc_1ab2
-            WHERE (AB IN ('A', 'M') OR AB = '' OR AB IS NULL)
+            b.KODE_BARANG, b.URAIAN, b.KLAS, b.UNIT, 
+            COALESCE(b.BC, '') as ref_bc,
+            COALESCE(b.NOMOR_DAFTAR, '') as ref_no_daftar,
+            COALESCE(b.TANGGAL_DAFTAR, '') as ref_tgl_daftar,
+            COALESCE(b.NAMA_BS, '') as ref_supplier,
+            COALESCE(b.NOMOR_AJU, '') as ref_nomor_aju,
+            COALESCE(b.SERI_BARANG, 1) as ref_seri_barang,
+            COALESCE(b.POS_TARIF, '') as ref_hs,
+            COALESCE(b.NO_BUKTI, '') as ref_no_bukti,
+            COALESCE(b.HARGA_PENYERAHAN, b.CIF, 0) as harga,
+            COALESCE(b.CIF, 0) as cif,
+            SUM(b.QTY_AKTUAL) as total_qty_masuk
+            FROM bc_1ab2 b
+            WHERE (b.AB IN ('A', 'M') OR b.AB = '' OR b.AB IS NULL)
               AND {$cmpFilter1ab2}
               {$whereSearch}
               {$klasCond1ab2}
-            GROUP BY KODE_BARANG, URAIAN, KLAS, UNIT
-            ORDER BY total_qty_masuk DESC, KODE_BARANG ASC
-            LIMIT 40";
+            GROUP BY b.KODE_BARANG, b.URAIAN, b.KLAS, b.UNIT, b.BC, b.NOMOR_DAFTAR, b.TANGGAL_DAFTAR, b.NOMOR_AJU, b.SERI_BARANG, b.POS_TARIF, b.HARGA_PENYERAHAN, b.CIF, b.NAMA_BS, b.NO_BUKTI
+            HAVING total_qty_masuk > 0
+            ORDER BY b.TANGGAL_DAFTAR DESC, b.KODE_BARANG ASC
+            LIMIT 50";
 
         $res1 = $koneksi->query($sql1ab2);
         if ($res1) {
             while ($r = $res1->fetch_assoc()) {
+                $isSelfProduce = in_array($r['KLAS'], ['Finished Goods', 'Mold', 'Work In Progress']) || stripos($r['URAIAN'], 'REGRIND') !== false;
                 $results[] = [
-                    'source'        => 'bc_1ab2',
-                    'source_label'  => 'Pabean (bc_1ab2)',
-                    'badge_class'   => 'badge-source-pabean',
-                    'kode_barang'   => $r['KODE_BARANG'],
-                    'nama_barang'   => $r['URAIAN'],
-                    'klas'          => !empty($r['KLAS']) ? $r['KLAS'] : 'General',
-                    'sat'           => !empty($r['UNIT']) ? $r['UNIT'] : 'PCE',
-                    'ref_bc'        => $r['ref_bc'] !== '-' ? 'BC ' . $r['ref_bc'] : '',
-                    'ref_no_daftar' => $r['ref_no_daftar'],
-                    'ref_tgl'       => $r['ref_tgl_daftar'],
-                    'ref_supplier'  => $r['ref_supplier'],
-                    'ref_nomor_aju' => $r['ref_nomor_aju'],
-                    'ref_no_bukti'  => $r['ref_no_bukti'],
-                    'stok_info'     => 'Total Masuk: ' . number_format((float)$r['total_qty_masuk'], 2, ',', '.') . ' ' . $r['UNIT']
+                    'source'              => 'bc_1ab2',
+                    'source_label'        => 'Pabean (bc_1ab2)',
+                    'badge_class'         => 'badge-source-pabean',
+                    'kode_barang'         => $r['KODE_BARANG'],
+                    'nama_barang'         => $r['URAIAN'],
+                    'klas'                => !empty($r['KLAS']) ? $r['KLAS'] : 'General',
+                    'sat'                 => !empty($r['UNIT']) ? $r['UNIT'] : 'PCE',
+                    'ref_bc'              => $r['ref_bc'],
+                    'ref_no_daftar'       => $r['ref_no_daftar'],
+                    'ref_tgl_daftar'      => $r['ref_tgl_daftar'],
+                    'ref_seri_barang'     => (int)$r['ref_seri_barang'],
+                    'ref_nomor_aju'       => $r['ref_nomor_aju'],
+                    'ref_hs'              => $r['ref_hs'],
+                    'ref_supplier'        => $r['ref_supplier'],
+                    'ref_no_bukti'        => $r['ref_no_bukti'],
+                    'harga'               => (float)$r['harga'],
+                    'cif'                 => (float)$r['cif'],
+                    'is_internal_produce' => $isSelfProduce ? 1 : 0,
+                    'stok_info'           => 'Saldo Masuk: ' . number_format((float)$r['total_qty_masuk'], 2, ',', '.') . ' ' . $r['UNIT']
                 ];
             }
         }
     }
 
-    // 2. CARI DI bc_issue_dtl (Riwayat Internal Issue / Produksi)
-    if (($source === 'all' || $source === 'bc_issue') && count($results) < 50) {
-        $whereSearchIssue = "";
-        if (!empty($escQ)) {
-            $whereSearchIssue = " AND (d.kode_barang LIKE '%{$escQ}%' OR d.nama_barang LIKE '%{$escQ}%') ";
-        }
-        $sqlIssue = "SELECT 
-            d.kode_barang, d.nama_barang, d.sat,
-            COALESCE(MAX(h.klas), 'Internal Issue') as klas,
-            COALESCE(MAX(h.no_bukti), '') as ref_no_bukti,
-            COALESCE(MAX(h.tgl), '') as ref_tgl,
-            COALESCE(SUM(d.qty), 0) as total_qty_issue
-            FROM bc_issue_dtl d
-            LEFT JOIN bc_issue_hdr h ON d.id_hdr = h.id
-            WHERE 1=1
-              {$whereSearchIssue}
-            GROUP BY d.kode_barang, d.nama_barang, d.sat
-            ORDER BY total_qty_issue DESC, d.kode_barang ASC
-            LIMIT 30";
-
-        $resIssue = $koneksi->query($sqlIssue);
-        if ($resIssue) {
-            // Deduplikasi agar jika sudah ada dari bc_1ab2 tidak dobel
-            $existingKodes = array_column($results, 'kode_barang');
-            while ($ri = $resIssue->fetch_assoc()) {
-                if (in_array($ri['kode_barang'], $existingKodes)) continue;
-                $results[] = [
-                    'source'        => 'bc_issue_dtl',
-                    'source_label'  => 'Internal Issue',
-                    'badge_class'   => 'badge-source-issue',
-                    'kode_barang'   => $ri['kode_barang'],
-                    'nama_barang'   => $ri['nama_barang'],
-                    'klas'          => !empty($ri['klas']) ? $ri['klas'] : 'Internal Issue',
-                    'sat'           => !empty($ri['sat']) ? $ri['sat'] : 'PCE',
-                    'ref_bc'        => '',
-                    'ref_no_daftar' => '',
-                    'ref_tgl'       => $ri['ref_tgl'],
-                    'ref_supplier'  => 'Internal Produksi',
-                    'ref_nomor_aju' => '',
-                    'ref_no_bukti'  => $ri['ref_no_bukti'],
-                    'stok_info'     => 'Riwayat Issue: ' . number_format((float)$ri['total_qty_issue'], 2, ',', '.') . ' ' . $ri['sat']
-                ];
-            }
-        }
-    }
-
-    // 3. CARI DI bc_material (Master Material)
-    if (($source === 'all' || $source === 'bc_material') && count($results) < 50) {
+    // 2. CARI DI bc_material (Master Material Framas)
+    if (($source === 'all' || $source === 'bc_material') && count($results) < 60) {
         $whereSearchMat = "";
         if (!empty($escQ)) {
-            $whereSearchMat = " AND (KODE_BARANG LIKE '%{$escQ}%' OR URAIAN LIKE '%{$escQ}%') ";
+            $whereSearchMat = " AND (m.KODE_BARANG LIKE '%{$escQ}%' OR m.URAIAN LIKE '%{$escQ}%') ";
         }
-        $sqlMat = "SELECT KODE_BARANG, URAIAN, KLAS, KODE_SATUAN 
-                   FROM bc_material 
+        $sqlMat = "SELECT m.KODE_BARANG, m.URAIAN, m.KLAS, m.KODE_SATUAN, m.POS_TARIF, m.UNIT_PRICE, m.PARENT
+                   FROM bc_material m
                    WHERE 1=1 {$whereSearchMat} {$klasCondMat}
-                   LIMIT 20";
+                   ORDER BY m.KLAS ASC, m.KODE_BARANG ASC
+                   LIMIT 40";
         $resMat = $koneksi->query($sqlMat);
         if ($resMat) {
             $existingKodes = array_column($results, 'kode_barang');
             while ($rm = $resMat->fetch_assoc()) {
-                if (in_array($rm['KODE_BARANG'], $existingKodes)) continue;
+                if ($source === 'all' && in_array($rm['KODE_BARANG'], $existingKodes)) continue;
+                $isSelfProduce = in_array($rm['KLAS'], ['Finished Goods', 'Mold', 'Work In Progress', 'Raw Materials']) || stripos($rm['URAIAN'], 'REGRIND') !== false;
                 $results[] = [
-                    'source'        => 'bc_material',
-                    'source_label'  => 'Master Barang',
-                    'badge_class'   => 'badge-source-material',
-                    'kode_barang'   => $rm['KODE_BARANG'],
-                    'nama_barang'   => $rm['URAIAN'],
-                    'klas'          => !empty($rm['KLAS']) ? $rm['KLAS'] : 'General',
-                    'sat'           => !empty($rm['KODE_SATUAN']) ? $rm['KODE_SATUAN'] : 'PCE',
-                    'ref_bc'        => '',
-                    'ref_no_daftar' => '',
-                    'ref_tgl'       => '',
-                    'ref_supplier'  => 'Master Data',
-                    'ref_nomor_aju' => '',
-                    'ref_no_bukti'  => '',
-                    'stok_info'     => 'Master Barang'
+                    'source'              => 'bc_material',
+                    'source_label'        => 'Master Material',
+                    'badge_class'         => 'badge-source-material',
+                    'kode_barang'         => $rm['KODE_BARANG'],
+                    'nama_barang'         => $rm['URAIAN'],
+                    'klas'                => !empty($rm['KLAS']) ? $rm['KLAS'] : 'General',
+                    'sat'                 => !empty($rm['KODE_SATUAN']) ? $rm['KODE_SATUAN'] : 'PCE',
+                    'ref_bc'              => '',
+                    'ref_no_daftar'       => '',
+                    'ref_tgl_daftar'      => '',
+                    'ref_seri_barang'     => 1,
+                    'ref_nomor_aju'       => '',
+                    'ref_hs'              => $rm['POS_TARIF'] ?? '',
+                    'ref_supplier'        => 'Master Framas',
+                    'ref_no_bukti'        => '',
+                    'harga'               => (float)($rm['UNIT_PRICE'] ?? 0),
+                    'cif'                 => 0,
+                    'is_internal_produce' => $isSelfProduce ? 1 : 0,
+                    'stok_info'           => 'Master Data Material'
                 ];
             }
         }
     }
 
     echo json_encode(['status' => 'OK', 'count' => count($results), 'data' => $results]);
+    exit;
+}
+
+// --- C2. ENDPOINT TRACING ASAL BAHAN BAKU / EKS BC DARI IT INVENTORY (bc_1ab2) ---
+if ($action === 'search_trace_materials') {
+    header('Content-Type: application/json; charset=utf-8');
+    $q = trim($_GET['q'] ?? '');
+    $klas = trim($_GET['klas'] ?? 'Raw Materials');
+    $escQ = $koneksi->real_escape_string($q);
+
+    $whereSearch = "";
+    if (!empty($escQ)) {
+        $whereSearch = " AND (b.KODE_BARANG LIKE '%{$escQ}%' OR b.URAIAN LIKE '%{$escQ}%' OR b.NOMOR_DAFTAR LIKE '%{$escQ}%' OR b.NOMOR_AJU LIKE '%{$escQ}%') ";
+    }
+    $whereKlas = "";
+    if (!empty($klas) && $klas !== 'ALL') {
+        $escKl = $koneksi->real_escape_string($klas);
+        $whereKlas = " AND b.KLAS LIKE '%{$escKl}%' ";
+    }
+
+    $sql = "SELECT 
+        b.KODE_BARANG, b.URAIAN, b.KLAS, b.UNIT, 
+        COALESCE(b.BC, '23') as ref_bc,
+        COALESCE(b.NOMOR_DAFTAR, '') as ref_no_daftar,
+        COALESCE(b.TANGGAL_DAFTAR, '') as ref_tgl_daftar,
+        COALESCE(b.NOMOR_AJU, '') as ref_nomor_aju,
+        COALESCE(b.SERI_BARANG, 1) as ref_seri_barang,
+        COALESCE(b.POS_TARIF, '') as ref_hs,
+        COALESCE(b.HARGA_PENYERAHAN, b.CIF, 0) as harga,
+        COALESCE(b.CIF, 0) as cif,
+        COALESCE(b.NAMA_BS, '-') as ref_supplier,
+        SUM(b.QTY_AKTUAL) as total_qty_masuk
+        FROM bc_1ab2 b
+        WHERE (b.AB IN ('A', 'M') OR b.AB = '' OR b.AB IS NULL)
+          AND {$cmpFilter1ab2}
+          {$whereSearch}
+          {$whereKlas}
+        GROUP BY b.KODE_BARANG, b.URAIAN, b.KLAS, b.UNIT, b.BC, b.NOMOR_DAFTAR, b.TANGGAL_DAFTAR, b.NOMOR_AJU, b.SERI_BARANG, b.POS_TARIF, b.HARGA_PENYERAHAN, b.CIF, b.NAMA_BS
+        HAVING total_qty_masuk > 0
+        ORDER BY b.TANGGAL_DAFTAR DESC, b.KODE_BARANG ASC
+        LIMIT 40";
+
+    $res = $koneksi->query($sql);
+    $data = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $data[] = [
+                'kode_barang'     => $r['KODE_BARANG'],
+                'nama_barang'     => $r['URAIAN'],
+                'klas'            => $r['KLAS'],
+                'sat'             => $r['UNIT'],
+                'ref_bc'          => $r['ref_bc'],
+                'ref_no_daftar'   => $r['ref_no_daftar'],
+                'ref_tgl_daftar'  => $r['ref_tgl_daftar'],
+                'ref_nomor_aju'   => $r['ref_nomor_aju'],
+                'ref_seri_barang' => (int)$r['ref_seri_barang'],
+                'ref_hs'          => $r['ref_hs'],
+                'ref_supplier'    => $r['ref_supplier'],
+                'saldo_qty'       => (float)$r['total_qty_masuk'],
+                'harga'           => (float)$r['harga'],
+                'cif'             => (float)$r['cif']
+            ];
+        }
+    }
+    echo json_encode(['status' => 'OK', 'count' => count($data), 'data' => $data]);
     exit;
 }
 
@@ -580,10 +642,10 @@ if ($action === 'save') {
             $koneksi->query("DELETE FROM bc_issue_dept_req_dtl WHERE id_hdr = '{$escId}'");
         }
 
-        // Insert Item Rincian
+        // Insert Item Rincian dengan Eks BC & Tracing Lengkap
         $stmtDtl = $koneksi->prepare("INSERT INTO bc_issue_dept_req_dtl 
-            (cmp_id, id, id_hdr, req_no, seq, kode_barang, nama_barang, sat, klas, qty_req, qty, qty_appr, source_type, ref_nomor_aju, ref_no_daftar, ref_no_bukti, note, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            (cmp_id, id, id_hdr, req_no, seq, kode_barang, nama_barang, sat, klas, qty_req, qty, qty_appr, source_type, ref_bc, ref_nomor_aju, ref_no_daftar, ref_tgl_daftar, ref_seri_barang, ref_hs, ref_no_bukti, is_internal_produce, trace_material_json, note, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
         $seq = 1;
         foreach ($items as $it) {
@@ -595,19 +657,26 @@ if ($action === 'save') {
             $qtyReq  = (float)($it['qty_req'] ?? 1);
             $qtyAppr = ($targetStatus === 'APPROVED') ? $qtyReq : 0.0;
             $srcType = trim($it['source_type'] ?? 'bc_1ab2');
+            $refBc   = trim($it['ref_bc'] ?? '');
             $refAju  = trim($it['ref_nomor_aju'] ?? '');
             $refDaft = trim($it['ref_no_daftar'] ?? '');
+            $refTgl  = trim($it['ref_tgl_daftar'] ?? '');
+            $refSeri = (int)($it['ref_seri_barang'] ?? 1);
+            $refHs   = trim($it['ref_hs'] ?? '');
             $refBkt  = trim($it['ref_no_bukti'] ?? '');
+            $isProduce = (int)($it['is_internal_produce'] ?? 0);
+            $traceJson = !empty($it['trace_material_json']) ? (is_array($it['trace_material_json']) ? json_encode($it['trace_material_json']) : $it['trace_material_json']) : null;
             $iNote   = trim($it['note'] ?? '');
             $iStatus = $targetStatus;
 
             if (empty($kd) || $qtyReq <= 0) continue;
 
-            $stmtDtl->bind_param("ssssissssdddssssss",
+            $stmtDtl->bind_param("ssssissssdddsssssisssisss",
                 $escCmp, $dtlId, $id, $reqNo, $seq,
                 $kd, $nm, $sat, $iKlas,
                 $qtyReq, $qtyReq, $qtyAppr,
-                $srcType, $refAju, $refDaft, $refBkt, $iNote, $iStatus
+                $srcType, $refBc, $refAju, $refDaft, $refTgl, $refSeri, $refHs, $refBkt,
+                $isProduce, $traceJson, $iNote, $iStatus
             );
             $stmtDtl->execute();
             $seq++;
@@ -843,7 +912,81 @@ if ($action === 'transfer_h2h') {
             $seri++;
         }
 
-        // 4. bc_ceisa_dokumen (BPPB No sebagai Surat Jalan / Dokumen 217)
+        // 3b. bc_ceisa_bahanbaku (Sheet Bahan Baku BC 2.7 / Rekam Data Eks BC Pabean)
+        $koneksi->query("DELETE FROM bc_ceisa_bahanbaku WHERE nomor_aju = '{$escAju}'");
+        $seriBb = 1;
+        $dokPabeanList = [];
+        foreach ($items as $it) {
+            $q = (float)($it['qty_appr'] > 0 ? $it['qty_appr'] : ($it['qty_req'] > 0 ? $it['qty_req'] : $it['qty']));
+            if ($q <= 0) $q = 1;
+            $prc = (float)($it['harga'] ?? 0);
+            if ($prc <= 0) $prc = 10000;
+            $fob = round($q * $prc, 2);
+            $net = round($q * 0.15, 2);
+            $brt = round($q * 0.17, 2);
+
+            $bbKd   = $it['kode_barang'];
+            $bbNm   = $it['nama_barang'];
+            $bbSat  = $it['sat'] ?: 'PCE';
+            $bbHs   = $it['ref_hs'] ?? '';
+            $refBc  = !empty($it['ref_bc']) ? $it['ref_bc'] : '23';
+            $refDaft= $it['ref_no_daftar'] ?? '';
+            $refTgl = $it['ref_tgl_daftar'] ?? '';
+            $refAju = $it['ref_nomor_aju'] ?? '';
+            $refSeri= (int)($it['ref_seri_barang'] ?: 1);
+
+            // Jika barang hasil produksi internal yang telah ditrace bahan bakunya
+            if (!empty($it['is_internal_produce']) && !empty($it['trace_material_json'])) {
+                $tj = json_decode($it['trace_material_json'], true);
+                if ($tj && !empty($tj['kode_barang'])) {
+                    $bbKd   = $tj['kode_barang'];
+                    $bbNm   = $tj['nama_barang'];
+                    $bbSat  = $tj['sat'] ?: $bbSat;
+                    $bbHs   = !empty($tj['ref_hs']) ? $tj['ref_hs'] : $bbHs;
+                    $refBc  = !empty($tj['ref_bc']) ? $tj['ref_bc'] : $refBc;
+                    $refDaft= !empty($tj['ref_no_daftar']) ? $tj['ref_no_daftar'] : $refDaft;
+                    $refTgl = !empty($tj['ref_tgl_daftar']) ? $tj['ref_tgl_daftar'] : $refTgl;
+                    $refAju = !empty($tj['ref_nomor_aju']) ? $tj['ref_nomor_aju'] : $refAju;
+                    $refSeri= (int)($tj['ref_seri_barang'] ?: $refSeri);
+                }
+            }
+
+            $asalBb = ($refBc === '40') ? '1' : '0'; // 1 = Lokal (BC 40), 0 = Impor / Luar Negeri
+
+            $escBbKd   = $koneksi->real_escape_string($bbKd);
+            $escBbNm   = $koneksi->real_escape_string($bbNm);
+            $escBbSat  = $koneksi->real_escape_string($bbSat);
+            $escBbHs   = $koneksi->real_escape_string($bbHs);
+            $escRefBc  = $koneksi->real_escape_string($refBc);
+            $escRefDaft= $koneksi->real_escape_string($refDaft);
+            $escRefTgl = $koneksi->real_escape_string($refTgl);
+            $escRefAju = $koneksi->real_escape_string($refAju);
+
+            $koneksi->query("INSERT INTO bc_ceisa_bahanbaku (
+                cmp_id, nomor_aju, seri_barang, seri_bahan_baku, kode_asal_bahan_baku,
+                hs, kode_barang, uraian, merek, tipe, ukuran, spesifikasi_lain,
+                kode_satuan, jumlah_satuan, kode_kemasan, jumlah_kemasan,
+                kode_dokumen_asal, nomor_daftar_asal, tanggal_daftar_asal, nomor_aju_asal, seri_barang_asal,
+                netto, bruto, cif, cif_rupiah, ndpbm, harga_penyerahan, user_id, upd_time
+            ) VALUES (
+                '{$escAsal}', '{$escAju}', {$seriBb}, 1, '{$asalBb}',
+                '{$escBbHs}', '{$escBbKd}', '{$escBbNm}', '-', '-', '-', '-',
+                '{$escBbSat}', {$q}, 'CT', 1,
+                '{$escRefBc}', '{$escRefDaft}', '{$escRefTgl}', '{$escRefAju}', {$refSeri},
+                {$net}, {$brt}, {$fob}, {$fob}, 1, {$fob}, 'DEPT_REQ', NOW()
+            )");
+
+            if (!empty($refDaft)) {
+                $dokPabeanList["{$refBc}_{$refDaft}"] = [
+                    'kode_dokumen'    => $refBc,
+                    'nomor_dokumen'   => $refDaft,
+                    'tanggal_dokumen' => !empty($refTgl) ? $refTgl : $reqDate
+                ];
+            }
+            $seriBb++;
+        }
+
+        // 4. bc_ceisa_dokumen (BPPB No sebagai Surat Jalan 217 + Dokumen Pabean Asal Eks BC)
         $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '{$escAju}'");
         $escReqNo = $koneksi->real_escape_string($reqNo);
         $koneksi->query("INSERT INTO bc_ceisa_dokumen (
@@ -851,6 +994,19 @@ if ($action === 'transfer_h2h') {
         ) VALUES (
             '{$escAsal}', '{$escAju}', 1, '217', '{$escReqNo}', '{$reqDate}', 'DEPT_REQ', NOW()
         )");
+
+        $seriDok = 2;
+        foreach ($dokPabeanList as $dp) {
+            $eKode = $koneksi->real_escape_string($dp['kode_dokumen']);
+            $eNom  = $koneksi->real_escape_string($dp['nomor_dokumen']);
+            $eTgl  = $koneksi->real_escape_string($dp['tanggal_dokumen']);
+            $koneksi->query("INSERT INTO bc_ceisa_dokumen (
+                cmp_id, nomor_aju, seri, kode_dokumen, nomor_dokumen, tanggal_dokumen, user_id, upd_time
+            ) VALUES (
+                '{$escAsal}', '{$escAju}', {$seriDok}, '{$eKode}', '{$eNom}', '{$eTgl}', 'DEPT_REQ', NOW()
+            )");
+            $seriDok++;
+        }
 
         // 5. bc_ceisa_kemasan
         $koneksi->query("DELETE FROM bc_ceisa_kemasan WHERE nomor_aju = '{$escAju}'");
@@ -1016,7 +1172,22 @@ if ($action === 'print_bppb') {
                         <td style="text-align: center;"><?= htmlspecialchars($it['sat']) ?></td>
                         <td style="text-align: right; font-weight: bold;"><?= number_format((float)$it['qty_req'], 2, ',', '.') ?></td>
                         <td style="text-align: right;"><?= number_format((float)($it['qty_appr'] ?: $it['qty_req']), 2, ',', '.') ?></td>
-                        <td style="font-size: 9px;"><?= htmlspecialchars(trim(($it['ref_bc'] ?? '') . ' ' . ($it['ref_no_daftar'] ?? '') . ' ' . ($it['ref_no_bukti'] ?? '')) ?: '-') ?></td>
+                        <td style="font-size: 8.5px;">
+                            <?php
+                            $refDisplay = '-';
+                            if (!empty($it['is_internal_produce']) && !empty($it['trace_material_json'])) {
+                                $tj = json_decode($it['trace_material_json'], true);
+                                if ($tj && !empty($tj['kode_barang'])) {
+                                    $refDisplay = 'Hasil Produksi (Trace: ' . $tj['kode_barang'] . ' | BC ' . ($it['ref_bc'] ?: $tj['ref_bc']) . ' No. ' . ($it['ref_no_daftar'] ?: $tj['ref_no_daftar']) . ')';
+                                }
+                            } elseif (!empty($it['ref_no_daftar'])) {
+                                $refDisplay = 'BC ' . ($it['ref_bc'] ?: '23') . ' No. ' . $it['ref_no_daftar'] . (!empty($it['ref_tgl_daftar']) ? ' Tgl ' . $it['ref_tgl_daftar'] : '') . ' Seri ' . ($it['ref_seri_barang'] ?: 1);
+                            } elseif (!empty($it['ref_no_bukti'])) {
+                                $refDisplay = $it['ref_no_bukti'];
+                            }
+                            echo htmlspecialchars($refDisplay);
+                            ?>
+                        </td>
                         <td><?= htmlspecialchars($it['note'] ?: '-') ?></td>
                     </tr>
                 <?php endforeach; endif; ?>
@@ -1297,7 +1468,11 @@ if ($action === 'print_bppb') {
         .badge-source-pabean { background: #e6f7ff; color: #1890ff; border: 1px solid #91d5ff; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
         .badge-source-issue { background: #fff7e6; color: #fa8c16; border: 1px solid #ffd591; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
         .badge-source-material { background: #f6ffed; color: #52c41a; border: 1px solid #b7eb8f; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
-        .badge-source-manual { background: #f9f0ff; color: #722ed1; border: 1px solid #d3adf7; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+        .badge-source-produce { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; padding: 1px 5px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+        .btn-trace-warning { background: #fffbe6; color: #d46b08; border: 1px solid #ffe58f; font-weight: 700; font-size: 10px; padding: 4px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+        .btn-trace-warning:hover { background: #fff1b8; }
+        .btn-link-trace { background: transparent; border: 1px solid var(--border-color); color: var(--text-color); font-size: 9.5px; padding: 1px 6px; border-radius: 3px; cursor: pointer; }
+        .btn-link-trace:hover { background: var(--bg-card); color: var(--primary); border-color: var(--primary); }
 
         /* MODAL */
         .modal-overlay {
@@ -1691,27 +1866,29 @@ if ($action === 'print_bppb') {
                         <span id="itemCountBadge" class="status-badge status-approved">0 Item</span>
                     </div>
                     <div style="display:flex; gap:6px;">
-                        <button type="button" class="btn-action btn-default" onclick="openItemPickerModal()" style="color:var(--primary); border-color:var(--primary);">
-                            <i class="fa-solid fa-magnifying-glass-plus"></i> <span>+ Pilih dari Master (Pabean / Issue)</span>
-                        </button>
-                        <button type="button" class="btn-action btn-default" onclick="addManualRow()">
-                            <i class="fa-solid fa-pen-to-square"></i> <span>+ Input Part Baru / Manual</span>
+                        <button type="button" class="btn-action btn-primary" onclick="openItemPickerModal()" style="font-weight:700;">
+                            <i class="fa-solid fa-magnifying-glass-plus"></i> <span>+ Pilih Barang (bc_1ab2 / bc_material)</span>
                         </button>
                     </div>
+                </div>
+
+                <div style="margin-bottom: 8px; font-size: 11px; color: var(--text-muted); background: rgba(0,0,0,0.02); border: 1px dashed var(--border-color); padding: 6px 10px; border-radius: 4px; display:flex; align-items:center; gap:8px;">
+                    <i class="fa-solid fa-circle-info" style="color:var(--primary); font-size:13px;"></i> 
+                    <span>Semua barang <strong>wajib bersumber dari IT Inventory (bc_1ab2) atau Master Material (bc_material)</strong>. Dokumen pabean asal (Nomor AJU, Nomor & Tanggal Daftar, Seri Barang) terekam otomatis untuk pembuatan BC 2.7. Barang hasil produksi internal (Finish Goods, Mold, Regrind) wajib menentukan asal bahan bakunya via tombol <strong>Trace Bahan Baku</strong>.</span>
                 </div>
 
                 <table class="custom-table" style="border: 1px solid var(--border-color); border-radius: 4px;">
                     <thead>
                         <tr>
-                            <th style="width:30px; text-align:center;">#</th>
-                            <th style="width:80px;">Sumber</th>
-                            <th style="width:140px;">Kode Barang</th>
+                            <th style="width:25px; text-align:center;">#</th>
+                            <th style="width:105px;">Sumber & Klas</th>
+                            <th style="width:130px;">Kode Barang</th>
                             <th>Nama / Uraian Barang</th>
-                            <th style="width:75px; text-align:center;">Satuan</th>
-                            <th style="width:85px; text-align:right;">Qty Minta</th>
-                            <th style="width:120px;">Ref Dokumen</th>
-                            <th style="width:130px;">Catatan Item</th>
-                            <th style="width:40px; text-align:center;">Aksi</th>
+                            <th style="width:60px; text-align:center;">Satuan</th>
+                            <th style="width:75px; text-align:right;">Qty Minta</th>
+                            <th style="width:235px;">Dokumen Pabean Asal (Eks BC)</th>
+                            <th style="width:115px;">Catatan Item</th>
+                            <th style="width:35px; text-align:center;">Aksi</th>
                         </tr>
                     </thead>
                     <tbody id="fItemsTbody">
@@ -1731,11 +1908,11 @@ if ($action === 'print_bppb') {
         </div>
     </div>
 
-    <!-- 6. MODAL ITEM PICKER (PENCARIAN CERDAS DARI PABEAN bc_1ab2, ISSUE, & MATERIAL) -->
+    <!-- 6. MODAL ITEM PICKER (PENCARIAN CERDAS DARI PABEAN bc_1ab2 & MASTER MATERIAL bc_material) -->
     <div class="modal-overlay" id="modalItemPicker" style="z-index: 1100;">
-        <div class="modal-card" style="max-width: 900px; height: 80vh;">
+        <div class="modal-card" style="max-width: 960px; height: 82vh;">
             <div class="modal-header">
-                <h3><i class="fa-solid fa-boxes-stacked" style="color:var(--primary); margin-right:6px;"></i> Pilih Barang dari Master / Riwayat</h3>
+                <h3><i class="fa-solid fa-boxes-stacked" style="color:var(--primary); margin-right:6px;"></i> Pilih Barang dari IT Inventory (bc_1ab2) / Master Material</h3>
                 <button type="button" class="btn-action btn-default" style="border:none;" onclick="closeModal('modalItemPicker')">✕</button>
             </div>
             <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-color); background: var(--bg-card); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -1745,22 +1922,24 @@ if ($action === 'print_bppb') {
                 </div>
                 <div>
                     <select id="pickerSource" class="form-select-sm" onchange="runPickerSearch()">
-                        <option value="all">Semua Sumber (Pabean + Issue + Master)</option>
-                        <option value="bc_1ab2">Dokumen Pabean Masuk (bc_1ab2)</option>
-                        <option value="bc_issue">Internal Issue / Produksi (bc_issue_dtl)</option>
-                        <option value="bc_material">Master Material (bc_material)</option>
+                        <option value="bc_1ab2">Dokumen Pabean Masuk / IT Inventory (bc_1ab2)</option>
+                        <option value="bc_material">Master Material Framas (bc_material)</option>
+                        <option value="all">Semua Sumber Data</option>
                     </select>
                 </div>
                 <div>
                     <select id="pickerKlas" class="form-select-sm" onchange="runPickerSearch()">
-                        <option value="ALL">Semua Kategori</option>
-                        <option value="Mesin">Mesin (Machine)</option>
+                        <option value="ALL">Semua Kategori (KLAS)</option>
+                        <option value="Machine">Mesin (Machine)</option>
                         <option value="Part Machine">Part Mesin (Sparepart)</option>
                         <option value="Tools">Tools / Tooling</option>
                         <option value="Mold">Mold</option>
                         <option value="Raw Materials">Raw Materials (Bahan Baku)</option>
-                        <option value="Consumables">Consumables</option>
+                        <option value="Finished Goods">Finished Goods (Barang Jadi)</option>
                         <option value="Work In Progress">Work In Progress (WIP)</option>
+                        <option value="Consumables">Consumables</option>
+                        <option value="Factory Equipment">Factory Equipment</option>
+                        <option value="Wastes">Wastes / Scrap</option>
                     </select>
                 </div>
             </div>
@@ -1768,13 +1947,13 @@ if ($action === 'print_bppb') {
                 <table class="custom-table" id="pickerTable">
                     <thead>
                         <tr>
-                            <th style="width: 80px;">Sumber</th>
-                            <th style="width: 150px;">Kode Barang</th>
+                            <th style="width: 75px;">Sumber</th>
+                            <th style="width: 140px;">Kode Barang</th>
                             <th>Uraian Barang</th>
-                            <th style="width: 90px;">Kategori</th>
-                            <th style="width: 55px; text-align:center;">Satuan</th>
-                            <th style="width: 140px;">Ref Dokumen / Asal</th>
-                            <th style="width: 80px; text-align:center;">Aksi</th>
+                            <th style="width: 95px;">Kategori</th>
+                            <th style="width: 50px; text-align:center;">Sat</th>
+                            <th style="width: 210px;">Dokumen Pabean Masuk (Eks BC)</th>
+                            <th style="width: 75px; text-align:center;">Aksi</th>
                         </tr>
                     </thead>
                     <tbody id="pickerTbody">
@@ -1784,6 +1963,59 @@ if ($action === 'print_bppb') {
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn-action btn-default" onclick="closeModal('modalItemPicker')">Tutup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. MODAL TRACE BAHAN BAKU / EKS BC (KHUSUS FINISH GOODS, MOLD, REGRIND, HASIL PRODUKSI) -->
+    <div class="modal-overlay" id="modalTraceMaterial" style="z-index: 1200;">
+        <div class="modal-card" style="max-width: 950px; height: 82vh;">
+            <div class="modal-header" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color:#fff;">
+                <h3 style="color:#fff;"><i class="fa-solid fa-code-branch" style="margin-right:6px;"></i> Tracing Dokumen Pabean Bahan Baku Asal (Eks BC)</h3>
+                <button type="button" class="btn-action btn-default" style="border:none; color:#fff; background:rgba(255,255,255,0.2);" onclick="closeModal('modalTraceMaterial')">✕</button>
+            </div>
+            <div style="padding: 10px 16px; background: #f0fdf4; border-bottom: 1px solid #bbf7d0;">
+                <div style="font-size:12px; color:#166534; font-weight:700;">
+                    Barang yang Dikeluarkan: <span id="traceItemInfo" style="color:#047857;">-</span>
+                </div>
+                <div style="font-size:11px; color:#15803d; margin-top:2px;">
+                    Barang hasil produksi (Finish Goods / Mold buatan sendiri / Raw Material regrind) <strong>wajib menautkan Dokumen Pabean Asal (Eks BC)</strong> dari IT Inventory (bc_1ab2) agar sheet Bahan Baku BC 2.7 terisi otomatis dan valid.
+                </div>
+            </div>
+            <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-color); background: var(--bg-card); display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div class="search-box" style="flex:2;">
+                    <input type="text" id="traceSearch" placeholder="Ketik Kode Bahan Baku, Uraian, No. Aju, No. Daftar BC..." oninput="debounceTraceSearch()">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </div>
+                <div>
+                    <select id="traceKlas" class="form-select-sm" onchange="runTraceSearch()">
+                        <option value="Raw Materials">Raw Materials (Bahan Baku)</option>
+                        <option value="Part Machine">Part Machine (Sparepart)</option>
+                        <option value="Tools">Tools / Tooling</option>
+                        <option value="ALL">Semua Kategori IT Inventory</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-body" style="padding: 0;">
+                <table class="custom-table" id="traceTable">
+                    <thead>
+                        <tr>
+                            <th style="width: 130px;">Kode Bahan</th>
+                            <th>Uraian Bahan Baku</th>
+                            <th style="width: 90px;">Kategori</th>
+                            <th style="width: 50px; text-align:center;">Sat</th>
+                            <th style="width: 200px;">Dokumen Pabean Asal (Eks BC)</th>
+                            <th style="width: 90px; text-align:right;">Saldo Masuk</th>
+                            <th style="width: 90px; text-align:center;">Aksi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="traceTbody">
+                        <tr><td colspan="7" style="text-align:center; padding:30px; color:var(--text-muted);">Memuat daftar bahan baku IT Inventory...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-action btn-default" onclick="closeModal('modalTraceMaterial')">Batal</button>
             </div>
         </div>
     </div>
@@ -2077,48 +2309,118 @@ if ($action === 'print_bppb') {
             }
         }
 
+        let currentTraceTargetRowIdx = null;
+        let traceSearchTimer = null;
+
         function addItemRow(it = {}) {
             const tbody = document.getElementById('fItemsTbody');
             const rowIdx = tbody.children.length + 1;
             const tr = document.createElement('tr');
 
+            const isProduce = (it.is_internal_produce == 1) || 
+                              ['Finished Goods', 'Mold', 'Work In Progress'].includes(it.klas) || 
+                              (it.nama_barang && it.nama_barang.toUpperCase().includes('REGRIND'));
+
             let srcBadge = '<span class="badge-source-pabean">Pabean</span>';
-            if (it.source_type === 'bc_issue_dtl') srcBadge = '<span class="badge-source-issue">Issue</span>';
-            else if (it.source_type === 'bc_material') srcBadge = '<span class="badge-source-material">Master</span>';
-            else if (it.source_type === 'manual') srcBadge = '<span class="badge-source-manual">Manual</span>';
+            if (it.source_type === 'bc_material') srcBadge = '<span class="badge-source-material">Master</span>';
+
+            const klasBadge = `<span style="font-size:9px; background:rgba(0,0,0,0.06); color:#374151; padding:1px 4px; border-radius:3px; font-weight:600; display:inline-block; margin-top:2px;">${escapeHtml(it.klas || 'General')}</span>`;
+
+            // Parsing trace json jika barang hasil produksi internal
+            let traceObj = null;
+            if (it.trace_material_json) {
+                try { traceObj = typeof it.trace_material_json === 'string' ? JSON.parse(it.trace_material_json) : it.trace_material_json; } catch(e){}
+            }
+
+            let eksBcHtml = '';
+            if (traceObj && traceObj.kode_barang) {
+                eksBcHtml = `
+                    <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:4px 7px; border-radius:4px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <span class="badge-source-produce"><i class="fa-solid fa-seedling"></i> Traced Internal</span>
+                            <button type="button" class="btn-link-trace" onclick="openTraceModalForRow(${rowIdx})"><i class="fa-solid fa-pen"></i> Ubah</button>
+                        </div>
+                        <div style="font-size:10px; font-weight:700; color:#166534; margin-top:2px;">${escapeHtml(traceObj.kode_barang)} - ${escapeHtml(traceObj.nama_barang)}</div>
+                        <div style="font-size:9.5px; color:#15803d;">Eks BC ${escapeHtml(it.ref_bc || traceObj.ref_bc || '23')} No. ${escapeHtml(it.ref_no_daftar || traceObj.ref_no_daftar)} (Seri ${it.ref_seri_barang || traceObj.ref_seri_barang || 1})</div>
+                        <div style="font-size:9px; font-family:monospace; color:#4b5563;">AJU: ${escapeHtml(it.ref_nomor_aju || traceObj.ref_nomor_aju)}</div>
+                    </div>
+                `;
+            } else if (it.ref_no_daftar && it.ref_nomor_aju) {
+                eksBcHtml = `
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; padding:4px 7px; border-radius:4px;">
+                        <div style="display:flex; align-items:center; justify-content:space-between;">
+                            <div><span class="badge-source-pabean">BC ${escapeHtml(it.ref_bc || '23')}</span> <strong style="font-size:11px;">No. ${escapeHtml(it.ref_no_daftar)}</strong></div>
+                            <button type="button" class="btn-link-trace" onclick="openTraceModalForRow(${rowIdx})" title="Ganti tautan Dokumen Asal"><i class="fa-solid fa-code-branch"></i> Ubah</button>
+                        </div>
+                        <div style="font-size:9.5px; color:var(--text-muted); margin-top:2px;">Tgl: ${escapeHtml(it.ref_tgl_daftar || '-')} | Seri: ${it.ref_seri_barang || 1}</div>
+                        <div style="font-size:9px; font-family:monospace; color:#4b5563;">AJU: ${escapeHtml(it.ref_nomor_aju)}</div>
+                    </div>
+                `;
+            } else {
+                eksBcHtml = `
+                    <button type="button" class="btn-trace-warning" style="width:100%; text-align:left; justify-content:space-between;" onclick="openTraceModalForRow(${rowIdx})">
+                        <span><i class="fa-solid fa-triangle-exclamation"></i> Wajib Tautkan Asal Material (Eks BC)</span>
+                        <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                `;
+            }
+
+            const traceJsonStr = traceObj ? JSON.stringify(traceObj) : (typeof it.trace_material_json === 'string' ? it.trace_material_json : '');
 
             tr.innerHTML = `
                 <td style="text-align:center; color:var(--text-muted); font-size:11px;">${rowIdx}</td>
-                <td>${srcBadge}<input type="hidden" class="it-src" value="${escapeHtml(it.source_type || 'bc_1ab2')}"></td>
-                <td><input type="text" class="form-control it-kd" style="font-family:monospace; font-weight:700;" value="${escapeHtml(it.kode_barang || '')}" placeholder="Kode barang..."></td>
                 <td>
-                    <input type="text" class="form-control it-nm" value="${escapeHtml(it.nama_barang || '')}" placeholder="Nama / deskripsi barang...">
-                    <input type="hidden" class="it-klas" value="${escapeHtml(it.klas || '')}">
+                    <div>${srcBadge}</div>
+                    <div>${klasBadge}</div>
+                    <input type="hidden" class="it-src" value="${escapeHtml(it.source_type || 'bc_1ab2')}">
+                    <input type="hidden" class="it-klas" value="${escapeHtml(it.klas || 'General')}">
+                    <input type="hidden" class="it-is-internal" value="${isProduce ? 1 : 0}">
+                    <input type="hidden" class="it-trace-json" value="${escapeHtml(traceJsonStr)}">
                 </td>
-                <td><input type="text" class="form-control it-sat" style="text-align:center;" value="${escapeHtml(it.sat || 'PCE')}"></td>
-                <td><input type="number" step="0.01" min="0.01" class="form-control it-qty" style="text-align:right; font-weight:700;" value="${it.display_qty_req || it.qty_req || 1}"></td>
                 <td>
-                    <input type="text" class="form-control it-ref" style="font-size:10.5px;" value="${escapeHtml(it.ref_no_daftar || it.ref_no_bukti || it.ref_bc || '')}" placeholder="No Ref...">
+                    <input type="text" class="form-control it-kd" style="font-family:monospace; font-weight:700; background:rgba(0,0,0,0.02);" readonly value="${escapeHtml(it.kode_barang || '')}">
+                </td>
+                <td>
+                    <input type="text" class="form-control it-nm" style="background:rgba(0,0,0,0.02);" readonly value="${escapeHtml(it.nama_barang || '')}">
+                </td>
+                <td>
+                    <input type="text" class="form-control it-sat" style="text-align:center; background:rgba(0,0,0,0.02);" readonly value="${escapeHtml(it.sat || 'PCE')}">
+                </td>
+                <td>
+                    <input type="number" step="0.01" min="0.01" class="form-control it-qty" style="text-align:right; font-weight:700;" value="${it.display_qty_req || it.qty_req || 1}">
+                </td>
+                <td>
+                    <div class="it-eks-bc-container">${eksBcHtml}</div>
+                    <input type="hidden" class="it-ref-bc" value="${escapeHtml(it.ref_bc || '')}">
+                    <input type="hidden" class="it-ref-no-daftar" value="${escapeHtml(it.ref_no_daftar || '')}">
+                    <input type="hidden" class="it-ref-tgl-daftar" value="${escapeHtml(it.ref_tgl_daftar || '')}">
+                    <input type="hidden" class="it-ref-seri" value="${it.ref_seri_barang || 1}">
                     <input type="hidden" class="it-ref-aju" value="${escapeHtml(it.ref_nomor_aju || '')}">
+                    <input type="hidden" class="it-ref-hs" value="${escapeHtml(it.ref_hs || '')}">
                 </td>
-                <td><input type="text" class="form-control it-note" style="font-size:10.5px;" value="${escapeHtml(it.note || '')}" placeholder="Catatan..."></td>
+                <td>
+                    <input type="text" class="form-control it-note" style="font-size:10.5px;" value="${escapeHtml(it.note || '')}" placeholder="Catatan keperluan...">
+                </td>
                 <td style="text-align:center;">
-                    <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px; color:var(--danger); border:none;" onclick="this.closest('tr').remove(); updateItemCount();"><i class="fa-solid fa-trash"></i></button>
+                    <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px; color:var(--danger); border:none;" onclick="this.closest('tr').remove(); reindexItemRows();"><i class="fa-solid fa-trash"></i></button>
                 </td>
             `;
             tbody.appendChild(tr);
             updateItemCount();
+            return rowIdx;
         }
 
-        function addManualRow() {
-            addItemRow({
-                source_type: 'manual',
-                kode_barang: '',
-                nama_barang: '',
-                sat: 'PCE',
-                qty_req: 1,
-                klas: 'General'
+        function reindexItemRows() {
+            const rows = document.querySelectorAll('#fItemsTbody tr');
+            rows.forEach((tr, idx) => {
+                const newIdx = idx + 1;
+                tr.children[0].innerText = newIdx;
+                const btnTrace = tr.querySelector('.it-eks-bc-container button');
+                if (btnTrace) {
+                    btnTrace.setAttribute('onclick', `openTraceModalForRow(${newIdx})`);
+                }
             });
+            updateItemCount();
         }
 
         function updateItemCount() {
@@ -2143,6 +2445,8 @@ if ($action === 'print_bppb') {
 
             const items = [];
             let hasEmptyKd = false;
+            let missingEksBc = [];
+
             rows.forEach(tr => {
                 const kd = tr.querySelector('.it-kd').value.trim();
                 const nm = tr.querySelector('.it-nm').value.trim();
@@ -2150,11 +2454,21 @@ if ($action === 'print_bppb') {
                 const qty = parseFloat(tr.querySelector('.it-qty').value) || 0;
                 const src = tr.querySelector('.it-src').value;
                 const klas = tr.querySelector('.it-klas').value;
-                const ref = tr.querySelector('.it-ref').value;
-                const refAju = tr.querySelector('.it-ref-aju').value;
-                const note = tr.querySelector('.it-note').value;
+                const isInternal = parseInt(tr.querySelector('.it-is-internal').value) || 0;
+                const traceJson = tr.querySelector('.it-trace-json').value;
+                const refBc = tr.querySelector('.it-ref-bc').value.trim();
+                const refNoDaftar = tr.querySelector('.it-ref-no-daftar').value.trim();
+                const refTglDaftar = tr.querySelector('.it-ref-tgl-daftar').value.trim();
+                const refSeri = parseInt(tr.querySelector('.it-ref-seri').value) || 1;
+                const refAju = tr.querySelector('.it-ref-aju').value.trim();
+                const refHs = tr.querySelector('.it-ref-hs').value.trim();
+                const note = tr.querySelector('.it-note').value.trim();
 
                 if (!kd || !nm) hasEmptyKd = true;
+                if (!refNoDaftar || !refAju) {
+                    missingEksBc.push(`${kd} (${nm})`);
+                }
+
                 items.push({
                     kode_barang: kd,
                     nama_barang: nm,
@@ -2162,14 +2476,30 @@ if ($action === 'print_bppb') {
                     qty_req: qty,
                     source_type: src,
                     klas: klas,
-                    ref_no_daftar: ref,
+                    ref_bc: refBc,
+                    ref_no_daftar: refNoDaftar,
+                    ref_tgl_daftar: refTglDaftar,
+                    ref_seri_barang: refSeri,
                     ref_nomor_aju: refAju,
+                    ref_hs: refHs,
+                    is_internal_produce: isInternal,
+                    trace_material_json: traceJson,
                     note: note
                 });
             });
 
             if (hasEmptyKd) {
                 Swal.fire({ icon: 'warning', title: 'Data Belum Lengkap', text: 'Semua item barang harus memiliki Kode Barang dan Nama Barang.' });
+                return;
+            }
+
+            if (missingEksBc.length > 0) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Dokumen Asal (Eks BC) Wajib Ditentukan',
+                    html: `Item barang berikut belum memiliki Dokumen Pabean Asal (Eks BC / Trace Bahan Baku):<br><br><div style="text-align:left; background:#fff1f0; border:1px solid #ffa39e; padding:8px 12px; border-radius:4px; font-size:11.5px; font-weight:600; color:#cf1322;">${missingEksBc.join('<br>')}</div><br>Silakan klik tombol <em>'Wajib Tautkan Asal Material'</em> pada tabel barang sebelum mengajukan BPPB untuk transfer BC 2.7.`,
+                    confirmButtonColor: '#1890ff'
+                });
                 return;
             }
 
@@ -2337,27 +2667,35 @@ if ($action === 'print_bppb') {
                 if (json.status !== 'OK') throw new Error(json.message);
 
                 if (!json.data || json.data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);"><i class="fa-solid fa-box-open" style="font-size:22px; opacity:0.4; display:block; margin-bottom:6px;"></i>Tidak ada barang ditemukan. Coba ubah kata kunci atau gunakan opsi Input Baru.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);"><i class="fa-solid fa-box-open" style="font-size:22px; opacity:0.4; display:block; margin-bottom:6px;"></i>Tidak ada barang ditemukan sesuai filter. Coba ubah kata kunci atau ganti filter kategori/sumber.</td></tr>`;
                     return;
                 }
 
                 let html = '';
                 json.data.forEach(item => {
                     const itemJson = JSON.stringify(item).replace(/"/g, '&quot;');
+                    let eksInfo = '';
+                    if (item.ref_no_daftar && item.ref_nomor_aju) {
+                        eksInfo = `<div><span class="badge-source-pabean">BC ${escapeHtml(item.ref_bc || '23')}</span> <strong style="font-size:11px;">No. ${escapeHtml(item.ref_no_daftar)}</strong></div>
+                                   <div style="font-size:9.5px; color:var(--text-muted);">Tgl: ${escapeHtml(item.ref_tgl_daftar || '-')} | Seri: ${item.ref_seri_barang || 1}</div>
+                                   <div style="font-size:9px; font-family:monospace; color:#4b5563;">AJU: ${escapeHtml(item.ref_nomor_aju)}</div>`;
+                    } else if (item.is_internal_produce == 1) {
+                        eksInfo = `<span style="color:#059669; font-size:10px; font-weight:700;"><i class="fa-solid fa-seedling"></i> Hasil Produksi - Butuh Trace Bahan Asal</span>`;
+                    } else {
+                        eksInfo = `<span style="color:#d97706; font-size:10px; font-weight:600;"><i class="fa-solid fa-triangle-exclamation"></i> Master - Butuh Tracing Eks BC</span>`;
+                    }
+
                     html += `
                         <tr>
                             <td><span class="${item.badge_class}">${escapeHtml(item.source_label)}</span></td>
-                            <td><strong style="font-family:monospace; color:var(--primary);">${escapeHtml(item.kode_barang)}</strong></td>
+                            <td><strong style="font-family:monospace; color:var(--primary); font-size:11px;">${escapeHtml(item.kode_barang)}</strong></td>
                             <td>
-                                <div>${escapeHtml(item.nama_barang)}</div>
+                                <div style="font-weight:600;">${escapeHtml(item.nama_barang)}</div>
                                 <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${escapeHtml(item.stok_info || '')}</div>
                             </td>
                             <td><span style="font-size:10px; background:rgba(0,0,0,0.05); padding:1px 5px; border-radius:3px;">${escapeHtml(item.klas)}</span></td>
                             <td style="text-align:center; font-weight:700;">${escapeHtml(item.sat)}</td>
-                            <td style="font-size:10px;">
-                                <div>${escapeHtml(item.ref_bc)} ${escapeHtml(item.ref_no_daftar)}</div>
-                                <div style="color:var(--text-muted);">${escapeHtml(item.ref_supplier || item.ref_no_bukti || '')}</div>
-                            </td>
+                            <td style="font-size:10px;">${eksInfo}</td>
                             <td style="text-align:center;">
                                 <button type="button" class="btn-action btn-primary" style="height:24px; padding:0 8px; font-size:10px;" onclick='selectPickerItem(${itemJson})'>
                                     + Pilih
@@ -2373,22 +2711,169 @@ if ($action === 'print_bppb') {
         }
 
         function selectPickerItem(item) {
-            addItemRow({
+            const isInternal = (item.is_internal_produce == 1) || 
+                               ['Finished Goods', 'Mold', 'Work In Progress'].includes(item.klas) || 
+                               (item.nama_barang && item.nama_barang.toUpperCase().includes('REGRIND')) ||
+                               (item.source === 'bc_material' && !item.ref_no_daftar);
+
+            const newRowIdx = addItemRow({
                 source_type: item.source,
                 kode_barang: item.kode_barang,
                 nama_barang: item.nama_barang,
-                sat: item.sat,
-                klas: item.klas,
+                sat: item.sat || 'PCE',
+                klas: item.klas || 'General',
                 qty_req: 1,
-                ref_bc: item.ref_bc,
-                ref_no_daftar: item.ref_no_daftar,
-                ref_no_bukti: item.ref_no_bukti,
-                ref_nomor_aju: item.ref_nomor_aju,
+                ref_bc: item.ref_bc || '',
+                ref_no_daftar: item.ref_no_daftar || '',
+                ref_tgl_daftar: item.ref_tgl_daftar || '',
+                ref_nomor_aju: item.ref_nomor_aju || '',
+                ref_seri_barang: item.ref_seri_barang || 1,
+                ref_hs: item.ref_hs || '',
+                is_internal_produce: isInternal ? 1 : 0,
+                trace_material_json: '',
                 note: ''
             });
-            Swal.mixin({ toast: true, position: 'top-end', timer: 1500, showConfirmButton: false }).fire({
+
+            closeModal('modalItemPicker');
+
+            if (isInternal && !item.ref_no_daftar) {
+                // Otomatis buka modal Trace Bahan Baku agar user langsung menentukan Dokumen Asal
+                setTimeout(() => {
+                    openTraceModalForRow(newRowIdx);
+                }, 200);
+            } else {
+                Swal.mixin({ toast: true, position: 'top-end', timer: 1800, showConfirmButton: false }).fire({
+                    icon: 'success',
+                    title: `Item '${item.kode_barang}' ditambahkan (Eks BC terekam)`
+                });
+            }
+        }
+
+        // --- TRACING DOKUMEN PABEAN ASAL (EKS BC) UNTUK PRODUKSI INTERNAL / MASTER ---
+        function openTraceModalForRow(rowIdx) {
+            currentTraceTargetRowIdx = rowIdx;
+            const tbody = document.getElementById('fItemsTbody');
+            const tr = tbody.children[rowIdx - 1];
+            if (!tr) return;
+
+            const kd = tr.querySelector('.it-kd').value;
+            const nm = tr.querySelector('.it-nm').value;
+            const klas = tr.querySelector('.it-klas').value;
+            const sat = tr.querySelector('.it-sat').value;
+
+            document.getElementById('traceItemInfo').innerText = `${kd} - ${nm} (${klas}) [Sat: ${sat}]`;
+            document.getElementById('traceSearch').value = '';
+            
+            const traceKlasSel = document.getElementById('traceKlas');
+            if (klas === 'Mold' || klas === 'Machine' || klas === 'Part Machine') {
+                traceKlasSel.value = 'Part Machine';
+            } else {
+                traceKlasSel.value = 'Raw Materials';
+            }
+
+            runTraceSearch();
+            openModal('modalTraceMaterial');
+        }
+
+        function debounceTraceSearch() {
+            clearTimeout(traceSearchTimer);
+            traceSearchTimer = setTimeout(() => { runTraceSearch(); }, 300);
+        }
+
+        async function runTraceSearch() {
+            const tbody = document.getElementById('traceTbody');
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Mencari bahan baku di IT Inventory...</td></tr>`;
+
+            const q = encodeURIComponent(document.getElementById('traceSearch').value.trim());
+            const klas = encodeURIComponent(document.getElementById('traceKlas').value);
+
+            try {
+                const res = await fetch(`department_request.php?action=search_trace_materials&q=${q}&klas=${klas}&_t=${Date.now()}`);
+                const json = await res.json();
+                if (json.status !== 'OK') throw new Error(json.message);
+
+                if (!json.data || json.data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);"><i class="fa-solid fa-box-open" style="font-size:22px; opacity:0.4; display:block; margin-bottom:6px;"></i>Tidak ada dokumen bahan baku ditemukan. Coba ubah kata kunci atau ganti filter kategori.</td></tr>`;
+                    return;
+                }
+
+                let html = '';
+                json.data.forEach(bb => {
+                    const bbJson = JSON.stringify(bb).replace(/"/g, '&quot;');
+                    html += `
+                        <tr>
+                            <td><strong style="font-family:monospace; color:var(--primary); font-size:11px;">${escapeHtml(bb.kode_barang)}</strong></td>
+                            <td>
+                                <div style="font-weight:600; font-size:11.5px;">${escapeHtml(bb.nama_barang)}</div>
+                                <div style="font-size:10px; color:var(--text-muted);">Pemasok: ${escapeHtml(bb.ref_supplier || '-')}</div>
+                            </td>
+                            <td><span style="font-size:10px; background:rgba(0,0,0,0.05); padding:1px 5px; border-radius:3px;">${escapeHtml(bb.klas)}</span></td>
+                            <td style="text-align:center; font-weight:700;">${escapeHtml(bb.sat)}</td>
+                            <td style="font-size:10.5px;">
+                                <div><span class="badge-source-pabean">BC ${escapeHtml(bb.ref_bc)}</span> <strong>No. ${escapeHtml(bb.ref_no_daftar)}</strong> <span style="color:var(--text-muted);">(Tgl: ${escapeHtml(bb.ref_tgl_daftar)})</span></div>
+                                <div style="font-size:9.5px; font-family:monospace; color:#4b5563; margin-top:2px;">AJU: ${escapeHtml(bb.ref_nomor_aju)} | Seri: ${bb.ref_seri_barang}</div>
+                            </td>
+                            <td style="text-align:right; font-weight:700; font-size:11px;">
+                                ${Number(bb.saldo_qty).toLocaleString('id-ID', {minimumFractionDigits:2, maximumFractionDigits:2})}
+                            </td>
+                            <td style="text-align:center;">
+                                <button type="button" class="btn-action btn-primary" style="height:24px; padding:0 8px; font-size:10px;" onclick='selectTraceMaterial(${bbJson})'>
+                                    + Hubungkan
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--danger); padding:16px;">Gagal memuat bahan baku: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function selectTraceMaterial(bb) {
+            if (!currentTraceTargetRowIdx) return;
+            const tbody = document.getElementById('fItemsTbody');
+            const tr = tbody.children[currentTraceTargetRowIdx - 1];
+            if (!tr) return;
+
+            tr.querySelector('.it-ref-bc').value = bb.ref_bc;
+            tr.querySelector('.it-ref-no-daftar').value = bb.ref_no_daftar;
+            tr.querySelector('.it-ref-tgl-daftar').value = bb.ref_tgl_daftar;
+            tr.querySelector('.it-ref-seri').value = bb.ref_seri_barang;
+            tr.querySelector('.it-ref-aju').value = bb.ref_nomor_aju;
+            tr.querySelector('.it-ref-hs').value = bb.ref_hs || '';
+            tr.querySelector('.it-is-internal').value = '1';
+            tr.querySelector('.it-trace-json').value = JSON.stringify({
+                kode_barang: bb.kode_barang,
+                nama_barang: bb.nama_barang,
+                sat: bb.sat,
+                klas: bb.klas,
+                ref_bc: bb.ref_bc,
+                ref_no_daftar: bb.ref_no_daftar,
+                ref_tgl_daftar: bb.ref_tgl_daftar,
+                ref_seri_barang: bb.ref_seri_barang,
+                ref_nomor_aju: bb.ref_nomor_aju,
+                ref_hs: bb.ref_hs
+            });
+
+            // Update visual container
+            const container = tr.querySelector('.it-eks-bc-container');
+            container.innerHTML = `
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:4px 7px; border-radius:4px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <span class="badge-source-produce"><i class="fa-solid fa-seedling"></i> Traced Internal</span>
+                        <button type="button" class="btn-link-trace" onclick="openTraceModalForRow(${currentTraceTargetRowIdx})"><i class="fa-solid fa-pen"></i> Ubah</button>
+                    </div>
+                    <div style="font-size:10px; font-weight:700; color:#166534; margin-top:2px;">${escapeHtml(bb.kode_barang)} - ${escapeHtml(bb.nama_barang)}</div>
+                    <div style="font-size:9.5px; color:#15803d;">Eks BC ${escapeHtml(bb.ref_bc)} No. ${escapeHtml(bb.ref_no_daftar)} (Seri ${bb.ref_seri_barang})</div>
+                    <div style="font-size:9px; font-family:monospace; color:#4b5563;">AJU: ${escapeHtml(bb.ref_nomor_aju)}</div>
+                </div>
+            `;
+
+            closeModal('modalTraceMaterial');
+            Swal.mixin({ toast: true, position: 'top-end', timer: 2000, showConfirmButton: false }).fire({
                 icon: 'success',
-                title: `Item '${item.kode_barang}' ditambahkan`
+                title: `Asal Bahan Baku '${bb.kode_barang}' berhasil dihubungkan!`
             });
         }
 
@@ -2397,306 +2882,6 @@ if ($action === 'print_bppb') {
             const confirm = await Swal.fire({
                 title: 'Setujui BPPB?',
                 html: `Apakah Anda yakin ingin menyetujui BPPB <strong>${escapeHtml(reqNo)}</strong>?<br><small style="color:gray;">Setelah disetujui, BPPB dapat langsung ditransfer ke Host to Host menjadi dokumen pabean BC 2.7.</small>`,
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: 'Ya, Setujui',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#52c41a'
-            });
-            if (!confirm.isConfirmed) return;
-
-            postStatusChange(id, 'APPROVED');
-        }
-
-        async function rejectRequest(id, reqNo) {
-            const { value: reason } = await Swal.fire({
-                title: 'Tolak Permintaan?',
-                text: `Masukkan alasan penolakan permintaan ${reqNo}:`,
-                input: 'text',
-                inputPlaceholder: 'Contoh: Stok tidak mencukupi, salah departemen...',
-                showCancelButton: true,
-                confirmButtonText: 'Tolak Permintaan',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#f5222d',
-                inputValidator: (v) => { if (!v) return 'Alasan penolakan wajib diisi!'; }
-            });
-            if (!reason) return;
-
-            postStatusChange(id, 'REJECTED', reason);
-        }
-
-        async function completeRequest(id, reqNo) {
-            const confirm = await Swal.fire({
-                title: 'Selesaikan Pengeluaran?',
-                html: `Tandai permintaan <strong>${escapeHtml(reqNo)}</strong> sebagai selesai dikeluarkan (COMPLETED)?`,
-                icon: 'question',
-                showCancelButton: true,
-                confirmButtonText: 'Ya, Selesai',
-                cancelButtonText: 'Batal'
-            });
-            if (!confirm.isConfirmed) return;
-
-            postStatusChange(id, 'COMPLETED');
-        }
-
-        async function deleteRequest(id, reqNo) {
-            const confirm = await Swal.fire({
-                title: 'Hapus Permintaan?',
-                text: `Apakah Anda yakin ingin menghapus permintaan ${reqNo}?`,
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'Ya, Hapus',
-                cancelButtonText: 'Batal',
-                confirmButtonColor: '#f5222d'
-            });
-            if (!confirm.isConfirmed) return;
-
-            postStatusChange(id, 'DELETE');
-        }
-
-        async function postStatusChange(id, st, reason = '') {
-            try {
-                Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const body = new URLSearchParams({ id: id, status: st, reason: reason });
-                const res = await fetch('department_request.php?action=update_status', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: body
-                });
-                const json = await res.json();
-                if (json.status !== 'OK') throw new Error(json.message);
-
-                Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message, timer: 1800, showConfirmButton: false });
-                loadList();
-            } catch (err) {
-                Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
-            }
-        }
-
-        function printBppb(id) {
-            const w = window.open(`department_request.php?action=print_bppb&id=${encodeURIComponent(id)}`, '_blank', 'width=900,height=700,resizable=yes,scrollbars=yes');
-            if (w) w.focus();
-        }
-
-        // --- UTILS ---
-        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
-        function escapeHtml(str) {
-            if (!str) return '';
-            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-        }
-    </script>
-
-        function addItemRow(it = {}) {
-            const tbody = document.getElementById('fItemsTbody');
-            const rowIdx = tbody.children.length + 1;
-            const tr = document.createElement('tr');
-
-            let srcBadge = '<span class="badge-source-pabean">Pabean</span>';
-            if (it.source_type === 'bc_issue_dtl') srcBadge = '<span class="badge-source-issue">Issue</span>';
-            else if (it.source_type === 'bc_material') srcBadge = '<span class="badge-source-material">Master</span>';
-            else if (it.source_type === 'manual') srcBadge = '<span class="badge-source-manual">Manual</span>';
-
-            tr.innerHTML = `
-                <td style="text-align:center; color:var(--text-muted); font-size:11px;">${rowIdx}</td>
-                <td>${srcBadge}<input type="hidden" class="it-src" value="${escapeHtml(it.source_type || 'bc_1ab2')}"></td>
-                <td><input type="text" class="form-control it-kd" style="font-family:monospace; font-weight:700;" value="${escapeHtml(it.kode_barang || '')}" placeholder="Kode barang..."></td>
-                <td>
-                    <input type="text" class="form-control it-nm" value="${escapeHtml(it.nama_barang || '')}" placeholder="Nama / deskripsi barang...">
-                    <input type="hidden" class="it-klas" value="${escapeHtml(it.klas || '')}">
-                </td>
-                <td><input type="text" class="form-control it-sat" style="text-align:center;" value="${escapeHtml(it.sat || 'PCE')}"></td>
-                <td><input type="number" step="0.01" min="0.01" class="form-control it-qty" style="text-align:right; font-weight:700;" value="${it.display_qty_req || it.qty_req || 1}"></td>
-                <td>
-                    <input type="text" class="form-control it-ref" style="font-size:10.5px;" value="${escapeHtml(it.ref_no_daftar || it.ref_no_bukti || it.ref_bc || '')}" placeholder="No Ref...">
-                    <input type="hidden" class="it-ref-aju" value="${escapeHtml(it.ref_nomor_aju || '')}">
-                </td>
-                <td><input type="text" class="form-control it-note" style="font-size:10.5px;" value="${escapeHtml(it.note || '')}" placeholder="Catatan..."></td>
-                <td style="text-align:center;">
-                    <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px; color:var(--danger); border:none;" onclick="this.closest('tr').remove(); updateItemCount();"><i class="fa-solid fa-trash"></i></button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-            updateItemCount();
-        }
-
-        function addManualRow() {
-            addItemRow({
-                source_type: 'manual',
-                kode_barang: '',
-                nama_barang: '',
-                sat: 'PCE',
-                qty_req: 1,
-                klas: 'General'
-            });
-        }
-
-        function updateItemCount() {
-            const cnt = document.querySelectorAll('#fItemsTbody tr').length;
-            const badge = document.getElementById('itemCountBadge');
-            if (badge) badge.innerText = `${cnt} Item`;
-        }
-
-        async function submitRequest(status) {
-            const rows = document.querySelectorAll('#fItemsTbody tr');
-            if (rows.length === 0) {
-                Swal.fire({ icon: 'warning', title: 'Item Kosong', text: 'Harap tambahkan minimal 1 item barang yang diminta.' });
-                return;
-            }
-
-            const items = [];
-            let hasEmptyKd = false;
-            rows.forEach(tr => {
-                const kd = tr.querySelector('.it-kd').value.trim();
-                const nm = tr.querySelector('.it-nm').value.trim();
-                const sat = tr.querySelector('.it-sat').value.trim();
-                const qty = parseFloat(tr.querySelector('.it-qty').value) || 0;
-                const src = tr.querySelector('.it-src').value;
-                const klas = tr.querySelector('.it-klas').value;
-                const ref = tr.querySelector('.it-ref').value;
-                const refAju = tr.querySelector('.it-ref-aju').value;
-                const note = tr.querySelector('.it-note').value;
-
-                if (!kd || !nm) hasEmptyKd = true;
-                items.push({
-                    kode_barang: kd,
-                    nama_barang: nm,
-                    sat: sat || 'PCE',
-                    qty_req: qty,
-                    source_type: src,
-                    klas: klas,
-                    ref_no_daftar: ref,
-                    ref_nomor_aju: refAju,
-                    note: note
-                });
-            });
-
-            if (hasEmptyKd) {
-                Swal.fire({ icon: 'warning', title: 'Data Belum Lengkap', text: 'Semua item barang harus memiliki Kode Barang dan Nama Barang.' });
-                return;
-            }
-
-            const payload = {
-                id: document.getElementById('fId').value,
-                cmp_id: document.getElementById('fCmpId').value,
-                req_no: document.getElementById('fReqNo').value.trim(),
-                req_date: document.getElementById('fReqDate').value,
-                need_date: document.getElementById('fNeedDate').value,
-                dept_pemohon: document.getElementById('fDeptPemohon').value,
-                dept_tujuan: document.getElementById('fDeptTujuan').value,
-                pic: document.getElementById('fPic').value.trim(),
-                wo_no: document.getElementById('fWoNo').value.trim(),
-                note: document.getElementById('fNote').value.trim(),
-                status: status,
-                items: items
-            };
-
-            try {
-                Swal.fire({ title: 'Menyimpan...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
-                const res = await fetch('department_request.php?action=save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-                const json = await res.json();
-                if (json.status !== 'OK') throw new Error(json.message);
-
-                Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message, timer: 2000, showConfirmButton: false });
-                closeModal('modalReqForm');
-                loadList();
-            } catch (err) {
-                Swal.fire({ icon: 'error', title: 'Gagal Menyimpan', text: err.message });
-            }
-        }
-
-        // --- ITEM PICKER MODAL SEARCH ---
-        function openItemPickerModal() {
-            const dept = document.getElementById('fDeptPemohon').value;
-            document.getElementById('pickerSearch').value = '';
-            runPickerSearch();
-            openModal('modalItemPicker');
-        }
-
-        function debouncePickerSearch() {
-            clearTimeout(searchTimer);
-            searchTimer = setTimeout(() => { runPickerSearch(); }, 300);
-        }
-
-        async function runPickerSearch() {
-            const tbody = document.getElementById('pickerTbody');
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Mencari barang...</td></tr>`;
-
-            const q = encodeURIComponent(document.getElementById('pickerSearch').value.trim());
-            const src = encodeURIComponent(document.getElementById('pickerSource').value);
-            const klas = encodeURIComponent(document.getElementById('pickerKlas').value);
-            const dept = encodeURIComponent(document.getElementById('fDeptPemohon').value);
-
-            try {
-                const res = await fetch(`department_request.php?action=search_goods&q=${q}&source=${src}&klas=${klas}&dept=${dept}&_t=${Date.now()}`);
-                const json = await res.json();
-                if (json.status !== 'OK') throw new Error(json.message);
-
-                if (!json.data || json.data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);"><i class="fa-solid fa-box-open" style="font-size:22px; opacity:0.4; display:block; margin-bottom:6px;"></i>Tidak ada barang ditemukan. Coba ubah kata kunci atau gunakan opsi Input Baru.</td></tr>`;
-                    return;
-                }
-
-                let html = '';
-                json.data.forEach(item => {
-                    const itemJson = JSON.stringify(item).replace(/"/g, '&quot;');
-                    html += `
-                        <tr>
-                            <td><span class="${item.badge_class}">${escapeHtml(item.source_label)}</span></td>
-                            <td><strong style="font-family:monospace; color:var(--primary);">${escapeHtml(item.kode_barang)}</strong></td>
-                            <td>
-                                <div>${escapeHtml(item.nama_barang)}</div>
-                                <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${escapeHtml(item.stok_info || '')}</div>
-                            </td>
-                            <td><span style="font-size:10px; background:rgba(0,0,0,0.05); padding:1px 5px; border-radius:3px;">${escapeHtml(item.klas)}</span></td>
-                            <td style="text-align:center; font-weight:700;">${escapeHtml(item.sat)}</td>
-                            <td style="font-size:10px;">
-                                <div>${escapeHtml(item.ref_bc)} ${escapeHtml(item.ref_no_daftar)}</div>
-                                <div style="color:var(--text-muted);">${escapeHtml(item.ref_supplier || item.ref_no_bukti || '')}</div>
-                            </td>
-                            <td style="text-align:center;">
-                                <button type="button" class="btn-action btn-primary" style="height:24px; padding:0 8px; font-size:10px;" onclick='selectPickerItem(${itemJson})'>
-                                    + Pilih
-                                </button>
-                            </td>
-                        </tr>
-                    `;
-                });
-                tbody.innerHTML = html;
-            } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--danger); padding:16px;">Gagal memuat barang: ${escapeHtml(err.message)}</td></tr>`;
-            }
-        }
-
-        function selectPickerItem(item) {
-            addItemRow({
-                source_type: item.source,
-                kode_barang: item.kode_barang,
-                nama_barang: item.nama_barang,
-                sat: item.sat,
-                klas: item.klas,
-                qty_req: 1,
-                ref_bc: item.ref_bc,
-                ref_no_daftar: item.ref_no_daftar,
-                ref_no_bukti: item.ref_no_bukti,
-                ref_nomor_aju: item.ref_nomor_aju,
-                note: ''
-            });
-            Swal.mixin({ toast: true, position: 'top-end', timer: 1500, showConfirmButton: false }).fire({
-                icon: 'success',
-                title: `Item '${item.kode_barang}' ditambahkan`
-            });
-        }
-
-        // --- APPROVAL / STATUS ACTIONS ---
-        async function approveRequest(id, reqNo) {
-            const confirm = await Swal.fire({
-                title: 'Setujui Permintaan?',
-                html: `Apakah Anda yakin ingin menyetujui permintaan barang <strong>${escapeHtml(reqNo)}</strong>?<br><small style="color:gray;">Setelah disetujui, gudang dapat langsung memproses pengeluaran barang.</small>`,
                 icon: 'question',
                 showCancelButton: true,
                 confirmButtonText: 'Ya, Setujui',
