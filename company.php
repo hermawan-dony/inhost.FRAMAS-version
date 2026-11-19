@@ -280,6 +280,38 @@ if ($action === 'save') {
             $erp_password = $odooPass;
         }
     }
+    // Keamanan & Proteksi Kredensial: Jika mode Edit dan kredensial sensitif dikirim kosong,
+    // pertahankan nilai lama dari database agar tidak tertimpa/terhapus secara tidak sengaja.
+    if ($mode === 'edit' && !empty($cmp_id)) {
+        $oldStmt = $koneksi->prepare("SELECT password_ceisa, secret_mfa, secret_mfa_insw, ERP_Password, token_ceisa, insw_client_secret FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
+        if ($oldStmt) {
+            $oldStmt->bind_param("s", $cmp_id);
+            $oldStmt->execute();
+            $oldRes = $oldStmt->get_result();
+            if ($oldRes && $oldRow = $oldRes->fetch_assoc()) {
+                if ($password_ceisa === '' && !empty($oldRow['password_ceisa'])) {
+                    $password_ceisa = $oldRow['password_ceisa'];
+                }
+                if ($secret_mfa === '' && !empty($oldRow['secret_mfa'])) {
+                    $secret_mfa = $oldRow['secret_mfa'];
+                }
+                if ($secret_mfa_insw === '' && !empty($oldRow['secret_mfa_insw'])) {
+                    $secret_mfa_insw = $oldRow['secret_mfa_insw'];
+                }
+                if ($erp_password === '' && !empty($oldRow['ERP_Password'])) {
+                    $erp_password = $oldRow['ERP_Password'];
+                }
+                if ($token_ceisa === '' && !empty($oldRow['token_ceisa'])) {
+                    $token_ceisa = $oldRow['token_ceisa'];
+                }
+                if ($insw_client_secret === '' && !empty($oldRow['insw_client_secret'])) {
+                    $insw_client_secret = $oldRow['insw_client_secret'];
+                }
+            }
+            $oldStmt->close();
+        }
+    }
+
     $ai_name        = trim($_POST['AI_Name'] ?? '');
     $ai_api_key     = trim($_POST['AI_API_Key'] ?? '');
     $is_active      = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;

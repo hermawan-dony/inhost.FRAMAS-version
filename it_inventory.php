@@ -1177,6 +1177,24 @@ $stats['total_rows'] = count($dataRows);
             white-space: nowrap;
             color: var(--text-main);
         }
+        .ant-table td[rowspan] {
+            vertical-align: top !important;
+            background: var(--bg-card);
+        }
+        .ant-table td.col-nobukti, .ant-table th.col-nobukti {
+            max-width: 220px !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
+            line-height: 1.35 !important;
+        }
+        .ant-table td.col-partner {
+            max-width: 200px !important;
+            white-space: normal !important;
+            word-break: break-word !important;
+            overflow-wrap: break-word !important;
+            line-height: 1.35 !important;
+        }
         .ant-table tbody tr:hover td {
             background: var(--row-hover);
         }
@@ -1915,7 +1933,7 @@ $stats['total_rows'] = count($dataRows);
                         <th style="text-align:center;">Jenis</th>
                         <th>Nomor</th>
                         <th style="text-align:center;">Tanggal</th>
-                        <th>Nomor</th>
+                        <th class="col-nobukti">Nomor</th>
                         <th style="text-align:center;">Tanggal</th>
                     </tr>
                 <?php elseif ($activeTab === '1c'): ?>
@@ -1973,6 +1991,17 @@ $stats['total_rows'] = count($dataRows);
                         $rowNo = 1;
                         $groupNo = 0;
                         $lastGroupKey = null;
+
+                        // Hitung jumlah baris dalam setiap grup (untuk atribut rowspan merge cell)
+                        $groupCounts = [];
+                        foreach ($dataRows as $r) {
+                            $gk = trim($r['JENIS_DOC'] ?? '') . '::' . trim($r['NO_DOC'] ?? '') . '::' . trim($r['TGL_DOC'] ?? '') . '::' . trim($r['NO_BUKTI'] ?? '') . '::' . trim($r['NO_AJU'] ?? '');
+                            if (!isset($groupCounts[$gk])) {
+                                $groupCounts[$gk] = 0;
+                            }
+                            $groupCounts[$gk]++;
+                        }
+
                         foreach ($dataRows as $idx => $r):
                             $groupKey = trim($r['JENIS_DOC'] ?? '') . '::' . trim($r['NO_DOC'] ?? '') . '::' . trim($r['TGL_DOC'] ?? '') . '::' . trim($r['NO_BUKTI'] ?? '') . '::' . trim($r['NO_AJU'] ?? '');
                             $isFirstInGroup = ($groupKey !== $lastGroupKey);
@@ -1980,11 +2009,17 @@ $stats['total_rows'] = count($dataRows);
                                 $groupNo++;
                                 $lastGroupKey = $groupKey;
                             }
+                            $currentGroupSpan = $groupCounts[$groupKey] ?? 1;
 
                             $jenisDoc = htmlspecialchars($r['JENIS_DOC'] ?? '-');
                             $noDoc    = htmlspecialchars($r['NO_DOC'] ?? '-');
                             $tglDoc   = htmlspecialchars($r['TGL_DOC'] ?? '-');
-                            $noBukti  = htmlspecialchars($r['NO_BUKTI'] ?? '-');
+
+                            // Batasi Nomor Bukti Penerimaan/Pengeluaran: max 60 karakter & auto wrap
+                            $rawBukti = trim($r['NO_BUKTI'] ?? '-');
+                            $noBuktiDisp = (strlen($rawBukti) > 60) ? nl2br(htmlspecialchars(wordwrap($rawBukti, 60, "\n", true))) : htmlspecialchars($rawBukti);
+                            $noBukti = htmlspecialchars($rawBukti);
+
                             $tglBukti = htmlspecialchars($r['TGL_BUKTI'] ?? '-');
                             $partner  = htmlspecialchars(($activeTab === '1a') ? ($r['VENDOR'] ?? ($r['NAMA_PENERIMA_BARANG'] ?? '-')) : ($r['NAMA_PENERIMA_BARANG'] ?? ($r['VENDOR'] ?? '-')));
                             $kodeBrg  = htmlspecialchars($r['KODE_BARANG'] ?? '-');
@@ -2014,36 +2049,59 @@ $stats['total_rows'] = count($dataRows);
                             data-group-no="<?= $groupNo ?>"
                             data-row-no="<?= $rowNo ?>"
                             data-is-first="<?= $isFirstInGroup ? '1' : '0' ?>"
+                            data-group-span="<?= $currentGroupSpan ?>"
                             onclick="selectReportRow(this)">
 
-                            <td class="col-no" data-orig-text="<?= $rowNo ?>" style="text-align:center; color:var(--text-muted);">
-                                <?= $group_mode ? ($isFirstInGroup ? $groupNo : '') : $rowNo ?>
+                            <!-- No. Urut (Merge Cell saat Group Mode) -->
+                            <td class="col-no col-grp-no" data-orig-text="<?= $rowNo ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="text-align:center; color:var(--text-muted); <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $group_mode ? $groupNo : $rowNo ?>
                             </td>
 
-                            <td class="col-grp col-jenis" data-orig-text="<?= $jenisDoc ?>" style="text-align:center;">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $jenisDoc ?>
+                            <!-- Dokumen Pabean: Jenis (Merge Cell saat Group Mode) -->
+                            <td class="col-grp col-jenis" data-orig-text="<?= $jenisDoc ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="text-align:center; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $jenisDoc ?>
                             </td>
 
-                            <td class="col-grp col-nodoc" data-orig-text="<?= $noDoc ?>" style="font-weight:600;">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noDoc ?>
+                            <!-- Dokumen Pabean: Nomor Pendaftaran (Merge Cell saat Group Mode) -->
+                            <td class="col-grp col-nodoc" data-orig-text="<?= $noDoc ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="font-weight:600; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $noDoc ?>
                             </td>
 
-                            <td class="col-grp col-tgldoc" data-orig-text="<?= $tglDoc ?>" style="text-align:center;">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $tglDoc ?>
+                            <!-- Dokumen Pabean: Tanggal Pendaftaran (Merge Cell saat Group Mode) -->
+                            <td class="col-grp col-tgldoc" data-orig-text="<?= $tglDoc ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="text-align:center; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $tglDoc ?>
                             </td>
 
-                            <td class="col-grp col-nobukti" data-orig-text="<?= $noBukti ?>">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noBukti ?>
+                            <!-- Bukti Penerimaan/Pengeluaran: Nomor (Merge Cell, Max 60 Karakter & Auto Wrap) -->
+                            <td class="col-grp col-nobukti" data-orig-text="<?= $noBukti ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="max-width:220px; white-space:normal !important; word-break:break-word; overflow-wrap:break-word; line-height:1.35; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $noBuktiDisp ?>
                             </td>
 
-                            <td class="col-grp col-tglbukti" data-orig-text="<?= $tglBukti ?>" style="text-align:center;">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $tglBukti ?>
+                            <!-- Bukti Penerimaan/Pengeluaran: Tanggal (Merge Cell saat Group Mode) -->
+                            <td class="col-grp col-tglbukti" data-orig-text="<?= $tglBukti ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="text-align:center; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $tglBukti ?>
                             </td>
 
-                            <td class="col-grp col-partner" data-orig-text="<?= $partner ?>">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $partner ?>
+                            <!-- Pengirim / Penerima Barang (Merge Cell saat Group Mode) -->
+                            <td class="col-grp col-partner" data-orig-text="<?= $partner ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="max-width:200px; white-space:normal !important; word-break:break-word; overflow-wrap:break-word; line-height:1.35; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $partner ?>
                             </td>
 
+                            <!-- Rincian Barang (Item Level - Selalu Tampil Tiap Baris) -->
                             <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= $kodeBrg ?></td>
                             <td><?= $hsKode ?></td>
                             <td><?= $namaBrg ?></td>
@@ -2054,9 +2112,11 @@ $stats['total_rows'] = count($dataRows);
                             <td style="text-align:right; font-weight:600; color:#52c41a;"><?= $nilaiDisp ?></td>
                             <td style="text-align:right; font-weight:600;"><?= $hargaPnyDisp ?></td>
 
-                            <!-- No. AJU (Ikut Grouping seperti Nomor Daftar & Bisa di-hide) -->
-                            <td class="col-ext col-ext-aju col-grp" data-orig-text="<?= $noAju ?>" style="text-align:center; font-family:monospace; <?= !$show_ext ? 'display:none;' : '' ?>">
-                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noAju ?>
+                            <!-- No. AJU (Merge Cell saat Group Mode & Ikut Toggle Hide) -->
+                            <td class="col-ext col-ext-aju col-grp" data-orig-text="<?= $noAju ?>"
+                                <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
+                                style="text-align:center; font-family:monospace; <?= !$show_ext ? 'display:none;' : (($group_mode && !$isFirstInGroup) ? 'display:none;' : '') ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                <?= $noAju ?>
                             </td>
                             <td class="col-ext col-ext-netto" style="text-align:right; <?= !$show_ext ? 'display:none;' : '' ?>">
                                 <?= $nettoDisp ?>
@@ -2276,7 +2336,7 @@ $stats['total_rows'] = count($dataRows);
     // FITUR INTERAKTIF TAB 1A & 1B: PEMASUKAN & PENGELUARAN (PowerBuilder TPB-ERP)
     // =========================================================================
 
-    // Toggle Tampilan Grup (Client-side instant zero-reload toggle)
+    // Toggle Tampilan Grup (Client-side instant zero-reload toggle dengan Merge Cell / Rowspan)
     function toggleGroupMode(isGrouped) {
         const input = document.getElementById('inputGroupMode');
         if (input) input.value = isGrouped ? '1' : '0';
@@ -2287,20 +2347,71 @@ $stats['total_rows'] = count($dataRows);
             const isFirst = tr.getAttribute('data-is-first') === '1';
             const groupNo = tr.getAttribute('data-group-no');
             const rowNo   = tr.getAttribute('data-row-no');
+            const span    = parseInt(tr.getAttribute('data-group-span') || '1', 10);
 
             const noCell = tr.querySelector('.col-no');
-            if (noCell) {
-                noCell.innerText = isGrouped ? (isFirst ? groupNo : '') : rowNo;
-            }
-
             const grpCells = tr.querySelectorAll('.col-grp');
-            grpCells.forEach(td => {
-                if (isGrouped && !isFirst) {
-                    td.innerText = '';
+
+            if (isGrouped) {
+                if (isFirst) {
+                    if (noCell) {
+                        if (span > 1) {
+                            noCell.setAttribute('rowspan', span);
+                        } else {
+                            noCell.removeAttribute('rowspan');
+                        }
+                        noCell.style.display = '';
+                        noCell.style.verticalAlign = 'top';
+                        noCell.innerText = groupNo;
+                    }
+                    grpCells.forEach(td => {
+                        // Jangan tampilkan No. AJU jika show_ext sedang off
+                        if (td.classList.contains('col-ext-aju')) {
+                            const showExt = document.getElementById('chkShowAjuNettoGross') ? document.getElementById('chkShowAjuNettoGross').checked : true;
+                            if (!showExt) {
+                                td.style.display = 'none';
+                                return;
+                            }
+                        }
+                        if (span > 1) {
+                            td.setAttribute('rowspan', span);
+                        } else {
+                            td.removeAttribute('rowspan');
+                        }
+                        td.style.display = '';
+                        td.style.verticalAlign = 'top';
+                    });
                 } else {
-                    td.innerText = td.getAttribute('data-orig-text') || '';
+                    if (noCell) {
+                        noCell.removeAttribute('rowspan');
+                        noCell.style.display = 'none';
+                    }
+                    grpCells.forEach(td => {
+                        td.removeAttribute('rowspan');
+                        td.style.display = 'none';
+                    });
                 }
-            });
+            } else {
+                // Tampilan Flat (Un-grouped)
+                if (noCell) {
+                    noCell.removeAttribute('rowspan');
+                    noCell.style.display = '';
+                    noCell.style.verticalAlign = '';
+                    noCell.innerText = rowNo;
+                }
+                grpCells.forEach(td => {
+                    if (td.classList.contains('col-ext-aju')) {
+                        const showExt = document.getElementById('chkShowAjuNettoGross') ? document.getElementById('chkShowAjuNettoGross').checked : true;
+                        if (!showExt) {
+                            td.style.display = 'none';
+                            return;
+                        }
+                    }
+                    td.removeAttribute('rowspan');
+                    td.style.display = '';
+                    td.style.verticalAlign = '';
+                });
+            }
         });
     }
 
@@ -2310,8 +2421,17 @@ $stats['total_rows'] = count($dataRows);
         if (input) input.value = show ? '1' : '0';
         try { localStorage.setItem('it_show_ext', show ? '1' : '0'); } catch(e){}
 
+        const isGrouped = document.getElementById('chkGroupMode') ? document.getElementById('chkGroupMode').checked : false;
+
         const extCols = document.querySelectorAll('.col-ext');
         extCols.forEach(el => {
+            if (isGrouped && el.classList.contains('col-ext-aju')) {
+                const tr = el.closest('tr');
+                if (tr && tr.getAttribute('data-is-first') !== '1') {
+                    el.style.display = 'none';
+                    return;
+                }
+            }
             el.style.display = show ? '' : 'none';
         });
     }
@@ -2355,6 +2475,13 @@ $stats['total_rows'] = count($dataRows);
         clone.querySelectorAll('th, td').forEach(cell => {
             if (cell.innerHTML) {
                 cell.innerText = cell.innerText.replace(/[\u2195\u25B2\u25BC↕▲▼]/g, '').trim();
+            }
+        });
+
+        // Hapus sel yang tersembunyi (display:none) pada mode merge cell agar SheetJS membentuk merge cell secara rapi
+        clone.querySelectorAll('tbody td').forEach(cell => {
+            if (cell.style.display === 'none') {
+                cell.remove();
             }
         });
 
@@ -2514,6 +2641,13 @@ $stats['total_rows'] = count($dataRows);
         if (!tbody) return;
         const rows = Array.from(tbody.querySelectorAll("tr"));
         if (rows.length === 0 || (rows.length === 1 && rows[0].cells.length <= 1)) return;
+
+        // Jika sedang dalam tampilan group (merge cell), kembalikan ke un-grouped dulu agar sorting baris akurat
+        const chkGroup = document.getElementById('chkGroupMode');
+        if (chkGroup && chkGroup.checked) {
+            chkGroup.checked = false;
+            toggleGroupMode(false);
+        }
 
         if (currentSortCol === colIndex) {
             currentSortDir = (currentSortDir === 'asc') ? 'desc' : 'asc';

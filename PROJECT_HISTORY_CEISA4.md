@@ -8336,3 +8336,26 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
   ```sql
   ALTER TABLE bc_ceisa_company ADD COLUMN secret_mfa_insw VARCHAR(64) NULL AFTER secret_mfa;
   ```
+
+
+---
+
+## 📌 49. PEMBARUAN UPSTREAM VPS JAKARTA: MERGE CELL ROWSPAN IT INVENTORY & PROTEKSI KREDENSIAL (19 NOVEMBER 2026)
+
+### A. Latar Belakang & Kebutuhan
+1. Penarikan pembaruan upstream terbaru dari VPS Jakarta (`inhost-base/main` commit `8069695`).
+2. Sinkronisasi satu arah murni ke lokal (`d:\xampp\htdocs\inhost-web-id`) tanpa upload/deploy ke server remote sesuai aturan keamanan.
+
+### B. Fitur & Peningkatan yang Diintegrasikan:
+1. **Merge Cell (Rowspan) Kolom Header IT Inventory (`it_inventory.php`)**:
+   - Menerapkan atribut `rowspan` HTML pada baris pertama di setiap grup dokumen saat Group Mode aktif untuk kolom: No Urut Grup, Jenis Dokumen, Nomor Dokumen, Tanggal Dokumen, Nomor Bukti, Tanggal Bukti, Pemasok/Pengirim/Penerima, dan No. Pengajuan (AJU).
+   - Baris berikutnya dalam grup yang sama disembunyikan atribut selnya sehingga tabel terlihat rapi dan tidak redundan.
+   - Tetap terintegrasi sempurna dengan filter dinamis dan fitur sorting tabel (auto un-group sebelum sorting).
+2. **Auto Wrap & Batasan Karakter No. Bukti (`it_inventory.php`)**:
+   - Membatasi lebar teks Nomor Bukti Penerimaan/Pengeluaran maksimal 60 karakter per baris menggunakan class CSS `.col-nobukti` dan `wordwrap($rawBukti, 60, "\n", true)` dengan `line-height: 1.35` agar tidak merusak tata letak tabel saat nomor bukti sangat panjang.
+3. **Penyempurnaan Ekspor Excel Mode Group (`it_inventory.php`)**:
+   - Sel tersembunyi (`display: none`) otomatis dihapus sebelum diekspor via SheetJS agar file Excel yang dihasilkan tetap rapi dengan formasi merge cell yang akurat.
+4. **Proteksi Kredensial Sensitif Perusahaan (`company.php`)**:
+   - Menambahkan pengecekan pada aksi simpan mode edit perusahaan (`$mode === 'edit'`). Jika input kredensial sensitif (`password_ceisa`, `secret_mfa`, `secret_mfa_insw`, `ERP_Password`, `token_ceisa`, `insw_client_secret`) dikirim kosong oleh pengguna, sistem otomatis mempertahankan nilai lama yang sudah tersimpan di database agar tidak tertimpa atau terhapus secara tidak sengaja.
+5. **Versi Aplikasi**:
+   - Pembaruan versi rilis menjadi `20261119.1024`.
