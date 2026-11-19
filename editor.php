@@ -155,13 +155,27 @@ $whereCmp = !empty($whereConditions) ? "WHERE " . implode(' AND ', $whereConditi
 // Ambil daftar AJU untuk selector dropdown
 $ajuList = [];
 if (isset($koneksi) && $koneksi) {
-    $resAju = $koneksi->query("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
-        IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
-        (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
-        FROM bc_ceisa_header a
-        LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
-        $whereCmp
-        ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC LIMIT 100");
+    try {
+        $resAju = $koneksi->query("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
+            IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
+            (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
+            FROM bc_ceisa_header a
+            LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
+            $whereCmp
+            ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC LIMIT 100");
+    } catch (Throwable $e) {
+        try {
+            $resAju = $koneksi->query("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
+                IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
+                (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju COLLATE utf8mb4_unicode_ci = a.nomor_aju COLLATE utf8mb4_unicode_ci) AS posted
+                FROM bc_ceisa_header a
+                LEFT JOIN bc_ceisa_company c ON a.cmp_id COLLATE utf8mb4_unicode_ci = c.cmp_id COLLATE utf8mb4_unicode_ci
+                $whereCmp
+                ORDER BY a.tanggal_pernyataan DESC, a.nomor_aju DESC LIMIT 100");
+        } catch (Throwable $e2) {
+            $resAju = false;
+        }
+    }
     if ($resAju) {
         while ($r = $resAju->fetch_assoc()) {
             $ajuList[] = $r;

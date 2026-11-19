@@ -240,15 +240,19 @@ if (!function_exists('fnum')) {
 // Filter sesuai spesifikasi: RM, FG, WI, CG (Mold, Machine, Part Machine, Tools, Factory Equipment), dan W
 // Mengacu ke SQL: SELECT * FROM bc_tipe WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx
 $cgTypes = [];
-$resKlas = $koneksi->query("SELECT * FROM bc_tipe WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx");
-if ($resKlas) {
-    while ($rk = $resKlas->fetch_assoc()) {
-        $g = trim($rk['grp'] ?? '');
-        $t = trim($rk['tipe'] ?? '');
-        if ($g === 'CG' && !empty($t) && !in_array($t, $cgTypes)) {
-            $cgTypes[] = $t;
+try {
+    $resKlas = $koneksi->query("SELECT * FROM bc_tipe WHERE NOT grp IN ('FA', 'Consumables') ORDER BY idx");
+    if ($resKlas) {
+        while ($rk = $resKlas->fetch_assoc()) {
+            $g = trim($rk['grp'] ?? '');
+            $t = trim($rk['tipe'] ?? '');
+            if ($g === 'CG' && !empty($t) && !in_array($t, $cgTypes)) {
+                $cgTypes[] = $t;
+            }
         }
     }
+} catch (Throwable $e) {
+    // Fallback if bc_tipe does not exist
 }
 if (empty($cgTypes)) {
     $cgTypes = ['Mold', 'Machine', 'Part Machine', 'Tools', 'Factory Equipment'];

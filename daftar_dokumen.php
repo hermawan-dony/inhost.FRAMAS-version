@@ -40,7 +40,16 @@ $targetCompanyAllowedDocs = null;
 $targetCompanyShowUnimportedH2h = 0;
 $companies = [];
 if (isset($koneksi) && $koneksi) {
-    $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, subdomain, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa, IFNULL(show_unimported_h2h, 0) AS show_unimported_h2h FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    $resComp = null;
+    try {
+        $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, subdomain, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa, IFNULL(show_unimported_h2h, 0) AS show_unimported_h2h FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    } catch (Throwable $e) {
+        try {
+            $resComp = $koneksi->query("SELECT cmp_id, cmp_name, npwp, subdomain, IFNULL(company_roles, 'tpb') AS company_roles, allowed_docs, id_user_ceisa FROM bc_ceisa_company ORDER BY cmp_name ASC");
+        } catch (Throwable $e2) {
+            $resComp = false;
+        }
+    }
     if ($resComp) {
         while ($r = $resComp->fetch_assoc()) {
             if ($r['cmp_id'] === $sessionCmpId || (!empty($r['subdomain']) && strcasecmp($r['subdomain'], (string)$sessionCmpId) === 0) || ($r['npwp'] === $sessionCmpId)) {
@@ -280,6 +289,51 @@ if ($action === 'list') {
         }
         echo json_encode(['status' => 'OK', 'count' => count($data), 'data' => $data]);
     } catch (\Throwable $e) {
+        if (stripos($e->getMessage(), 'bc_ceisa_sppb') !== false && stripos($e->getMessage(), "doesn't exist") !== false) {
+            try {
+                $koneksi->query("CREATE TABLE IF NOT EXISTS bc_ceisa_sppb (
+                  cmp_id VARCHAR(30) NOT NULL DEFAULT '',
+                  nomorAju VARCHAR(40) NOT NULL,
+                  nomorDaftar VARCHAR(255) DEFAULT NULL,
+                  tanggalDaftar DATE DEFAULT NULL,
+                  kodeDokumen VARCHAR(255) DEFAULT NULL,
+                  namaDokumen VARCHAR(255) DEFAULT NULL,
+                  kodeKantor VARCHAR(255) DEFAULT NULL,
+                  namaKantorPendek VARCHAR(255) DEFAULT NULL,
+                  namaEntitas VARCHAR(255) DEFAULT NULL,
+                  kodeProses VARCHAR(255) DEFAULT NULL,
+                  kodeEntitas VARCHAR(255) DEFAULT NULL,
+                  namaProses VARCHAR(255) DEFAULT NULL,
+                  idPerusahaan VARCHAR(255) DEFAULT NULL,
+                  namaPerusahaan VARCHAR(255) DEFAULT NULL,
+                  idPpjk VARCHAR(255) DEFAULT NULL,
+                  nipPfpd VARCHAR(255) DEFAULT NULL,
+                  nipPfpb VARCHAR(255) DEFAULT NULL,
+                  nipAp VARCHAR(255) DEFAULT NULL,
+                  kodeJalur VARCHAR(255) DEFAULT NULL,
+                  idRespon VARCHAR(255) DEFAULT NULL,
+                  namaRespon VARCHAR(255) DEFAULT 'SPPB',
+                  nomorRespon VARCHAR(255) DEFAULT NULL,
+                  tanggalRespon DATETIME DEFAULT NULL,
+                  pdf TEXT,
+                  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  upd_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  PRIMARY KEY (cmp_id, nomorAju),
+                  KEY idx_nomor_aju (nomorAju)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                $res = $koneksi->query($sql);
+                $data = [];
+                if ($res) {
+                    while ($row = $res->fetch_assoc()) {
+                        $data[] = $row;
+                    }
+                }
+                echo json_encode(['status' => 'OK', 'count' => count($data), 'data' => $data]);
+                exit;
+            } catch (\Throwable $e2) {
+                // proceed to standard error output
+            }
+        }
         error_log("daftar_dokumen.php action=list error: " . $e->getMessage());
         echo json_encode(['status' => 'ERROR', 'message' => $e->getMessage(), 'data' => []]);
     }

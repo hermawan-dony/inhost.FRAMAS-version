@@ -349,11 +349,10 @@ if ($action === 'list') {
         GROUP BY cmp_id, nomor_aju
     ) doc_inv ON kiri.cmp_id = doc_inv.cmp_id AND kiri.nomor_aju = doc_inv.nomor_aju
     LEFT JOIN (
-        SELECT cmp_id, nomor_aju, COUNT(1) AS jml
+        SELECT nomor_aju, COUNT(1) AS jml
         FROM bc_1ab2
-        $cmpWhereSub
-        GROUP BY cmp_id, nomor_aju
-    ) cekit ON kiri.cmp_id = cekit.cmp_id AND kiri.nomor_aju = cekit.nomor_aju
+        GROUP BY nomor_aju
+    ) cekit ON kiri.nomor_aju = cekit.nomor_aju
     LEFT JOIN bc_ceisa_data bcd ON kiri.nomor_aju = bcd.nomorAju
     $whereOuterSql
     ORDER BY kiri.tanggal_pernyataan DESC, kiri.nomor_aju DESC";

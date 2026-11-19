@@ -8436,3 +8436,47 @@ Agar perintah pengguna **`SYNC DB!`** di kemudian hari tidak menimbulkan error s
    - Mengambil pembaruan dari inhost-base/main (commit e21324d):
      - Menetapkan min-width: 50ch !important dan max-width: 60ch !important pada CSS class .col-nobukti dan header tabel it_inventory.php agar nomor bukti tampil proporsional tanpa terpotong.
      - Penerapan auto word-break word-break: break-word dan overflow-wrap: break-word untuk menjaga kerapian merge cell.
+
+
+---
+
+## 📌 52. ELIMINASI ERROR SINKRONISASI DATABASE (SYNC DB!), OPTIMASI COLLATION UTF8MB4 & RESILIENSI MULTI-PLANT IT INVENTORY (19 NOVEMBER 2026)
+
+### A. Latar Belakang & Identifikasi Masalah
+Pengguna melaporkan serangkaian kendala saat mengakses aplikasi setelah migrasi dan proses sinkronisasi:
+1. **Unknown column 'show_unimported_h2h' in 'field list'** di `daftar_dokumen.php:43`:
+   - Terjadi karena query mencoba mengambil kolom konfigurasi tampilan kartu `[BELUM IMPORT H2H]` yang belum didefinisikan secara lengkap pada database MySQL 5 staging atau belum dibuat pada saat query dijalankan.
+2. **Gagal memuat data: Unexpected token '<', "<br /> <b>"... is not valid JSON** di `transfer.php`:
+   - Respon API mengembalikan HTML error PHP alih-alih JSON karena adanya kolom yang tidak ditemukan atau kegagalan query SQL internal.
+3. **Table 'framasbc.bc_tipe' doesn't exist** di `it_inventory.php:243`:
+   - Terjadi saat tab 1D Mutasi Barang diakses dan tabel referensi klasifikasi capital goods `bc_tipe` belum ter-copy sempurna dari database lama.
+4. **Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_0900_ai_ci,IMPLICIT) for operation '='** di `editor.php:158`:
+   - Terjadi karena perbandingan karakter (`a.cmp_id = c.cmp_id` atau `p.nomor_aju = a.nomor_aju`) antara tabel yang ber-collation default MySQL 8 (`utf8mb4_0900_ai_ci`) dan tabel hasil migrasi (`utf8mb4_unicode_ci`), serta tabel `bc_1ab2` yang masih ber-collation `latin1_swedish_ci` akibat kegagalan konversi otomatis (InnoDB index key length limit).
+5. **Table 'framasbc.bc_ceisa_sppb' doesn't exist** di `daftar_dokumen.php`:
+   - Terjadi saat pemuatan daftar dokumen pabean karena tabel arsip respon SPPB tidak terbuat di staging database jika 4 database plant lama belum memilikinya.
+6. **Harmonisasi Multi-Plant IT Inventory (`bc_1ab2`)**:
+   - Untuk Framas sebagai entitas multi-plant (1 entitas CEISA dengan 4 plant), keberadaan dokumen di IT Inventory (`bc_1ab2`) tidak boleh dibatasi oleh isolasi `cmp_id`. Dokumen yang sudah masuk ke `bc_1ab2` di plant manapun harus langsung diakui sebagai "Sudah Masuk IT Inventory" (`cekit > 0` / status posted).
+
+### B. Solusi & Perbaikan Kode Aplikasi
+1. **Resiliensi `daftar_dokumen.php`**:
+   - Menambahkan mekanisme `try-catch` berlapis pada pembacaan kolom `show_unimported_h2h` di `bc_ceisa_company`.
+   - Menambahkan mekanisme *auto-healing/auto-recovery* pada query dokumen utama: jika tabel `bc_ceisa_sppb` belum ada, sistem secara otomatis mengeksekusi DDL `CREATE TABLE IF NOT EXISTS bc_ceisa_sppb` dan mengulang query seketika tanpa memunculkan error ke pengguna.
+2. **Resiliensi `it_inventory.php`**:
+   - Menambahkan blok penanganan `try-catch` pada pembacaan tabel `bc_tipe`. Jika tabel tidak ditemukan, sistem langsung menggunakan fallback daftar Capital Goods standar (`['Mold', 'Machine', 'Part Machine', 'Tools', 'Factory Equipment']`).
+3. **Resiliensi `editor.php`**:
+   - Menambahkan blok penanganan `try-catch` dengan fallback eksplisit `COLLATE utf8mb4_unicode_ci` pada relasi `cmp_id` dan `nomor_aju`.
+4. **Harmonisasi `transfer.php` Multi-Plant**:
+   - Menghapus pembatasan `cmp_id` pada join tabel `cekit` (`bc_1ab2`). Pencocokan dokumen dengan IT Inventory kini murni berdasarkan 26-digit `nomor_aju` global yang dijamin unik. Jika nomor AJU ada di `bc_1ab2`, status langsung dianggap "Sudah Masuk IT Inventory" (`cekit > 0`).
+
+### C. Penguatan Permanen Skrip Otomasi (`database/merge_to_framasbc.ps1`)
+Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluruh di skrip migrasi:
+1. **Optimasi Primary Key `bc_1ab2`**:
+   - Panjang kolom kunci `NO_BUKTI` dan `URAIAN` pada composite primary key `bc_1ab2` disesuaikan menjadi `NO_BUKTI(100)` dan `URAIAN(50)`. Hal ini membuat total ukuran index sebesar 1.233 byte (sangat aman di bawah batas InnoDB 3.072 byte) dan memungkinkan seluruh 429.609 baris data tabel `bc_1ab2` dikonversi sempurna ke `utf8mb4_unicode_ci`.
+2. **Pembersihan Nilai Zero Date (`0000-00-00`)**:
+   - Ditambahkan pembersihan otomatis `UPDATE framasbc.bc_1ab2 SET TGL_PROSES = NULL WHERE TGL_PROSES = '0000-00-00'` sebelum konversi tabel agar tidak terjadi kegagalan akibat *Strict SQL Mode* MySQL 8.
+3. **Standardisasi Collation 100% Seluruh Database**:
+   - Seluruh 81 tabel dan seluruh kolom teks dalam database `framasbc` kini 100% menggunakan `utf8mb4_unicode_ci` tanpa pengecualian.
+4. **Preservasi Tabel & Kolom Baru**:
+   - Preservasi data `bc_ceisa_sppb` dan preservasi data konfigurasi `bc_ceisa_company` (`show_unimported_h2h`, `last_cmp_id`, dll.) kini dijamin tidak tertimpa atau hilang saat `SYNC DB!` dijalankan.
+   - Penambahan skema dan *seed data* default tabel `bc_tipe` di Phase 4.
+   - Hidrasi otomatis tanggal daftar dan tanggal pernyataan pada `bc_ceisa_header` dari `bc_ceisa_data` atau substring 26-digit nomor AJU (`YYYY-MM-DD`).

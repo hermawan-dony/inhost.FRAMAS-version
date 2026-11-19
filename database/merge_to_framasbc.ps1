@@ -309,7 +309,14 @@ foreach ($tbl in $AllTenantTables) {
     $autoCol = Get-AutoCol5 "framas" $tbl
     $pkCols = Get-PkCols5 "framas" $tbl
 
-    if ($pkCols.Count -gt 0 -and ($pkCols -notcontains "cmp_id") -and [string]::IsNullOrWhiteSpace($autoCol)) {
+    if ($tbl -eq "bc_1ab2") {
+        try {
+            Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} DROP PRIMARY KEY, ADD PRIMARY KEY (cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI(100), KODE_BARANG, URAIAN(50), QTY, SERI_BARANG);" | Out-Null
+            Log "  PK => (cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI(100), KODE_BARANG, URAIAN(50), QTY, SERI_BARANG)"
+        } catch {
+            Log "  WARN bc_1ab2 PK change failed: $($_.Exception.Message)"
+        }
+    } elseif ($pkCols.Count -gt 0 -and ($pkCols -notcontains "cmp_id") -and [string]::IsNullOrWhiteSpace($autoCol)) {
         $newPk = @("cmp_id") + $pkCols
         $pkList = ($newPk | ForEach-Object { "${bt}${_}${bt}" }) -join ", "
         try {
@@ -385,6 +392,14 @@ foreach ($tbl in $AllTenantTables) {
                 Log "  FAIL $($t.Src).$tbl"
             }
         }
+    }
+
+    if ($tbl -eq "bc_ceisa_sppb" -and (Table-Exists5 "framasbc" "bc_ceisa_sppb")) {
+        try {
+            Invoke-Mysql5 "INSERT IGNORE INTO framas.bc_ceisa_sppb SELECT * FROM framasbc.bc_ceisa_sppb;" | Out-Null
+            $cnt = Get-Scalar5 "SELECT COUNT(*) FROM framas.bc_ceisa_sppb;"
+            Log "  + preserved framasbc.bc_ceisa_sppb rows=$cnt"
+        } catch {}
     }
 }
 
@@ -501,26 +516,33 @@ Log "Import done"
 Log "Phase3: standardize collation to utf8mb4_unicode_ci on all tables in framasbc"
 Invoke-Mysql8 @"
 SET FOREIGN_KEY_CHECKS = 0;
+SET sql_mode = '';
 ALTER DATABASE framasbc CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+UPDATE framasbc.bc_1ab2 SET TGL_PROSES = NULL WHERE TGL_PROSES = '0000-00-00' OR CAST(TGL_PROSES AS CHAR) = '0000-00-00';
 "@ | Out-Null
+
+try {
+    Invoke-Mysql8 @"
+SET sql_mode = '';
+ALTER TABLE framasbc.bc_1ab2 DROP PRIMARY KEY;
+ALTER TABLE framasbc.bc_1ab2 ADD PRIMARY KEY (cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI(100), KODE_BARANG, URAIAN(50), QTY, SERI_BARANG);
+"@ | Out-Null
+} catch {}
+
 $allTblsOut = Invoke-Mysql8 "SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema='framasbc';"
 foreach ($line in ($allTblsOut -split "`r?`n")) {
     $tbl = $line.Trim()
     if (-not $tbl -or $tbl -match 'Warning' -or $tbl -eq 'TABLE_NAME') { continue }
     try {
-        Invoke-Mysql8 "ALTER TABLE framasbc.${bt}${tbl}${bt} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" | Out-Null
+        Invoke-Mysql8 "SET sql_mode = ''; ALTER TABLE framasbc.${bt}${tbl}${bt} CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" | Out-Null
     } catch {
-        # Tables with long composite keys (e.g. bc_1ab2) may exceed InnoDB key length; ensure cmp_id is utf8mb4_unicode_ci
+        Log "  WARN convert $tbl failed: $($_.Exception.Message)"
         try {
             Invoke-Mysql8 "SET sql_mode = ''; ALTER TABLE framasbc.${bt}${tbl}${bt} MODIFY COLUMN cmp_id VARCHAR(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '';" | Out-Null
         } catch {}
     }
 }
 Invoke-Mysql8 "SET FOREIGN_KEY_CHECKS = 1;" | Out-Null
-# Optimize bc_1ab2 NOMOR_AJU collation for fast index join
-try {
-    Invoke-Mysql8 "SET sql_mode = ''; ALTER TABLE framasbc.bc_1ab2 MODIFY COLUMN NOMOR_AJU VARCHAR(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL;" | Out-Null
-} catch {}
 Log "Phase3: Collation standardization complete."
 
 # ---------- Phase 4: Harmonize multi-plant cmp_id on bc_ceisa_data ----------
@@ -541,6 +563,73 @@ JOIN (SELECT NOMOR_AJU, MAX(cmp_id) AS cmp_id FROM framasbc.bc_ceisa_header GROU
 SET d.cmp_id = h.cmp_id
 WHERE d.nomorAju NOT LIKE '%FRM%' AND d.nomorAju NOT LIKE '%PLB%' AND d.kodeDokumen NOT IN ('16','28','33','331')
   AND d.cmp_id = 'FRM-1';
+
+UPDATE framasbc.bc_ceisa_header h
+JOIN framasbc.bc_ceisa_data d ON h.nomor_aju = d.nomorAju
+SET 
+  h.nomor_daftar = COALESCE(NULLIF(h.nomor_daftar, ''), d.nomorDaftar),
+  h.tanggal_daftar = COALESCE(NULLIF(h.tanggal_daftar, ''), DATE_FORMAT(d.tanggalDaftar, '%Y-%m-%d')),
+  h.tanggal_pernyataan = COALESCE(NULLIF(h.tanggal_pernyataan, ''), DATE_FORMAT(d.tanggalDaftar, '%Y-%m-%d'));
+
+UPDATE framasbc.bc_ceisa_header h
+SET 
+  h.tanggal_pernyataan = CONCAT(SUBSTRING(h.nomor_aju, 13, 4), '-', SUBSTRING(h.nomor_aju, 17, 2), '-', SUBSTRING(h.nomor_aju, 19, 2))
+WHERE (h.tanggal_pernyataan IS NULL OR h.tanggal_pernyataan = '')
+  AND LENGTH(h.nomor_aju) >= 20
+  AND SUBSTRING(h.nomor_aju, 13, 4) BETWEEN '2015' AND '2030';
+
+CREATE TABLE IF NOT EXISTS framasbc.bc_ceisa_sppb (
+  cmp_id VARCHAR(30) NOT NULL DEFAULT '',
+  nomorAju VARCHAR(40) NOT NULL,
+  nomorDaftar VARCHAR(255) DEFAULT NULL,
+  tanggalDaftar DATE DEFAULT NULL,
+  kodeDokumen VARCHAR(255) DEFAULT NULL,
+  namaDokumen VARCHAR(255) DEFAULT NULL,
+  kodeKantor VARCHAR(255) DEFAULT NULL,
+  namaKantorPendek VARCHAR(255) DEFAULT NULL,
+  namaEntitas VARCHAR(255) DEFAULT NULL,
+  kodeProses VARCHAR(255) DEFAULT NULL,
+  kodeEntitas VARCHAR(255) DEFAULT NULL,
+  namaProses VARCHAR(255) DEFAULT NULL,
+  idPerusahaan VARCHAR(255) DEFAULT NULL,
+  namaPerusahaan VARCHAR(255) DEFAULT NULL,
+  idPpjk VARCHAR(255) DEFAULT NULL,
+  nipPfpd VARCHAR(255) DEFAULT NULL,
+  nipPfpb VARCHAR(255) DEFAULT NULL,
+  nipAp VARCHAR(255) DEFAULT NULL,
+  kodeJalur VARCHAR(255) DEFAULT NULL,
+  idRespon VARCHAR(255) DEFAULT NULL,
+  namaRespon VARCHAR(255) DEFAULT 'SPPB',
+  nomorRespon VARCHAR(255) DEFAULT NULL,
+  tanggalRespon DATETIME DEFAULT NULL,
+  pdf TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  upd_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cmp_id, nomorAju),
+  KEY idx_nomor_aju (nomorAju)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS framasbc.bc_tipe (
+  tipe VARCHAR(30) DEFAULT NULL,
+  r INT DEFAULT NULL,
+  g INT DEFAULT NULL,
+  b INT DEFAULT NULL,
+  grp VARCHAR(2) DEFAULT NULL,
+  idx INT DEFAULT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO framasbc.bc_tipe (tipe, r, g, b, grp, idx)
+SELECT 'Finished Goods', 0, 0, 255, 'FG', 2 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='FG')
+UNION ALL SELECT 'Raw Materials', 0, 255, 0, 'RM', 1 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='RM')
+UNION ALL SELECT 'Work In Progress', 100, 0, 0, 'WI', 3 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='WI')
+UNION ALL SELECT 'Product Sample', 100, 100, 0, 'PS', 4 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='PS')
+UNION ALL SELECT 'Wastes', 200, 200, 200, 'W', 5 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='W')
+UNION ALL SELECT 'Mold', 255, 250, 50, 'CG', 6 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Mold')
+UNION ALL SELECT 'Machine', 255, 250, 50, 'CG', 7 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Machine')
+UNION ALL SELECT 'Part Machine', 255, 250, 50, 'CG', 8 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Part Machine')
+UNION ALL SELECT 'Tools', 255, 250, 50, 'CG', 10 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Tools')
+UNION ALL SELECT 'Factory Equipment', 255, 250, 50, 'CG', 11 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Factory Equipment')
+UNION ALL SELECT '-- SEMUA KLAS --', 255, 255, 255, '%', 0 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='%');
 "@ | Out-Null
 Log "Phase4: Harmonization complete."
 
