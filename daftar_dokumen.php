@@ -279,6 +279,43 @@ if ($action === 'list') {
     $whereSql
     ORDER BY effective_tanggal_respon DESC, a.nomorAju DESC";
 
+    // Pastikan tabel bc_ceisa_sppb sudah ada agar tidak pernah throw 'Table doesn't exist'
+    try {
+        $chkSppb = $koneksi->query("SHOW TABLES LIKE 'bc_ceisa_sppb'");
+        if (!$chkSppb || $chkSppb->num_rows === 0) {
+            $koneksi->query("CREATE TABLE IF NOT EXISTS bc_ceisa_sppb (
+              cmp_id VARCHAR(30) NOT NULL DEFAULT '',
+              nomorAju VARCHAR(40) NOT NULL,
+              nomorDaftar VARCHAR(255) DEFAULT NULL,
+              tanggalDaftar DATE DEFAULT NULL,
+              kodeDokumen VARCHAR(255) DEFAULT NULL,
+              namaDokumen VARCHAR(255) DEFAULT NULL,
+              kodeKantor VARCHAR(255) DEFAULT NULL,
+              namaKantorPendek VARCHAR(255) DEFAULT NULL,
+              namaEntitas VARCHAR(255) DEFAULT NULL,
+              kodeProses VARCHAR(255) DEFAULT NULL,
+              kodeEntitas VARCHAR(255) DEFAULT NULL,
+              namaProses VARCHAR(255) DEFAULT NULL,
+              idPerusahaan VARCHAR(255) DEFAULT NULL,
+              namaPerusahaan VARCHAR(255) DEFAULT NULL,
+              idPpjk VARCHAR(255) DEFAULT NULL,
+              nipPfpd VARCHAR(255) DEFAULT NULL,
+              nipPfpb VARCHAR(255) DEFAULT NULL,
+              nipAp VARCHAR(255) DEFAULT NULL,
+              kodeJalur VARCHAR(255) DEFAULT NULL,
+              idRespon VARCHAR(255) DEFAULT NULL,
+              namaRespon VARCHAR(255) DEFAULT 'SPPB',
+              nomorRespon VARCHAR(255) DEFAULT NULL,
+              tanggalRespon DATETIME DEFAULT NULL,
+              pdf TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+              upd_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (cmp_id, nomorAju),
+              KEY idx_nomor_aju (nomorAju)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        }
+    } catch (\Throwable $eIgn) {}
+
     try {
         $res = $koneksi->query($sql);
         $data = [];

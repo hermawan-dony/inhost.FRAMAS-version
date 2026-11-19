@@ -397,9 +397,18 @@ foreach ($tbl in $AllTenantTables) {
 
     if ($tbl -eq "bc_ceisa_sppb" -and (Table-Exists5 "framasbc" "bc_ceisa_sppb")) {
         try {
+            Invoke-Mysql5 "CREATE TABLE IF NOT EXISTS framas.bc_ceisa_sppb LIKE framasbc.bc_ceisa_sppb;" | Out-Null
             Invoke-Mysql5 "INSERT IGNORE INTO framas.bc_ceisa_sppb SELECT * FROM framasbc.bc_ceisa_sppb;" | Out-Null
             $cnt = Get-Scalar5 "SELECT COUNT(*) FROM framas.bc_ceisa_sppb;"
             Log "  + preserved framasbc.bc_ceisa_sppb rows=$cnt"
+        } catch {}
+    }
+    if ($tbl -eq "bc_kek_setting" -and (Table-Exists5 "framasbc" "bc_kek_setting")) {
+        try {
+            Invoke-Mysql5 "CREATE TABLE IF NOT EXISTS framas.bc_kek_setting LIKE framasbc.bc_kek_setting;" | Out-Null
+            Invoke-Mysql5 "INSERT IGNORE INTO framas.bc_kek_setting SELECT * FROM framasbc.bc_kek_setting;" | Out-Null
+            $cnt = Get-Scalar5 "SELECT COUNT(*) FROM framas.bc_kek_setting;"
+            Log "  + preserved framasbc.bc_kek_setting rows=$cnt"
         } catch {}
     }
 }

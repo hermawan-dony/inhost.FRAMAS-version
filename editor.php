@@ -192,20 +192,40 @@ if (isset($koneksi) && $koneksi) {
             }
         }
         if (!$foundInList) {
-            $stmtSelected = $koneksi->prepare("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
-                IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
-                (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
-                FROM bc_ceisa_header a
-                LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
-                WHERE a.nomor_aju = ? LIMIT 1");
-            if ($stmtSelected) {
-                $stmtSelected->bind_param("s", $selectedAjuParam);
-                $stmtSelected->execute();
-                $resSel = $stmtSelected->get_result();
-                if ($resSel && $rowSel = $resSel->fetch_assoc()) {
-                    array_unshift($ajuList, $rowSel);
+            try {
+                $stmtSelected = $koneksi->prepare("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
+                    IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
+                    (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju = a.nomor_aju) AS posted
+                    FROM bc_ceisa_header a
+                    LEFT JOIN bc_ceisa_company c ON a.cmp_id = c.cmp_id
+                    WHERE a.nomor_aju = ? LIMIT 1");
+                if ($stmtSelected) {
+                    $stmtSelected->bind_param("s", $selectedAjuParam);
+                    $stmtSelected->execute();
+                    $resSel = $stmtSelected->get_result();
+                    if ($resSel && $rowSel = $resSel->fetch_assoc()) {
+                        array_unshift($ajuList, $rowSel);
+                    }
+                    $stmtSelected->close();
                 }
-                $stmtSelected->close();
+            } catch (Throwable $eSel) {
+                try {
+                    $stmtSelected = $koneksi->prepare("SELECT a.nomor_aju, a.kode_dokumen, a.tanggal_pernyataan, a.cmp_id, 
+                        IFNULL(c.cmp_name, a.cmp_id) AS nama_perusahaan,
+                        (SELECT COUNT(1) FROM bc_ceisa_aju_posted p WHERE p.nomor_aju COLLATE utf8mb4_unicode_ci = a.nomor_aju COLLATE utf8mb4_unicode_ci) AS posted
+                        FROM bc_ceisa_header a
+                        LEFT JOIN bc_ceisa_company c ON a.cmp_id COLLATE utf8mb4_unicode_ci = c.cmp_id COLLATE utf8mb4_unicode_ci
+                        WHERE a.nomor_aju = ? LIMIT 1");
+                    if ($stmtSelected) {
+                        $stmtSelected->bind_param("s", $selectedAjuParam);
+                        $stmtSelected->execute();
+                        $resSel = $stmtSelected->get_result();
+                        if ($resSel && $rowSel = $resSel->fetch_assoc()) {
+                            array_unshift($ajuList, $rowSel);
+                        }
+                        $stmtSelected->close();
+                    }
+                } catch (Throwable $eSel2) {}
             }
         }
     }

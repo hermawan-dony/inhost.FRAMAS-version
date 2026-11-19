@@ -90,8 +90,11 @@ if ($action === 'login') {
             $_SESSION['allowed_menus']    = ['*'];
             $_SESSION['allowed_docs']     = ['*'];
 
-            // Tentukan Perusahaan Aktif Berdasarkan Pilihan Terakhir Pengguna
+            // Tentukan Perusahaan Aktif Berdasarkan Pilihan Terakhir Pengguna (Khusus Framas: Default ke FRM-1)
             $prefCmp = !empty($adminUserRow['last_cmp_id']) ? $adminUserRow['last_cmp_id'] : ($_COOKIE['ceisa_last_cmp_' . $loggedUserId] ?? ($_COOKIE['ceisa_last_cmp'] ?? 'FRM-1'));
+            if (strtoupper($prefCmp) === 'SYSTEM' || !in_array($prefCmp, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB'])) {
+                $prefCmp = 'FRM-1';
+            }
             $cStmt = $koneksi->prepare("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id = ? OR subdomain = ? LIMIT 1");
             $cStmt->bind_param("ss", $prefCmp, $prefCmp);
             $cStmt->execute();
@@ -99,7 +102,7 @@ if ($action === 'login') {
             if ($cRes && $cr = $cRes->fetch_assoc()) {
                 $comp = $cr;
             } else {
-                $fb = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company ORDER BY cmp_name ASC LIMIT 1");
+                $fb = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(IS_INV, 1) as IS_INV, IFNULL(company_roles, 'tpb') as company_roles, allowed_docs, IFNULL(ERP_Name, '-') as ERP_Name FROM bc_ceisa_company WHERE cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') ORDER BY FIELD(cmp_id, 'FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') LIMIT 1");
                 $comp = $fb ? $fb->fetch_assoc() : null;
             }
             $cStmt->close();
@@ -404,11 +407,15 @@ if ($action === 'switch_company') {
 // -------------------------------------------------------------
 if ($action === 'get_companies') {
     header('Content-Type: application/json; charset=utf-8');
-    if (empty($_SESSION['is_admin'])) {
-        echo json_encode(['status' => 'ERROR', 'message' => 'Akses terbatas untuk Administrator.']);
+    if (empty($_SESSION['is_admin']) && empty($_SESSION['can_switch_company'])) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Akses terbatas untuk Administrator / Pengguna Terdaftar.']);
         exit;
     }
-    $res = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, IFNULL(card_color, '') as card_color FROM bc_ceisa_company ORDER BY cmp_name ASC");
+    // Khusus Framas: Hanya ambil 4 plant resmi dan urutkan secara konsisten
+    $res = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(IS_INV, 1) as IS_INV, allowed_docs, IFNULL(alamat, '') as alamat 
+    FROM bc_ceisa_company 
+    WHERE cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') 
+    ORDER BY FIELD(cmp_id, 'FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')");
     $list = [];
     if ($res) {
         while ($r = $res->fetch_assoc()) {
@@ -617,7 +624,11 @@ if ($action === 'logout') {
 }
 
 $companies = [];
-$res = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(IS_INV, 1) as IS_INV FROM bc_ceisa_company ORDER BY cmp_name ASC");
+// Khusus Framas: Tampilkan hanya 4 plant terdaftar dan urutkan strictly (FRM-1 -> FRM-2 -> FRM-3 -> PDPLB)
+$res = $koneksi->query("SELECT cmp_id, cmp_name, npwp, logo, subdomain, IFNULL(card_color, '') as card_color, IFNULL(company_roles, 'tpb') as company_roles, IFNULL(IS_INV, 1) as IS_INV, allowed_docs, IFNULL(alamat, '') as alamat 
+FROM bc_ceisa_company 
+WHERE cmp_id IN ('FRM-1', 'FRM-2', 'FRM-3', 'PDPLB') 
+ORDER BY FIELD(cmp_id, 'FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')");
 if ($res) {
     while ($r = $res->fetch_assoc()) {
         $companies[] = $r;
@@ -763,6 +774,11 @@ $isAdmin          = $isSuperAdmin; // Strict: $isAdmin merujuk khusus pada Super
 $sessionUserId    = $_SESSION['user_id'] ?? '';
 $sessionUserName  = $_SESSION['user_name'] ?? ($sessionUserId ?: 'User');
 $sessionCmpId     = $_SESSION['company_cmp_id'] ?? '';
+// Khusus Framas: Jika sesi perusahaan mengarah ke SYSTEM atau plant tidak valid, default ke FRM-1
+if (!empty($sessionCmpId) && (strtoupper($sessionCmpId) === 'SYSTEM' || !in_array($sessionCmpId, ['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB']))) {
+    $sessionCmpId = 'FRM-1';
+    $_SESSION['company_cmp_id'] = 'FRM-1';
+}
 $sessionCmpName   = $_SESSION['company_name'] ?? '';
 $sessionNpwp      = $_SESSION['company_npwp'] ?? '';
 $sessionLogo      = $_SESSION['company_logo'] ?? '';
@@ -804,6 +820,58 @@ if (!empty($sessionCmpId) && isset($koneksi) && $koneksi) {
         $_SESSION['company_allowed_docs'] = ceisa_resolve_allowed_docs($sessionCompanyRoles, null);
     }
 }
+
+// Metadata & Penamaan Visual Plant Framas (Khusus Multi-Plant Framas Indonesia)
+$framasPlantMeta = [
+    'FRM-1' => [
+        'code'     => 'FRM-1',
+        'badge'    => 'PLANT 1',
+        'title'    => 'FRAMAS - 1',
+        'sub'      => 'Plant 1 Kenari • TPB',
+        'fullname' => 'PT FRAMAS INDONESIA (TPB Kenari)',
+        'location' => 'Lippo Cikarang',
+        'role_tag' => 'Kawasan Berikat',
+        'color'    => '#1890ff',
+        'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+    ],
+    'FRM-2' => [
+        'code'     => 'FRM-2',
+        'badge'    => 'PLANT 2',
+        'title'    => 'FRAMAS - 2',
+        'sub'      => 'Plant 2 Delta • TPB',
+        'fullname' => 'PT FRAMAS INDONESIA (Delta Silicon)',
+        'location' => 'Delta Silicon MM2100',
+        'role_tag' => 'Kawasan Berikat',
+        'color'    => '#52c41a',
+        'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+    ],
+    'FRM-3' => [
+        'code'     => 'FRM-3',
+        'badge'    => 'PLANT 3',
+        'title'    => 'FRAMAS - 3',
+        'sub'      => 'Plant 3 DS 6 • TPB',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
+        'location' => 'Delta Silicon 6 Lippo Cikarang',
+        'role_tag' => 'Kawasan Berikat',
+        'color'    => '#722ed1',
+        'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+    ],
+    'PDPLB' => [
+        'code'     => 'PDPLB',
+        'badge'    => 'PLB',
+        'title'    => 'FRAMAS - PLB',
+        'sub'      => 'Pusat Logistik Berikat • MM2100',
+        'fullname' => 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
+        'location' => 'MM2100 Cikarang Barat',
+        'role_tag' => 'Pusat Logistik Berikat',
+        'color'    => '#fa8c16',
+        'docs'     => 'BC 1.6, 2.8, 3.3, 3.3.1'
+    ]
+];
+
+$activePlantMeta   = $framasPlantMeta[$sessionCmpId] ?? null;
+$displayPlantTitle = $activePlantMeta['title'] ?? ($sessionCmpName ?: 'FRAMAS');
+$displayPlantSub   = $activePlantMeta['sub'] ?? (!empty($sessionCmpId) ? '[' . $sessionCmpId . ']' : '');
 
 // Sinkronisasi Hak Akses Dokumen Pengguna yang Sedang Login
 if (!empty($_SESSION['is_super_admin'])) {
@@ -1559,39 +1627,49 @@ if ($initialTab === 'editor') {
         body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-name {
             color: #40a9ff;
         }
-        .sidebar-company-action {
-            flex-shrink: 0;
-            display: flex;
-            align-items: center;
+        .sidebar-plant-subtitle {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--card-sub-color, var(--text-muted, #8c8c8c));
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.25;
+            margin-top: 1px;
+            letter-spacing: 0.1px;
         }
-        .sidebar-company-btn {
+        body[data-theme="dark"] .sidebar-plant-subtitle {
+            color: var(--card-sub-color, #a6a6a6);
+        }
+        .sidebar-company-chevron {
+            flex-shrink: 0;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            padding: 4px 8px;
-            border-radius: 6px;
-            background: var(--card-btn-bg, rgba(24, 144, 255, 0.08));
-            color: var(--card-btn-color, #1890ff);
-            border: 1px solid var(--card-btn-border, rgba(24, 144, 255, 0.25));
-            font-size: 9.5px;
-            font-weight: 700;
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            color: var(--card-sub-color, #8c8c8c);
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-            gap: 4px;
-            letter-spacing: 0.2px;
+            background: rgba(0, 0, 0, 0.03);
+            margin-left: 4px;
         }
-        .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-btn {
-            background: #1890ff;
-            color: #ffffff;
-            border-color: #1890ff;
-            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.35);
+        .sidebar-company-card.is-admin-clickable:hover .sidebar-company-chevron {
+            color: #1890ff;
+            background: rgba(24, 144, 255, 0.12);
+            transform: translateY(1px);
         }
-        body[data-theme="dark"] .sidebar-company-card:not([data-custom-color="true"]).is-admin-clickable:hover .sidebar-company-btn {
-            background: #177ddc;
-            color: #ffffff;
-            border-color: #177ddc;
+        body[data-theme="dark"] .sidebar-company-chevron {
+            background: rgba(255, 255, 255, 0.05);
+            color: #bfbfbf;
         }
-        .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover .sidebar-company-btn {
-            filter: brightness(1.2);
+        body[data-theme="dark"] .sidebar-company-card.is-admin-clickable:hover .sidebar-company-chevron {
+            color: #40a9ff;
+            background: rgba(24, 144, 255, 0.22);
+        }
+        .sidebar-company-action,
+        .sidebar-company-btn {
+            display: none !important;
         }
 
         /* Sidebar Search Box (Matches CEISA 4.0 .Menu_searchWrapper__1Kj_Z) */
@@ -3022,33 +3100,69 @@ if ($initialTab === 'editor') {
         }
 
         .company-card-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            padding: 8px 12px;
-            margin-bottom: 6px;
+            background: var(--bg-card, #ffffff);
+            border: 1px solid var(--border-color, #e8e8e8);
+            border-left: 4px solid var(--plant-accent, #1890ff);
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 10px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             cursor: pointer;
-            transition: all 0.2s;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+            transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .company-card-item:hover {
-            border-color: #1890ff;
-            background: #e6f7ff;
-            transform: translateX(2px);
+            border-color: var(--plant-accent, #1890ff);
+            background: rgba(24, 144, 255, 0.035);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+        }
+        body[data-theme="dark"] .company-card-item {
+            background: #1f1f1f;
+            border-color: #303030;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
         }
         body[data-theme="dark"] .company-card-item:hover {
-            background: #111d2c;
-            border-color: #177ddc;
+            background: #262626;
+            border-color: #40a9ff;
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
         }
         .company-card-item.is-active-company {
-            border-color: #1890ff;
-            background: #e6f7ff;
+            border-color: var(--plant-accent, #1890ff);
+            background: rgba(24, 144, 255, 0.08);
+            box-shadow: 0 2px 10px rgba(24, 144, 255, 0.18);
         }
         body[data-theme="dark"] .company-card-item.is-active-company {
             border-color: #177ddc;
-            background: #111d2c;
+            background: rgba(24, 144, 255, 0.16);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+        }
+        .plant-badge-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 10.5px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            border: 1px solid currentColor;
+            line-height: 1;
+        }
+        .plant-tag-pill {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.05);
+            color: var(--text-muted, #595959);
+        }
+        body[data-theme="dark"] .plant-tag-pill {
+            background: rgba(255, 255, 255, 0.08);
+            color: #8c8c8c;
         }
 
         #toast {
@@ -3270,27 +3384,27 @@ if ($initialTab === 'editor') {
             }
             $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
             ?>
-            <!-- Active Company Card (Sleek Modern Workspace Switcher - No Icon, Clear Bold Name) -->
-            <div class="sidebar-company-card <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk ganti perusahaan aktif' : 'Perusahaan Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
+            <!-- Active Plant Card (Sleek Modern Framas Plant Switcher - No Button Ganti, Clean Un-truncated Name) -->
+            <div class="sidebar-company-card <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk beralih plant operasional' : 'Plant Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
                 <div id="sidebarCompanyLogoBox" style="display:none;" aria-hidden="true"></div>
                 <div class="sidebar-company-info">
                     <div class="sidebar-company-meta">
-                        <span class="sidebar-company-status-dot" title="Sesi Perusahaan Aktif"></span>
-                        <span class="sidebar-company-tag">PERUSAHAAN AKTIF</span>
-                        <span id="sidebarCompanySub" style="display:none;" aria-hidden="true"></span>
+                        <span class="sidebar-company-status-dot" title="Sesi Plant Aktif"></span>
+                        <span class="sidebar-company-tag">PLANT AKTIF</span>
+                        <span id="sidebarCompanySub" style="display:none;" aria-hidden="true">[<?= htmlspecialchars($sessionCmpId) ?>]</span>
                     </div>
-                    <div class="sidebar-company-name" id="sidebarCompanyName" title="<?= htmlspecialchars($sessionCmpName) ?>">
-                        <?= htmlspecialchars($sessionCmpName) ?>
+                    <div class="sidebar-company-name" id="sidebarCompanyName" title="<?= htmlspecialchars($displayPlantTitle) ?>">
+                        <?= htmlspecialchars($displayPlantTitle) ?>
+                    </div>
+                    <div class="sidebar-plant-subtitle" id="sidebarPlantSub" title="<?= htmlspecialchars($displayPlantSub) ?>">
+                        <?= htmlspecialchars($displayPlantSub) ?>
                     </div>
                 </div>
                 <?php if ($canSwitchCompany): ?>
-                <div class="sidebar-company-action">
-                    <span class="sidebar-company-btn" title="Klik untuk beralih perusahaan">
-                        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M7 16V4m0 0L3 8m4-4l4 4m6 4v12m0 0l4-4m-4 4l-4-4"/>
-                        </svg>
-                        <span>Ganti</span>
-                    </span>
+                <div class="sidebar-company-chevron" title="Ganti Plant Operasional">
+                    <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor">
+                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
                 </div>
                 <?php endif; ?>
             </div>
@@ -4211,36 +4325,35 @@ if ($initialTab === 'editor') {
     </div>
 
     <?php if ($isAdmin || !empty($_SESSION['can_switch_company'])): ?>
-    <!-- 3. MODAL GANTI PERUSAHAAN (ADMIN & MULTI-COMPANY USER) -->
+    <!-- 3. MODAL GANTI PLANT OPERASIONAL (FRAMAS MULTI-PLANT) -->
     <div class="modal" id="modalCompanySwitcher">
-        <div class="modal-card" style="max-width: 600px; max-height: 85vh; display:flex; flex-direction:column; padding:0; overflow:hidden;">
-            <div class="modal-header">
+        <div class="modal-card" style="max-width: 640px; max-height: 85vh; display:flex; flex-direction:column; padding:0; overflow:hidden; border-radius:10px; box-shadow:0 12px 36px rgba(0,0,0,0.2);">
+            <div class="modal-header" style="padding:16px 20px; border-bottom:1px solid var(--border-color); background:var(--bg-card); display:flex; justify-content:space-between; align-items:center;">
                 <div>
-                    <h3 class="modal-title" style="color:#1890ff;">
-                        <span>🏢</span> Pilih Perusahaan Aktif <?= $isAdmin ? '(Mode Administrator)' : '' ?>
+                    <h3 class="modal-title" style="color:#1890ff; font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px; margin:0;">
+                        <span>🏭</span> Pilih Plant Operasional (Framas Indonesia)
                     </h3>
-                    <p style="font-size:10.5px; color:var(--text-muted); margin:3px 0 0 0;">
-                        Pilih perusahaan untuk langsung beralih konteks data tanpa login ulang.
+                    <p style="font-size:11px; color:var(--text-muted); margin:4px 0 0 0;">
+                        Beralih konteks data pabean, dokumen CEISA 4.0, dan IT Inventory lintas plant tanpa login ulang.
                     </p>
                 </div>
                 <button type="button" class="modal-close-btn" onclick="closeCompanyModal()" title="Tutup">✕</button>
             </div>
 
-            <div style="padding: 12px 20px; border-bottom: 1px solid var(--border-color); background:var(--bg-card);">
-                <input type="text" id="companySearchInput" placeholder="🔍 Cari nama perusahaan, kode cmp_id, atau NPWP..." 
-                       onkeyup="filterCompanySearch()" 
-                       style="width:100%; padding: 7px 12px; font-size:11.5px; border-radius:6px; border:1px solid var(--border-color); outline:none; background:var(--bg-card); color:var(--text-main);">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px; font-size:10.5px; color:var(--text-muted);">
-                    <span id="companyCountLabel">Memuat daftar perusahaan...</span>
-                    <span>💡 Klik baris untuk langsung beralih</span>
+            <div style="padding: 10px 20px; border-bottom: 1px solid var(--border-color); background:var(--table-head-bg, #fafafa); display:flex; justify-content:space-between; align-items:center; font-size:11px; color:var(--text-muted);">
+                <span id="companyCountLabel">Memuat 4 plant operasional Framas...</span>
+                <span style="font-weight:600; color:#1890ff;">💡 Klik kartu plant untuk langsung beralih</span>
+            </div>
+
+            <div style="padding: 14px 20px; overflow-y:auto; flex:1; max-height:440px;" id="companyListContainer">
+            </div>
+
+            <div class="modal-footer" style="padding:12px 20px; border-top:1px solid var(--border-color); background:var(--bg-card); display:flex; justify-content:space-between; align-items:center;">
+                <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                    <span>🏢 NPWP Entitas:</span>
+                    <code style="font-family:monospace; font-weight:700; color:var(--text-main); background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:4px;">01.081.606.4-431.000</code>
                 </div>
-            </div>
-
-            <div style="padding: 12px 20px; overflow-y:auto; flex:1; max-height:360px;" id="companyListContainer">
-            </div>
-
-            <div class="modal-footer">
-                <button type="button" class="ant-btn ant-btn-default" onclick="closeCompanyModal()">Tutup</button>
+                <button type="button" class="ant-btn ant-btn-default" onclick="closeCompanyModal()" style="border-radius:6px; font-weight:600;">Tutup</button>
             </div>
         </div>
     </div>
@@ -5204,45 +5317,126 @@ if ($initialTab === 'editor') {
             if (modal) modal.style.display = 'none';
         }
 
+        const FRAMAS_PLANTS_CONFIG = {
+            'FRM-1': {
+                code: 'FRM-1',
+                order: 1,
+                badge: 'PLANT 1',
+                shortTitle: 'FRAMAS - 1',
+                subTitle: 'Plant 1 Kenari • TPB',
+                legalName: 'PT FRAMAS INDONESIA (TPB Kenari)',
+                location: 'Jl. Kenari II Blok G2, Lippo Cikarang',
+                facility: 'Kawasan Berikat (TPB)',
+                accent: '#1890ff',
+                docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+            },
+            'FRM-2': {
+                code: 'FRM-2',
+                order: 2,
+                badge: 'PLANT 2',
+                shortTitle: 'FRAMAS - 2',
+                subTitle: 'Plant 2 Delta • TPB',
+                legalName: 'PT FRAMAS INDONESIA (Delta Silicon)',
+                location: 'Delta Silicon, MM2100',
+                facility: 'Kawasan Berikat (TPB)',
+                accent: '#52c41a',
+                docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+            },
+            'FRM-3': {
+                code: 'FRM-3',
+                order: 3,
+                badge: 'PLANT 3',
+                shortTitle: 'FRAMAS - 3',
+                subTitle: 'Plant 3 DS 6 • TPB',
+                legalName: 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
+                location: 'Delta Silicon 6, Lippo Cikarang',
+                facility: 'Kawasan Berikat (TPB)',
+                accent: '#722ed1',
+                docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
+            },
+            'PDPLB': {
+                code: 'PDPLB',
+                order: 4,
+                badge: 'PLB',
+                shortTitle: 'FRAMAS - PLB',
+                subTitle: 'Pusat Logistik Berikat • MM2100',
+                legalName: 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
+                location: 'MM2100, Cikarang Barat',
+                facility: 'Pusat Logistik Berikat (PLB)',
+                accent: '#fa8c16',
+                docs: 'BC 1.6, 2.8, 3.3, 3.3.1'
+            }
+        };
+
         function renderCompanyList(list) {
             const container = document.getElementById('companyListContainer');
             if (!container) return;
             container.innerHTML = '';
 
+            // Saring dan urutkan khusus 4 plant resmi Framas (FRM-1 -> FRM-2 -> FRM-3 -> PDPLB)
+            const plantItems = (list && list.length ? list : Object.values(FRAMAS_PLANTS_CONFIG))
+                .filter(c => !!FRAMAS_PLANTS_CONFIG[c.cmp_id])
+                .sort((a, b) => {
+                    const ordA = FRAMAS_PLANTS_CONFIG[a.cmp_id]?.order || 99;
+                    const ordB = FRAMAS_PLANTS_CONFIG[b.cmp_id]?.order || 99;
+                    return ordA - ordB;
+                });
+
             const countLabel = document.getElementById('companyCountLabel');
             if (countLabel) {
-                countLabel.innerText = `Menampilkan ${list.length} dari ${allCompanies.length} perusahaan terdaftar`;
+                countLabel.innerText = `Menampilkan ${plantItems.length} plant operasional resmi Framas Indonesia`;
             }
 
-            if (list.length === 0) {
-                container.innerHTML = `<div style="text-align:center; padding:24px; color:#8c8c8c; font-size:12px;">Tidak ada perusahaan yang cocok dengan pencarian.</div>`;
+            if (plantItems.length === 0) {
+                container.innerHTML = `<div style="text-align:center; padding:24px; color:#8c8c8c; font-size:12px;">Tidak ada plant Framas yang ditemukan.</div>`;
                 return;
             }
 
-            list.forEach(c => {
-                const isActive = c.cmp_id === currentCmpId;
+            plantItems.forEach(c => {
+                const conf = FRAMAS_PLANTS_CONFIG[c.cmp_id] || {
+                    badge: c.cmp_id,
+                    shortTitle: c.cmp_name,
+                    subTitle: '[' + c.cmp_id + ']',
+                    legalName: c.cmp_name,
+                    location: 'Cikarang',
+                    facility: 'Pabean',
+                    accent: '#1890ff',
+                    docs: '-'
+                };
+                const isActive = (c.cmp_id === currentCmpId);
                 const div = document.createElement('div');
                 div.className = 'company-card-item' + (isActive ? ' is-active-company' : '');
-                div.onclick = function() { selectCompany(c.cmp_id, c.cmp_name); };
+                div.style.setProperty('--plant-accent', conf.accent);
+                div.onclick = function() { selectCompany(c.cmp_id, conf.legalName); };
 
                 div.innerHTML = `
-                    <div style="display:flex; flex-direction:column; gap:2px;">
-                        <div style="font-weight:700; font-size:13px; color:${isActive ? '#1890ff' : 'var(--text-main)'}; display:flex; align-items:center; gap:6px;">
-                            <span>${escapeHtml(c.cmp_name)}</span>
-                            ${c.card_color ? `
-                                <span style="display:inline-block; width:10px; height:10px; border-radius:3px; background:${escapeHtml(c.card_color)}; border:1px solid rgba(0,0,0,0.25); flex-shrink:0;" title="Warna Card: ${escapeHtml(c.card_color)}"></span>
-                            ` : ''}
-                            ${isActive ? '<span style="font-size:9.5px; font-weight:700; color:#1890ff; background:#fff; border:1px solid #1890ff; padding:1px 5px; border-radius:3px;">✓ AKTIF</span>' : ''}
-                        </div>
-                        <div style="font-size:10.5px; color:#8c8c8c; display:flex; gap:10px;">
-                            <span>ID: <code style="font-family:monospace;">${escapeHtml(c.cmp_id)}</code></span>
-                            <span>NPWP: <code style="font-family:monospace;">${escapeHtml(c.npwp || '-')}</code></span>
+                    <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
+                        <span class="plant-badge-pill" style="color:${conf.accent}; border-color:${conf.accent}; background:${conf.accent}14;">
+                            ${escapeHtml(conf.badge)}
+                        </span>
+                        <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
+                            <div style="font-weight:800; font-size:13.5px; color:${isActive ? conf.accent : 'var(--text-main)'}; display:flex; align-items:center; gap:8px;">
+                                <span>${escapeHtml(conf.shortTitle)}</span>
+                                <span style="font-size:11px; font-weight:600; color:var(--text-muted);">${escapeHtml(conf.legalName)}</span>
+                            </div>
+                            <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                <span>📍 ${escapeHtml(conf.location)}</span>
+                                <span class="plant-tag-pill">${escapeHtml(conf.facility)}</span>
+                                <span>ID: <code style="font-family:monospace; font-weight:600;">${escapeHtml(c.cmp_id)}</code></span>
+                            </div>
+                            <div style="font-size:10px; color:#8c8c8c; margin-top:1px;">
+                                <span>📄 Dokumen: ${escapeHtml(conf.docs)}</span>
+                            </div>
                         </div>
                     </div>
-                    <div>
+                    <div style="margin-left:14px; flex-shrink:0;">
                         ${isActive 
-                            ? '<button class="ant-btn ant-btn-primary" disabled style="opacity:0.85; padding:0 8px; height:24px; font-size:11px;">Sedang Aktif</button>' 
-                            : '<button class="ant-btn" style="padding:0 8px; height:24px; font-size:11px;">Pilih ➔</button>'}
+                            ? `<span style="font-size:11px; font-weight:700; color:#52c41a; background:rgba(82, 196, 26, 0.12); border:1px solid rgba(82, 196, 26, 0.35); padding:5px 11px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+                                 <span>✓</span> <span>SEDANG AKTIF</span>
+                               </span>`
+                            : `<button type="button" class="ant-btn ant-btn-primary" style="padding:0 12px; height:30px; font-size:11.5px; border-radius:6px; font-weight:600;">
+                                 Pilih Plant ➔
+                               </button>`}
                     </div>
                 `;
                 container.appendChild(div);
@@ -5336,10 +5530,21 @@ if ($initialTab === 'editor') {
                         applySidebarCompanyCardColor(json.card_color);
                     }
 
+                    const pConf = FRAMAS_PLANTS_CONFIG[json.cmp_id] || {
+                        shortTitle: json.cmp_name,
+                        subTitle: '[' + json.cmp_id + ']',
+                        legalName: json.cmp_name
+                    };
+
                     const sbName = document.getElementById('sidebarCompanyName');
                     if (sbName) {
-                        sbName.innerText = json.cmp_name;
-                        sbName.title = json.cmp_name;
+                        sbName.innerText = pConf.shortTitle;
+                        sbName.title = pConf.legalName || json.cmp_name;
+                    }
+                    const sbPlantSub = document.getElementById('sidebarPlantSub');
+                    if (sbPlantSub) {
+                        sbPlantSub.innerText = pConf.subTitle;
+                        sbPlantSub.title = pConf.subTitle;
                     }
                     const sbSub = document.getElementById('sidebarCompanySub');
                     if (sbSub) {

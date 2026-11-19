@@ -8485,3 +8485,39 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - Hidrasi otomatis tanggal daftar dan tanggal pernyataan pada `bc_ceisa_header` dari `bc_ceisa_data` atau substring 26-digit nomor AJU (`YYYY-MM-DD`).
 5. **Dukungan Penuh Tabel `bc_kek_setting`**:
    - Ditambahkan ke array `$TenantTablesPrefer` dan dipastikan skemanya selalu dibuat di Phase 4 `merge_to_framasbc.ps1`.
+
+---
+
+## [2026-11-19] Redesain Profesional Multi-Plant Switcher Framas & Resolusi Error Tampilan
+
+### A. Latar Belakang & Kebutuhan Pengguna
+1. **Redesain Modal Ganti Perusahaan (`modalCompanySwitcher`)**:
+   - Khusus proyek Framas (multi-plant 1 entitas), modal switch perusahaan dibuat jauh lebih profesional dan elegan.
+   - Hanya menampilkan 4 plant resmi Framas dan **URUT STRICT**:
+     1. `FRM-1` — Plant Framas 1 (TPB Kenari)
+     2. `FRM-2` — Plant Framas 2 (Delta Silicon)
+     3. `FRM-3` — Plant Framas 3 (Delta Silicon 6)
+     4. `PDPLB` — Plant Framas PLB (Pusat Logistik Berikat MM2100)
+   - Akun `SYSTEM` disembunyikan/dikeluarkan 100% dari modal plant operasional.
+2. **Redesain Kartu Perusahaan Aktif di Sidebar (`sidebarCompanyCard`)**:
+   - Menghilangkan tombol `[↑↓ Ganti]` yang memakan ruang dan membuat nama perusahaan terpotong (`PT FRAMAS IN...`).
+   - Tampilan diubah menjadi *Sleek Workspace Switcher* (mirip Notion/Linear/Slack) dengan judul tebal tidak terpotong (`FRAMAS - 1`, `FRAMAS - 2`, `FRAMAS - 3`, `FRAMAS - PLB`), subtitle plant yang informatif (`Plant 1 Kenari • TPB`, dll.), dan ikon chevron `▾` dropdown yang elegan.
+3. **Penyelesaian Seluruh Error Layar**:
+   - Error `Table 'framasbc.bc_ceisa_sppb' doesn't exist` di `daftar_dokumen.php`: Ditambahkan pengecekan dan inisialisasi proaktif sebelum query list dokumen.
+   - Error `Illegal mix of collations` di `editor.php:158`: Dilengkapi *multi-layered fallback* dan *character collation safety*.
+   - Pemunculan Chip KPI `BELUM IMPORT H2H` dan `BELUM MASUK IT INV` di `daftar_dokumen.php` terjamin aktif karena nilai `show_unimported_h2h` dan `IS_INV` untuk keempat plant Framas bernilai `1` dan query dokumen berhasil dimuat tanpa kendala.
+
+### B. Perubahan File
+1. `index.php`:
+   - Query `$companies` dan AJAX handler `get_companies` dibatasi khusus 4 plant Framas dengan urutan `ORDER BY FIELD(cmp_id, 'FRM-1', 'FRM-2', 'FRM-3', 'PDPLB')`.
+   - Definisi `$framasPlantMeta` dan konfigurasi frontend `FRAMAS_PLANTS_CONFIG`.
+   - Redesain markup `#sidebarCompanyCard` tanpa tombol `Ganti` dan penambahan chevron serta subtitle plant.
+   - Redesain markup modal `#modalCompanySwitcher` dan JavaScript `renderCompanyList()` dengan badge plant, jenis fasilitas, lokasi, dan indikator status aktif.
+   - Sinkronisasi dinamis judul dan subtitle sidebar saat switch plant tanpa reload halaman.
+2. `daftar_dokumen.php`:
+   - Proactive check & auto-create tabel `bc_ceisa_sppb` sebelum eksekusi query data.
+3. `editor.php`:
+   - Penambahan try-catch dan fallback collation pada query selected AJU.
+4. `database/merge_to_framasbc.ps1`:
+   - Pembuatan dan preservasi data `bc_ceisa_sppb` dan `bc_kek_setting` terintegrasi di staging MySQL 5 agar aman pada setiap kali perintah `SYNC DB!`.
+
