@@ -8398,3 +8398,12 @@ Agar perintah pengguna **`SYNC DB!`** di kemudian hari tidak menimbulkan error s
    - Skrip sekarang secara otomatis menjalankan Phase 3 setelah proses impor selesai untuk mengonversi setiap tabel ke `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, serta memastikan kolom relasi `cmp_id` seragam dan kompatibel terhadap operasi `JOIN`.
 4. **Pencatatan Versi Skrip**:
    - Menambahkan pengecualian pada `.gitignore` (`!database/merge_to_framasbc.ps1`) sehingga skrip resmi `merge_to_framasbc.ps1` tersimpan aman di repositori Git proyek.
+
+### D. Resolusi Tambahan: Missing Table `bc_ceisa_sppb` & Optimasi Index Kolom AJU
+1. **Identifikasi Masalah**:
+   - Saat Dashboard Dokumen memuat data via AJAX, muncul pesan: `Table 'framasbc.bc_ceisa_sppb' doesn't exist`.
+   - *Penyebab*: Tabel arsip SPPB (`bc_ceisa_sppb`) dan tabel CEISA 4.0 generasi baru lainnya hanya ada di skema master `framasbc` (MySQL 5) dan belum ada di 4 database plant warisan (`tpbdb`, `tpbdelta`, `tpbfrm3`, `tpbplb`). Skrip migrasi sebelumnya hanya mencari skema pada 4 database plant lama sehingga tabel-tabel baru ini di-skip (`SKIP no source schema`).
+2. **Perbaikan & Penguatan**:
+   - Seluruh 27 tabel CEISA baru (termasuk `bc_ceisa_sppb`, `bc_material_approval`, `bc_ceisa_manifes_*`, `bc_ppkek_masuk_*`) telah diimpor ke `framasbc` di MySQL 8 dengan collation `utf8mb4_unicode_ci`.
+   - Kandidat pencarian skema pada `merge_to_framasbc.ps1` diperluas dengan menambahkan `framasbc` (`@("tpbdb", "tpbfrm3", "tpbplb", "tpbdelta", "framasbc")`) sehingga tabel-tabel CEISA generasi baru otomatis ikut dimigrasikan saat perintah `SYNC DB!` dieksekusi.
+   - Menambahkan index `idx_nomor_aju` otomatis untuk setiap tabel bertransaksi `nomor_aju`/`nomorAju`, serta menstandarisasi kolom `NOMOR_AJU` pada `bc_1ab2` menjadi `utf8mb4_unicode_ci` agar proses join dokumen H2H berlangsung secepat kilat (< 1 detik).

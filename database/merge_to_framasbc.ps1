@@ -159,7 +159,7 @@ $TenantTablesPrefer = @(
     "bc_ceisa_get_dokumen_xls","bc_ceisa_get_entitas_xls","bc_ceisa_get_kemasan_xls",
     "bc_1ab2","bc_1ab","bc_1ab2_revisi","bc_1c","bc_1d",
     "bc_barang","bc_bom","bc_do_dtl","bc_issue_aju","bc_issue_dtl","bc_issue_hdr","bc_issue_hdr2","bc_issue2",
-    "bc_material_approval","bc_pi_dtl","bc_po_dtl","bc_si_aju_ceisa","bc_si_dtl","bc_so","bc_so0","bc_wh_trn","tpb_respon"
+    "bc_material_approval","bc_pi_dtl","bc_po_dtl","bc_si_aju_ceisa","bc_si_dtl","bc_so","bc_so0","bc_wh_trn","tpb_respon","bc_ppkek_masuk_detail","bc_ppkek_masuk_header","bc_ppkek_masuk_kontainer"
 )
 
 if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
@@ -247,7 +247,7 @@ VALUES
 
 foreach ($tbl in $SharedTables) {
     $src = $null
-    foreach ($cand in @("tpbfrm3", "tpbplb", "tpbdb", "tpbdelta")) {
+    foreach ($cand in @("tpbfrm3", "tpbplb", "tpbdb", "tpbdelta", "framasbc")) {
         if (Table-Exists5 $cand $tbl) { $src = $cand; break }
     }
     if (-not $src) { Log "SKIP shared missing: $tbl"; continue }
@@ -273,7 +273,7 @@ Log ("Tenant tables planned: {0}" -f $AllTenantTables.Count)
 
 foreach ($tbl in $AllTenantTables) {
     $schemaSrc = $null
-    foreach ($cand in @("tpbdb", "tpbfrm3", "tpbplb", "tpbdelta")) {
+    foreach ($cand in @("tpbdb", "tpbfrm3", "tpbplb", "tpbdelta", "framasbc")) {
         if (Table-Exists5 $cand $tbl) { $schemaSrc = $cand; break }
     }
     if (-not $schemaSrc) { Log "SKIP no source schema: $tbl"; continue }
@@ -301,10 +301,20 @@ foreach ($tbl in $AllTenantTables) {
             Log "  WARN PK change failed: $($_.Exception.Message)"
             try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_cmp_id (cmp_id);" | Out-Null } catch {}
         }
+        if ($cols -contains "nomor_aju") {
+            try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_nomor_aju (nomor_aju);" | Out-Null } catch {}
+        }
+        if ($cols -contains "nomorAju") {
+            try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_nomor_aju (nomorAju);" | Out-Null } catch {}
+        }
     } else {
         try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_cmp_id (cmp_id);" | Out-Null } catch {}
         if ($cols -contains "nomor_aju") {
+            try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_nomor_aju (nomor_aju);" | Out-Null } catch {}
             try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_cmp_aju (cmp_id, nomor_aju);" | Out-Null } catch {}
+        }
+        if ($cols -contains "nomorAju") {
+            try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} ADD KEY idx_nomor_aju (nomorAju);" | Out-Null } catch {}
         }
         if ($tbl -eq "bc_material" -and ($cols -contains "KODE_BARANG")) {
             try { Invoke-Mysql5 "ALTER TABLE framas.${bt}${tbl}${bt} DROP PRIMARY KEY;" | Out-Null } catch {}
@@ -488,6 +498,10 @@ foreach ($line in ($allTblsOut -split "`r?`n")) {
     }
 }
 Invoke-Mysql8 "SET FOREIGN_KEY_CHECKS = 1;" | Out-Null
+# Optimize bc_1ab2 NOMOR_AJU collation for fast index join
+try {
+    Invoke-Mysql8 "SET sql_mode = ''; ALTER TABLE framasbc.bc_1ab2 MODIFY COLUMN NOMOR_AJU VARCHAR(30) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL;" | Out-Null
+} catch {}
 Log "Phase3: Collation standardization complete."
 
 $sum2 = Invoke-Mysql8 @"
