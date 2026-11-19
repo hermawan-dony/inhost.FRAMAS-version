@@ -4188,7 +4188,9 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const selectedCmp = (document.getElementById('filterCmp')?.value || initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>').toUpperCase();
                 if (companyShowUnimportedMap && typeof companyShowUnimportedMap[selectedCmp] !== 'undefined') {
                     isH2HVisible = (parseInt(companyShowUnimportedMap[selectedCmp], 10) === 1);
-                } else if (['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB', 'SYSTEM', 'FRAMAS', ''].includes(selectedCmp)) {
+                } else if (['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB', 'SYSTEM', 'FRAMAS', 'ALL', '*', ''].includes(selectedCmp)) {
+                    isH2HVisible = true;
+                } else if (companyShowUnimportedMap && Object.values(companyShowUnimportedMap).some(v => parseInt(v, 10) === 1)) {
                     isH2HVisible = true;
                 }
                 if (isH2HVisible) {
@@ -4402,13 +4404,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const ajuStr = (r.nomor_aju || '').toUpperCase();
                 const curCmp = (r.cmp_id || '').toUpperCase();
                 if (curCmp === 'FRM-1' || ajuStr.includes('FRM01') || ajuStr.includes('FRM1')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-blue" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 1 MM2100 (Kawasan Industri MM 2100 Blok M 33-34)">PLANT 1</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-blue notranslate" translate="no" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 1 MM2100 (Kawasan Industri MM 2100 Blok M 33-34)">PLANT 1</span>';
                 } else if (curCmp === 'FRM-2' || ajuStr.includes('FRM02') || ajuStr.includes('FRM2')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 2 Kenari DS5 (Kenari Raya Blok G2 Delta Silicon 5)">PLANT 2</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-green notranslate" translate="no" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 2 Kenari DS5 (Kenari Raya Blok G2 Delta Silicon 5)">PLANT 2</span>';
                 } else if (curCmp === 'FRM-3' || ajuStr.includes('FRM03') || ajuStr.includes('FRM3')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-purple" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 3 DS6 (Jl. Ramin Blok G6A Delta Silicon VI)">PLANT 3</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-purple notranslate" translate="no" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 3 DS6 (Jl. Ramin Blok G6A Delta Silicon VI)">PLANT 3</span>';
                 } else if (curCmp === 'PDPLB' || ajuStr.includes('PDPLB') || ajuStr.includes('PLB')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-orange" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Pusat Logistik Berikat (Kawasan Industri MM2100 Blok O-1-2)">PLB</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-orange notranslate" translate="no" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Pusat Logistik Berikat (Kawasan Industri MM2100 Blok O-1-2)">PLB</span>';
                 }
 
                 html += `
@@ -4420,7 +4422,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <td style="font-weight:500;">BC ${r.bc}</td>
                         <td>
                             <div style="display:flex; align-items:center;">
-                                <a class="nomor-aju-link" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Klik untuk melihat riwayat tracking status">${r.nomor_aju}</a>
+                                <a class="nomor-aju-link notranslate" translate="no" onclick="openTrackingHistory('${r.nomor_aju}', '${r.cmp_id || ''}')" title="Klik untuk melihat riwayat tracking status">${r.nomor_aju}</a>
                                 ${itInvIconHtml}
                             </div>
                             <p style="margin:4px 0px;"><span class="ant-tag ${tagClass}">${escapeHtml(tagText)}</span></p>
@@ -4446,12 +4448,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                         <td style="text-align:center;">
                             ${lokalHtml}
                         </td>
-                        <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;">
-                            <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:#8c8c8c; font-family:monospace;">
-                                <span>${escapeHtml(companyId)}</span>
+                        <td style="max-width:240px; overflow:hidden; text-overflow:ellipsis;" class="notranslate" translate="no">
+                            <div style="display:flex; align-items:center; gap:6px; font-size:10px; color:#8c8c8c; font-family:monospace;" class="notranslate" translate="no">
+                                <span class="notranslate" translate="no">${escapeHtml(companyId)}</span>
                                 ${plantBadgeHtml}
                             </div>
-                            <p style="margin:0; font-weight:500; font-size:11px;">${escapeHtml(companyName)}</p>
+                            <p style="margin:0; font-weight:500; font-size:11px;" class="notranslate" translate="no">${escapeHtml(companyName)}</p>
                         </td>
                         <td style="text-align:center; white-space:nowrap;" class="td-col-aksi">
                             <button type="button" class="action-btn-ceisa" onclick="openRowActionMenu(event, '${r.nomor_aju}', '${r.cmp_id || ''}', '${pdfFile ? encodeURIComponent(pdfFile) : ''}', '${r.id_header || ''}', '${r.kode_dokumen || r.bc || ''}', '${r.kode_proses || ''}', '${r.namaProses ? encodeURIComponent(r.namaProses) : ''}', '${r.nomor_daftar || ''}')" title="Pilihan Aksi Dokumen ${escapeHtml(r.nomor_aju)}">

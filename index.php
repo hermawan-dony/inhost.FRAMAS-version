@@ -3391,14 +3391,14 @@ if ($initialTab === 'editor') {
     <!-- 1. STANDALONE LOGIN SCREEN -->
     <div style="position:fixed; top:20px; right:24px; z-index:100; display:flex; align-items:center; gap:8px;">
         <!-- Language Switcher Pill (ID, EN, VI) -->
-        <div class="lang-select-box" id="loginLangSelect">
-            <button type="button" class="lang-btn active" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia">
+        <div class="lang-select-box notranslate" id="loginLangSelect" translate="no">
+            <button type="button" class="lang-btn active notranslate" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia" translate="no">
                 <span class="flag-icon">🇮🇩</span> <span>ID</span>
             </button>
-            <button type="button" class="lang-btn" data-lang="en" onclick="setAppLanguage('en')" title="English">
+            <button type="button" class="lang-btn notranslate" data-lang="en" onclick="setAppLanguage('en')" title="English" translate="no">
                 <span class="flag-icon">🇬🇧</span> <span>EN</span>
             </button>
-            <button type="button" class="lang-btn" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">
+            <button type="button" class="lang-btn notranslate" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt" translate="no">
                 <span class="flag-icon">🇻🇳</span> <span>VI</span>
             </button>
         </div>
@@ -3415,21 +3415,13 @@ if ($initialTab === 'editor') {
     <div class="login-wrap">
         <div class="login-card">
             <div class="login-header">
-                <!-- Security SSO Pill -->
-                <div style="display:flex; justify-content:center;">
-                    <div class="login-security-pill">
-                        <i class="fa-solid fa-shield-halved"></i>
-                        <span>CEISA 4.0 &bull; Enterprise SSO</span>
-                    </div>
-                </div>
-
                 <!-- Brand Badge (Logo, App Name, Subtitle) -->
                 <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:12px;">
-                    <div class="login-brand-badge">
+                    <div class="login-brand-badge notranslate" translate="no">
                         <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
                         <div style="text-align:left;">
-                            <div class="login-brand-title"><?= htmlspecialchars($appSettings['app_name']) ?></div>
-                            <div class="login-brand-sub"><?= htmlspecialchars($appSettings['app_subtitle']) ?></div>
+                            <div class="login-brand-title notranslate" translate="no"><?= htmlspecialchars($appSettings['app_name']) ?></div>
+                            <div class="login-brand-sub notranslate" translate="no"><?= htmlspecialchars($appSettings['app_subtitle']) ?></div>
                         </div>
                     </div>
                 </div>
@@ -3443,13 +3435,12 @@ if ($initialTab === 'editor') {
                     </div>
                 <?php elseif ($isFramasPortal): ?>
                     <div style="margin-top:2px; margin-bottom:12px;">
-                        <h2 style="font-size:19px; margin-bottom:4px; font-weight:800; color:var(--text-main); letter-spacing:-0.3px;">Masuk ke Portal Pabean</h2>
-                        <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;">PT FRAMAS INDONESIA &bull; CEISA 4.0 Single Core</p>
-                        <div class="login-plant-badges">
-                            <span class="plant-chip frm1" title="Plant FRM-1: Kawasan Industri MM 2100 Blok M 33-34"><i class="fa-solid fa-industry"></i> FRM-1 (MM2100)</span>
-                            <span class="plant-chip frm2" title="Plant FRM-2: Kenari Raya Delta Silicon 5"><i class="fa-solid fa-industry"></i> FRM-2 (Kenari DS5)</span>
-                            <span class="plant-chip frm3" title="Plant FRM-3: Jl. Ramin Delta Silicon VI"><i class="fa-solid fa-industry"></i> FRM-3 (DS6)</span>
-                            <span class="plant-chip plb" title="Plant PDPLB: Kawasan Industri MM2100 Blok O-1-2"><i class="fa-solid fa-warehouse"></i> PDPLB (PLB)</span>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;" class="notranslate" translate="no">PT FRAMAS INDONESIA &bull; CEISA 4.0 Single Core</p>
+                        <div class="login-plant-badges notranslate" translate="no">
+                            <span class="plant-chip frm1 notranslate" translate="no" title="Plant FRM-1: Kawasan Industri MM 2100 Blok M 33-34"><i class="fa-solid fa-industry"></i> FRM-1 (MM2100)</span>
+                            <span class="plant-chip frm2 notranslate" translate="no" title="Plant FRM-2: Kenari Raya Delta Silicon 5"><i class="fa-solid fa-industry"></i> FRM-2 (Kenari DS5)</span>
+                            <span class="plant-chip frm3 notranslate" translate="no" title="Plant FRM-3: Jl. Ramin Delta Silicon VI"><i class="fa-solid fa-industry"></i> FRM-3 (DS6)</span>
+                            <span class="plant-chip plb notranslate" translate="no" title="Plant PDPLB: Kawasan Industri MM2100 Blok O-1-2"><i class="fa-solid fa-warehouse"></i> PDPLB (PLB)</span>
                         </div>
                     </div>
                 <?php elseif ($subdomainCompany): ?>
@@ -3526,7 +3517,7 @@ if ($initialTab === 'editor') {
                     <span><?= $isAdminOnlyLogin ? 'MASUK SEBAGAI ADMINISTRATOR' : 'MASUK KE SISTEM' ?></span>
                 </button>
             </form>
-            <div class="login-card-meta">
+            <div class="login-card-meta notranslate" translate="no">
                 <span><i class="fa-solid fa-building" style="margin-right:4px;"></i> PT FRAMAS INDONESIA</span>
                 <span class="meta-dot">&bull;</span>
                 <span>NPWP: 01.081.606.4-431.000</span>
@@ -3539,12 +3530,6 @@ if ($initialTab === 'editor') {
                     if (p) { p.value = ''; }
                 })();
             </script>
-        </div>
-
-        <div class="login-page-footer">
-            <span><?= htmlspecialchars(str_replace(' • Single Core System', '', $appSettings['app_footer'])) ?></span>
-            <span class="footer-dot">•</span>
-            <span><?= htmlspecialchars($appSettings['login_badge']) ?></span>
         </div>
     </div>
 
@@ -3569,9 +3554,9 @@ if ($initialTab === 'editor') {
                 <div class="kt-aside__brand-logo">
                     <a href="index.php" style="display:flex; align-items:center; text-decoration:none; gap:7px; width:100%; min-width:0; overflow:hidden;">
                         <img alt="<?= htmlspecialchars($appSettings['app_name']) ?>" src="<?= htmlspecialchars($appSettings['app_logo']) ?>" id="sidebarBrandLogo" style="height:30px; width:30px; max-height:30px; max-width:30px; object-fit:contain; border-radius:5px; flex-shrink:0;" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
-                        <div class="logo-text-wrap" style="display:flex; flex-direction:column; justify-content:center; white-space:nowrap; overflow:hidden; min-width:0; flex:1;">
-                            <span style="font-size:<?= htmlspecialchars($sidebarBrandFontSize) ?>; font-weight:800; color:#1890ff; line-height:1.15; letter-spacing:normal; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandName" title="<?= htmlspecialchars($appSettings['app_name']) ?>"><?= htmlspecialchars($appSettings['app_name']) ?></span>
-                            <span style="font-size:<?= htmlspecialchars($sidebarBrandSubFontSize) ?>; font-weight:600; color:#8c8c8c; letter-spacing:normal; line-height:1.25; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandSub" title="<?= htmlspecialchars($appSettings['app_subtitle']) ?>"><?= htmlspecialchars($appSettings['app_subtitle']) ?></span>
+                        <div class="logo-text-wrap notranslate" translate="no" style="display:flex; flex-direction:column; justify-content:center; white-space:nowrap; overflow:hidden; min-width:0; flex:1;">
+                            <span style="font-size:<?= htmlspecialchars($sidebarBrandFontSize) ?>; font-weight:800; color:#1890ff; line-height:1.15; letter-spacing:normal; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandName" title="<?= htmlspecialchars($appSettings['app_name']) ?>" class="notranslate" translate="no"><?= htmlspecialchars($appSettings['app_name']) ?></span>
+                            <span style="font-size:<?= htmlspecialchars($sidebarBrandSubFontSize) ?>; font-weight:600; color:#8c8c8c; letter-spacing:normal; line-height:1.25; text-overflow:ellipsis; overflow:hidden; white-space:nowrap; display:block; width:100%;" id="sidebarBrandSub" title="<?= htmlspecialchars($appSettings['app_subtitle']) ?>" class="notranslate" translate="no"><?= htmlspecialchars($appSettings['app_subtitle']) ?></span>
                         </div>
                     </a>
                 </div>
@@ -3601,18 +3586,18 @@ if ($initialTab === 'editor') {
             $companyCardDisplay = $isCompanyCardVisible ? '' : 'display: none !important;';
             ?>
             <!-- Active Plant Card (Sleek Modern Framas Plant Switcher - No Button Ganti, Clean Un-truncated Name) -->
-            <div class="sidebar-company-card <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk beralih plant operasional' : 'Plant Aktif' ?>" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
+            <div class="sidebar-company-card notranslate <?= $canSwitchCompany ? 'is-admin-clickable' : '' ?>" id="sidebarCompanyCard" <?= $canSwitchCompany ? 'onclick="openCompanyModal()"' : '' ?> title="<?= $canSwitchCompany ? 'Klik untuk beralih plant operasional' : 'Plant Aktif' ?>" translate="no" style="<?= htmlspecialchars(getSidebarCompanyCardStyle($sessionCardColor)) ?> <?= $companyCardDisplay ?>" <?= !empty($sessionCardColor) ? 'data-custom-color="true"' : '' ?>>
                 <div id="sidebarCompanyLogoBox" style="display:none;" aria-hidden="true"></div>
-                <div class="sidebar-company-info">
+                <div class="sidebar-company-info notranslate" translate="no">
                     <div class="sidebar-company-meta">
                         <span class="sidebar-company-status-dot" title="Sesi Plant Aktif"></span>
                         <span class="sidebar-company-tag">PLANT AKTIF</span>
                         <span id="sidebarCompanySub" style="display:none;" aria-hidden="true">[<?= htmlspecialchars($sessionCmpId) ?>]</span>
                     </div>
-                    <div class="sidebar-company-name" id="sidebarCompanyName" title="<?= htmlspecialchars($displayPlantTitle) ?>">
+                    <div class="sidebar-company-name notranslate" id="sidebarCompanyName" title="<?= htmlspecialchars($displayPlantTitle) ?>" translate="no">
                         <?= htmlspecialchars($displayPlantTitle) ?>
                     </div>
-                    <div class="sidebar-plant-subtitle" id="sidebarPlantSub" title="<?= htmlspecialchars($displayPlantSub) ?>">
+                    <div class="sidebar-plant-subtitle notranslate" id="sidebarPlantSub" title="<?= htmlspecialchars($displayPlantSub) ?>" translate="no">
                         <?= htmlspecialchars($displayPlantSub) ?>
                     </div>
                 </div>
@@ -4505,14 +4490,14 @@ if ($initialTab === 'editor') {
                     </div>
 
                     <!-- Language Selector (ID, EN, VI) -->
-                    <div class="lang-select-box topbar-lang-select" id="topbarLangSelect">
-                        <button type="button" class="lang-btn active" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia">
+                    <div class="lang-select-box topbar-lang-select notranslate" id="topbarLangSelect" translate="no">
+                        <button type="button" class="lang-btn active notranslate" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia" translate="no">
                             <span class="flag-icon">🇮🇩</span> <span>ID</span>
                         </button>
-                        <button type="button" class="lang-btn" data-lang="en" onclick="setAppLanguage('en')" title="English">
+                        <button type="button" class="lang-btn notranslate" data-lang="en" onclick="setAppLanguage('en')" title="English" translate="no">
                             <span class="flag-icon">🇬🇧</span> <span>EN</span>
                         </button>
-                        <button type="button" class="lang-btn" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">
+                        <button type="button" class="lang-btn notranslate" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt" translate="no">
                             <span class="flag-icon">🇻🇳</span> <span>VI</span>
                         </button>
                     </div>
@@ -5700,24 +5685,25 @@ if ($initialTab === 'editor') {
                 };
                 const isActive = (c.cmp_id === currentCmpId);
                 const div = document.createElement('div');
-                div.className = 'company-card-item' + (isActive ? ' is-active-company' : '');
+                div.className = 'company-card-item notranslate' + (isActive ? ' is-active-company' : '');
+                div.setAttribute('translate', 'no');
                 div.style.setProperty('--plant-accent', conf.accent);
                 div.onclick = function() { selectCompany(c.cmp_id, conf.legalName); };
 
                 div.innerHTML = `
-                    <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;">
-                        <span class="plant-badge-pill" style="color:${conf.accent}; border-color:${conf.accent}; background:${conf.accent}14;">
+                    <div style="display:flex; align-items:center; gap:12px; min-width:0; flex:1;" class="notranslate" translate="no">
+                        <span class="plant-badge-pill notranslate" translate="no" style="color:${conf.accent}; border-color:${conf.accent}; background:${conf.accent}14;">
                             ${escapeHtml(conf.badge)}
                         </span>
-                        <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;">
-                            <div style="font-weight:800; font-size:13.5px; color:${isActive ? conf.accent : 'var(--text-main)'}; display:flex; align-items:center; gap:8px;">
-                                <span>${escapeHtml(conf.shortTitle)}</span>
-                                <span style="font-size:11px; font-weight:600; color:var(--text-muted);">${escapeHtml(conf.legalName)}</span>
+                        <div style="display:flex; flex-direction:column; gap:2px; min-width:0; flex:1;" class="notranslate" translate="no">
+                            <div style="font-weight:800; font-size:13.5px; color:${isActive ? conf.accent : 'var(--text-main)'}; display:flex; align-items:center; gap:8px;" class="notranslate" translate="no">
+                                <span class="notranslate" translate="no">${escapeHtml(conf.shortTitle)}</span>
+                                <span style="font-size:11px; font-weight:600; color:var(--text-muted);" class="notranslate" translate="no">${escapeHtml(conf.legalName)}</span>
                             </div>
-                            <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-                                <span>📍 ${escapeHtml(conf.location)}</span>
-                                <span class="plant-tag-pill">${escapeHtml(conf.facility)}</span>
-                                <span>ID: <code style="font-family:monospace; font-weight:600;">${escapeHtml(c.cmp_id)}</code></span>
+                            <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap;" class="notranslate" translate="no">
+                                <span class="notranslate" translate="no">📍 ${escapeHtml(conf.location)}</span>
+                                <span class="plant-tag-pill notranslate" translate="no">${escapeHtml(conf.facility)}</span>
+                                <span class="notranslate" translate="no">ID: <code style="font-family:monospace; font-weight:600;">${escapeHtml(c.cmp_id)}</code></span>
                             </div>
                             <div style="font-size:10px; color:#8c8c8c; margin-top:1px;">
                                 <span>📄 Dokumen: ${escapeHtml(conf.docs)}</span>

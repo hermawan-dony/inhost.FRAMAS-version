@@ -8607,5 +8607,33 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 3. **Skrip Otomasi Sinkronisasi (`database/merge_to_framasbc.ps1`)**:
    - Memperbarui pemetaan metadata tenant `$Tenants` sehingga setiap kali perintah `SYNC DB!` dieksekusi di masa mendatang, nama dan alamat yang benar akan selalu terjaga otomatis.
 
+---
+
+## [2026-11-19] Pembersihan UI Login, Kunci Brand Anti-Translasi & Visibilitas Kartu H2H
+
+### A. Pembersihan UI Halaman Login (Screenshot `prnt.sc/uWZlKALHBwk4`)
+- Menghapus 3 elemen yang ditandai merah oleh pengguna pada halaman login:
+  1. **Badge Keamanan Atas**: Dihapus elemen `.login-security-pill` (`CEISA 4.0 • Enterprise SSO`).
+  2. **Judul Halaman**: Dihapus elemen `<h2>Masuk ke Portal Pabean</h2>`.
+  3. **Footer Melayang Bawah**: Dihapus elemen `.login-page-footer` (`H2H Ceisa 4.0 • Single Core System`).
+- Hasilnya: Halaman login tampil jauh lebih bersih, modern, dan minimalis.
+
+### B. Proteksi Anti-Translasi Brand Framas Indonesia (Screenshot `prnt.sc/tVS0uhLI5r_q` & `prnt.sc/glxo0sNP5xY7`)
+- **Masalah**: Fitur Google Translate menerjemahkan nama brand **"framas Indonesia"** menjadi *"Indonesian frames"* (bahasa Inggris) dan *"Khung ảnh Indonesia"* (bahasa Vietnam), serta menerjemahkan kode bahasa *"ID"* menjadi *"NHẬN DẠNG"*.
+- **Solusi**: Menerapkan atribut standar Google Translate `class="notranslate"` dan `translate="no"` pada:
+  - Kotak switcher bahasa (`#loginLangSelect` dan `#topbarLangSelect`) serta tombol `lang-btn` (`ID`, `EN`, `VI`).
+  - Badge logo brand login (`.login-brand-badge`, `.login-brand-title`, `.login-brand-sub`).
+  - Chip badge plant login (`.login-plant-badges`, `.plant-chip`).
+  - Metadata footer login (`.login-card-meta`).
+  - Brand header sidebar aplikasi (`#sidebarBrandName`, `#sidebarBrandSub`).
+  - Kartu plant aktif di sidebar (`#sidebarCompanyCard`, `#sidebarCompanyName`, `#sidebarPlantSub`).
+  - Item plant pada modal switcher (`#modalCompanySwitcher`).
+  - Kolom nama perusahaan dan badge plant pada tabel dokumen (`daftar_dokumen.php`).
+
+### C. Pengaturan & Visibilitas Kartu "BELUM IMPORT H2H" (`daftar_dokumen.php`)
+- Memperluas logika JavaScript `isH2HVisible` pada `kpiChipNotH2H` agar kartu ringkasan dokumen yang belum diimpor ke H2H (`bc_ceisa_header`) selalu tampil aktif saat memfilter `ALL` (Semua Perusahaan), `*`, maupun plant spesifik Framas.
+- Memastikan tombol `⚡ Select All` dan `📊 Rekap` tetap berfungsi responsif.
+
+
 
 
