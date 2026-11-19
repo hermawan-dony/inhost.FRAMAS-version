@@ -159,7 +159,8 @@ $TenantTablesPrefer = @(
     "bc_ceisa_get_dokumen_xls","bc_ceisa_get_entitas_xls","bc_ceisa_get_kemasan_xls",
     "bc_1ab2","bc_1ab","bc_1ab2_revisi","bc_1c","bc_1d",
     "bc_barang","bc_bom","bc_do_dtl","bc_issue_aju","bc_issue_dtl","bc_issue_hdr","bc_issue_hdr2","bc_issue2",
-    "bc_material_approval","bc_pi_dtl","bc_po_dtl","bc_si_aju_ceisa","bc_si_dtl","bc_so","bc_so0","bc_wh_trn","tpb_respon","bc_ppkek_masuk_detail","bc_ppkek_masuk_header","bc_ppkek_masuk_kontainer"
+    "bc_material_approval","bc_pi_dtl","bc_po_dtl","bc_si_aju_ceisa","bc_si_dtl","bc_so","bc_so0","bc_wh_trn","tpb_respon","bc_ppkek_masuk_detail","bc_ppkek_masuk_header","bc_ppkek_masuk_kontainer",
+    "bc_kek_setting"
 )
 
 if (Test-Path $LogFile) { Remove-Item $LogFile -Force }
@@ -630,6 +631,23 @@ UNION ALL SELECT 'Part Machine', 255, 250, 50, 'CG', 8 FROM DUAL WHERE NOT EXIST
 UNION ALL SELECT 'Tools', 255, 250, 50, 'CG', 10 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Tools')
 UNION ALL SELECT 'Factory Equipment', 255, 250, 50, 'CG', 11 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE tipe='Factory Equipment')
 UNION ALL SELECT '-- SEMUA KLAS --', 255, 255, 255, '%', 0 FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM framasbc.bc_tipe WHERE grp='%');
+
+CREATE TABLE IF NOT EXISTS framasbc.bc_kek_setting (
+  cmp_id VARCHAR(30) NOT NULL,
+  is_kek_active TINYINT(1) NOT NULL DEFAULT 0,
+  kek_mode VARCHAR(20) NOT NULL DEFAULT 'dummy',
+  insw_key VARCHAR(100) DEFAULT 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo',
+  unique_key VARCHAR(255) DEFAULT '',
+  unique_key_real VARCHAR(255) DEFAULT '',
+  unique_key_dummy VARCHAR(255) DEFAULT 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7',
+  business_type VARCHAR(50) DEFAULT 'manufaktur',
+  saldo_awal_final TINYINT(1) DEFAULT 0,
+  saldo_awal_final_at DATETIME DEFAULT NULL,
+  last_push_at DATETIME DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cmp_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 "@ | Out-Null
 Log "Phase4: Harmonization complete."
 

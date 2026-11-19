@@ -8467,6 +8467,9 @@ Pengguna melaporkan serangkaian kendala saat mengakses aplikasi setelah migrasi 
    - Menambahkan blok penanganan `try-catch` dengan fallback eksplisit `COLLATE utf8mb4_unicode_ci` pada relasi `cmp_id` dan `nomor_aju`.
 4. **Harmonisasi `transfer.php` Multi-Plant**:
    - Menghapus pembatasan `cmp_id` pada join tabel `cekit` (`bc_1ab2`). Pencocokan dokumen dengan IT Inventory kini murni berdasarkan 26-digit `nomor_aju` global yang dijamin unik. Jika nomor AJU ada di `bc_1ab2`, status langsung dianggap "Sudah Masuk IT Inventory" (`cekit > 0`).
+5. **Resiliensi `company.php` (Modal Edit Perusahaan & KEK Setting)**:
+   - Menambahkan DDL otomatis `CREATE TABLE IF NOT EXISTS bc_kek_setting` pada blok *auto-heal* di awal `company.php`.
+   - Melapisi query pembacaan dan penyimpanan `bc_kek_setting` dengan `try-catch` agar saat user mendobel-klik baris perusahaan untuk mengedit, sistem tidak crash dengan pesan `Table 'framasbc.bc_kek_setting' doesn't exist` / `Unexpected token '<', "<br /> <b>"... is not valid JSON`.
 
 ### C. Penguatan Permanen Skrip Otomasi (`database/merge_to_framasbc.ps1`)
 Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluruh di skrip migrasi:
@@ -8480,3 +8483,5 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - Preservasi data `bc_ceisa_sppb` dan preservasi data konfigurasi `bc_ceisa_company` (`show_unimported_h2h`, `last_cmp_id`, dll.) kini dijamin tidak tertimpa atau hilang saat `SYNC DB!` dijalankan.
    - Penambahan skema dan *seed data* default tabel `bc_tipe` di Phase 4.
    - Hidrasi otomatis tanggal daftar dan tanggal pernyataan pada `bc_ceisa_header` dari `bc_ceisa_data` atau substring 26-digit nomor AJU (`YYYY-MM-DD`).
+5. **Dukungan Penuh Tabel `bc_kek_setting`**:
+   - Ditambahkan ke array `$TenantTablesPrefer` dan dipastikan skemanya selalu dibuat di Phase 4 `merge_to_framasbc.ps1`.

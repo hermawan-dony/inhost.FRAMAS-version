@@ -76,6 +76,24 @@ if ($chkColNitku && $chkColNitku->num_rows === 0) {
 // Auto-heal: pastikan seluruh NPWP 15 digit di bc_ceisa_company wajib 15 digit jika terdapat 16 digit yang berawalan 0
 @$koneksi->query("UPDATE bc_ceisa_company SET npwp = SUBSTRING(npwp, 2) WHERE LENGTH(npwp) = 16 AND npwp LIKE '0%'");
 
+// Auto-heal: pastikan tabel bc_kek_setting tersedia
+@$koneksi->query("CREATE TABLE IF NOT EXISTS bc_kek_setting (
+  cmp_id VARCHAR(30) NOT NULL,
+  is_kek_active TINYINT(1) NOT NULL DEFAULT 0,
+  kek_mode VARCHAR(20) NOT NULL DEFAULT 'dummy',
+  insw_key VARCHAR(100) DEFAULT 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo',
+  unique_key VARCHAR(255) DEFAULT '',
+  unique_key_real VARCHAR(255) DEFAULT '',
+  unique_key_dummy VARCHAR(255) DEFAULT 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7',
+  business_type VARCHAR(50) DEFAULT 'manufaktur',
+  saldo_awal_final TINYINT(1) DEFAULT 0,
+  saldo_awal_final_at DATETIME DEFAULT NULL,
+  last_push_at DATETIME DEFAULT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (cmp_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
 
 $action = $_REQUEST['action'] ?? '';
 
@@ -141,26 +159,29 @@ if ($action === 'get') {
         $res = $stmt->get_result();
         if ($res && $data = $res->fetch_assoc()) {
             // Lampirkan Pengaturan KEK LNSW jika ada
-            $kekStmt = $koneksi->prepare("SELECT * FROM bc_kek_setting WHERE cmp_id = ? LIMIT 1");
-            if ($kekStmt) {
-                $kekStmt->bind_param("s", $cmp_id);
-                $kekStmt->execute();
-                $kekRes = $kekStmt->get_result();
-                if ($kekRes && $kRow = $kekRes->fetch_assoc()) {
-                    $data['kek_setting'] = $kRow;
-                } else {
-                    $data['kek_setting'] = [
-                        'is_kek_active' => 0,
-                        'kek_mode' => 'dummy',
-                        'insw_key' => 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo',
-                        'unique_key' => '',
-                        'unique_key_real' => '',
-                        'unique_key_dummy' => 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7',
-                        'business_type' => $data['business_type'] ?? 'manufaktur',
-                        'auto_push_active' => 0
-                    ];
+            $data['kek_setting'] = [
+                'is_kek_active' => 0,
+                'kek_mode' => 'dummy',
+                'insw_key' => 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo',
+                'unique_key' => '',
+                'unique_key_real' => '',
+                'unique_key_dummy' => 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7',
+                'business_type' => $data['business_type'] ?? 'manufaktur',
+                'auto_push_active' => 0
+            ];
+            try {
+                $kekStmt = $koneksi->prepare("SELECT * FROM bc_kek_setting WHERE cmp_id = ? LIMIT 1");
+                if ($kekStmt) {
+                    $kekStmt->bind_param("s", $cmp_id);
+                    $kekStmt->execute();
+                    $kekRes = $kekStmt->get_result();
+                    if ($kekRes && $kRow = $kekRes->fetch_assoc()) {
+                        $data['kek_setting'] = $kRow;
+                    }
+                    $kekStmt->close();
                 }
-                $kekStmt->close();
+            } catch (Throwable $eKek) {
+                // Gunakan default kek_setting jika query gagal
             }
             echo json_encode(['status' => 'OK', 'data' => $data]);
         } else {
@@ -555,20 +576,24 @@ if ($action === 'save') {
             $kek_unique_key_dummy = trim($_POST['kek_unique_key_dummy'] ?? 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7');
             $kek_unique_key       = ($kek_mode === 'real') ? $kek_unique_key_real : $kek_unique_key_dummy;
 
-            $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE 
-                is_kek_active = VALUES(is_kek_active),
-                kek_mode = VALUES(kek_mode),
-                insw_key = VALUES(insw_key),
-                unique_key = VALUES(unique_key),
-                unique_key_real = VALUES(unique_key_real),
-                unique_key_dummy = VALUES(unique_key_dummy),
-                business_type = VALUES(business_type)");
-            if ($kStmt) {
-                $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
-                $kStmt->execute();
-                $kStmt->close();
+            try {
+                $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE 
+                    is_kek_active = VALUES(is_kek_active),
+                    kek_mode = VALUES(kek_mode),
+                    insw_key = VALUES(insw_key),
+                    unique_key = VALUES(unique_key),
+                    unique_key_real = VALUES(unique_key_real),
+                    unique_key_dummy = VALUES(unique_key_dummy),
+                    business_type = VALUES(business_type)");
+                if ($kStmt) {
+                    $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
+                    $kStmt->execute();
+                    $kStmt->close();
+                }
+            } catch (Throwable $eKekSave) {
+                // Jangan gagalkan pembuatan perusahaan jika KEK gagal disimpan
             }
 
             echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_name' berhasil ditambahkan!"]);
@@ -615,20 +640,24 @@ if ($action === 'save') {
             $kek_unique_key_dummy = trim($_POST['kek_unique_key_dummy'] ?? 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7');
             $kek_unique_key       = ($kek_mode === 'real') ? $kek_unique_key_real : $kek_unique_key_dummy;
 
-            $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON DUPLICATE KEY UPDATE 
-                is_kek_active = VALUES(is_kek_active),
-                kek_mode = VALUES(kek_mode),
-                insw_key = VALUES(insw_key),
-                unique_key = VALUES(unique_key),
-                unique_key_real = VALUES(unique_key_real),
-                unique_key_dummy = VALUES(unique_key_dummy),
-                business_type = VALUES(business_type)");
-            if ($kStmt) {
-                $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
-                $kStmt->execute();
-                $kStmt->close();
+            try {
+                $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON DUPLICATE KEY UPDATE 
+                    is_kek_active = VALUES(is_kek_active),
+                    kek_mode = VALUES(kek_mode),
+                    insw_key = VALUES(insw_key),
+                    unique_key = VALUES(unique_key),
+                    unique_key_real = VALUES(unique_key_real),
+                    unique_key_dummy = VALUES(unique_key_dummy),
+                    business_type = VALUES(business_type)");
+                if ($kStmt) {
+                    $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
+                    $kStmt->execute();
+                    $kStmt->close();
+                }
+            } catch (Throwable $eKekSave) {
+                // Jangan gagalkan pembuatan perusahaan jika KEK gagal disimpan
             }
             // Update session jika perusahaan yang diedit sedang aktif
             if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
