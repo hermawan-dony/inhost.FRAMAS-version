@@ -257,6 +257,7 @@ SET
   d.id_user_ceisa  = IFNULL(s.id_user_ceisa, d.id_user_ceisa),
   d.token_ceisa    = IFNULL(s.token_ceisa, d.token_ceisa),
   d.allowed_docs   = IFNULL(s.allowed_docs, d.allowed_docs),
+  d.show_unimported_h2h = IFNULL(s.show_unimported_h2h, d.show_unimported_h2h),
   d.app_password   = IFNULL(s.app_password, d.app_password);
 "@ | Out-Null
     Log "Preserved company credentials from framasbc"
