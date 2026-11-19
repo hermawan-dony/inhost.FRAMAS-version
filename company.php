@@ -271,7 +271,7 @@ if ($action === 'save') {
     $secret_mfa     = trim(str_replace(' ', '', strtoupper($_POST['secret_mfa'] ?? '')));
     $secret_mfa_insw= trim(str_replace(' ', '', strtoupper($_POST['secret_mfa_insw'] ?? '')));
     $id_user_ceisa  = trim($_POST['id_user_ceisa'] ?? '');
-    $is_final       = (isset($_POST['is_final']) && strtolower($_POST['is_final']) === 'true') ? 'true' : 'false';
+    $is_final       = (isset($_POST['is_final']) && in_array(strtolower((string)$_POST['is_final']), ['true', '1'])) ? 1 : 0;
     $token_ceisa    = trim($_POST['token_ceisa'] ?? '');
     $api_key_ceisa  = trim($_POST['api_key_ceisa'] ?? 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83');
     $insw_client_id     = trim($_POST['insw_client_id'] ?? '');
@@ -472,11 +472,22 @@ if ($action === 'save') {
     // Auto check / add db_mode, db_name, app_mode, use_tabs columns if not exists
     $chkColDbMode = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'db_mode'");
     if ($chkColDbMode && $chkColDbMode->num_rows === 0) {
-        @$koneksi->query("ALTER TABLE bc_ceisa_company 
-            ADD COLUMN db_mode VARCHAR(20) NOT NULL DEFAULT 'global' AFTER show_unimported_h2h,
-            ADD COLUMN db_name VARCHAR(64) NULL AFTER db_mode,
-            ADD COLUMN app_mode VARCHAR(20) NOT NULL DEFAULT 'standar' AFTER db_name,
-            ADD COLUMN use_tabs TINYINT(1) NOT NULL DEFAULT 1 AFTER app_mode");
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN db_mode VARCHAR(20) NOT NULL DEFAULT 'global' AFTER show_unimported_h2h");
+    }
+
+    $chkColDbName = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'db_name'");
+    if ($chkColDbName && $chkColDbName->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN db_name VARCHAR(64) NULL AFTER db_mode");
+    }
+
+    $chkColAppMode = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'app_mode'");
+    if ($chkColAppMode && $chkColAppMode->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN app_mode VARCHAR(20) NOT NULL DEFAULT 'standar' AFTER db_name");
+    }
+
+    $chkColUseTabs = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'use_tabs'");
+    if ($chkColUseTabs && $chkColUseTabs->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN use_tabs TINYINT(1) NOT NULL DEFAULT 1 AFTER app_mode");
     }
 
     // Ambil input roles perusahaan (array dari form checkbox atau string)
@@ -557,7 +568,7 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssssssssssssssssssiisssiiisssi",
+            "ssssssssssssssssssssissssssssssssiisssiiisssi",
             $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $npwp16, $nitku, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $secret_mfa_insw, $id_user_ceisa, $is_final,
@@ -621,7 +632,7 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssssssssssssssssssiisssiiisssis",
+            "sssssssssssssssssssissssssssssssiisssiiisssis",
             $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $npwp16, $nitku, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
             $username_ceisa, $password_ceisa, $secret_mfa, $secret_mfa_insw, $id_user_ceisa, $is_final,

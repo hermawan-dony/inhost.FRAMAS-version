@@ -223,6 +223,8 @@ CREATE TABLE bc_ceisa_company (
   show_unimported_h2h TINYINT(1) NOT NULL DEFAULT 0,
   db_mode VARCHAR(20) NOT NULL DEFAULT 'global',
   db_name VARCHAR(50) DEFAULT NULL,
+  app_mode VARCHAR(20) NOT NULL DEFAULT 'standar',
+  use_tabs TINYINT(1) NOT NULL DEFAULT 1,
   db_host VARCHAR(100) DEFAULT NULL,
   db_port INT DEFAULT NULL,
   db_user VARCHAR(50) DEFAULT NULL,
@@ -240,9 +242,9 @@ foreach ($t in $Tenants) {
     $allowed = if ($t.Roles -eq "plb") { "16,28,33,331" } else { "23,25,261,262,27,40,41" }
     Invoke-Mysql5 @"
 INSERT INTO framas.bc_ceisa_company
-  (cmp_id, cmp_name, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, allowed_docs, username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, token_ceisa, is_active, IS_INV, created_at, updated_at)
+  (cmp_id, cmp_name, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, allowed_docs, ERP_Name, username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, token_ceisa, is_active, IS_INV, created_at, updated_at)
 VALUES
-  ('$($t.CmpId)', '$name', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', '$allowed', 'maikelwawoh', 'Framas2007', 'MNTDETJSOBXDG4LMMZJES2CDK5CFGR2E', '1b6fdb63-0b91-4c3e-bd42-27b3cd9fe604', '1322604451', 1, 1, NOW(), NOW());
+  ('$($t.CmpId)', '$name', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', '$allowed', 'FRAMAS', 'maikelwawoh', 'Framas2007', 'MNTDETJSOBXDG4LMMZJES2CDK5CFGR2E', '1b6fdb63-0b91-4c3e-bd42-27b3cd9fe604', '1322604451', 1, 1, NOW(), NOW());
 "@ | Out-Null
     Log "Seed company $($t.CmpId) <= $($t.Src)"
 }
@@ -252,6 +254,7 @@ if (Table-Exists5 "framasbc" "bc_ceisa_company") {
 UPDATE framas.bc_ceisa_company d
 JOIN framasbc.bc_ceisa_company s ON d.cmp_id = s.cmp_id
 SET 
+  d.ERP_Name       = IFNULL(s.ERP_Name, 'FRAMAS'),
   d.username_ceisa = IFNULL(s.username_ceisa, d.username_ceisa),
   d.password_ceisa = IFNULL(s.password_ceisa, d.password_ceisa),
   d.secret_mfa     = IFNULL(s.secret_mfa, d.secret_mfa),

@@ -8802,3 +8802,24 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 
 
 
+
+---
+
+### Perbaikan Modul Kelola Perusahaan (company.php) & Standarisasi ERP = FRAMAS (19 November 2026)
+1. **Diagnosa Kendala:**
+   - Error saat edit/simpan pengaturan perusahaan di `company.php`:
+     `Fatal error: Uncaught mysqli_sql_exception: Unknown column 'app_mode' in 'field list'`
+     dan `Incorrect integer value: 'false' for column 'is_final'`.
+   - Hal ini disebabkan auto-heal kolom baru (`db_name`, `app_mode`, `use_tabs`) sebelumnya dibungkus di dalam pengecekan tunggal `db_mode`. Jika kolom `db_mode` sudah pernah ada, kolom pendukung lainnya tidak ikut dibuat.
+   - Selain itu, MySQL 8 strict mode menolak penugasan string `'false'` untuk tipe kolom `TINYINT(1)` (`is_final`).
+   - Panjang string tipe parameter pada query `bind_param` (INSERT dan UPDATE) tidak selaras secara presisi dengan 45 variabel yang dikirimkan.
+2. **Solusi & Penanganan:**
+   - **Auto-Heal Skema Mandiri**: Memisahkan pemeriksaan keberadaan kolom `db_mode`, `db_name`, `app_mode`, dan `use_tabs` secara mandiri per kolom pada `company.php`.
+   - **Type-Safe Handling MySQL 8**: Menyesuaikan parsing `$is_final` menjadi integer `0` atau `1`:
+     `$is_final = (isset($_POST['is_final']) && in_array(strtolower((string)$_POST['is_final']), ['true', '1'])) ? 1 : 0;`.
+   - **Sinkronisasi Parameter `bind_param`**:
+     - INSERT: Menyesuaikan string tipe menjadi tepat 45 karakter (`"ssssssssssssssssssssissssssssssssiisssiiisssi"`).
+     - UPDATE: Menyesuaikan string tipe menjadi tepat 45 karakter (`"sssssssssssssssssssissssssssssssiisssiiisssis"`).
+   - **Standarisasi Konfigurasi Multi-Plant**:
+     - Menjalankan migrasi data untuk memastikan seluruh record plant (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`, dan `SYSTEM`) pada database `framasbc` (MySQL 8 port 3307) memiliki `ERP_Name = 'FRAMAS'`.
+     - Memperbarui skrip sinkronisasi staging `database/merge_to_framasbc.ps1` agar menyertakan kolom `app_mode`, `use_tabs`, dan mempertahankan nilai `ERP_Name = 'FRAMAS'` pada saat perintah `SYNC DB!` dijalankan.
