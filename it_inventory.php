@@ -1182,7 +1182,8 @@ $stats['total_rows'] = count($dataRows);
             background: var(--bg-card);
         }
         .ant-table td.col-nobukti, .ant-table th.col-nobukti {
-            max-width: 220px !important;
+            min-width: 50ch !important;
+            max-width: 60ch !important;
             white-space: normal !important;
             word-break: break-word !important;
             overflow-wrap: break-word !important;
@@ -1933,7 +1934,7 @@ $stats['total_rows'] = count($dataRows);
                         <th style="text-align:center;">Jenis</th>
                         <th>Nomor</th>
                         <th style="text-align:center;">Tanggal</th>
-                        <th class="col-nobukti">Nomor</th>
+                        <th class="col-nobukti" style="min-width:50ch; max-width:60ch;">Nomor</th>
                         <th style="text-align:center;">Tanggal</th>
                     </tr>
                 <?php elseif ($activeTab === '1c'): ?>
@@ -2083,7 +2084,7 @@ $stats['total_rows'] = count($dataRows);
                             <!-- Bukti Penerimaan/Pengeluaran: Nomor (Merge Cell, Max 60 Karakter & Auto Wrap) -->
                             <td class="col-grp col-nobukti" data-orig-text="<?= $noBukti ?>"
                                 <?= ($group_mode && $currentGroupSpan > 1 && $isFirstInGroup) ? 'rowspan="' . $currentGroupSpan . '"' : '' ?>
-                                style="max-width:220px; white-space:normal !important; word-break:break-word; overflow-wrap:break-word; line-height:1.35; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
+                                style="min-width:50ch !important; max-width:60ch !important; white-space:normal !important; word-break:break-word; overflow-wrap:break-word; line-height:1.35; <?= ($group_mode && !$isFirstInGroup) ? 'display:none;' : '' ?> <?= ($group_mode && $isFirstInGroup) ? 'vertical-align:top;' : '' ?>">
                                 <?= $noBuktiDisp ?>
                             </td>
 
