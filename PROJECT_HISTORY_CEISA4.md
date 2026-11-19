@@ -8634,6 +8634,29 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 - Memperluas logika JavaScript `isH2HVisible` pada `kpiChipNotH2H` agar kartu ringkasan dokumen yang belum diimpor ke H2H (`bc_ceisa_header`) selalu tampil aktif saat memfilter `ALL` (Semua Perusahaan), `*`, maupun plant spesifik Framas.
 - Memastikan tombol `⚡ Select All` dan `📊 Rekap` tetap berfungsi responsif.
 
+---
+
+## [2026-11-19] Integrasi Commit VPS Jakarta `dc71e14` (Executive IT Inventory Dashboard & Charts)
+
+### A. Analisis & Integrasi Commit `dc71e14`
+- Mengintegrasikan pembaruan dari repositori VPS Jakarta (`https://github.com/hermawan-dony/inhost.web.id.git`):
+  - **Commit `dc71e14`**: *feat(it_inventory): transform home dashboard with rich executive KPIs, Chart.js trends, customs composition donut, and recent feeds*.
+- **Pembaruan Utama pada Modul IT Inventory (`it_inventory.php`)**:
+  1. **Executive Dashboard Home Tab (`?tab=home`)**:
+     - Agregasi KPI Pemasukan (1A Inbound) & Pengeluaran (1B Outbound) real-time (jumlah dokumen, total item, sum qty volume, sum nilai pabean, CIF, harga penyerahan).
+     - Ringkasan posisi WIP (1C Work In Progress) dan Master Material (1D Inventory breakdown per klasifikasi RM, FG, CG, Waste).
+  2. **Chart.js Tren Interaktif & Donut Komposisi**:
+     - **Grafik Tren 12 Bulan (Bar Chart)**: Menampilkan perbandingan bulanan Pemasukan vs Pengeluaran dengan switcher instan: Nilai (Rp), Qty Satuan, dan Jumlah Dokumen.
+     - **Donut Chart Komposisi Dokumen Pabean**: Menampilkan porsi persentase jenis dokumen (BC 2.3, BC 4.0, BC 2.7, BC 2.5, BC 3.0, BC 4.1, BC 2.6.1, BC 2.6.2, PLB 1.6, 2.8, 3.3, 6.1.1).
+  3. **Live Feeds Dokumen Terkini**:
+     - Tabel cepat Top 5 Pemasukan dan Top 5 Pengeluaran terbaru lengkap dengan info nomor pendaftaran, no bukti, nama supplier/buyer, kode barang, nilai, dan valuta.
+  4. **Kompatibilitas Multi-Plant Framas**:
+     - Memastikan seluruh kueri agregasi dashboard home menggunakan filter multi-plant `$cmpFilter` sehingga secara cerdas merangkum data keempat plant Framas (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`).
+  5. **Resolusi Warning & Versi**:
+     - Safe-guard variabel `$reportBannerTitle` pada `it_inventory.php` sehingga aman saat tab `home` dibuka.
+     - Sinkronisasi file versi `version.txt` ke `20261119.1828`.
+
+
 
 
 

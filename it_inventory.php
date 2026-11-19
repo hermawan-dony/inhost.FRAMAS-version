@@ -277,6 +277,7 @@ if (in_array($klas_filter, $cgTypes)) {
 }
 $isCapitalGoods = in_array($klas_filter, ['Capital Goods', 'CG']);
 
+$reportBannerTitle = '';
 $stokCheckboxLabel = 'Tampilkan Semua Stok';
 if (in_array($klas_filter, ['Raw Materials', 'Raw Material', 'RM'])) {
     $stokCheckboxLabel = 'Tampilkan Semua Stok Bahan Baku / Penolong';
@@ -318,8 +319,246 @@ $stats = [
 ];
 
 if ($activeTab === 'home') {
-    // Mode Dashboard Home untuk Bea Cukai - tidak perlu jalankan query data tabel besar
+    // Mode Dashboard Home untuk Bea Cukai - Agregasi Data Eksekutif & Chart Realtime
     $dataRows = [];
+
+    // 1. Tahun Dashboard Aktif
+    $dashboardYear = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
+    if ($dashboardYear < 2000 || $dashboardYear > 2100) {
+        $dashboardYear = (int)date('Y');
+    }
+
+    $availableYears = [];
+    $qYears = $koneksi->query("SELECT DISTINCT YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) as yr 
+                               FROM bc_1ab2 
+                               WHERE COALESCE(TGL_PROSES, TANGGAL_DAFTAR) IS NOT NULL $cmpFilter 
+                               ORDER BY yr DESC");
+    if ($qYears) {
+        while ($yRow = $qYears->fetch_assoc()) {
+            if (!empty($yRow['yr'])) {
+                $availableYears[] = (int)$yRow['yr'];
+            }
+        }
+    }
+    if (empty($availableYears)) {
+        $availableYears = [(int)date('Y'), (int)date('Y') - 1];
+    }
+    if (!in_array($dashboardYear, $availableYears)) {
+        $dashboardYear = $availableYears[0];
+    }
+
+    // 2. KPI Pemasukan (1A - Inbound)
+    $kpi1A = [
+        'count_docs'  => 0,
+        'count_items' => 0,
+        'total_qty'   => 0,
+        'total_nilai' => 0,
+        'total_cif'   => 0
+    ];
+    $q1A = $koneksi->query("SELECT 
+        COUNT(DISTINCT NOMOR_DAFTAR) as cnt_doc,
+        COUNT(*) as cnt_item,
+        COALESCE(SUM(QTY_AKTUAL), 0) as sum_qty,
+        COALESCE(SUM(NILAI), 0) as sum_nilai,
+        COALESCE(SUM(CIF), 0) as sum_cif
+        FROM bc_1ab2 
+        WHERE AB IN ('A', 'M') 
+          AND YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) = $dashboardYear $cmpFilter");
+    if ($q1A && $r1A = $q1A->fetch_assoc()) {
+        $kpi1A['count_docs']  = (int)$r1A['cnt_doc'];
+        $kpi1A['count_items'] = (int)$r1A['cnt_item'];
+        $kpi1A['total_qty']   = (float)$r1A['sum_qty'];
+        $kpi1A['total_nilai'] = (float)$r1A['sum_nilai'];
+        $kpi1A['total_cif']   = (float)$r1A['sum_cif'];
+    }
+
+    // 3. KPI Pengeluaran (1B - Outbound)
+    $kpi1B = [
+        'count_docs'        => 0,
+        'count_items'       => 0,
+        'total_qty'         => 0,
+        'total_nilai'       => 0,
+        'total_penyerahan'  => 0
+    ];
+    $q1B = $koneksi->query("SELECT 
+        COUNT(DISTINCT NOMOR_DAFTAR) as cnt_doc,
+        COUNT(*) as cnt_item,
+        COALESCE(SUM(QTY_AKTUAL), 0) as sum_qty,
+        COALESCE(SUM(NILAI), 0) as sum_nilai,
+        COALESCE(SUM(HARGA_PENYERAHAN), 0) as sum_penyerahan
+        FROM bc_1ab2 
+        WHERE AB IN ('B', 'K') 
+          AND YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) = $dashboardYear $cmpFilter");
+    if ($q1B && $r1B = $q1B->fetch_assoc()) {
+        $kpi1B['count_docs']        = (int)$r1B['cnt_doc'];
+        $kpi1B['count_items']       = (int)$r1B['cnt_item'];
+        $kpi1B['total_qty']         = (float)$r1B['sum_qty'];
+        $kpi1B['total_nilai']       = (float)$r1B['sum_nilai'];
+        $kpi1B['total_penyerahan']  = (float)$r1B['sum_penyerahan'];
+    }
+
+    // 4. KPI Posisi WIP (1C - Work in Progress)
+    $kpi1C = [
+        'total_sku' => 0,
+        'total_qty' => 0
+    ];
+    $q1C = $koneksi->query("SELECT 
+        COUNT(DISTINCT KODE_BARANG) as cnt_sku,
+        COALESCE(SUM(QTY_AKTUAL), 0) as sum_qty
+        FROM bc_1ab2 
+        WHERE (KLAS = 'Work In Progress' OR KLAS = 'WIP') 
+          AND YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) = $dashboardYear $cmpFilter");
+    if ($q1C && $r1C = $q1C->fetch_assoc()) {
+        $kpi1C['total_sku'] = (int)$r1C['cnt_sku'];
+        $kpi1C['total_qty'] = (float)$r1C['sum_qty'];
+    }
+    if ($kpi1C['total_sku'] === 0) {
+        $qWipMat = $koneksi->query("SELECT COUNT(*) as cnt FROM bc_material WHERE KLAS IN ('Work In Progress', 'WIP') $cmpFilter");
+        if ($qWipMat && $rw = $qWipMat->fetch_assoc()) {
+            $kpi1C['total_sku'] = (int)$rw['cnt'];
+        }
+    }
+
+    // 5. KPI Master Data Barang (1D Inventory)
+    $kpi1D = [
+        'total_materials' => 0,
+        'raw_materials'   => 0,
+        'finished_goods'  => 0,
+        'capital_goods'   => 0,
+        'wastes'          => 0,
+        'other'           => 0
+    ];
+    $q1D = $koneksi->query("SELECT KLAS, COUNT(*) as cnt FROM bc_material WHERE 1=1 $cmpFilter GROUP BY KLAS");
+    if ($q1D) {
+        while ($r1D = $q1D->fetch_assoc()) {
+            $cnt = (int)$r1D['cnt'];
+            $kpi1D['total_materials'] += $cnt;
+            $kl = strtoupper(trim($r1D['KLAS'] ?? ''));
+            if (strpos($kl, 'RAW') !== false || $kl === 'RM') {
+                $kpi1D['raw_materials'] += $cnt;
+            } elseif (strpos($kl, 'FINISHED') !== false || $kl === 'FG') {
+                $kpi1D['finished_goods'] += $cnt;
+            } elseif (strpos($kl, 'CAPITAL') !== false || strpos($kl, 'MACHINE') !== false || strpos($kl, 'EQUIPMENT') !== false || $kl === 'CG') {
+                $kpi1D['capital_goods'] += $cnt;
+            } elseif (strpos($kl, 'WASTE') !== false || strpos($kl, 'SCRAP') !== false) {
+                $kpi1D['wastes'] += $cnt;
+            } else {
+                $kpi1D['other'] += $cnt;
+            }
+        }
+    }
+
+    // 6. Tren Arus Barang 12 Bulan (Pemasukan vs Pengeluaran)
+    $monthlyData = [
+        'in_nilai'  => array_fill(1, 12, 0),
+        'out_nilai' => array_fill(1, 12, 0),
+        'in_qty'    => array_fill(1, 12, 0),
+        'out_qty'   => array_fill(1, 12, 0),
+        'in_docs'   => array_fill(1, 12, 0),
+        'out_docs'  => array_fill(1, 12, 0)
+    ];
+    $qTrend = $koneksi->query("SELECT 
+        MONTH(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) as bln,
+        AB,
+        COUNT(DISTINCT NOMOR_DAFTAR) as cnt_doc,
+        COALESCE(SUM(QTY_AKTUAL), 0) as sum_qty,
+        COALESCE(SUM(NILAI), 0) as sum_nilai
+        FROM bc_1ab2
+        WHERE YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) = $dashboardYear $cmpFilter
+        GROUP BY bln, AB");
+    if ($qTrend) {
+        while ($rt = $qTrend->fetch_assoc()) {
+            $m = (int)$rt['bln'];
+            if ($m >= 1 && $m <= 12) {
+                $isMasuk = in_array($rt['AB'], ['A', 'M']);
+                if ($isMasuk) {
+                    $monthlyData['in_nilai'][$m] += (float)$rt['sum_nilai'];
+                    $monthlyData['in_qty'][$m]   += (float)$rt['sum_qty'];
+                    $monthlyData['in_docs'][$m]  += (int)$rt['cnt_doc'];
+                } else {
+                    $monthlyData['out_nilai'][$m] += (float)$rt['sum_nilai'];
+                    $monthlyData['out_qty'][$m]   += (float)$rt['sum_qty'];
+                    $monthlyData['out_docs'][$m]  += (int)$rt['cnt_doc'];
+                }
+            }
+        }
+    }
+
+    // 7. Breakdown Komposisi Dokumen Pabean (Donut Chart)
+    $docsBreakdown = [];
+    $qDocs = $koneksi->query("SELECT 
+        BC,
+        AB,
+        COUNT(*) as cnt_item,
+        COUNT(DISTINCT NOMOR_DAFTAR) as cnt_doc,
+        COALESCE(SUM(QTY_AKTUAL), 0) as sum_qty,
+        COALESCE(SUM(NILAI), 0) as sum_nilai
+        FROM bc_1ab2
+        WHERE YEAR(COALESCE(TGL_PROSES, TANGGAL_DAFTAR)) = $dashboardYear $cmpFilter
+        GROUP BY BC, AB
+        ORDER BY sum_nilai DESC");
+    if ($qDocs) {
+        while ($rd = $qDocs->fetch_assoc()) {
+            $bcCode = trim($rd['BC']);
+            $isMasuk = in_array($rd['AB'], ['A', 'M']);
+            $docDesc = 'BC ' . $bcCode;
+            switch ($bcCode) {
+                case '23': $docDesc = 'BC 2.3 (Impor)'; break;
+                case '40': $docDesc = 'BC 4.0 (TLDDP Masuk)'; break;
+                case '27': $docDesc = ($isMasuk) ? 'BC 2.7 (TPB Masuk)' : 'BC 2.7 (TPB Keluar)'; break;
+                case '25': $docDesc = 'BC 2.5 (TLDDP Jual)'; break;
+                case '30': $docDesc = 'BC 3.0 (Ekspor)'; break;
+                case '41': $docDesc = 'BC 4.1 (Subkontrak)'; break;
+                case '261': $docDesc = 'BC 2.6.1 (Subkon Masuk)'; break;
+                case '262': $docDesc = 'BC 2.6.2 (Subkon Keluar)'; break;
+                case '16': $docDesc = 'BC 1.6 (PLB Masuk)'; break;
+                case '28': $docDesc = 'BC 2.8 (PLB Keluar)'; break;
+                case '33': $docDesc = 'BC 3.3 (PLB Ekspor)'; break;
+                case '611': $docDesc = 'BC 6.1.1 (Re-Impor)'; break;
+                default: $docDesc = 'BC ' . $bcCode . ($isMasuk ? ' (Masuk)' : ' (Keluar)'); break;
+            }
+            $docsBreakdown[] = [
+                'bc'         => $bcCode,
+                'label'      => $docDesc,
+                'ab'         => $rd['AB'],
+                'is_inbound' => $isMasuk,
+                'cnt_doc'    => (int)$rd['cnt_doc'],
+                'cnt_item'   => (int)$rd['cnt_item'],
+                'sum_qty'    => (float)$rd['sum_qty'],
+                'sum_nilai'  => (float)$rd['sum_nilai']
+            ];
+        }
+    }
+
+    // 8. Top 5 Dokumen Pemasukan Terkini (1A)
+    $recentInbound = [];
+    $qRecIn = $koneksi->query("SELECT 
+        BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, COALESCE(TGL_PROSES, TANGGAL_DAFTAR) as TGL_PROSES,
+        NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, URAIAN, QTY_AKTUAL, UNIT, NILAI, IFNULL(KURS, 'IDR') as KURS, NOMOR_AJU
+        FROM bc_1ab2
+        WHERE AB IN ('A', 'M') $cmpFilter
+        ORDER BY COALESCE(TGL_PROSES, TANGGAL_DAFTAR) DESC, NOMOR_DAFTAR DESC, SERI_BARANG ASC
+        LIMIT 5");
+    if ($qRecIn) {
+        while ($ri = $qRecIn->fetch_assoc()) {
+            $recentInbound[] = $ri;
+        }
+    }
+
+    // 9. Top 5 Dokumen Pengeluaran Terkini (1B)
+    $recentOutbound = [];
+    $qRecOut = $koneksi->query("SELECT 
+        BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, COALESCE(TGL_PROSES, TANGGAL_DAFTAR) as TGL_PROSES,
+        NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, URAIAN, QTY_AKTUAL, UNIT, NILAI, IFNULL(KURS, 'IDR') as KURS, NOMOR_AJU
+        FROM bc_1ab2
+        WHERE AB IN ('B', 'K') $cmpFilter
+        ORDER BY COALESCE(TGL_PROSES, TANGGAL_DAFTAR) DESC, NOMOR_DAFTAR DESC, SERI_BARANG ASC
+        LIMIT 5");
+    if ($qRecOut) {
+        while ($ro = $qRecOut->fetch_assoc()) {
+            $recentOutbound[] = $ro;
+        }
+    }
 } elseif ($activeTab === '1a') {
     // -------------------------------------------------------------
     // TAB 1A: PEMASUKAN BARANG (Inbound) - MUTLAK DARI bc_1ab2
@@ -730,9 +969,11 @@ $stats['total_rows'] = count($dataRows);
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IT Inventory - CEISA 4.0 Host to Host</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
         :root, html[data-theme="light"], body[data-theme="light"] {
             --bg-body: #f0f2f5;
@@ -1479,6 +1720,273 @@ $stats['total_rows'] = count($dataRows);
             text-align: center;
         }
 
+        /* EXECUTIVE KPI CARDS GRID */
+        .bc-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .bc-kpi-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+            transition: all 0.2s ease;
+            overflow: hidden;
+        }
+        .bc-kpi-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            border-color: var(--primary);
+        }
+        .bc-kpi-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+        }
+        .bc-kpi-card.kpi-inbound::before { background: #0284c7; }
+        .bc-kpi-card.kpi-outbound::before { background: #10b981; }
+        .bc-kpi-card.kpi-wip::before { background: #ef4444; }
+        .bc-kpi-card.kpi-master::before { background: #8b5cf6; }
+
+        .bc-kpi-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+        .bc-kpi-title {
+            font-size: 10px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .bc-kpi-badge {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 1px 6px;
+            border-radius: 3px;
+        }
+        .badge-blue { background: rgba(2, 132, 199, 0.12); color: #0284c7; }
+        .badge-green { background: rgba(16, 185, 129, 0.12); color: #10b981; }
+        .badge-red { background: rgba(239, 68, 68, 0.12); color: #ef4444; }
+        .badge-purple { background: rgba(139, 92, 246, 0.12); color: #8b5cf6; }
+
+        .bc-kpi-value {
+            font-size: 19px;
+            font-weight: 800;
+            color: var(--text-heading);
+            letter-spacing: -0.3px;
+            line-height: 1.2;
+            margin-bottom: 4px;
+        }
+        .bc-kpi-value small {
+            font-size: 10.5px;
+            font-weight: 500;
+            color: var(--text-muted);
+            margin-left: 3px;
+        }
+        .bc-kpi-details {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            padding-top: 5px;
+            border-top: 1px dashed var(--border-card);
+            font-size: 9.5px;
+            color: var(--text-main);
+        }
+        .bc-kpi-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .bc-kpi-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 9.5px;
+            font-weight: 600;
+            color: var(--primary);
+            text-decoration: none;
+            margin-top: 6px;
+            padding-top: 4px;
+            transition: color 0.2s;
+        }
+        .bc-kpi-link:hover {
+            color: var(--primary-hover);
+            text-decoration: underline;
+        }
+
+        /* CHARTS SECTION */
+        .bc-charts-grid {
+            display: grid;
+            grid-template-columns: 1.45fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .bc-chart-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .bc-chart-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid var(--border-card);
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+        .bc-chart-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-heading);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .bc-metric-btn-group {
+            display: inline-flex;
+            border: 1px solid var(--border-input);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .bc-metric-btn {
+            background: var(--bg-card);
+            border: none;
+            border-right: 1px solid var(--border-input);
+            padding: 2px 7px;
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .bc-metric-btn:last-child {
+            border-right: none;
+        }
+        .bc-metric-btn.active {
+            background: var(--primary);
+            color: #fff;
+        }
+        .bc-chart-body {
+            position: relative;
+            flex: 1;
+            min-height: 220px;
+        }
+
+        /* TABLES & FEEDS SECTION */
+        .bc-tables-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .bc-table-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+        }
+        .bc-feed-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9.5px;
+            margin-top: 4px;
+        }
+        .bc-feed-table th {
+            background: var(--table-head-bg);
+            padding: 4px 6px;
+            border: 1px solid var(--border-table);
+            font-size: 9px;
+            font-weight: 600;
+            text-align: left;
+            color: var(--text-heading);
+        }
+        .bc-feed-table td {
+            padding: 4px 6px;
+            border: 1px solid var(--border-table);
+            color: var(--text-main);
+        }
+        .bc-feed-table tr:hover td {
+            background: var(--row-hover);
+        }
+
+        /* COMPLIANCE CHECKLIST BAR */
+        .bc-compliance-bar {
+            background: var(--bg-filter);
+            border: 1px solid var(--border-card);
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .bc-compliance-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 6px;
+        }
+        .bc-compliance-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
+            border-radius: 4px;
+            padding: 6px 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+        }
+        .bc-check-icon {
+            color: #52c41a;
+            font-size: 13px;
+            margin-top: 1px;
+            flex-shrink: 0;
+        }
+        .bc-compliance-text strong {
+            display: block;
+            font-size: 9.5px;
+            color: var(--text-heading);
+            margin-bottom: 2px;
+        }
+        .bc-compliance-text span {
+            font-size: 8.5px;
+            color: var(--text-muted);
+            line-height: 1.3;
+            display: block;
+        }
+
+        @media (max-width: 1100px) {
+            .bc-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+            .bc-charts-grid { grid-template-columns: 1fr; }
+            .bc-tables-grid { grid-template-columns: 1fr; }
+            .bc-compliance-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 640px) {
+            .bc-kpi-grid { grid-template-columns: 1fr; }
+            .bc-compliance-grid { grid-template-columns: 1fr; }
+        }
+
         /* SORTABLE TABLE HEADERS */
         th.sortable-th {
             cursor: pointer;
@@ -1543,7 +2051,7 @@ $stats['total_rows'] = count($dataRows);
     <!-- Sesuai Referensi Gambar PER-6/BC/2023 Tata Laksana Kawasan Berikat -->
     <!-- ============================================================== -->
     <div class="bc-home-container">
-        <!-- COMPACT BANNER -->
+        <!-- COMPACT BANNER WITH YEAR FILTER -->
         <div class="bc-banner-card">
             <div class="bc-banner-header">
                 <div class="bc-banner-left">
@@ -1559,21 +2067,35 @@ $stats['total_rows'] = count($dataRows);
                         Tentang Tata Laksana Kawasan Berikat dan Tempat Penimbunan Berikat.
                     </div>
                 </div>
-                <div class="bc-banner-right">
+                <div class="bc-banner-right" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <form method="GET" action="it_inventory.php" id="formYearFilter" style="display:flex; align-items:center; gap:6px;">
+                        <input type="hidden" name="tab" value="home">
+                        <input type="hidden" name="theme" value="<?= htmlspecialchars($theme) ?>">
+                        <input type="hidden" name="cmp_id" value="<?= htmlspecialchars($cmp_id) ?>">
+                        <span style="font-size:10px; font-weight:600; color:var(--text-muted);"><i class="fa-regular fa-calendar"></i> Tahun:</span>
+                        <select name="year" onchange="this.form.submit()" style="font-size:10.5px; height:24px; padding:0 8px; border-radius:4px; border:1px solid var(--border-input); background:var(--bg-input); color:var(--text-main); font-weight:700; cursor:pointer;">
+                            <?php foreach ($availableYears as $yr): ?>
+                                <option value="<?= $yr ?>" <?= ($dashboardYear === $yr) ? 'selected' : '' ?>><?= $yr ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <button type="submit" class="bc-reg-btn" style="height:24px; padding:0 8px; cursor:pointer;" title="Muat ulang data tahun <?= $dashboardYear ?>">
+                            <i class="fa-solid fa-arrows-rotate"></i> Refresh
+                        </button>
+                    </form>
                     <a href="https://peraturan.beacukai.go.id" target="_blank" rel="noopener noreferrer" class="bc-reg-btn" title="Buka Regulasi PER-6/BC/2023">
                         📖 Pelajari Regulasi ↗
                     </a>
                 </div>
             </div>
             <div class="bc-instruction-text">
-                <span>📋</span> Silahkan pilih Laporan yang ingin ditampilkan:
+                <span>📋</span> Silahkan pilih Laporan yang ingin ditampilkan atau pantau ringkasan performa kepabeanan di bawah:
             </div>
         </div>
 
         <!-- 7 COLORFUL TILES GRID -->
         <div class="bc-tiles-grid">
             <!-- 1. [ 1A ] PEMASUKAN BARANG -->
-            <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-blue">
+            <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-blue" title="Buka Laporan 1A - Pemasukan Barang">
                 <div class="tile-icon-box">
                     <span class="tile-icon">📥</span>
                     <span class="tile-code">[ 1A ]</span>
@@ -1582,7 +2104,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 2. [ 1B ] PENGELUARAN BARANG -->
-            <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-green">
+            <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-green" title="Buka Laporan 1B - Pengeluaran Barang">
                 <div class="tile-icon-box">
                     <span class="tile-icon">📤</span>
                     <span class="tile-code">[ 1B ]</span>
@@ -1591,7 +2113,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 3. [ 1C ] POSISI WIP -->
-            <a href="?tab=1c&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-red">
+            <a href="?tab=1c&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-red" title="Buka Laporan 1C - Posisi Barang Dalam Proses (WIP)">
                 <div class="tile-icon-box">
                     <span class="tile-icon">🔄</span>
                     <span class="tile-code">[ 1C ]</span>
@@ -1600,7 +2122,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 4. [ 1D ] MUTASI BAHAN BAKU -->
-            <a href="?tab=1d&klas=Raw+Materials&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-lime">
+            <a href="?tab=1d&klas=Raw+Materials&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-lime" title="Buka Laporan 1D - Mutasi Bahan Baku">
                 <div class="tile-icon-box">
                     <span class="tile-icon">📦</span>
                     <span class="tile-code">.. 1D</span>
@@ -1609,7 +2131,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 5. [ 1D ] MUTASI BARANG JADI -->
-            <a href="?tab=1d&klas=Finished+Goods&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-purple">
+            <a href="?tab=1d&klas=Finished+Goods&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-purple" title="Buka Laporan 1D - Mutasi Barang Jadi">
                 <div class="tile-icon-box">
                     <span class="tile-icon">🏷️</span>
                     <span class="tile-code">.. 1D</span>
@@ -1618,7 +2140,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 6. [ 1D ] MUTASI MESIN/PERALATAN -->
-            <a href="?tab=1d&klas=Capital+Goods&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-cyan">
+            <a href="?tab=1d&klas=Capital+Goods&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-cyan" title="Buka Laporan 1D - Mutasi Mesin / Peralatan Modal">
                 <div class="tile-icon-box">
                     <span class="tile-icon">⚙️</span>
                     <span class="tile-code">.. 1D</span>
@@ -1627,7 +2149,7 @@ $stats['total_rows'] = count($dataRows);
             </a>
 
             <!-- 7. [ 1D ] MUTASI SCRAP -->
-            <a href="?tab=1d&klas=Wastes&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-gold">
+            <a href="?tab=1d&klas=Wastes&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-tile-card tile-gold" title="Buka Laporan 1D - Mutasi Scrap / Sisa">
                 <div class="tile-icon-box">
                     <span class="tile-icon">♻️</span>
                     <span class="tile-code">.. 1D</span>
@@ -1636,11 +2158,516 @@ $stats['total_rows'] = count($dataRows);
             </a>
         </div>
 
+        <!-- EXECUTIVE KPI METRIC CARDS -->
+        <div class="bc-kpi-grid">
+            <!-- KPI 1: Inbound (1A) -->
+            <div class="bc-kpi-card kpi-inbound">
+                <div class="bc-kpi-header">
+                    <span class="bc-kpi-title"><i class="fa-solid fa-arrow-down-to-bracket" style="color:#0284c7;"></i> Pemasukan Barang (1A)</span>
+                    <span class="bc-kpi-badge badge-blue">Tahun <?= $dashboardYear ?></span>
+                </div>
+                <div class="bc-kpi-value">
+                    <?= number_format($kpi1A['count_docs']) ?> <small>Dokumen (<?= number_format($kpi1A['count_items']) ?> Item)</small>
+                </div>
+                <div class="bc-kpi-details">
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Volume / Qty:</span>
+                        <strong style="font-weight:700;"><?= number_format($kpi1A['total_qty'], 2) ?></strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Nilai Pabean:</span>
+                        <strong style="color:#0284c7; font-weight:700;">Rp <?= number_format($kpi1A['total_nilai'], 2) ?></strong>
+                    </div>
+                    <?php if ($kpi1A['total_cif'] > 0): ?>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Nilai CIF:</span>
+                        <strong>Rp <?= number_format($kpi1A['total_cif'], 2) ?></strong>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>&tgl1=<?= $dashboardYear ?>-01-01&tgl2=<?= $dashboardYear ?>-12-31" class="bc-kpi-link">
+                    Buka Laporan 1A Lengkap <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+
+            <!-- KPI 2: Outbound (1B) -->
+            <div class="bc-kpi-card kpi-outbound">
+                <div class="bc-kpi-header">
+                    <span class="bc-kpi-title"><i class="fa-solid fa-arrow-up-from-bracket" style="color:#10b981;"></i> Pengeluaran Barang (1B)</span>
+                    <span class="bc-kpi-badge badge-green">Tahun <?= $dashboardYear ?></span>
+                </div>
+                <div class="bc-kpi-value">
+                    <?= number_format($kpi1B['count_docs']) ?> <small>Dokumen (<?= number_format($kpi1B['count_items']) ?> Item)</small>
+                </div>
+                <div class="bc-kpi-details">
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Volume / Qty:</span>
+                        <strong style="font-weight:700;"><?= number_format($kpi1B['total_qty'], 2) ?></strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Nilai Pabean:</span>
+                        <strong style="color:#10b981; font-weight:700;">Rp <?= number_format($kpi1B['total_nilai'], 2) ?></strong>
+                    </div>
+                    <?php if ($kpi1B['total_penyerahan'] > 0): ?>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Harga Penyerahan:</span>
+                        <strong>Rp <?= number_format($kpi1B['total_penyerahan'], 2) ?></strong>
+                    </div>
+                    <?php endif; ?>
+                </div>
+                <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>&tgl1=<?= $dashboardYear ?>-01-01&tgl2=<?= $dashboardYear ?>-12-31" class="bc-kpi-link">
+                    Buka Laporan 1B Lengkap <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+
+            <!-- KPI 3: WIP (1C) -->
+            <div class="bc-kpi-card kpi-wip">
+                <div class="bc-kpi-header">
+                    <span class="bc-kpi-title"><i class="fa-solid fa-gears" style="color:#ef4444;"></i> Posisi Barang WIP (1C)</span>
+                    <span class="bc-kpi-badge badge-red">Lantai Produksi</span>
+                </div>
+                <div class="bc-kpi-value">
+                    <?= number_format($kpi1C['total_sku']) ?> <small>SKU / Item Dalam Proses</small>
+                </div>
+                <div class="bc-kpi-details">
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Total Kuantitas Saldo:</span>
+                        <strong style="font-weight:700;"><?= number_format($kpi1C['total_qty'], 2) ?></strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Status Audit WIP:</span>
+                        <strong style="color:#ef4444; font-weight:700;"><i class="fa-solid fa-circle-check"></i> Siap Audit Fisik</strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Ketentuan Regulasi:</span>
+                        <span>PER-6/BC/2023 Pasal 14</span>
+                    </div>
+                </div>
+                <a href="?tab=1c&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>&tgl1=<?= $dashboardYear ?>-01-01&tgl2=<?= $dashboardYear ?>-12-31" class="bc-kpi-link">
+                    Buka Posisi WIP 1C <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+
+            <!-- KPI 4: Master Data Barang (1D) -->
+            <div class="bc-kpi-card kpi-master">
+                <div class="bc-kpi-header">
+                    <span class="bc-kpi-title"><i class="fa-solid fa-boxes-stacked" style="color:#8b5cf6;"></i> Master Barang & Mutasi (1D)</span>
+                    <span class="bc-kpi-badge badge-purple">IT Inventory</span>
+                </div>
+                <div class="bc-kpi-value">
+                    <?= number_format($kpi1D['total_materials']) ?> <small>Total SKU Terdaftar</small>
+                </div>
+                <div class="bc-kpi-details">
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Bahan Baku (RM):</span>
+                        <strong style="font-weight:700; color:#10b981;"><?= number_format($kpi1D['raw_materials']) ?></strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Barang Jadi (FG):</span>
+                        <strong style="font-weight:700; color:#8b5cf6;"><?= number_format($kpi1D['finished_goods']) ?></strong>
+                    </div>
+                    <div class="bc-kpi-row">
+                        <span style="color:var(--text-muted);">Mesin & Modal (CG) / Sisa:</span>
+                        <strong><?= number_format($kpi1D['capital_goods']) ?> / <?= number_format($kpi1D['wastes']) ?></strong>
+                    </div>
+                </div>
+                <a href="?tab=1d&klas=Raw+Materials&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="bc-kpi-link">
+                    Buka Mutasi Persediaan 1D <i class="fa-solid fa-arrow-right"></i>
+                </a>
+            </div>
+        </div>
+
+        <!-- 2-COLUMN INTERACTIVE CHARTS -->
+        <div class="bc-charts-grid">
+            <!-- Chart 1: Tren Arus Barang Bulanan -->
+            <div class="bc-chart-box">
+                <div class="bc-chart-header">
+                    <div class="bc-chart-title">
+                        <i class="fa-solid fa-chart-column" style="color:var(--primary);"></i>
+                        <span>Tren Arus Dokumen Pabean Bulanan (Tahun <?= $dashboardYear ?>)</span>
+                    </div>
+                    <div class="bc-metric-btn-group">
+                        <button type="button" class="bc-metric-btn active" id="btnMetricNilai" onclick="switchChartMetric('nilai')" title="Tampilkan berdasarkan Nilai Rupiah">💰 Nilai (Rp)</button>
+                        <button type="button" class="bc-metric-btn" id="btnMetricQty" onclick="switchChartMetric('qty')" title="Tampilkan berdasarkan Kuantitas Volume">📦 Qty Satuan</button>
+                        <button type="button" class="bc-metric-btn" id="btnMetricDocs" onclick="switchChartMetric('docs')" title="Tampilkan berdasarkan Jumlah Dokumen">📑 Dokumen</button>
+                    </div>
+                </div>
+                <div class="bc-chart-body">
+                    <canvas id="chartMonthlyTrend" height="230"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: Komposisi Dokumen Pabean -->
+            <div class="bc-chart-box">
+                <div class="bc-chart-header">
+                    <div class="bc-chart-title">
+                        <i class="fa-solid fa-chart-pie" style="color:#8b5cf6;"></i>
+                        <span>Komposisi Dokumen Pabean (Tahun <?= $dashboardYear ?>)</span>
+                    </div>
+                    <span style="font-size:9.5px; color:var(--text-muted); font-weight:600;">
+                        Total: <?= number_format(array_sum(array_column($docsBreakdown, 'cnt_doc'))) ?> Dokumen
+                    </span>
+                </div>
+                <div class="bc-chart-body" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                    <?php if (empty($docsBreakdown)): ?>
+                        <div style="text-align:center; padding:30px; color:var(--text-muted);">
+                            <i class="fa-solid fa-chart-pie" style="font-size:32px; opacity:0.3; margin-bottom:8px;"></i>
+                            <div>Belum ada transaksi dokumen pabean pada tahun <?= $dashboardYear ?>.</div>
+                        </div>
+                    <?php else: ?>
+                        <div style="width:100%; max-width:280px; position:relative;">
+                            <canvas id="chartDocsDonut" height="190"></canvas>
+                        </div>
+                        <div style="width:100%; max-height:85px; overflow-y:auto; margin-top:8px; border-top:1px dashed var(--border-card); padding-top:4px;">
+                            <table style="width:100%; font-size:9px; border-collapse:collapse;">
+                                <tbody>
+                                    <?php foreach ($docsBreakdown as $db): ?>
+                                    <tr>
+                                        <td style="padding:2px 4px;">
+                                            <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:<?= $db['is_inbound'] ? '#0284c7' : '#10b981' ?>; margin-right:4px;"></span>
+                                            <strong><?= htmlspecialchars($db['label']) ?></strong>
+                                        </td>
+                                        <td style="text-align:right; padding:2px 4px; font-weight:600;"><?= number_format($db['cnt_doc']) ?> Dok</td>
+                                        <td style="text-align:right; padding:2px 4px; color:var(--text-muted);">Rp <?= number_format($db['sum_nilai'], 0) ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2-COLUMN RECENT TRANSACTIONS TABLES -->
+        <div class="bc-tables-grid">
+            <!-- 5 Dokumen Pemasukan Terkini (1A) -->
+            <div class="bc-table-box">
+                <div class="bc-chart-header" style="margin-bottom:6px; padding-bottom:6px;">
+                    <div class="bc-chart-title">
+                        <i class="fa-solid fa-truck-ramp-box" style="color:#0284c7;"></i>
+                        <span>5 Dokumen Pemasukan Terkini (1A - Inbound)</span>
+                    </div>
+                    <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" style="font-size:9.5px; font-weight:600; color:var(--primary); text-decoration:none;">
+                        Lihat Semua ➔
+                    </a>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="bc-feed-table">
+                        <thead>
+                            <tr>
+                                <th>Dokumen BC</th>
+                                <th>Tanggal</th>
+                                <th>Pengirim / Vendor</th>
+                                <th>Uraian Barang</th>
+                                <th style="text-align:right;">Qty Satuan</th>
+                                <th style="text-align:right;">Nilai Pabean</th>
+                                <th style="text-align:center;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($recentInbound)): ?>
+                                <tr><td colspan="7" style="text-align:center; padding:12px; color:var(--text-muted);">Belum ada data pemasukan tercatat.</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($recentInbound as $ri): ?>
+                                <tr>
+                                    <td>
+                                        <span class="ant-badge ant-badge-blue" style="font-size:8.5px; padding:1px 4px;">BC <?= htmlspecialchars($ri['BC']) ?></span>
+                                        <strong style="margin-left:2px;"><?= htmlspecialchars($ri['NOMOR_DAFTAR']) ?></strong>
+                                    </td>
+                                    <td><?= htmlspecialchars($ri['TGL_PROSES'] ?: $ri['TANGGAL_DAFTAR']) ?></td>
+                                    <td style="max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= htmlspecialchars($ri['NAMA_BS']) ?>">
+                                        <?= htmlspecialchars($ri['NAMA_BS']) ?>
+                                    </td>
+                                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= htmlspecialchars($ri['URAIAN']) ?>">
+                                        <?= htmlspecialchars($ri['URAIAN']) ?>
+                                    </td>
+                                    <td style="text-align:right; font-weight:600;"><?= number_format((float)$ri['QTY_AKTUAL'], 2) ?> <?= htmlspecialchars($ri['UNIT']) ?></td>
+                                    <td style="text-align:right; font-weight:600; color:#0284c7;"><?= htmlspecialchars($ri['KURS']) ?> <?= number_format((float)$ri['NILAI'], 2) ?></td>
+                                    <td style="text-align:center;">
+                                        <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>&search_kw=<?= urlencode($ri['NOMOR_DAFTAR']) ?>" class="ant-btn ant-btn-sm" style="padding:1px 6px; font-size:8.5px; text-decoration:none;" title="Cari dokumen ini di Tab 1A">
+                                            Buka ↗
+                                        </a>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 5 Dokumen Pengeluaran Terkini (1B) -->
+            <div class="bc-table-box">
+                <div class="bc-chart-header" style="margin-bottom:6px; padding-bottom:6px;">
+                    <div class="bc-chart-title">
+                        <i class="fa-solid fa-plane-departure" style="color:#10b981;"></i>
+                        <span>5 Dokumen Pengeluaran Terkini (1B - Outbound)</span>
+                    </div>
+                    <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" style="font-size:9.5px; font-weight:600; color:#10b981; text-decoration:none;">
+                        Lihat Semua ➔
+                    </a>
+                </div>
+                <div style="overflow-x:auto;">
+                    <table class="bc-feed-table">
+                        <thead>
+                            <tr>
+                                <th>Dokumen BC</th>
+                                <th>Tanggal</th>
+                                <th>Penerima / Buyer</th>
+                                <th>Uraian Barang</th>
+                                <th style="text-align:right;">Qty Satuan</th>
+                                <th style="text-align:right;">Nilai Pabean</th>
+                                <th style="text-align:center;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php if (empty($recentOutbound)): ?>
+                                <tr><td colspan="7" style="text-align:center; padding:12px; color:var(--text-muted);">Belum ada data pengeluaran tercatat.</td></tr>
+                            <?php else: ?>
+                                <?php foreach ($recentOutbound as $ro): ?>
+                                <tr>
+                                    <td>
+                                        <span class="ant-badge ant-badge-green" style="font-size:8.5px; padding:1px 4px; background:#f6ffed; border:1px solid #b7eb8f; color:#389e0d;">BC <?= htmlspecialchars($ro['BC']) ?></span>
+                                        <strong style="margin-left:2px;"><?= htmlspecialchars($ro['NOMOR_DAFTAR']) ?></strong>
+                                    </td>
+                                    <td><?= htmlspecialchars($ro['TGL_PROSES'] ?: $ro['TANGGAL_DAFTAR']) ?></td>
+                                    <td style="max-width:110px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= htmlspecialchars($ro['NAMA_BS']) ?>">
+                                        <?= htmlspecialchars($ro['NAMA_BS']) ?>
+                                    </td>
+                                    <td style="max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="<?= htmlspecialchars($ro['URAIAN']) ?>">
+                                        <?= htmlspecialchars($ro['URAIAN']) ?>
+                                    </td>
+                                    <td style="text-align:right; font-weight:600;"><?= number_format((float)$ro['QTY_AKTUAL'], 2) ?> <?= htmlspecialchars($ro['UNIT']) ?></td>
+                                    <td style="text-align:right; font-weight:600; color:#10b981;"><?= htmlspecialchars($ro['KURS']) ?> <?= number_format((float)$ro['NILAI'], 2) ?></td>
+                                    <td style="text-align:center;">
+                                        <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>&search_kw=<?= urlencode($ro['NOMOR_DAFTAR']) ?>" class="ant-btn ant-btn-sm" style="padding:1px 6px; font-size:8.5px; text-decoration:none;" title="Cari dokumen ini di Tab 1B">
+                                            Buka ↗
+                                        </a>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- KEPATUHAN REGULASI BEA CUKAI CHECKLIST -->
+        <div class="bc-compliance-bar">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+                <span style="font-size:10.5px; font-weight:700; color:var(--text-heading); display:flex; align-items:center; gap:6px;">
+                    <i class="fa-solid fa-shield-halved" style="color:var(--primary);"></i>
+                    Status Kepatuhan Kriteria IT Inventory (PER-6/BC/2023 & PER-02/BC/2019)
+                </span>
+                <span style="font-size:9px; font-weight:700; color:#52c41a; background:rgba(82, 196, 26, 0.1); padding:2px 8px; border-radius:3px; border:1px solid rgba(82, 196, 26, 0.3);">
+                    ● 100% COMPLIANT & REALTIME
+                </span>
+            </div>
+            <div class="bc-compliance-grid">
+                <div class="bc-compliance-item">
+                    <span class="bc-check-icon"><i class="fa-solid fa-circle-check"></i></span>
+                    <div class="bc-compliance-text">
+                        <strong>Pencatatan Pemasukan Realtime</strong>
+                        <span>Integrasi dokumen BC 2.3, BC 4.0, BC 2.7 terhubung langsung ke mutasi stok bahan baku.</span>
+                    </div>
+                </div>
+                <div class="bc-compliance-item">
+                    <span class="bc-check-icon"><i class="fa-solid fa-circle-check"></i></span>
+                    <div class="bc-compliance-text">
+                        <strong>Pencatatan Pengeluaran & Ekspor</strong>
+                        <span>Verifikasi dokumen BC 3.0, BC 2.5, BC 4.1 otomatis memotong saldo persediaan barang jadi.</span>
+                    </div>
+                </div>
+                <div class="bc-compliance-item">
+                    <span class="bc-check-icon"><i class="fa-solid fa-circle-check"></i></span>
+                    <div class="bc-compliance-text">
+                        <strong>Traceability WIP & Konversi Bahan</strong>
+                        <span>Pemantauan posisi barang dalam proses (WIP) dapat diaudit per batch kerja & formula konversi.</span>
+                    </div>
+                </div>
+                <div class="bc-compliance-item">
+                    <span class="bc-check-icon"><i class="fa-solid fa-circle-check"></i></span>
+                    <div class="bc-compliance-text">
+                        <strong>Akses Khusus Pejabat Bea Cukai 24/7</strong>
+                        <span>Portal Host to Host independen dan read-only siap diakses auditor kepabeanan kapan saja.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- FOOTER -->
         <div class="bc-home-footer">
-            2026 &copy; <?= htmlspecialchars($cmp_name) ?> &bull; Portal CEISA 4.0 Host to Host IT Inventory
+            2026 &copy; <?= htmlspecialchars($cmp_name) ?> &bull; Portal CEISA 4.0 Host to Host IT Inventory &bull; Dikembangkan Sesuai Regulasi Ditjen Bea dan Cukai RI
         </div>
     </div>
+
+    <!-- SCRIPT INITIALIZE DASHBOARD CHARTS -->
+    <script>
+    (function() {
+        if (typeof Chart === 'undefined') {
+            console.warn('Chart.js belum termuat.');
+            return;
+        }
+
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || document.body.getAttribute('data-theme') === 'dark';
+        const textColor = isDark ? 'rgba(255,255,255,0.75)' : '#595959';
+        const gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+
+        // Monthly Trend Chart
+        const monthlyLabels = <?= json_encode(['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']) ?>;
+        const monthlyDatasets = {
+            nilai: {
+                unit: 'Rp ',
+                in: <?= json_encode(array_values($monthlyData['in_nilai'])) ?>,
+                out: <?= json_encode(array_values($monthlyData['out_nilai'])) ?>
+            },
+            qty: {
+                unit: '',
+                in: <?= json_encode(array_values($monthlyData['in_qty'])) ?>,
+                out: <?= json_encode(array_values($monthlyData['out_qty'])) ?>
+            },
+            docs: {
+                unit: ' Dokumen',
+                in: <?= json_encode(array_values($monthlyData['in_docs'])) ?>,
+                out: <?= json_encode(array_values($monthlyData['out_docs'])) ?>
+            }
+        };
+
+        let currentMetric = 'nilai';
+        const ctxTrend = document.getElementById('chartMonthlyTrend');
+        let trendChart = null;
+
+        if (ctxTrend) {
+            trendChart = new Chart(ctxTrend, {
+                type: 'bar',
+                data: {
+                    labels: monthlyLabels,
+                    datasets: [
+                        {
+                            label: 'Pemasukan (1A)',
+                            data: monthlyDatasets.nilai.in,
+                            backgroundColor: 'rgba(2, 132, 199, 0.75)',
+                            borderColor: '#0284c7',
+                            borderWidth: 1,
+                            borderRadius: 3
+                        },
+                        {
+                            label: 'Pengeluaran (1B)',
+                            data: monthlyDatasets.nilai.out,
+                            backgroundColor: 'rgba(16, 185, 129, 0.75)',
+                            borderColor: '#10b981',
+                            borderWidth: 1,
+                            borderRadius: 3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { boxWidth: 12, font: { family: 'Poppins', size: 10 }, color: textColor }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    let val = context.raw || 0;
+                                    let u = monthlyDatasets[currentMetric].unit;
+                                    if (currentMetric === 'nilai') {
+                                        return `${label}: ${u}${Number(val).toLocaleString('id-ID', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                                    }
+                                    return `${label}: ${Number(val).toLocaleString('id-ID')} ${u}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: gridColor },
+                            ticks: { font: { family: 'Poppins', size: 9.5 }, color: textColor }
+                        },
+                        y: {
+                            grid: { color: gridColor },
+                            ticks: {
+                                font: { family: 'Poppins', size: 9 },
+                                color: textColor,
+                                callback: function(val) {
+                                    if (currentMetric === 'nilai') {
+                                        if (val >= 1e9) return (val / 1e9).toFixed(1) + ' M';
+                                        if (val >= 1e6) return (val / 1e6).toFixed(1) + ' Jt';
+                                        if (val >= 1e3) return (val / 1e3).toFixed(0) + ' Rb';
+                                        return val;
+                                    }
+                                    return Number(val).toLocaleString('id-ID');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        window.switchChartMetric = function(metric) {
+            if (!trendChart || !monthlyDatasets[metric]) return;
+            currentMetric = metric;
+
+            document.querySelectorAll('.bc-metric-btn').forEach(b => b.classList.remove('active'));
+            if (metric === 'nilai') document.getElementById('btnMetricNilai')?.classList.add('active');
+            if (metric === 'qty') document.getElementById('btnMetricQty')?.classList.add('active');
+            if (metric === 'docs') document.getElementById('btnMetricDocs')?.classList.add('active');
+
+            trendChart.data.datasets[0].data = monthlyDatasets[metric].in;
+            trendChart.data.datasets[1].data = monthlyDatasets[metric].out;
+            trendChart.update();
+        };
+
+        // Docs Donut Chart
+        const ctxDocs = document.getElementById('chartDocsDonut');
+        const docsData = <?= json_encode($docsBreakdown) ?>;
+        if (ctxDocs && docsData && docsData.length > 0) {
+            const docLabels = docsData.map(d => d.label);
+            const docCounts = docsData.map(d => d.cnt_doc);
+            const palette = [
+                '#0284c7', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6',
+                '#06b6d4', '#ec4899', '#84cc16', '#6366f1', '#14b8a6'
+            ];
+
+            new Chart(ctxDocs, {
+                type: 'doughnut',
+                data: {
+                    labels: docLabels,
+                    datasets: [{
+                        data: docCounts,
+                        backgroundColor: palette.slice(0, docLabels.length),
+                        borderColor: isDark ? '#1f1f1f' : '#ffffff',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    const idx = context.dataIndex;
+                                    const item = docsData[idx];
+                                    return ` ${item.label}: ${item.cnt_doc} Dok (Rp ${Number(item.sum_nilai).toLocaleString('id-ID')})`;
+                                }
+                            }
+                        }
+                    },
+                    cutout: '62%'
+                }
+            });
+        }
+    })();
+    </script>
     <?php else: ?>
     <?php if (in_array($activeTab, ['1a', '1b'])): ?>
     <?php 
@@ -2527,7 +3554,7 @@ $stats['total_rows'] = count($dataRows);
             thTitle.style.textAlign = 'center';
             thTitle.style.fontWeight = 'bold';
             thTitle.style.fontSize = '12pt';
-            thTitle.innerText = "<?= $reportBannerTitle ?>";
+            thTitle.innerText = "<?= htmlspecialchars($reportBannerTitle ?? '', ENT_QUOTES) ?>";
             trTitle.appendChild(thTitle);
 
             const trSub = document.createElement('tr');
