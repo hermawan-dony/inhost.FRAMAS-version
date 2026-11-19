@@ -7,7 +7,9 @@
  * Dynamic Company Switcher with Live Search for Admin (Without Re-login),
  * Self-Service Password Manager & Multi-Theme Engine.
  */
-session_start();
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
 require_once __DIR__ . '/visitor_logger.php';
@@ -999,9 +1001,9 @@ if (!function_exists('isMenuAllowed')) {
             return false;
         }
 
-        // Role PRODUKSI: mutasi produksi, it inventory
+        // Role PRODUKSI: mutasi produksi, it inventory, department request
         if ($role === 'produksi') {
-            return in_array($menuKey, ['inventory_modul', 'inv_stock_transfer', 'it_inventory']);
+            return in_array($menuKey, ['inventory_modul', 'inv_stock_transfer', 'it_inventory', 'department_request']);
         }
 
         // Role WAREHOUSE: menu warehouse & modul inventory, bisa akses dashboard ceisa 4.0
@@ -1021,7 +1023,8 @@ if (!function_exists('isMenuAllowed')) {
                 'inv_unposting_appv',
                 'inv_stok_awal',
                 'inv_adjust_spp',
-                'it_inventory'
+                'it_inventory',
+                'department_request'
             ]);
         }
 
@@ -1060,7 +1063,7 @@ if ($userRole === 'bc') {
     }
 } elseif ($isManifestOnlyCompany) {
     // Jika hanya role manifest, tab pabean standar atau inventory diarahkan ke manifest_ceisa
-    if (in_array($initialTab, ['daftar_dokumen', 'transfer', 'editor', 'import', 'load_erp_odoo', 'dokap', 'tracking', 'winline_sales_invoice', 'winline_dn_transfer', 'winline_purchase_order']) || strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0 || strpos($initialTab, 'winline_') === 0) {
+    if (in_array($initialTab, ['daftar_dokumen', 'transfer', 'editor', 'import', 'load_erp_odoo', 'dokap', 'tracking', 'winline_sales_invoice', 'winline_dn_transfer', 'winline_purchase_order', 'department_request']) || strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0 || strpos($initialTab, 'winline_') === 0) {
         $initialTab = 'manifest_ceisa';
     }
 } elseif (!$isInventoryModuleAllowed && (strpos($initialTab, 'it_inventory') === 0 || strpos($initialTab, 'inv_') === 0)) {
@@ -1096,6 +1099,7 @@ $breadcrumbTitlesPhp = [
     'winline_sales_invoice'  => 'Winline ERP — Sales Invoice (BC 2.7, BC 3.0 Customer)',
     'winline_dn_transfer'    => 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
     'winline_purchase_order' => 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
+    'department_request'     => 'Department Request — Permintaan Pengeluaran Barang',
     'tools'           => 'INHOST TOOLS — Customs & Trade Utilities',
     'ticket'          => 'Pusat Tiket & Bantuan',
     'inv_qr_label'    => 'Warehouse - Cetak Label QR Dokumen BC',
@@ -1228,6 +1232,8 @@ if ($initialTab === 'editor') {
     $initSrc = "/winline_erp.php?type=dn_transfer&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'winline_purchase_order') {
     $initSrc = "/winline_erp.php?type=purchase_order&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'department_request') {
+    $initSrc = "/department_request.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'tools') {
     $initSrc = "/tools/index.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'ticket' || $initialTab === 'system_tickets') {
@@ -3899,6 +3905,19 @@ if ($initialTab === 'editor') {
                         </a>
                     </div>
                     <?php endif; ?>
+
+                    <?php if (isMenuAllowed('department_request')): ?>
+                    <div class="kt-menu__item <?= ($initialTab === 'department_request') ? 'active' : '' ?>" id="nav-item-department_request" onclick="switchMainTab('department_request')" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                        <a class="kt-menu__link" title="Department Request (Permintaan Pengeluaran Barang Antar Departemen)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">📋</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zm-40 728H184V184h656v656zM280 288h464v64H280zm0 160h464v64H280zm0 160h288v64H280z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text">Department Request</span>
+                            <i class="kt-menu__ver-arrow">›</i>
+                        </a>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Group 1B: MANIFES ONLINE (BC 1.1) -->
@@ -4879,6 +4898,7 @@ if ($initialTab === 'editor') {
             'winline_sales_invoice': 'Winline ERP — Sales Invoice (BC 2.7, BC 3.0 Customer)',
             'winline_dn_transfer': 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
             'winline_purchase_order': 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
+            'department_request': 'Department Request — Permintaan Pengeluaran Barang',
             'tracking': 'Tracking Respon Pabean',
             'it_inventory_home': 'Bea Cukai - Home Dashboard',
             'it_inventory_1a': 'IT Inventory - 1A Pemasukan Barang',
@@ -4931,6 +4951,7 @@ if ($initialTab === 'editor') {
             if (tabId === 'winline_sales_invoice') return `/winline_erp.php?type=sales_invoice&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'winline_dn_transfer') return `/winline_erp.php?type=dn_transfer&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'winline_purchase_order') return `/winline_erp.php?type=purchase_order&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'department_request') return `/department_request.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'tools') return `/tools/index.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'ticket' || tabId === 'system_tickets') return `/ticket.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'inv_qr_label') return `/erp/inv_qr_label.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;

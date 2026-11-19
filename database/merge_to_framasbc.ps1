@@ -158,7 +158,7 @@ $TenantTablesPrefer = @(
     "bc_ceisa_odoo_header","bc_ceisa_hs_map","bc_ceisa_get_data_xls","bc_ceisa_get_barang_xls",
     "bc_ceisa_get_dokumen_xls","bc_ceisa_get_entitas_xls","bc_ceisa_get_kemasan_xls",
     "bc_1ab2","bc_1ab","bc_1ab2_revisi","bc_1c","bc_1d",
-    "bc_barang","bc_bom","bc_do_dtl","bc_issue_aju","bc_issue_dtl","bc_issue_hdr","bc_issue_hdr2","bc_issue2",
+    "bc_barang","bc_bom","bc_do_dtl","bc_issue_aju","bc_issue_dtl","bc_issue_hdr","bc_issue_hdr2","bc_issue2","bc_issue_dept_req_hdr","bc_issue_dept_req_dtl",
     "bc_material_approval","bc_pi_dtl","bc_po_dtl","bc_si_aju_ceisa","bc_si_dtl","bc_so","bc_so0","bc_wh_trn","tpb_respon","bc_ppkek_masuk_detail","bc_ppkek_masuk_header","bc_ppkek_masuk_kontainer",
     "bc_kek_setting"
 )

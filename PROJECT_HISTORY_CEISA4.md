@@ -8636,7 +8636,55 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 
 ---
 
-## [2026-11-19] Integrasi Commit VPS Jakarta `dc71e14` (Executive IT Inventory Dashboard & Charts)
+## [2026-11-19] Modul Department Request (Permintaan Pengeluaran Barang Antar Departemen & Integrasi Pabean/Internal Issue)
+
+### A. Latar Belakang & Kebutuhan Fitur
+- Pengguna meminta penambahan menu baru **"Department Request"** di sidebar navigasi di bawah grup **WINLINE ERP** (tepat di bawah menu Purchase Order).
+- Tujuan: Memfasilitasi setiap departemen (Maintenance, Moldshop, Produksi, GA, Gudang, dll.) untuk mengajukan permohonan pengeluaran barang sesuai bidangnya:
+  - **Dept Maintenance**: Pengeluaran barang Mesin, Part Mesin (`Machine Parts`), dan Tooling (`Tools`).
+  - **Dept Moldshop**: Pengeluaran Mold dan suku cadang cetakan (`Molds`).
+  - **Dept Produksi**: Pengeluaran Bahan Baku (`Raw Material`), Barang Dalam Proses (`WIP`), dan Bahan Penolong (`Consumables`).
+- Pemilihan barang harus fleksibel dan terintegrasi:
+  1. Bersumber dari data dokumen pabean yang pernah masuk/tercatat di tabel **`bc_1ab2`**.
+  2. Bersumber dari riwayat pengeluaran internal/produksi di tabel **`bc_issue_dtl`** (misal: part mesin, sparepart internal issue).
+  3. Mendukung input manual / part baru jika barang belum ada di database.
+
+### B. Arsitektur Skema Database & Staging Data
+1. **Tabel Database Baru & Kompatibilitas**:
+   - `bc_issue_dept_req_hdr`: Header permohonan (`req_no`, `req_date`, `dept_pemohon`, `dept_tujuan`, `wo_no`, `status`, `approved_by_1`, `approved_by_2`, `issued_by`, `received_by`, `notes`, serta aliasing kolom legacy: `no_bukti`, `tgl`, `dept_fr`, `dept_to`, `wo_id`, `setby`, dll.).
+   - `bc_issue_dept_req_dtl`: Detail item barang yang diminta (`req_no`, `item_seq`, `source_type` ['CUSTOMS_1AB2', 'INTERNAL_ISSUE', 'MASTER_MATERIAL', 'MANUAL_ENTRY'], `kode_barang`, `nama_barang`, `spesifikasi`, `kategori`, `hs_code`, `qty_req`, `qty_approved`, `qty_issued`, `satuan`, `stok_tersedia`, `keterangan_item`, dll.).
+2. **Auto-Heal & Staging Impor Data Historis**:
+   - Fungsi `ensureDeptReqTables($koneksi)` otomatis membuat dan memeriksa integritas tabel.
+   - Mengimpor 99 baris data historis header dan 154 baris detail dari skrip staging `full_tenant_bc_issue_dept_req_hdr.sql` dan `dtl.sql` ke database `framasbc` (port 3307).
+   - Menambahkan tabel `bc_issue_dept_req_hdr` dan `bc_issue_dept_req_dtl` ke dalam skrip sinkronisasi `database/merge_to_framasbc.ps1`.
+
+### C. Modul Inti `department_request.php`
+1. **Pencarian Cerdas (Smart Search Goods)**:
+   - Endpoint `action=search_goods` melakukan pencarian instan gabungan (UNION) dari:
+     - `bc_1ab2` (Customs Inbound/Outbound history - ~15.000 mold, ~3.400 part mesin, ~690 mesin, ~1.200 tooling).
+     - `bc_issue_dtl` (Internal Issue/Production history - item seperti Barrel, Screw, Injection Mesin HT-150, Engel Parts).
+     - `bc_material` (Master material katalog).
+   - Smart Category Filtering otomatis mendeteksi departemen pemohon:
+     - Maintenance $\rightarrow$ Prioritas kategori: Mesin, Part Mesin, Tools, Factory Equipment.
+     - Moldshop $\rightarrow$ Prioritas kategori: Mold.
+     - Produksi $\rightarrow$ Prioritas kategori: Raw Material, Bahan Penolong, WIP.
+2. **Alur Transaksi & Validasi**:
+   - Pembuatan nomor request otomatis format `REQ-[DEPT]-[YYYYMM]-[SEQ]` (misal: `REQ-MAIN-202611-0001`).
+   - Modal Item Picker interaktif dengan pencarian cepat nama/kode barang, preview stok, asal dokumen, dan tombol "Pilih".
+   - Input manual langsung di baris tabel untuk barang/part baru yang belum terdaftar di database.
+   - Perubahan status terintegrasi: `SUBMITTED`, `APPROVED`, `REJECTED`, `COMPLETED`, `DELETE`.
+   - Fitur cetak formulir resmi **BPPB (Bukti Permintaan dan Pengeluaran Barang)** dengan 4 kolom tanda tangan resmi (Pemohon, Kepala Departemen, Gudang/Pengeluaran, Penerima Barang).
+
+### D. Integrasi Sidebar Navigasi `index.php`
+1. **Penempatan Menu**:
+   - Ditambahkan tepat di bawah menu **Purchase Order** di dalam grup menu **WINLINE ERP**.
+   - Hak akses disesuaikan pada fungsi `isMenuAllowed('department_request')` agar dapat diakses oleh role admin, superadmin, produksi, warehouse, dan departemen operasional.
+2. **Iframe Routing & Switcher**:
+   - Tab ID: `'department_request'`.
+   - Routing iframe: `/department_request.php?cmp_id=...&embedded=1...`.
+   - Sinkronisasi breadcrumb dan tab title: `Department Request — Permintaan Pengeluaran Barang`.
+   - Mendukung peralihan tema (Light / Dark mode) secara otomatis.
+
 
 ### A. Analisis & Integrasi Commit `dc71e14`
 - Mengintegrasikan pembaruan dari repositori VPS Jakarta (`https://github.com/hermawan-dony/inhost.web.id.git`):
