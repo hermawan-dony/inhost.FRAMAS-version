@@ -401,6 +401,7 @@ CREATE TABLE framas.bc_ceisa_login (
   allowed_docs VARCHAR(255) DEFAULT '*',
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   oto VARCHAR(100) DEFAULT NULL,
+  last_cmp_id VARCHAR(30) DEFAULT NULL,
   created_at DATETIME DEFAULT NULL,
   updated_at DATETIME DEFAULT NULL,
   PRIMARY KEY (cmp_id, user_id),
