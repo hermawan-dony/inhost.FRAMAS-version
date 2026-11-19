@@ -51,4 +51,5 @@ excel_cache/
 database/_merge_work/
 database/*.tsv
 database/*.ps1
+!database/merge_to_framasbc.ps1
 database/ceisa0400db.zip

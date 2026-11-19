@@ -8359,3 +8359,42 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
    - Menambahkan pengecekan pada aksi simpan mode edit perusahaan (`$mode === 'edit'`). Jika input kredensial sensitif (`password_ceisa`, `secret_mfa`, `secret_mfa_insw`, `ERP_Password`, `token_ceisa`, `insw_client_secret`) dikirim kosong oleh pengguna, sistem otomatis mempertahankan nilai lama yang sudah tersimpan di database agar tidak tertimpa atau terhapus secara tidak sengaja.
 5. **Versi Aplikasi**:
    - Pembaruan versi rilis menjadi `20261119.1024`.
+
+
+---
+
+## 📌 50. PENYELESAIAN ERROR MULTI-MODULE & PENGUATAN PERMANEN SINKRONISASI DATABASE (SYNC DB!) (19 NOVEMBER 2026)
+
+### A. Latar Belakang & Identifikasi Masalah
+Setelah proses penggabungan data aktual dari MySQL lama (MySQL 5 port 3306) dan penarikan kode terbaru dari upstream VPS Jakarta, ditemukan beberapa fatal error saat pengguna membuka modul:
+1. **Daftar Dokumen (`daftar_dokumen.php:43`)**:
+   - `Fatal error: Unknown column 'show_unimported_h2h' in 'field list'`.
+   - *Penyebab*: DDL pembuatan tabel `bc_ceisa_company` pada skrip migrasi masih menggunakan struktur lama yang belum memuat kolom pengaturan H2H baru (`show_unimported_h2h`, `secret_mfa_insw`, `business_type`, `db_mode`, dll.).
+2. **Transfer Data Host to Host (`transfer.php`)**:
+   - `Gagal memuat data: Unexpected token '<', "... is not valid JSON`.
+   - *Penyebab*: AJAX endpoint `action=list` mengembalikan pesan HTML Fatal Error MySQL Collation Mismatch alih-alih respons JSON valid.
+3. **IT Inventory 1A Pemasukan Barang (`it_inventory.php:243`)**:
+   - `Fatal error: Table 'framasbc.bc_tipe' doesn't exist`.
+   - *Penyebab*: Skrip `merge_to_framasbc.ps1` sebelumnya hanya menyaring tabel dengan awalan `bc_ceisa%`, sehingga tabel referensi jenis dokumen `bc_tipe` dan tabel arsip inventory `bc_1ab2` terlewat.
+4. **Form Editor Dokumen (`editor.php:158`)**:
+   - `Fatal error: Illegal mix of collations (utf8mb4_unicode_ci,IMPLICIT) and (utf8mb4_0900_ai_ci,IMPLICIT) for operation '='`.
+   - *Penyebab*: Tabel master `bc_ceisa_company` dan `bc_ceisa_login` dibuat di MySQL 8 tanpa klausul `COLLATE` eksplisit sehingga mewarisi collation bawaan MySQL 8 (`utf8mb4_0900_ai_ci`), sedangkan tabel transaksi `bc_ceisa_header` menggunakan `utf8mb4_unicode_ci`. Operasi `LEFT JOIN ... ON cmp_id = ...` menyebabkan benturan collation biner.
+
+### B. Tindakan Perbaikan Langsung pada Database Aktif (`framasbc` Port 3307)
+1. Menambahkan kolom baru yang hilang pada tabel `bc_ceisa_company`: `show_unimported_h2h`, `secret_mfa_insw`, `npwp16`, `nitku`, `business_type`, `db_mode`, `db_name`, `db_host`, `db_port`, `db_user`, `db_pass`.
+2. Menyinkronkan dan memigrasikan tabel master referensi yang belum ada dari MySQL 5 (`bc_tipe`, `bc_type`, `bc_dokumen`, `bc_dept`, `bc_color`, `bc_filter`, dll.) serta tabel transaksi tenant (`bc_1ab2`, `bc_1ab`, `bc_bom`, `bc_material_approval`, `tpb_respon`, dll.).
+3. Menyelaraskan seluruh collation tabel di database `framasbc` menjadi `utf8mb4_unicode_ci` secara menyeluruh.
+4. Melakukan verifikasi runtime pada seluruh 31 endpoint dan modul aplikasi (Daftar Dokumen, Transfer, Editor, IT Inventory 1A-1D, Master Material, Setting, dsb.) dengan hasil 100% SUCCESS tanpa error.
+
+### C. Penguatan Permanen Skrip Sinkronisasi (`database/merge_to_framasbc.ps1`)
+Agar perintah pengguna **`SYNC DB!`** di kemudian hari tidak menimbulkan error serupa:
+1. **Pembaruan DDL `bc_ceisa_company` & `bc_ceisa_login`**:
+   - Skema tabel `bc_ceisa_company` diperbarui dengan seluruh kolom terbaru lengkap.
+   - Didefinisikan secara eksplisit menggunakan `ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`.
+2. **Ekspansi `$SharedTables` & `$TenantTablesPrefer`**:
+   - Menambahkan tabel bersama: `bc_tipe`, `bc_type`, `bc_dokumen`, `bc_dept`, `bc_color`, `bc_filter`, `bc_ceisa_versi`, `bc_ceisa_setting_desimal`, `bc_ceisa_setting_kolom`, `bc_ceisa_setting_tab`.
+   - Menambahkan tabel tenant dengan preservasi partisi multi-plant `cmp_id`: `bc_1ab2`, `bc_1ab`, `bc_1ab2_revisi`, `bc_1c`, `bc_1d`, `bc_barang`, `bc_bom`, `bc_do_dtl`, `bc_issue_aju`, `bc_issue_dtl`, `bc_issue_hdr`, `bc_issue_hdr2`, `bc_issue2`, `bc_material_approval`, `bc_pi_dtl`, `bc_po_dtl`, `bc_si_aju_ceisa`, `bc_si_dtl`, `bc_so`, `bc_so0`, `bc_wh_trn`, `tpb_respon`.
+3. **Penambahan Phase 3 (Automated Collation Standardization)**:
+   - Skrip sekarang secara otomatis menjalankan Phase 3 setelah proses impor selesai untuk mengonversi setiap tabel ke `CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`, serta memastikan kolom relasi `cmp_id` seragam dan kompatibel terhadap operasi `JOIN`.
+4. **Pencatatan Versi Skrip**:
+   - Menambahkan pengecualian pada `.gitignore` (`!database/merge_to_framasbc.ps1`) sehingga skrip resmi `merge_to_framasbc.ps1` tersimpan aman di repositori Git proyek.
