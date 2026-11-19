@@ -8704,6 +8704,46 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
      - Safe-guard variabel `$reportBannerTitle` pada `it_inventory.php` sehingga aman saat tab `home` dibuka.
      - Sinkronisasi file versi `version.txt` ke `20261119.1828`.
 
+---
+
+## [2026-11-19] Integrasi Department Request (BPPB) Antar Plant Framas & Transfer Otomatis ke Host to Host BC 2.7
+
+### A. Latar Belakang & Kebutuhan Fitur
+- Pengguna menetapkan spesifikasi operasional untuk **Department Request (BPPB)**:
+  1. **Transfer Antar Plant Framas**: Pengeluaran barang melalui Department Request bertujuan untuk pengiriman antar plant PT FRAMAS INDONESIA, yaitu:
+     - `FRM-1`: Plant 1 MM2100 (TPB Kenari / Lippo Cikarang)
+     - `FRM-2`: Plant 2 Delta Silicon MM2100 (Kenari DS5)
+     - `FRM-3`: Plant 3 Delta Silicon VI (DS6)
+     - `PDPLB`: Pusat Distribusi Logistik Berikat (PLB MM2100)
+  2. **Transfer ke Host to Host (H2H) BC 2.7**: Dokumen BPPB yang telah disetujui (`APPROVED`) dapat langsung ditransfer menjadi draft dokumen pabean **BC 2.7 (Perpindahan Barang Antar TPB / PLB)** pada sistem Host to Host CEISA 4.0.
+
+### B. Perubahan & Fitur yang Diterapkan
+1. **Skema Database & Metadata Multi-Plant**:
+   - Kolom baru pada tabel `bc_issue_dept_req_hdr`: `plant_tujuan` (varchar 30), `nomor_aju` (varchar 30), `h2h_transferred_at` (datetime), dan `h2h_transferred_by` (varchar 50) dengan mekanisme auto-heal database.
+   - Definisi meta 4 plant Framas (`$framasPlantMeta`) memetakan alamat, kode kantor, dan nomor SKEP/ijin TPB pengirim dan penerima.
+2. **Transfer Otomatis ke BC 2.7 (`action=transfer_h2h`)**:
+   - Validasi plant asal dan plant tujuan tidak boleh sama.
+   - Penomoran AJU CEISA 4.0 26 digit: `000027` + NPWP 6 digit + `YYYYMMDD` + running sequence 6 digit.
+   - **`bc_ceisa_header`**: Dokumen 27, kode kantor pabean tujuan/bongkar (`050900`), valuta IDR, kalkulasi FOB, CIF, harga penyerahan, netto, dan bruto.
+   - **`bc_ceisa_entitas`**:
+     - Seri 1 (Kode 3 - Pengirim TPB): Profil Plant Asal Framas lengkap dengan nomor izin TPB.
+     - Seri 2 (Kode 7 - Penyelenggara TPB): PT FRAMAS INDONESIA.
+     - Seri 3 (Kode 8 - Penerima TPB): Profil Plant Tujuan Framas lengkap dengan nomor izin TPB penerima.
+   - **`bc_ceisa_barang`**: Seri barang 1..N dari item BPPB, kode barang, uraian, jumlah & kode satuan, estimasi kemasan CT (Carton), nilai satuan dan total FOB/penyerahan.
+   - **`bc_ceisa_dokumen`**: Kode dokumen `217` (Surat Jalan / BPPB) dengan nomor BPPB dan tanggal permintaan.
+   - **`bc_ceisa_kemasan`**: Kode kemasan `CT` (Karton) dengan merek `FRAMAS`.
+   - Update status BPPB menjadi `COMPLETED` disertai nomor AJU, tanggal transfer, dan user pelaksana.
+3. **UI / UX Antar Plant & Shortcut Integrasi**:
+   - Visualisasi rute antar plant: badge plant berwarna (`FRM-1` biru, `FRM-2` hijau, `FRM-3` ungu, `PDPLB` oranye) dan banner `🏢 FRM-1 ➔ 🎯 FRM-2`.
+   - Filter tabel berdasarkan Plant Asal, Plant Tujuan, dan Status H2H (Sudah / Belum Transfer).
+   - Tombol aksi **"🚀 Transfer BC 2.7"** pada baris dokumen BPPB dengan status `APPROVED`.
+   - Pop-up konfirmasi interaktif (SweetAlert2) dengan shortcut:
+     - **Buka di Form Editor**: Langsung membuka form CEISA 4.0 editor dengan nomor AJU yang terbentuk via `window.parent.switchMainTab('editor', nomorAju)`.
+     - **Lihat Data Host to Host**: Membuka tabel transaksi H2H via `window.parent.switchMainTab('transfer')`.
+   - Cetak form BPPB resmi (`action=print_bppb`) lengkap dengan kop surat PT FRAMAS INDONESIA, rute plant asal & tujuan, nomor AJU BC 2.7, dan 4 kolom otorisasi tanda tangan.
+4. **Pembaruan Navigasi Sidebar `index.php`**:
+   - Menambahkan pengecekan role `plb` pada fungsi JavaScript `applyRoleMenuVisibility` sehingga grup menu `WINLINE ERP` dan `DOKUMEN PABEAN` tetap tampil penuh saat pengguna berpindah ke plant `PDPLB`.
+
 
 
 

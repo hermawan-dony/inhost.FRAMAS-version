@@ -4810,11 +4810,12 @@ if ($initialTab === 'editor') {
             const hasPib = roles.includes('pib');
             const hasPeb = roles.includes('peb');
             const hasTpb = roles.includes('tpb');
+            const hasPlb = roles.includes('plb');
             const hasPpkek = roles.includes('ppkek');
-            const isManifestOnly = (hasManifest && !hasPib && !hasPeb && !hasTpb && !hasPpkek);
-            const hasCustoms = (hasPib || hasPeb || hasTpb || hasPpkek);
+            const isManifestOnly = (hasManifest && !hasPib && !hasPeb && !hasTpb && !hasPpkek && !hasPlb);
+            const hasCustoms = (hasPib || hasPeb || hasTpb || hasPpkek || hasPlb);
             const isOdoo = ((currentErpName || '').toUpperCase() === 'ODOO');
-            const canInventory = ((hasTpb || hasPpkek) && (currentIsInv === 1));
+            const canInventory = ((hasTpb || hasPpkek || hasPlb) && (currentIsInv === 1));
 
             // Section Dokumen Pabean
             const grpPabean = document.getElementById('menu-group-dokumen-pabean');

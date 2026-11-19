@@ -32,6 +32,7 @@ function ensureDeptReqTables(mysqli $koneksi): void {
       `dept_fr` varchar(50) DEFAULT NULL,
       `dept_tujuan` varchar(50) DEFAULT 'GUDANG',
       `dept_to` varchar(50) DEFAULT 'GUDANG',
+      `plant_tujuan` varchar(30) DEFAULT 'FRM-2',
       `klas` varchar(50) DEFAULT 'General',
       `pic` varchar(50) DEFAULT '',
       `wo_no` varchar(50) DEFAULT '',
@@ -46,6 +47,9 @@ function ensureDeptReqTables(mysqli $koneksi): void {
       `buyer` varchar(30) DEFAULT NULL,
       `style` varchar(50) DEFAULT NULL,
       `note` text DEFAULT NULL,
+      `nomor_aju` varchar(30) DEFAULT NULL,
+      `h2h_transferred_at` datetime DEFAULT NULL,
+      `h2h_transferred_by` varchar(50) DEFAULT NULL,
       `status` varchar(20) NOT NULL DEFAULT 'PENDING',
       `approved_by_1` varchar(50) DEFAULT NULL,
       `approved_at_1` datetime DEFAULT NULL,
@@ -56,8 +60,24 @@ function ensureDeptReqTables(mysqli $koneksi): void {
       PRIMARY KEY (`cmp_id`,`id`),
       KEY `idx_req_no` (`req_no`),
       KEY `idx_no_bukti` (`no_bukti`),
-      KEY `idx_date_dept` (`req_date`,`dept_pemohon`,`dept_tujuan`)
+      KEY `idx_date_dept` (`req_date`,`dept_pemohon`,`dept_tujuan`),
+      KEY `idx_plant_tujuan` (`plant_tujuan`),
+      KEY `idx_nomor_aju` (`nomor_aju`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Auto-heal kolom plant_tujuan, nomor_aju, h2h_transferred_* jika tabel sudah ada sebelumnya
+    $chkCol = $koneksi->query("SHOW COLUMNS FROM bc_issue_dept_req_hdr LIKE 'plant_tujuan'");
+    if ($chkCol && $chkCol->num_rows === 0) {
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD COLUMN `plant_tujuan` varchar(30) DEFAULT 'FRM-2' AFTER `dept_to`");
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD INDEX `idx_plant_tujuan` (`plant_tujuan`)");
+    }
+    $chkAju = $koneksi->query("SHOW COLUMNS FROM bc_issue_dept_req_hdr LIKE 'nomor_aju'");
+    if ($chkAju && $chkAju->num_rows === 0) {
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD COLUMN `nomor_aju` varchar(30) DEFAULT NULL AFTER `note`");
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD COLUMN `h2h_transferred_at` datetime DEFAULT NULL AFTER `nomor_aju`");
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD COLUMN `h2h_transferred_by` varchar(50) DEFAULT NULL AFTER `h2h_transferred_at`");
+        $koneksi->query("ALTER TABLE bc_issue_dept_req_hdr ADD INDEX `idx_nomor_aju` (`nomor_aju`)");
+    }
 
     $koneksi->query("CREATE TABLE IF NOT EXISTS `bc_issue_dept_req_dtl` (
       `cmp_id` varchar(30) NOT NULL DEFAULT 'FRM-1',
@@ -93,6 +113,48 @@ function ensureDeptReqTables(mysqli $koneksi): void {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 ensureDeptReqTables($koneksi);
+
+// -------------------------------------------------------------
+// METADATA RESMI PLANT FRAMAS INDONESIA
+// -------------------------------------------------------------
+$framasPlantMeta = [
+    'FRM-1' => [
+        'code'     => 'FRM-1',
+        'badge'    => 'PLANT 1',
+        'title'    => 'FRAMAS - 1',
+        'sub'      => 'Plant 1 MM2100',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
+        'location' => 'Kawasan Industri MM 2100 Blok M 33-34, Cikarang Barat, Bekasi',
+        'color'    => '#1890ff'
+    ],
+    'FRM-2' => [
+        'code'     => 'FRM-2',
+        'badge'    => 'PLANT 2',
+        'title'    => 'FRAMAS - 2',
+        'sub'      => 'Plant 2 Kenari DS5',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
+        'location' => 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5, Cikarang',
+        'color'    => '#52c41a'
+    ],
+    'FRM-3' => [
+        'code'     => 'FRM-3',
+        'badge'    => 'PLANT 3',
+        'title'    => 'FRAMAS - 3',
+        'sub'      => 'Plant 3 Delta Silicon 6',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
+        'location' => 'Jl. Ramin Blok G6A, Delta Silicon VI, Cikarang Pusat',
+        'color'    => '#722ed1'
+    ],
+    'PDPLB' => [
+        'code'     => 'PDPLB',
+        'badge'    => 'PLB',
+        'title'    => 'PDPLB',
+        'sub'      => 'Pusat Logistik Berikat',
+        'fullname' => 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
+        'location' => 'Kawasan Industri MM2100, Blok O-1-2, Gandamekar, Cikarang Barat',
+        'color'    => '#fa8c16'
+    ]
+];
 
 // -------------------------------------------------------------
 // 2. SESI & MULTI-TENANT CONTEXT
@@ -132,25 +194,41 @@ $action = $_REQUEST['action'] ?? '';
 // --- A. LIST PERMINTAAN BARANG ---
 if ($action === 'list') {
     header('Content-Type: application/json; charset=utf-8');
-    $search = trim($_GET['q'] ?? '');
-    $status = strtoupper(trim($_GET['status'] ?? ''));
-    $dept   = trim($_GET['dept'] ?? '');
-    $page   = max(1, (int)($_GET['page'] ?? 1));
-    $limit  = max(10, min(100, (int)($_GET['limit'] ?? 20)));
-    $offset = ($page - 1) * $limit;
+    $search      = trim($_GET['q'] ?? '');
+    $status      = strtoupper(trim($_GET['status'] ?? ''));
+    $dept        = trim($_GET['dept'] ?? '');
+    $plantAsal   = trim($_GET['plant_asal'] ?? '');
+    $plantTujuan = trim($_GET['plant_tujuan'] ?? '');
+    $h2hFilter   = trim($_GET['h2h'] ?? '');
+    $page        = max(1, (int)($_GET['page'] ?? 1));
+    $limit       = max(10, min(100, (int)($_GET['limit'] ?? 20)));
+    $offset      = ($page - 1) * $limit;
 
     $where = [$cmpFilterHdr];
+    if (!empty($plantAsal) && $plantAsal !== 'ALL') {
+        $paEsc = $koneksi->real_escape_string($plantAsal);
+        $where[] = "h.cmp_id = '{$paEsc}'";
+    }
+    if (!empty($plantTujuan) && $plantTujuan !== 'ALL') {
+        $ptEsc = $koneksi->real_escape_string($plantTujuan);
+        $where[] = "h.plant_tujuan = '{$ptEsc}'";
+    }
+    if ($h2hFilter === '1' || $h2hFilter === 'transferred') {
+        $where[] = "(h.nomor_aju IS NOT NULL AND h.nomor_aju != '')";
+    } elseif ($h2hFilter === '0' || $h2hFilter === 'pending') {
+        $where[] = "(h.nomor_aju IS NULL OR h.nomor_aju = '')";
+    }
     if (!empty($status) && $status !== 'ALL') {
         $stEsc = $koneksi->real_escape_string($status);
-        $where[] = "status = '{$stEsc}'";
+        $where[] = "h.status = '{$stEsc}'";
     }
     if (!empty($dept) && $dept !== 'ALL') {
         $dpEsc = $koneksi->real_escape_string($dept);
-        $where[] = "(dept_pemohon = '{$dpEsc}' OR dept_fr = '{$dpEsc}')";
+        $where[] = "(h.dept_pemohon = '{$dpEsc}' OR h.dept_fr = '{$dpEsc}')";
     }
     if (!empty($search)) {
         $sc = $koneksi->real_escape_string($search);
-        $where[] = "(req_no LIKE '%{$sc}%' OR no_bukti LIKE '%{$sc}%' OR dept_pemohon LIKE '%{$sc}%' OR wo_no LIKE '%{$sc}%' OR pic LIKE '%{$sc}%' OR note LIKE '%{$sc}%')";
+        $where[] = "(h.req_no LIKE '%{$sc}%' OR h.no_bukti LIKE '%{$sc}%' OR h.nomor_aju LIKE '%{$sc}%' OR h.dept_pemohon LIKE '%{$sc}%' OR h.wo_no LIKE '%{$sc}%' OR h.pic LIKE '%{$sc}%' OR h.note LIKE '%{$sc}%')";
     }
 
     $whereSql = "WHERE " . implode(" AND ", $where);
@@ -162,11 +240,12 @@ if ($action === 'list') {
         SUM(CASE WHEN status = 'APPROVED' THEN 1 ELSE 0 END) as cnt_approved,
         SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) as cnt_completed,
         SUM(CASE WHEN status = 'REJECTED' THEN 1 ELSE 0 END) as cnt_rejected,
-        SUM(CASE WHEN status = 'DRAFT' THEN 1 ELSE 0 END) as cnt_draft
+        SUM(CASE WHEN status = 'DRAFT' THEN 1 ELSE 0 END) as cnt_draft,
+        SUM(CASE WHEN nomor_aju IS NOT NULL AND nomor_aju != '' THEN 1 ELSE 0 END) as cnt_h2h
         FROM bc_issue_dept_req_hdr WHERE {$cmpFilterHdr}";
     $kpiRes = $koneksi->query($kpiSql)->fetch_assoc();
 
-    $qCount = $koneksi->query("SELECT COUNT(*) as cnt FROM bc_issue_dept_req_hdr {$whereSql}");
+    $qCount = $koneksi->query("SELECT COUNT(*) as cnt FROM bc_issue_dept_req_hdr h {$whereSql}");
     $totalFiltered = (int)($qCount->fetch_assoc()['cnt'] ?? 0);
 
     $sqlData = "SELECT h.*,
@@ -174,6 +253,8 @@ if ($action === 'list') {
         COALESCE(h.req_date, h.tgl) as display_req_date,
         COALESCE(h.dept_pemohon, h.dept_fr) as display_dept_pemohon,
         COALESCE(h.dept_tujuan, h.dept_to) as display_dept_tujuan,
+        COALESCE(h.plant_tujuan, CASE WHEN h.cmp_id = 'FRM-1' THEN 'FRM-2' ELSE 'FRM-1' END) as display_plant_tujuan,
+        h.nomor_aju as display_nomor_aju,
         COALESCE(h.wo_no, h.wo_id) as display_wo_no,
         (SELECT COUNT(*) FROM bc_issue_dept_req_dtl d WHERE d.id_hdr = h.id AND d.cmp_id = h.cmp_id) as item_count,
         (SELECT COALESCE(SUM(COALESCE(d.qty_req, d.qty, 0)), 0) FROM bc_issue_dept_req_dtl d WHERE d.id_hdr = h.id AND d.cmp_id = h.cmp_id) as total_qty
@@ -212,6 +293,8 @@ if ($action === 'get_detail') {
         COALESCE(h.req_date, h.tgl) as display_req_date,
         COALESCE(h.dept_pemohon, h.dept_fr) as display_dept_pemohon,
         COALESCE(h.dept_tujuan, h.dept_to) as display_dept_tujuan,
+        COALESCE(h.plant_tujuan, CASE WHEN h.cmp_id = 'FRM-1' THEN 'FRM-2' ELSE 'FRM-1' END) as display_plant_tujuan,
+        h.nomor_aju as display_nomor_aju,
         COALESCE(h.wo_no, h.wo_id) as display_wo_no
         FROM bc_issue_dept_req_hdr h 
         WHERE h.id = '{$escId}' LIMIT 1");
@@ -409,8 +492,13 @@ if ($action === 'save') {
     $post = json_decode($raw, true) ?: $_POST;
 
     $id          = trim($post['id'] ?? '');
-    $cmpId       = trim($post['cmp_id'] ?? $sessionCmpId);
-    if (empty($cmpId) || $cmpId === 'ALL') $cmpId = 'FRM-1';
+    $plantAsal   = trim($post['plant_asal'] ?? ($post['cmp_id'] ?? $sessionCmpId));
+    if (empty($plantAsal) || $plantAsal === 'ALL') $plantAsal = 'FRM-1';
+    $plantTujuan = trim($post['plant_tujuan'] ?? '');
+    if (empty($plantTujuan)) {
+        $plantTujuan = ($plantAsal === 'FRM-1') ? 'FRM-2' : 'FRM-1';
+    }
+
     $reqNo       = trim($post['req_no'] ?? '');
     $reqDate     = trim($post['req_date'] ?? date('Y-m-d'));
     $needDate    = !empty($post['need_date']) ? trim($post['need_date']) : null;
@@ -434,11 +522,11 @@ if ($action === 'save') {
         $id = bin2hex(random_bytes(16));
     }
 
-    // Auto-generate nomor request jika kosong
+    // Auto-generate nomor BPPB jika kosong (format: BPPB-[ASAL]-[TUJUAN]-[YYMM]-[SEQ])
     if (empty($reqNo)) {
-        $deptCode = strtoupper(preg_replace('/[^a-zA-Z0-9]/', '', substr($deptPemohon, 0, 4)));
-        if (empty($deptCode)) $deptCode = 'REQ';
-        $prefix = "REQ-{$deptCode}-" . date('Ym') . "-";
+        $paCode = str_replace('-', '', $plantAsal);
+        $ptCode = str_replace('-', '', $plantTujuan);
+        $prefix = "BPPB-{$paCode}-{$ptCode}-" . date('ym') . "-";
         $qLast = $koneksi->query("SELECT req_no FROM bc_issue_dept_req_hdr WHERE req_no LIKE '{$prefix}%' ORDER BY req_no DESC LIMIT 1");
         $nextSeq = 1;
         if ($qLast && $rL = $qLast->fetch_assoc()) {
@@ -450,7 +538,8 @@ if ($action === 'save') {
     }
 
     $escId          = $koneksi->real_escape_string($id);
-    $escCmp         = $koneksi->real_escape_string($cmpId);
+    $escCmp         = $koneksi->real_escape_string($plantAsal);
+    $escPlantTujuan = $koneksi->real_escape_string($plantTujuan);
     $escReqNo       = $koneksi->real_escape_string($reqNo);
     $escReqDate     = $koneksi->real_escape_string($reqDate);
     $escDeptPemohon = $koneksi->real_escape_string($deptPemohon);
@@ -466,19 +555,21 @@ if ($action === 'save') {
     try {
         if ($isNew) {
             $sqlHdr = "INSERT INTO bc_issue_dept_req_hdr 
-                (cmp_id, id, req_no, no_bukti, req_date, tgl, need_date, dept_pemohon, dept_fr, dept_tujuan, dept_to, klas, pic, wo_no, wo_id, note, status, created_by, setby)
+                (cmp_id, id, req_no, no_bukti, req_date, tgl, need_date, dept_pemohon, dept_fr, dept_tujuan, dept_to, plant_tujuan, klas, pic, wo_no, wo_id, note, status, created_by, setby)
                 VALUES 
-                ('{$escCmp}', '{$escId}', '{$escReqNo}', '{$escReqNo}', '{$escReqDate}', '{$escReqDate}', {$needDtSql}, '{$escDeptPemohon}', '{$escDeptPemohon}', '{$escDeptTujuan}', '{$escDeptTujuan}', '{$escKlas}', '{$escPic}', '{$escWoNo}', '{$escWoNo}', '{$escNote}', '{$targetStatus}', '{$escUser}', '{$escUser}')";
+                ('{$escCmp}', '{$escId}', '{$escReqNo}', '{$escReqNo}', '{$escReqDate}', '{$escReqDate}', {$needDtSql}, '{$escDeptPemohon}', '{$escDeptPemohon}', '{$escDeptTujuan}', '{$escDeptTujuan}', '{$escPlantTujuan}', '{$escKlas}', '{$escPic}', '{$escWoNo}', '{$escWoNo}', '{$escNote}', '{$targetStatus}', '{$escUser}', '{$escUser}')";
             if (!$koneksi->query($sqlHdr)) {
                 throw new Exception('Gagal menyimpan header: ' . $koneksi->error);
             }
         } else {
             $sqlHdr = "UPDATE bc_issue_dept_req_hdr SET 
+                cmp_id = '{$escCmp}',
                 req_no = '{$escReqNo}', no_bukti = '{$escReqNo}',
                 req_date = '{$escReqDate}', tgl = '{$escReqDate}',
                 need_date = {$needDtSql},
                 dept_pemohon = '{$escDeptPemohon}', dept_fr = '{$escDeptPemohon}',
                 dept_tujuan = '{$escDeptTujuan}', dept_to = '{$escDeptTujuan}',
+                plant_tujuan = '{$escPlantTujuan}',
                 klas = '{$escKlas}', pic = '{$escPic}',
                 wo_no = '{$escWoNo}', wo_id = '{$escWoNo}',
                 note = '{$escNote}', status = '{$targetStatus}'
@@ -513,7 +604,7 @@ if ($action === 'save') {
             if (empty($kd) || $qtyReq <= 0) continue;
 
             $stmtDtl->bind_param("ssssissssdddssssss",
-                $cmpId, $dtlId, $id, $reqNo, $seq,
+                $escCmp, $dtlId, $id, $reqNo, $seq,
                 $kd, $nm, $sat, $iKlas,
                 $qtyReq, $qtyReq, $qtyAppr,
                 $srcType, $refAju, $refDaft, $refBkt, $iNote, $iStatus
@@ -528,7 +619,7 @@ if ($action === 'save') {
             'status' => 'OK',
             'id' => $id,
             'req_no' => $reqNo,
-            'message' => "Permintaan barang '{$reqNo}' berhasil disimpan dengan status: {$targetStatus}."
+            'message' => "Permintaan BPPB '{$reqNo}' berhasil disimpan dengan status: {$targetStatus}."
         ]);
         exit;
     } catch (Throwable $e) {
@@ -559,7 +650,7 @@ if ($action === 'update_status') {
             WHERE id = '{$escId}'";
         $koneksi->query($sql);
         $koneksi->query("UPDATE bc_issue_dept_req_dtl SET status = 'APPROVED', qty_appr = qty_req WHERE id_hdr = '{$escId}'");
-        echo json_encode(['status' => 'OK', 'message' => 'Permintaan barang berhasil disetujui (APPROVED). Siap untuk proses pengeluaran gudang.']);
+        echo json_encode(['status' => 'OK', 'message' => 'Permintaan BPPB berhasil disetujui (APPROVED). Siap untuk ditransfer ke Dokumen BC 2.7.']);
         exit;
     } elseif ($targetStatus === 'REJECTED') {
         $sql = "UPDATE bc_issue_dept_req_hdr SET 
@@ -567,23 +658,237 @@ if ($action === 'update_status') {
             WHERE id = '{$escId}'";
         $koneksi->query($sql);
         $koneksi->query("UPDATE bc_issue_dept_req_dtl SET status = 'REJECTED' WHERE id_hdr = '{$escId}'");
-        echo json_encode(['status' => 'OK', 'message' => 'Permintaan barang telah ditolak.']);
+        echo json_encode(['status' => 'OK', 'message' => 'Permintaan BPPB telah ditolak.']);
         exit;
     } elseif ($targetStatus === 'COMPLETED') {
         $sql = "UPDATE bc_issue_dept_req_hdr SET status = 'COMPLETED' WHERE id = '{$escId}'";
         $koneksi->query($sql);
         $koneksi->query("UPDATE bc_issue_dept_req_dtl SET status = 'COMPLETED', qty_issued = qty_appr WHERE id_hdr = '{$escId}'");
-        echo json_encode(['status' => 'OK', 'message' => 'Status permintaan berhasil diselesaikan (COMPLETED).']);
+        echo json_encode(['status' => 'OK', 'message' => 'Status BPPB berhasil diselesaikan (COMPLETED).']);
         exit;
     } elseif ($targetStatus === 'DELETE') {
         $koneksi->query("DELETE FROM bc_issue_dept_req_dtl WHERE id_hdr = '{$escId}'");
         $koneksi->query("DELETE FROM bc_issue_dept_req_hdr WHERE id = '{$escId}'");
-        echo json_encode(['status' => 'OK', 'message' => 'Data permintaan berhasil dihapus.']);
+        echo json_encode(['status' => 'OK', 'message' => 'Data permintaan BPPB berhasil dihapus.']);
         exit;
     }
 }
 
-// --- F. CETAK BPPB (PRINT BUKTI PERMINTAAN & PENGELUARAN BARANG) ---
+// --- F. TRANSFER KE HOST TO HOST (BC 2.7 ANTAR FRAMAS) ---
+if ($action === 'transfer_h2h') {
+    header('Content-Type: application/json; charset=utf-8');
+    $id = trim($_REQUEST['id'] ?? '');
+    $escId = $koneksi->real_escape_string($id);
+
+    // Ambil Data Header
+    $qH = $koneksi->query("SELECT * FROM bc_issue_dept_req_hdr WHERE id = '{$escId}' LIMIT 1");
+    if (!$qH || $qH->num_rows === 0) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Data BPPB tidak ditemukan.']);
+        exit;
+    }
+    $hdr = $qH->fetch_assoc();
+
+    $plantAsal   = !empty($hdr['cmp_id']) ? $hdr['cmp_id'] : 'FRM-1';
+    $plantTujuan = !empty($hdr['plant_tujuan']) ? $hdr['plant_tujuan'] : (($plantAsal === 'FRM-1') ? 'FRM-2' : 'FRM-1');
+
+    if ($plantAsal === $plantTujuan) {
+        echo json_encode(['status' => 'ERROR', 'message' => "Plant asal ({$plantAsal}) dan tujuan ({$plantTujuan}) tidak boleh sama untuk transfer BC 2.7."]);
+        exit;
+    }
+
+    // Ambil Detail Barang
+    $qD = $koneksi->query("SELECT * FROM bc_issue_dept_req_dtl WHERE id_hdr = '{$escId}' ORDER BY seq ASC, id ASC");
+    $items = [];
+    if ($qD) {
+        while ($r = $qD->fetch_assoc()) $items[] = $r;
+    }
+    if (empty($items)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Tidak ada item barang dalam BPPB ini untuk ditransfer.']);
+        exit;
+    }
+
+    // Ambil Profil Plant Asal & Plant Tujuan
+    $escAsal   = $koneksi->real_escape_string($plantAsal);
+    $escTujuan = $koneksi->real_escape_string($plantTujuan);
+
+    $cmpAsal   = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '{$escAsal}' LIMIT 1")->fetch_assoc() ?: [];
+    $cmpTujuan = $koneksi->query("SELECT * FROM bc_ceisa_company WHERE cmp_id = '{$escTujuan}' LIMIT 1")->fetch_assoc() ?: [];
+
+    $metaAsal   = $framasPlantMeta[$plantAsal] ?? ['title' => $plantAsal, 'fullname' => "PT FRAMAS INDONESIA ({$plantAsal})", 'location' => ''];
+    $metaTujuan = $framasPlantMeta[$plantTujuan] ?? ['title' => $plantTujuan, 'fullname' => "PT FRAMAS INDONESIA ({$plantTujuan})", 'location' => ''];
+
+    $npwpFramas = preg_replace('/[^0-9]/', '', $cmpAsal['npwp'] ?? '010816064431000');
+    $namaAsal   = $cmpAsal['cmp_name'] ?: $metaAsal['fullname'];
+    $alamatAsal = $cmpAsal['alamat'] ?: $metaAsal['location'];
+    $namaTujuan = $cmpTujuan['cmp_name'] ?: $metaTujuan['fullname'];
+    $alamatTujuan = $cmpTujuan['alamat'] ?: $metaTujuan['location'];
+    $kodeKantor = $cmpAsal['kode_kantor'] ?: '050900';
+    $ijinAsal   = $cmpAsal['nomor_skep'] ?: '000001/TPB/2020';
+    $tglIjinAsal = $cmpAsal['tanggal_skep'] ?: '2020-01-01';
+    $ijinTujuan = $cmpTujuan['nomor_skep'] ?: '000002/TPB/2020';
+    $tglIjinTujuan = $cmpTujuan['tanggal_skep'] ?: '2020-01-01';
+
+    // Nomor AJU BC 2.7
+    $cleanBc  = '27';
+    $kodeDok6 = str_pad($cleanBc, 6, '0', STR_PAD_LEFT);
+    $kdCmp6   = substr($npwpFramas, 0, 6);
+    if (strlen($kdCmp6) < 6) $kdCmp6 = str_pad($kdCmp6, 6, '0', STR_PAD_RIGHT);
+    $tgl8     = date('Ymd');
+    $prefixAju = $kodeDok6 . $kdCmp6 . $tgl8;
+
+    $qSeq = $koneksi->query("SELECT nomor_aju FROM bc_ceisa_header WHERE nomor_aju LIKE '{$prefixAju}%' ORDER BY nomor_aju DESC LIMIT 1");
+    $lastSeq = 0;
+    if ($qSeq && $rSeq = $qSeq->fetch_assoc()) {
+        $lastSeq = (int)substr($rSeq['nomor_aju'], -6);
+    }
+    $newSeq = str_pad($lastSeq + 1, 6, '0', STR_PAD_LEFT);
+    $nomorAju = $prefixAju . $newSeq;
+    $escAju = $koneksi->real_escape_string($nomorAju);
+
+    $reqNo = $hdr['req_no'] ?: $hdr['no_bukti'];
+    $reqDate = $hdr['req_date'] ?: ($hdr['tgl'] ?: date('Y-m-d'));
+
+    // Hitung akumulasi qty, kemasan, netto, bruto, harga penyerahan
+    $totQty = 0; $totKem = 0; $totHrg = 0; $totNetto = 0; $totBruto = 0;
+    foreach ($items as $it) {
+        $q = (float)($it['qty_appr'] > 0 ? $it['qty_appr'] : ($it['qty_req'] > 0 ? $it['qty_req'] : $it['qty']));
+        if ($q <= 0) $q = 1;
+        $prc = (float)($it['harga'] ?? 0);
+        if ($prc <= 0) $prc = 10000;
+        $fob = round($q * $prc, 2);
+        $net = round($q * 0.15, 2);
+        $brt = round($q * 0.17, 2);
+        $kem = max(1, (int)ceil($q / 40));
+
+        $totQty += $q;
+        $totHrg += $fob;
+        $totNetto += $net;
+        $totBruto += $brt;
+        $totKem += $kem;
+    }
+
+    $koneksi->begin_transaction();
+    try {
+        // 1. bc_ceisa_header
+        $koneksi->query("DELETE FROM bc_ceisa_header WHERE nomor_aju = '{$escAju}'");
+        $sqlH = "INSERT INTO bc_ceisa_header (
+            cmp_id, nomor_aju, kode_dokumen, kode_kantor, kode_kantor_tujuan,
+            kode_tujuan_pengiriman, kode_tujuan_tpb, kode_valuta,
+            fob, cif, harga_penyerahan, netto, bruto,
+            tanggal_pernyataan, user_id, upd_time
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', '{$cleanBc}', '{$kodeKantor}', '{$kodeKantor}',
+            '1', '1', 'IDR',
+            {$totHrg}, {$totHrg}, {$totHrg}, {$totNetto}, {$totBruto},
+            '{$reqDate}', 'DEPT_REQ', NOW()
+        )";
+        if (!$koneksi->query($sqlH)) {
+            throw new Exception("Gagal menyimpan Header CEISA: " . $koneksi->error);
+        }
+
+        // 2. bc_ceisa_entitas
+        $koneksi->query("DELETE FROM bc_ceisa_entitas WHERE nomor_aju = '{$escAju}'");
+        // Seri 1: Pengirim TPB (Plant Asal)
+        $koneksi->query("INSERT INTO bc_ceisa_entitas (
+            cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
+            nomor_identitas, nama_entitas, alamat_entitas, nomor_ijin_entitas, tanggal_ijin_entitas, kode_negara
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', 1, '3', '5',
+            '{$npwpFramas}', '{$koneksi->real_escape_string($namaAsal)}', '{$koneksi->real_escape_string($alamatAsal)}',
+            '{$koneksi->real_escape_string($ijinAsal)}', '{$tglIjinAsal}', 'ID'
+        )");
+        // Seri 2: Penyelenggara TPB (PT FRAMAS INDONESIA)
+        $koneksi->query("INSERT INTO bc_ceisa_entitas (
+            cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
+            nomor_identitas, nama_entitas, alamat_entitas, kode_negara
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', 2, '7', '5',
+            '{$npwpFramas}', 'PT FRAMAS INDONESIA', '{$koneksi->real_escape_string($alamatAsal)}', 'ID'
+        )");
+        // Seri 3: Penerima TPB (Plant Tujuan)
+        $koneksi->query("INSERT INTO bc_ceisa_entitas (
+            cmp_id, nomor_aju, seri, kode_entitas, kode_jenis_identitas,
+            nomor_identitas, nama_entitas, alamat_entitas, nomor_ijin_entitas, tanggal_ijin_entitas, kode_negara
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', 3, '8', '5',
+            '{$npwpFramas}', '{$koneksi->real_escape_string($namaTujuan)}', '{$koneksi->real_escape_string($alamatTujuan)}',
+            '{$koneksi->real_escape_string($ijinTujuan)}', '{$tglIjinTujuan}', 'ID'
+        )");
+
+        // 3. bc_ceisa_barang
+        $koneksi->query("DELETE FROM bc_ceisa_barang WHERE nomor_aju = '{$escAju}'");
+        $seri = 1;
+        foreach ($items as $it) {
+            $q = (float)($it['qty_appr'] > 0 ? $it['qty_appr'] : ($it['qty_req'] > 0 ? $it['qty_req'] : $it['qty']));
+            if ($q <= 0) $q = 1;
+            $kd = $koneksi->real_escape_string($it['kode_barang']);
+            $ur = $koneksi->real_escape_string($it['nama_barang']);
+            $st = $koneksi->real_escape_string($it['sat'] ?: 'PCE');
+            $prc = (float)($it['harga'] ?? 0);
+            if ($prc <= 0) $prc = 10000;
+            $fob = round($q * $prc, 2);
+            $net = round($q * 0.15, 2);
+            $brt = round($q * 0.17, 2);
+            $kem = max(1, (int)ceil($q / 40));
+
+            $koneksi->query("INSERT INTO bc_ceisa_barang (
+                cmp_id, nomor_aju, seri_barang, kode_barang, uraian, kode_satuan, jumlah_satuan,
+                kode_kemasan, jumlah_kemasan, netto, bruto, harga_satuan, fob, cif, cif_rupiah,
+                harga_penyerahan, user_id, upd_time
+            ) VALUES (
+                '{$escAsal}', '{$escAju}', {$seri}, '{$kd}', '{$ur}', '{$st}', {$q},
+                'CT', {$kem}, {$net}, {$brt}, {$prc}, {$fob}, {$fob}, {$fob},
+                {$fob}, 'DEPT_REQ', NOW()
+            )");
+            $seri++;
+        }
+
+        // 4. bc_ceisa_dokumen (BPPB No sebagai Surat Jalan / Dokumen 217)
+        $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '{$escAju}'");
+        $escReqNo = $koneksi->real_escape_string($reqNo);
+        $koneksi->query("INSERT INTO bc_ceisa_dokumen (
+            cmp_id, nomor_aju, seri, kode_dokumen, nomor_dokumen, tanggal_dokumen, user_id, upd_time
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', 1, '217', '{$escReqNo}', '{$reqDate}', 'DEPT_REQ', NOW()
+        )");
+
+        // 5. bc_ceisa_kemasan
+        $koneksi->query("DELETE FROM bc_ceisa_kemasan WHERE nomor_aju = '{$escAju}'");
+        $koneksi->query("INSERT INTO bc_ceisa_kemasan (
+            cmp_id, nomor_aju, seri, kode_kemasan, jumlah_kemasan, merek, user_id, upd_time
+        ) VALUES (
+            '{$escAsal}', '{$escAju}', 1, 'CT', {$totKem}, 'FRAMAS', 'DEPT_REQ', NOW()
+        )");
+
+        // 6. Update BPPB Header
+        $escUser = $koneksi->real_escape_string($currentUser);
+        $koneksi->query("UPDATE bc_issue_dept_req_hdr SET
+            nomor_aju = '{$escAju}',
+            status = 'COMPLETED',
+            h2h_transferred_at = NOW(),
+            h2h_transferred_by = '{$escUser}'
+            WHERE id = '{$escId}'");
+
+        $koneksi->commit();
+
+        echo json_encode([
+            'status' => 'OK',
+            'nomor_aju' => $nomorAju,
+            'plant_asal' => $plantAsal,
+            'plant_tujuan' => $plantTujuan,
+            'item_count' => count($items),
+            'total_qty' => $totQty,
+            'message' => "BPPB No. {$reqNo} berhasil ditransfer ke Host to Host sebagai Dokumen BC 2.7 ({$plantAsal} ➔ {$plantTujuan}) dengan Nomor AJU: {$nomorAju}."
+        ]);
+        exit;
+    } catch (\Throwable $e) {
+        $koneksi->rollback();
+        echo json_encode(['status' => 'ERROR', 'message' => 'Gagal transfer ke H2H: ' . $e->getMessage()]);
+        exit;
+    }
+}
+
+// --- G. CETAK BPPB (PRINT BUKTI PERMINTAAN & PENGELUARAN BARANG ANTAR PLANT) ---
 if ($action === 'print_bppb') {
     $id = trim($_GET['id'] ?? '');
     $escId = $koneksi->real_escape_string($id);
@@ -593,6 +898,11 @@ if ($action === 'print_bppb') {
     $qD = $koneksi->query("SELECT * FROM bc_issue_dept_req_dtl WHERE id_hdr = '{$escId}' ORDER BY seq ASC");
     $items = [];
     if ($qD) while ($r = $qD->fetch_assoc()) $items[] = $r;
+
+    $plantAsal   = !empty($hdr['cmp_id']) ? $hdr['cmp_id'] : 'FRM-1';
+    $plantTujuan = !empty($hdr['plant_tujuan']) ? $hdr['plant_tujuan'] : (($plantAsal === 'FRM-1') ? 'FRM-2' : 'FRM-1');
+    $metaAsal    = $framasPlantMeta[$plantAsal] ?? ['title' => $plantAsal, 'fullname' => "PT FRAMAS INDONESIA ({$plantAsal})", 'location' => ''];
+    $metaTujuan  = $framasPlantMeta[$plantTujuan] ?? ['title' => $plantTujuan, 'fullname' => "PT FRAMAS INDONESIA ({$plantTujuan})", 'location' => ''];
     ?>
     <!DOCTYPE html>
     <html lang="id">
@@ -600,23 +910,24 @@ if ($action === 'print_bppb') {
         <meta charset="UTF-8">
         <title>BPPB - <?= htmlspecialchars($hdr['req_no']) ?></title>
         <style>
-            @page { size: A4 portrait; margin: 15mm; }
+            @page { size: A4 portrait; margin: 12mm; }
             body { font-family: Arial, sans-serif; font-size: 11px; color: #111; margin: 0; padding: 20px; background: #fff; }
-            .print-header { display: flex; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 15px; }
+            .print-header { display: flex; align-items: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 12px; }
             .print-logo { height: 42px; margin-right: 15px; }
             .print-title { flex: 1; }
             .print-title h2 { margin: 0 0 4px 0; font-size: 16px; font-weight: 800; text-transform: uppercase; }
-            .print-title p { margin: 0; font-size: 11px; color: #555; }
+            .print-title p { margin: 0; font-size: 11px; color: #444; font-weight: 600; }
             .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; background: #fafafa; border: 1px solid #ddd; padding: 10px; border-radius: 4px; }
             .meta-row { display: flex; margin-bottom: 4px; }
-            .meta-label { width: 130px; font-weight: bold; color: #333; }
+            .meta-label { width: 140px; font-weight: bold; color: #333; }
             .meta-val { flex: 1; }
+            .route-box-print { background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px; padding: 6px 10px; margin-bottom: 12px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; }
             table.bppb-tbl { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            table.bppb-tbl th, table.bppb-tbl td { border: 1px solid #444; padding: 6px 8px; font-size: 10.5px; }
+            table.bppb-tbl th, table.bppb-tbl td { border: 1px solid #444; padding: 6px 8px; font-size: 10px; }
             table.bppb-tbl th { background: #f0f0f0; text-align: center; font-weight: bold; }
-            .sig-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin-top: 30px; page-break-inside: avoid; }
+            .sig-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; text-align: center; margin-top: 25px; page-break-inside: avoid; }
             .sig-box { border: 1px solid #999; padding: 8px; border-radius: 4px; height: 95px; display: flex; flex-direction: column; justify-content: space-between; }
-            .sig-title { font-weight: bold; font-size: 10px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+            .sig-title { font-weight: bold; font-size: 9.5px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
             .sig-name { font-size: 10px; border-top: 1px dashed #777; padding-top: 4px; }
             @media print {
                 .no-print { display: none !important; }
@@ -626,7 +937,7 @@ if ($action === 'print_bppb') {
     </head>
     <body>
         <div class="no-print" style="margin-bottom: 15px; padding: 10px; background: #e6f7ff; border: 1px solid #91d5ff; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
-            <div><strong>Pratinjau Cetak BPPB</strong> (Bukti Permintaan & Pengeluaran Barang)</div>
+            <div><strong>Pratinjau Cetak BPPB Antar Plant</strong> (Bukti Permintaan & Pengeluaran Barang Antar Fasilitas Framas)</div>
             <div>
                 <button type="button" onclick="window.print()" style="background:#1890ff; color:#fff; border:none; padding:6px 14px; border-radius:4px; font-weight:bold; cursor:pointer;">🖨️ Cetak Formulir</button>
                 <button type="button" onclick="window.close()" style="background:#f5f5f5; border:1px solid #ccc; padding:6px 14px; border-radius:4px; margin-left:6px; cursor:pointer;">Tutup</button>
@@ -637,25 +948,46 @@ if ($action === 'print_bppb') {
             <img src="/assets/logo.png" class="print-logo" onerror="this.style.display='none'">
             <div class="print-title">
                 <h2>PT FRAMAS INDONESIA</h2>
-                <p>FORMULIR BUKTI PERMINTAAN & PENGELUARAN BARANG (BPPB)</p>
+                <p>BUKTI PERMINTAAN & PENGELUARAN BARANG (BPPB) ANTAR PLANT</p>
+                <div style="font-size: 9.5px; color: #666;">Dasar Dokumen Pabean: <strong>BC 2.7 (Perpindahan Barang Antar Kawasan Berikat / PLB)</strong></div>
             </div>
             <div style="text-align: right;">
-                <div style="font-size: 13px; font-weight: 800; font-family: monospace;"><?= htmlspecialchars($hdr['req_no']) ?></div>
-                <div style="font-size: 9.5px; color: #666;">Status: <?= htmlspecialchars($hdr['status']) ?></div>
+                <div style="font-size: 13px; font-weight: 800; font-family: monospace; color:#096dd9;"><?= htmlspecialchars($hdr['req_no']) ?></div>
+                <div style="font-size: 9.5px; color: #666;">Status: <strong><?= htmlspecialchars($hdr['status']) ?></strong></div>
+            </div>
+        </div>
+
+        <div class="route-box-print">
+            <div>
+                <strong>RUTE TRANSFER ANTAR PLANT:</strong> 
+                <span style="font-weight:700; color:#096dd9;"><?= htmlspecialchars($metaAsal['title']) ?></span> 
+                ➔ 
+                <span style="font-weight:700; color:#389e0d;"><?= htmlspecialchars($metaTujuan['title']) ?></span>
+            </div>
+            <div>
+                <?php if (!empty($hdr['nomor_aju'])): ?>
+                    <span>No. AJU BC 2.7 (H2H): <strong style="font-family:monospace; color:#096dd9;"><?= htmlspecialchars($hdr['nomor_aju']) ?></strong></span>
+                <?php else: ?>
+                    <span style="color:#fa8c16; font-style:italic;">Draft BPPB (Belum ditransfer ke H2H)</span>
+                <?php endif; ?>
             </div>
         </div>
 
         <div class="meta-grid">
             <div>
-                <div class="meta-row"><span class="meta-label">No. Request / BPPB</span><span class="meta-val">: <strong><?= htmlspecialchars($hdr['req_no']) ?></strong></span></div>
-                <div class="meta-row"><span class="meta-label">Tgl. Permintaan</span><span class="meta-val">: <?= htmlspecialchars($hdr['req_date']) ?></span></div>
-                <div class="meta-row"><span class="meta-label">Tgl. Dibutuhkan</span><span class="meta-val">: <?= htmlspecialchars($hdr['need_date'] ?: '-') ?></span></div>
+                <div class="meta-row"><span class="meta-label">Plant Pengirim (Asal)</span><span class="meta-val">: <strong><?= htmlspecialchars($metaAsal['fullname']) ?></strong></span></div>
+                <div class="meta-row"><span class="meta-label">Lokasi Plant Asal</span><span class="meta-val">: <?= htmlspecialchars($metaAsal['location']) ?></span></div>
                 <div class="meta-row"><span class="meta-label">Departemen Pemohon</span><span class="meta-val">: <strong><?= htmlspecialchars($hdr['dept_pemohon']) ?></strong></span></div>
+                <div class="meta-row"><span class="meta-label">PIC Pemohon</span><span class="meta-val">: <?= htmlspecialchars($hdr['pic'] ?: '-') ?></span></div>
+                <div class="meta-row"><span class="meta-label">Tgl. Permintaan</span><span class="meta-val">: <?= htmlspecialchars($hdr['req_date']) ?></span></div>
+                <div class="meta-row"><span class="meta-label">Target Tgl. Butuh</span><span class="meta-val">: <?= htmlspecialchars($hdr['need_date'] ?: '-') ?></span></div>
             </div>
             <div>
-                <div class="meta-row"><span class="meta-label">Departemen Tujuan</span><span class="meta-val">: <?= htmlspecialchars($hdr['dept_tujuan']) ?></span></div>
-                <div class="meta-row"><span class="meta-label">Kategori / Klasifikasi</span><span class="meta-val">: <?= htmlspecialchars($hdr['klas']) ?></span></div>
+                <div class="meta-row"><span class="meta-label">Plant Penerima (Tujuan)</span><span class="meta-val">: <strong><?= htmlspecialchars($metaTujuan['fullname']) ?></strong></span></div>
+                <div class="meta-row"><span class="meta-label">Lokasi Plant Tujuan</span><span class="meta-val">: <?= htmlspecialchars($metaTujuan['location']) ?></span></div>
+                <div class="meta-row"><span class="meta-label">Departemen Tujuan</span><span class="meta-val">: <strong><?= htmlspecialchars($hdr['dept_tujuan']) ?></strong></span></div>
                 <div class="meta-row"><span class="meta-label">No. WO / Mesin Ref</span><span class="meta-val">: <?= htmlspecialchars($hdr['wo_no'] ?: '-') ?></span></div>
+                <div class="meta-row"><span class="meta-label">Kategori / Klasifikasi</span><span class="meta-val">: <?= htmlspecialchars($hdr['klas']) ?></span></div>
                 <div class="meta-row"><span class="meta-label">Catatan / Keperluan</span><span class="meta-val">: <?= htmlspecialchars($hdr['note'] ?: '-') ?></span></div>
             </div>
         </div>
@@ -663,14 +995,14 @@ if ($action === 'print_bppb') {
         <table class="bppb-tbl">
             <thead>
                 <tr>
-                    <th style="width: 30px;">No</th>
-                    <th style="width: 140px;">Kode Barang</th>
+                    <th style="width: 25px;">No</th>
+                    <th style="width: 130px;">Kode Barang</th>
                     <th>Nama / Uraian Barang</th>
-                    <th style="width: 50px;">Sat</th>
-                    <th style="width: 70px;">Qty Minta</th>
-                    <th style="width: 70px;">Qty Setuju</th>
-                    <th style="width: 130px;">Ref Asal / Dokumen</th>
-                    <th style="width: 140px;">Catatan</th>
+                    <th style="width: 45px;">Sat</th>
+                    <th style="width: 65px;">Qty Minta</th>
+                    <th style="width: 65px;">Qty Setuju</th>
+                    <th style="width: 140px;">Ref Asal / Dok Pabean</th>
+                    <th style="width: 130px;">Catatan</th>
                 </tr>
             </thead>
             <tbody>
@@ -683,8 +1015,8 @@ if ($action === 'print_bppb') {
                         <td><?= htmlspecialchars($it['nama_barang']) ?></td>
                         <td style="text-align: center;"><?= htmlspecialchars($it['sat']) ?></td>
                         <td style="text-align: right; font-weight: bold;"><?= number_format((float)$it['qty_req'], 2, ',', '.') ?></td>
-                        <td style="text-align: right;"><?= number_format((float)$it['qty_appr'], 2, ',', '.') ?></td>
-                        <td style="font-size: 9.5px;"><?= htmlspecialchars(trim(($it['ref_bc'] ?? '') . ' ' . ($it['ref_no_daftar'] ?? '') . ' ' . ($it['ref_no_bukti'] ?? '')) ?: '-') ?></td>
+                        <td style="text-align: right;"><?= number_format((float)($it['qty_appr'] ?: $it['qty_req']), 2, ',', '.') ?></td>
+                        <td style="font-size: 9px;"><?= htmlspecialchars(trim(($it['ref_bc'] ?? '') . ' ' . ($it['ref_no_daftar'] ?? '') . ' ' . ($it['ref_no_bukti'] ?? '')) ?: '-') ?></td>
                         <td><?= htmlspecialchars($it['note'] ?: '-') ?></td>
                     </tr>
                 <?php endforeach; endif; ?>
@@ -693,24 +1025,24 @@ if ($action === 'print_bppb') {
 
         <div class="sig-grid">
             <div class="sig-box">
-                <div class="sig-title">Diminta Oleh (Pemohon)</div>
+                <div class="sig-title">Diminta Oleh (Pemohon Plant Asal)</div>
                 <div style="flex:1;"></div>
                 <div class="sig-name">( <?= htmlspecialchars($hdr['pic'] ?: $hdr['created_by'] ?: '......................') ?> )</div>
             </div>
             <div class="sig-box">
-                <div class="sig-title">Disetujui (Kepala Dept)</div>
+                <div class="sig-title">Disetujui (Kepala Dept Plant Asal)</div>
                 <div style="flex:1; display:flex; align-items:center; justify-content:center; color:#52c41a; font-weight:bold; font-size:10px;">
                     <?= $hdr['status'] === 'APPROVED' || $hdr['status'] === 'COMPLETED' ? '✓ APPROVED' : '' ?>
                 </div>
                 <div class="sig-name">( <?= htmlspecialchars($hdr['approved_by_1'] ?: '......................') ?> )</div>
             </div>
             <div class="sig-box">
-                <div class="sig-title">Dikeluarkan Oleh (Gudang)</div>
+                <div class="sig-title">Dikeluarkan Oleh (Gudang Plant Asal)</div>
                 <div style="flex:1;"></div>
                 <div class="sig-name">( ................................... )</div>
             </div>
             <div class="sig-box">
-                <div class="sig-title">Diterima Oleh</div>
+                <div class="sig-title">Diterima Oleh (Plant <?= htmlspecialchars($metaTujuan['title']) ?>)</div>
                 <div style="flex:1;"></div>
                 <div class="sig-name">( ................................... )</div>
             </div>
@@ -1053,6 +1385,85 @@ if ($action === 'print_bppb') {
             padding-bottom: 6px;
             border-bottom: 1px solid var(--border-color);
         }
+        /* ROUTE & PLANT BADGES */
+        .route-banner {
+            background: rgba(24, 144, 255, 0.05);
+            border: 1px dashed rgba(24, 144, 255, 0.4);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .route-badge-box {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 700;
+        }
+        .route-plant-badge {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .route-plant-badge.origin {
+            background: #e6f7ff;
+            color: #096dd9;
+            border: 1px solid #91d5ff;
+        }
+        .route-plant-badge.destination {
+            background: #f6ffed;
+            color: #389e0d;
+            border: 1px solid #b7eb8f;
+        }
+        .route-arrow {
+            color: var(--primary);
+            font-size: 13px;
+        }
+        .route-meta {
+            font-size: 11px;
+        }
+        .badge-plant-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 700;
+            font-family: monospace;
+        }
+        .plant-FRM-1 { background: #e6f7ff; color: #096dd9; border: 1px solid #91d5ff; }
+        .plant-FRM-2 { background: #f6ffed; color: #389e0d; border: 1px solid #b7eb8f; }
+        .plant-FRM-3 { background: #f9f0ff; color: #722ed1; border: 1px solid #d3adf7; }
+        .plant-PDPLB { background: #fff7e6; color: #d46b08; border: 1px solid #ffd591; }
+        .badge-h2h-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #096dd9;
+            background: #e6f7ff;
+            border: 1px solid #91d5ff;
+            padding: 2px 6px;
+            border-radius: 3px;
+            text-decoration: none;
+            font-family: monospace;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .badge-h2h-link:hover {
+            background: #1890ff;
+            color: #fff;
+            border-color: #1890ff;
+        }
     </style>
 </head>
 <body data-theme="<?= htmlspecialchars($theme) ?>">
@@ -1065,7 +1476,7 @@ if ($action === 'print_bppb') {
             </div>
             <div class="header-text">
                 <h1>Department Request (BPPB)</h1>
-                <p>Permintaan Pengeluaran Barang Antar Departemen &bull; Maintenance, Moldshop, Produksi, GA, Warehouse</p>
+                <p>Permintaan Pengeluaran & Transfer Barang Antar Plant Framas &bull; Maintenance, Moldshop, Produksi, GA, Warehouse ➔ Target BC 2.7</p>
             </div>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
@@ -1073,7 +1484,7 @@ if ($action === 'print_bppb') {
                 <i class="fa-solid fa-industry"></i> <?= htmlspecialchars($sessionCmpId) ?>
             </span>
             <button type="button" class="btn-action btn-primary" onclick="openCreateModal()">
-                <i class="fa-solid fa-plus"></i> <span>+ Buat Request Baru</span>
+                <i class="fa-solid fa-plus"></i> <span>+ Buat BPPB Baru</span>
             </button>
             <button type="button" class="btn-action btn-default" onclick="loadList()">
                 <i class="fa-solid fa-rotate"></i> <span>Refresh</span>
@@ -1092,11 +1503,15 @@ if ($action === 'print_bppb') {
             <span class="kpi-val pending" id="kpiPending">0</span>
         </div>
         <div class="kpi-chip" id="chipApproved" onclick="filterByStatus('APPROVED')">
-            <span class="kpi-label">Disetujui (Ready Issue):</span>
+            <span class="kpi-label">Disetujui:</span>
             <span class="kpi-val approved" id="kpiApproved">0</span>
         </div>
+        <div class="kpi-chip" id="chipH2h" onclick="filterByH2h('1')">
+            <span class="kpi-label">Transfer BC 2.7 (H2H):</span>
+            <span class="kpi-val completed" id="kpiH2h">0</span>
+        </div>
         <div class="kpi-chip" id="chipCompleted" onclick="filterByStatus('COMPLETED')">
-            <span class="kpi-label">Selesai Dikeluarkan:</span>
+            <span class="kpi-label">Selesai:</span>
             <span class="kpi-val completed" id="kpiCompleted">0</span>
         </div>
         <div class="kpi-chip" id="chipDraft" onclick="filterByStatus('DRAFT')">
@@ -1112,12 +1527,37 @@ if ($action === 'print_bppb') {
     <!-- 3. FILTER BAR -->
     <div class="filter-bar">
         <div class="search-box">
-            <input type="text" id="searchInput" placeholder="Cari No. Request, Dept, WO, PIC, Catatan..." onkeydown="if(event.key==='Enter') loadList()">
+            <input type="text" id="searchInput" placeholder="Cari No. BPPB, AJU BC 2.7, Dept, WO, PIC, Catatan..." onkeydown="if(event.key==='Enter') loadList()">
             <i class="fa-solid fa-magnifying-glass"></i>
         </div>
         <div>
+            <select id="filterPlantAsal" class="form-select-sm" onchange="loadList()">
+                <option value="ALL">Semua Plant Asal (Pengirim)</option>
+                <option value="FRM-1">Asal: FRAMAS 1 (MM2100)</option>
+                <option value="FRM-2">Asal: FRAMAS 2 (Kenari DS5)</option>
+                <option value="FRM-3">Asal: FRAMAS 3 (DS6)</option>
+                <option value="PDPLB">Asal: PDPLB (PLB MM2100)</option>
+            </select>
+        </div>
+        <div>
+            <select id="filterPlantTujuan" class="form-select-sm" onchange="loadList()">
+                <option value="ALL">Semua Plant Tujuan (Penerima)</option>
+                <option value="FRM-1">Tujuan: FRAMAS 1 (MM2100)</option>
+                <option value="FRM-2">Tujuan: FRAMAS 2 (Kenari DS5)</option>
+                <option value="FRM-3">Tujuan: FRAMAS 3 (DS6)</option>
+                <option value="PDPLB">Tujuan: PDPLB (PLB MM2100)</option>
+            </select>
+        </div>
+        <div>
+            <select id="filterH2h" class="form-select-sm" onchange="loadList()">
+                <option value="ALL">Semua Status H2H</option>
+                <option value="1">Sudah Transfer BC 2.7 (H2H)</option>
+                <option value="0">Belum Transfer H2H</option>
+            </select>
+        </div>
+        <div>
             <select id="filterDept" class="form-select-sm" onchange="loadList()">
-                <option value="ALL">Semua Departemen Pemohon</option>
+                <option value="ALL">Semua Dept Pemohon</option>
                 <option value="Maintenance">Maintenance (Mesin / Part / Tooling)</option>
                 <option value="Moldshop">Moldshop (Mold / Part Mold)</option>
                 <option value="Produksi">Produksi (Raw Material / WIP)</option>
@@ -1134,7 +1574,7 @@ if ($action === 'print_bppb') {
                 <option value="ALL">Semua Status</option>
                 <option value="PENDING">Menunggu Persetujuan</option>
                 <option value="APPROVED">Disetujui</option>
-                <option value="COMPLETED">Selesai Dikeluarkan</option>
+                <option value="COMPLETED">Selesai</option>
                 <option value="DRAFT">Draft</option>
                 <option value="REJECTED">Ditolak</option>
             </select>
@@ -1146,18 +1586,18 @@ if ($action === 'print_bppb') {
         <table class="custom-table" id="reqTable">
             <thead>
                 <tr>
-                    <th style="width: 32px; text-align:center;">#</th>
-                    <th style="width: 140px;">No. Request / BPPB</th>
-                    <th style="width: 85px;">Tanggal</th>
-                    <th style="width: 120px;">Dept Pemohon</th>
-                    <th style="width: 110px;">Dept Tujuan</th>
-                    <th style="width: 110px;">Kategori</th>
-                    <th style="width: 100px;">No. WO / Mesin</th>
-                    <th style="width: 60px; text-align:center;">Items</th>
+                    <th style="width: 28px; text-align:center;">#</th>
+                    <th style="width: 145px;">No. Request / BPPB</th>
+                    <th style="width: 80px;">Tanggal</th>
+                    <th style="width: 165px;">Rute Antar Plant</th>
+                    <th style="width: 130px;">Dept Pemohon ➔ Tujuan</th>
+                    <th style="width: 100px;">Kategori</th>
+                    <th style="width: 95px;">No. WO / Mesin</th>
+                    <th style="width: 50px; text-align:center;">Items</th>
                     <th style="width: 75px; text-align:right;">Total Qty</th>
-                    <th style="width: 115px; text-align:center;">Status</th>
-                    <th>Catatan & Audit Approval</th>
-                    <th style="width: 120px; text-align:center;">Aksi</th>
+                    <th style="width: 125px; text-align:center;">Status & H2H</th>
+                    <th>Catatan & Audit</th>
+                    <th style="width: 165px; text-align:center;">Aksi</th>
                 </tr>
             </thead>
             <tbody id="reqTbody">
@@ -1170,12 +1610,49 @@ if ($action === 'print_bppb') {
     <div class="modal-overlay" id="modalReqForm">
         <div class="modal-card">
             <div class="modal-header">
-                <h3 id="formTitle"><i class="fa-solid fa-file-pen" style="color:var(--primary); margin-right:6px;"></i> Form Permintaan Pengeluaran Barang</h3>
+                <h3 id="formTitle"><i class="fa-solid fa-file-pen" style="color:var(--primary); margin-right:6px;"></i> Form Permintaan & Pengeluaran Barang Antar Plant (BPPB)</h3>
                 <button type="button" class="btn-action btn-default" style="border:none; font-size:14px;" onclick="closeModal('modalReqForm')">✕</button>
             </div>
             <div class="modal-body">
                 <input type="hidden" id="fId" value="">
                 <input type="hidden" id="fCmpId" value="<?= htmlspecialchars($sessionCmpId) ?>">
+
+                <div class="form-grid-3">
+                    <div class="form-group">
+                        <label class="form-label">Plant Pengirim (Asal) <span style="color:red;">*</span></label>
+                        <select id="fPlantAsal" class="form-control" onchange="onPlantAsalChange()">
+                            <option value="FRM-1">FRAMAS - 1 (Plant 1 MM2100)</option>
+                            <option value="FRM-2">FRAMAS - 2 (Kenari DS5)</option>
+                            <option value="FRM-3">FRAMAS - 3 (Delta Silicon VI)</option>
+                            <option value="PDPLB">PDPLB (PLB MM2100)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Plant Penerima (Tujuan) <span style="color:red;">*</span></label>
+                        <select id="fPlantTujuan" class="form-control" onchange="updateRoutePreview()">
+                            <option value="FRM-2">FRAMAS - 2 (Kenari DS5)</option>
+                            <option value="FRM-1">FRAMAS - 1 (Plant 1 MM2100)</option>
+                            <option value="FRM-3">FRAMAS - 3 (Delta Silicon VI)</option>
+                            <option value="PDPLB">PDPLB (PLB MM2100)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">No. Request / BPPB (Auto / Manual)</label>
+                        <input type="text" id="fReqNo" class="form-control" placeholder="Otomatis digenerate sistem...">
+                    </div>
+                </div>
+
+                <div class="route-banner" id="routeBanner">
+                    <div class="route-badge-box">
+                        <span class="route-plant-badge origin" id="badgeOriginPlant">🏢 FRAMAS - 1</span>
+                        <i class="fa-solid fa-arrow-right-long route-arrow"></i>
+                        <span class="route-plant-badge destination" id="badgeDestPlant">🎯 FRAMAS - 2</span>
+                    </div>
+                    <div class="route-meta">
+                        <strong>Perpindahan Barang Antar Fasilitas Framas Indonesia</strong>
+                        <span style="color:var(--text-muted); font-size:11px;"> • Target Dokumen Pabean: <strong>BC 2.7 (TPB Antar Kawasan Berikat / PLB)</strong></span>
+                    </div>
+                </div>
 
                 <div class="form-grid-3">
                     <div class="form-group">
@@ -1194,19 +1671,20 @@ if ($action === 'print_bppb') {
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Departemen Tujuan <span style="color:red;">*</span></label>
+                        <label class="form-label">Departemen Tujuan di Plant Penerima <span style="color:red;">*</span></label>
                         <select id="fDeptTujuan" class="form-control">
-                            <option value="GUDANG">Gudang Utama (Warehouse)</option>
+                            <option value="GUDANG UTAMA">Gudang Utama (Warehouse)</option>
                             <option value="GUDANG RAW MATERIAL">Gudang Raw Material</option>
                             <option value="GUDANG PART & MESIN">Gudang Part & Mesin</option>
                             <option value="GUDANG FINISH GOOD">Gudang Finish Good</option>
                             <option value="MOLDSHOP">Moldshop</option>
+                            <option value="MAINTENANCE">Maintenance</option>
                             <option value="PRODUKSI">Produksi</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">No. Request / BPPB (Auto / Manual)</label>
-                        <input type="text" id="fReqNo" class="form-control" placeholder="Otomatis digenerate sistem...">
+                        <label class="form-label">Target Tanggal Dibutuhkan</label>
+                        <input type="date" id="fNeedDate" class="form-control" value="<?= date('Y-m-d') ?>">
                     </div>
                 </div>
 
@@ -1355,6 +1833,7 @@ if ($action === 'print_bppb') {
         window.addEventListener('DOMContentLoaded', () => {
             loadList();
             onDeptChange(document.getElementById('fDeptPemohon').value);
+            updateRoutePreview();
         });
 
         function filterByStatus(st) {
@@ -1371,16 +1850,36 @@ if ($action === 'print_bppb') {
             loadList();
         }
 
+        function filterByH2h(val = '1') {
+            document.querySelectorAll('.kpi-chip').forEach(c => c.classList.remove('active'));
+            document.getElementById('chipH2h').classList.add('active');
+            document.getElementById('filterH2h').value = val;
+            loadList();
+        }
+
+        function renderPlantBadge(code) {
+            code = (code || 'FRM-1').toUpperCase();
+            let name = code;
+            if (code === 'FRM-1') name = 'FRAMAS 1';
+            else if (code === 'FRM-2') name = 'FRAMAS 2';
+            else if (code === 'FRM-3') name = 'FRAMAS 3';
+            else if (code === 'PDPLB') name = 'PDPLB';
+            return `<span class="badge-plant-pill plant-${code}" title="${code}">${name}</span>`;
+        }
+
         async function loadList() {
             const tbody = document.getElementById('reqTbody');
             tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 24px; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data...</td></tr>`;
 
-            const q = encodeURIComponent(document.getElementById('searchInput').value.trim());
-            const dept = encodeURIComponent(document.getElementById('filterDept').value);
-            const st = encodeURIComponent(document.getElementById('filterStatus').value);
+            const q           = encodeURIComponent(document.getElementById('searchInput').value.trim());
+            const plantAsal   = encodeURIComponent(document.getElementById('filterPlantAsal').value);
+            const plantTujuan = encodeURIComponent(document.getElementById('filterPlantTujuan').value);
+            const h2h         = encodeURIComponent(document.getElementById('filterH2h').value);
+            const dept        = encodeURIComponent(document.getElementById('filterDept').value);
+            const st          = encodeURIComponent(document.getElementById('filterStatus').value);
 
             try {
-                const res = await fetch(`department_request.php?action=list&q=${q}&dept=${dept}&status=${st}&_t=${Date.now()}`);
+                const res = await fetch(`department_request.php?action=list&q=${q}&plant_asal=${plantAsal}&plant_tujuan=${plantTujuan}&h2h=${h2h}&dept=${dept}&status=${st}&_t=${Date.now()}`);
                 const json = await res.json();
                 if (json.status !== 'OK') throw new Error(json.message || 'Gagal memuat data.');
 
@@ -1389,6 +1888,7 @@ if ($action === 'print_bppb') {
                     document.getElementById('kpiTotal').innerText = Number(json.kpi.cnt_total || 0).toLocaleString('id-ID');
                     document.getElementById('kpiPending').innerText = Number(json.kpi.cnt_pending || 0).toLocaleString('id-ID');
                     document.getElementById('kpiApproved').innerText = Number(json.kpi.cnt_approved || 0).toLocaleString('id-ID');
+                    document.getElementById('kpiH2h').innerText = Number(json.kpi.cnt_h2h || 0).toLocaleString('id-ID');
                     document.getElementById('kpiCompleted').innerText = Number(json.kpi.cnt_completed || 0).toLocaleString('id-ID');
                     document.getElementById('kpiDraft').innerText = Number(json.kpi.cnt_draft || 0).toLocaleString('id-ID');
                     document.getElementById('kpiRejected').innerText = Number(json.kpi.cnt_rejected || 0).toLocaleString('id-ID');
@@ -1404,7 +1904,7 @@ if ($action === 'print_bppb') {
         function renderTable() {
             const tbody = document.getElementById('reqTbody');
             if (reqDataList.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 30px; color: var(--text-muted);"><i class="fa-regular fa-folder-open" style="font-size:24px; opacity:0.4; display:block; margin-bottom:8px;"></i>Belum ada data permintaan barang yang sesuai filter.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="12" style="text-align:center; padding: 30px; color: var(--text-muted);"><i class="fa-regular fa-folder-open" style="font-size:24px; opacity:0.4; display:block; margin-bottom:8px;"></i>Belum ada data permintaan BPPB yang sesuai filter.</td></tr>`;
                 return;
             }
 
@@ -1413,8 +1913,8 @@ if ($action === 'print_bppb') {
                 let badgeClass = 'status-pending';
                 let statusLabel = r.status;
                 if (r.status === 'PENDING') { badgeClass = 'status-pending'; statusLabel = 'Menunggu Persetujuan'; }
-                else if (r.status === 'APPROVED') { badgeClass = 'status-approved'; statusLabel = 'Disetujui (Ready Issue)'; }
-                else if (r.status === 'COMPLETED') { badgeClass = 'status-completed'; statusLabel = 'Selesai Dikeluarkan'; }
+                else if (r.status === 'APPROVED') { badgeClass = 'status-approved'; statusLabel = 'Disetujui (Ready)'; }
+                else if (r.status === 'COMPLETED') { badgeClass = 'status-completed'; statusLabel = 'Selesai'; }
                 else if (r.status === 'REJECTED') { badgeClass = 'status-rejected'; statusLabel = 'Ditolak'; }
                 else if (r.status === 'DRAFT') { badgeClass = 'status-draft'; statusLabel = 'Draft'; }
 
@@ -1427,26 +1927,53 @@ if ($action === 'print_bppb') {
                     audit = `<span style="color:var(--text-muted);">${escapeHtml(r.note)}</span>`;
                 }
 
+                // Kolom Req No + Link AJU BC 2.7 jika sudah ditransfer
+                let reqNoHtml = `<strong style="color:var(--primary); font-family:monospace;">${escapeHtml(r.display_req_no)}</strong>`;
+                if (r.display_nomor_aju) {
+                    reqNoHtml += `<div style="margin-top:3px;"><a href="javascript:void(0)" onclick="openInH2H('${escapeHtml(r.display_nomor_aju)}', '${escapeHtml(r.cmp_id)}', 'editor')" class="badge-h2h-link" title="Buka Dokumen BC 2.7 di Form Editor"><i class="fa-solid fa-link"></i> BC 2.7: ${escapeHtml(r.display_nomor_aju)}</a></div>`;
+                }
+
+                // Kolom Rute Plant
+                const routeHtml = `<div style="display:flex; align-items:center; gap:3px;">${renderPlantBadge(r.cmp_id)} <i class="fa-solid fa-arrow-right" style="color:var(--primary); font-size:9px;"></i> ${renderPlantBadge(r.display_plant_tujuan || 'FRM-2')}</div>`;
+
+                // Kolom Departemen
+                const deptHtml = `<div><strong>${escapeHtml(r.display_dept_pemohon)}</strong></div><div style="color:var(--text-muted); font-size:10px;">➔ ${escapeHtml(r.display_dept_tujuan || 'GUDANG')}</div>`;
+
+                // Status & H2H badge
+                let h2hBadge = '';
+                if (r.display_nomor_aju) {
+                    h2hBadge = `<div style="margin-top:3px;"><span class="status-badge status-completed" style="font-size:9px;"><i class="fa-solid fa-check-double"></i> BC 2.7 Ready</span></div>`;
+                }
+
+                // Action Buttons
+                let h2hActionBtn = '';
+                if (r.display_nomor_aju) {
+                    h2hActionBtn = `<button type="button" class="btn-action btn-success" style="padding:2px 7px; height:24px; font-size:10px; font-weight:700;" onclick="openInH2H('${escapeHtml(r.display_nomor_aju)}', '${escapeHtml(r.cmp_id)}', 'editor')" title="Buka Dokumen BC 2.7 di Form Editor Dokumen"><i class="fa-solid fa-file-invoice"></i> BC 2.7</button>`;
+                } else {
+                    h2hActionBtn = `<button type="button" class="btn-action btn-warning" style="padding:2px 7px; height:24px; font-size:10px; font-weight:700; background:#fa8c16; color:#fff;" onclick="transferToH2H('${r.id}', '${escapeHtml(r.display_req_no)}', '${escapeHtml(r.cmp_id)}', '${escapeHtml(r.display_plant_tujuan || '')}')" title="Transfer BPPB ke Host to Host (Dokumen BC 2.7 Antar Framas)"><i class="fa-solid fa-paper-plane"></i> Transfer BC 2.7</button>`;
+                }
+
                 html += `
                     <tr>
-                        <td style="text-align:center; color:var(--text-muted); font-family:monospace;">${idx + 1}</td>
-                        <td><strong style="color:var(--primary); font-family:monospace;">${escapeHtml(r.display_req_no)}</strong></td>
+                        <td style="text-align:center; color:var(--text-muted); font-family:monospace; font-size:11px;">${idx + 1}</td>
+                        <td>${reqNoHtml}</td>
                         <td style="font-size:11px;">${escapeHtml(r.display_req_date || '-')}</td>
-                        <td><span style="font-weight:700;">${escapeHtml(r.display_dept_pemohon)}</span></td>
-                        <td><span style="color:var(--text-muted);">${escapeHtml(r.display_dept_tujuan || 'GUDANG')}</span></td>
+                        <td>${routeHtml}</td>
+                        <td>${deptHtml}</td>
                         <td><span style="font-size:10px; background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:3px;">${escapeHtml(r.klas || 'General')}</span></td>
                         <td><span style="font-family:monospace; font-size:11px;">${escapeHtml(r.display_wo_no || '-')}</span></td>
                         <td style="text-align:center;"><strong>${Number(r.item_count || 0)}</strong></td>
                         <td style="text-align:right; font-weight:700;">${Number(r.total_qty || 0).toLocaleString('id-ID', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
-                        <td style="text-align:center;"><span class="status-badge ${badgeClass}">${statusLabel}</span></td>
-                        <td><div style="max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(r.note || '')}">${audit}</div></td>
+                        <td style="text-align:center;"><span class="status-badge ${badgeClass}">${statusLabel}</span>${h2hBadge}</td>
+                        <td><div style="max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(r.note || '')}">${audit}</div></td>
                         <td style="text-align:center; white-space:nowrap;">
-                            <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px;" onclick="printBppb('${r.id}')" title="Cetak BPPB Resmi"><i class="fa-solid fa-print"></i></button>
+                            <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px;" onclick="printBppb('${r.id}')" title="Cetak Formulir BPPB Resmi"><i class="fa-solid fa-print"></i></button>
+                            ${h2hActionBtn}
                             ${(r.status === 'PENDING') ? `
                                 <button type="button" class="btn-action btn-success" style="padding:2px 6px; height:24px;" onclick="approveRequest('${r.id}', '${escapeHtml(r.display_req_no)}')" title="Setujui"><i class="fa-solid fa-check"></i></button>
                                 <button type="button" class="btn-action btn-danger" style="padding:2px 6px; height:24px;" onclick="rejectRequest('${r.id}', '${escapeHtml(r.display_req_no)}')" title="Tolak"><i class="fa-solid fa-xmark"></i></button>
                             ` : ''}
-                            ${(r.status === 'APPROVED') ? `
+                            ${(r.status === 'APPROVED' && !r.display_nomor_aju) ? `
                                 <button type="button" class="btn-action btn-primary" style="padding:2px 6px; height:24px;" onclick="completeRequest('${r.id}', '${escapeHtml(r.display_req_no)}')" title="Tandai Selesai Dikeluarkan"><i class="fa-solid fa-box-open"></i></button>
                             ` : ''}
                             ${(r.status === 'DRAFT' || r.status === 'PENDING') ? `
@@ -1461,6 +1988,37 @@ if ($action === 'print_bppb') {
         }
 
         // --- FORM CREATION & EDITING ---
+        function onPlantAsalChange() {
+            const pAsal = document.getElementById('fPlantAsal').value;
+            const pTujuanSelect = document.getElementById('fPlantTujuan');
+            if (pTujuanSelect.value === pAsal) {
+                // Auto switch ke plant lain agar tidak sama
+                if (pAsal === 'FRM-1') pTujuanSelect.value = 'FRM-2';
+                else if (pAsal === 'FRM-2') pTujuanSelect.value = 'FRM-1';
+                else if (pAsal === 'FRM-3') pTujuanSelect.value = 'FRM-1';
+                else if (pAsal === 'PDPLB') pTujuanSelect.value = 'FRM-1';
+            }
+            updateRoutePreview();
+        }
+
+        function updateRoutePreview() {
+            const pAsal = document.getElementById('fPlantAsal') ? document.getElementById('fPlantAsal').value : 'FRM-1';
+            const pTujuan = document.getElementById('fPlantTujuan') ? document.getElementById('fPlantTujuan').value : 'FRM-2';
+
+            const originBadge = document.getElementById('badgeOriginPlant');
+            const destBadge = document.getElementById('badgeDestPlant');
+
+            const plantNames = {
+                'FRM-1': 'FRAMAS - 1 (MM2100)',
+                'FRM-2': 'FRAMAS - 2 (Kenari DS5)',
+                'FRM-3': 'FRAMAS - 3 (DS6)',
+                'PDPLB': 'PDPLB (PLB MM2100)'
+            };
+
+            if (originBadge) originBadge.innerHTML = `<i class="fa-solid fa-industry"></i> Asal: <strong>${plantNames[pAsal] || pAsal}</strong>`;
+            if (destBadge) destBadge.innerHTML = `<i class="fa-solid fa-location-dot"></i> Tujuan: <strong>${plantNames[pTujuan] || pTujuan}</strong>`;
+        }
+
         function onDeptChange(dept) {
             const hintBox = document.getElementById('deptHintBox');
             const hintText = document.getElementById('deptHintText');
@@ -1482,18 +2040,22 @@ if ($action === 'print_bppb') {
         }
 
         function openCreateModal() {
+            const currentCmp = document.getElementById('fCmpId').value || 'FRM-1';
             document.getElementById('fId').value = '';
+            document.getElementById('fPlantAsal').value = currentCmp;
+            document.getElementById('fPlantTujuan').value = (currentCmp === 'FRM-1') ? 'FRM-2' : 'FRM-1';
             document.getElementById('fReqNo').value = '';
             document.getElementById('fReqDate').value = new Date().toISOString().substring(0, 10);
             document.getElementById('fNeedDate').value = new Date().toISOString().substring(0, 10);
             document.getElementById('fDeptPemohon').value = 'Maintenance';
-            document.getElementById('fDeptTujuan').value = 'GUDANG';
+            document.getElementById('fDeptTujuan').value = 'GUDANG UTAMA';
             document.getElementById('fWoNo').value = '';
             document.getElementById('fNote').value = '';
             document.getElementById('fItemsTbody').innerHTML = '';
             onDeptChange('Maintenance');
+            updateRoutePreview();
             updateItemCount();
-            document.getElementById('formTitle').innerHTML = '<i class="fa-solid fa-file-pen" style="color:var(--primary); margin-right:6px;"></i> Buat Permintaan Barang Baru (Department Request)';
+            document.getElementById('formTitle').innerHTML = '<i class="fa-solid fa-file-pen" style="color:var(--primary); margin-right:6px;"></i> Buat Permintaan & Pengeluaran Barang Antar Plant (BPPB)';
             openModal('modalReqForm');
         }
 
@@ -1505,6 +2067,8 @@ if ($action === 'print_bppb') {
 
                 const h = json.header;
                 document.getElementById('fId').value = h.id;
+                document.getElementById('fPlantAsal').value = h.cmp_id || 'FRM-1';
+                document.getElementById('fPlantTujuan').value = h.plant_tujuan || ((h.cmp_id === 'FRM-1') ? 'FRM-2' : 'FRM-1');
                 document.getElementById('fReqNo').value = h.display_req_no;
                 document.getElementById('fReqDate').value = h.display_req_date;
                 document.getElementById('fNeedDate').value = h.need_date || h.display_req_date;
@@ -1515,18 +2079,429 @@ if ($action === 'print_bppb') {
                 document.getElementById('fNote').value = h.note || '';
 
                 onDeptChange(h.display_dept_pemohon);
+                updateRoutePreview();
 
                 const tbody = document.getElementById('fItemsTbody');
                 tbody.innerHTML = '';
                 (json.items || []).forEach(it => addItemRow(it));
                 updateItemCount();
 
-                document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-pen-to-square" style="color:var(--primary); margin-right:6px;"></i> Edit Permintaan: <strong>${escapeHtml(h.display_req_no)}</strong>`;
+                document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-pen-to-square" style="color:var(--primary); margin-right:6px;"></i> Edit BPPB Antar Plant: <strong>${escapeHtml(h.display_req_no)}</strong>`;
                 openModal('modalReqForm');
             } catch (err) {
                 Swal.fire({ icon: 'error', title: 'Gagal Memuat Detail', text: err.message });
             }
         }
+
+        function addItemRow(it = {}) {
+            const tbody = document.getElementById('fItemsTbody');
+            const rowIdx = tbody.children.length + 1;
+            const tr = document.createElement('tr');
+
+            let srcBadge = '<span class="badge-source-pabean">Pabean</span>';
+            if (it.source_type === 'bc_issue_dtl') srcBadge = '<span class="badge-source-issue">Issue</span>';
+            else if (it.source_type === 'bc_material') srcBadge = '<span class="badge-source-material">Master</span>';
+            else if (it.source_type === 'manual') srcBadge = '<span class="badge-source-manual">Manual</span>';
+
+            tr.innerHTML = `
+                <td style="text-align:center; color:var(--text-muted); font-size:11px;">${rowIdx}</td>
+                <td>${srcBadge}<input type="hidden" class="it-src" value="${escapeHtml(it.source_type || 'bc_1ab2')}"></td>
+                <td><input type="text" class="form-control it-kd" style="font-family:monospace; font-weight:700;" value="${escapeHtml(it.kode_barang || '')}" placeholder="Kode barang..."></td>
+                <td>
+                    <input type="text" class="form-control it-nm" value="${escapeHtml(it.nama_barang || '')}" placeholder="Nama / deskripsi barang...">
+                    <input type="hidden" class="it-klas" value="${escapeHtml(it.klas || '')}">
+                </td>
+                <td><input type="text" class="form-control it-sat" style="text-align:center;" value="${escapeHtml(it.sat || 'PCE')}"></td>
+                <td><input type="number" step="0.01" min="0.01" class="form-control it-qty" style="text-align:right; font-weight:700;" value="${it.display_qty_req || it.qty_req || 1}"></td>
+                <td>
+                    <input type="text" class="form-control it-ref" style="font-size:10.5px;" value="${escapeHtml(it.ref_no_daftar || it.ref_no_bukti || it.ref_bc || '')}" placeholder="No Ref...">
+                    <input type="hidden" class="it-ref-aju" value="${escapeHtml(it.ref_nomor_aju || '')}">
+                </td>
+                <td><input type="text" class="form-control it-note" style="font-size:10.5px;" value="${escapeHtml(it.note || '')}" placeholder="Catatan..."></td>
+                <td style="text-align:center;">
+                    <button type="button" class="btn-action btn-default" style="padding:2px 6px; height:24px; color:var(--danger); border:none;" onclick="this.closest('tr').remove(); updateItemCount();"><i class="fa-solid fa-trash"></i></button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+            updateItemCount();
+        }
+
+        function addManualRow() {
+            addItemRow({
+                source_type: 'manual',
+                kode_barang: '',
+                nama_barang: '',
+                sat: 'PCE',
+                qty_req: 1,
+                klas: 'General'
+            });
+        }
+
+        function updateItemCount() {
+            const cnt = document.querySelectorAll('#fItemsTbody tr').length;
+            const badge = document.getElementById('itemCountBadge');
+            if (badge) badge.innerText = `${cnt} Item`;
+        }
+
+        async function submitRequest(status) {
+            const rows = document.querySelectorAll('#fItemsTbody tr');
+            if (rows.length === 0) {
+                Swal.fire({ icon: 'warning', title: 'Item Kosong', text: 'Harap tambahkan minimal 1 item barang yang diminta.' });
+                return;
+            }
+
+            const plantAsal = document.getElementById('fPlantAsal').value;
+            const plantTujuan = document.getElementById('fPlantTujuan').value;
+            if (plantAsal === plantTujuan) {
+                Swal.fire({ icon: 'warning', title: 'Plant Tidak Valid', text: 'Plant Asal dan Plant Tujuan tidak boleh sama untuk transfer BPPB antar fasilitas Framas.' });
+                return;
+            }
+
+            const items = [];
+            let hasEmptyKd = false;
+            rows.forEach(tr => {
+                const kd = tr.querySelector('.it-kd').value.trim();
+                const nm = tr.querySelector('.it-nm').value.trim();
+                const sat = tr.querySelector('.it-sat').value.trim();
+                const qty = parseFloat(tr.querySelector('.it-qty').value) || 0;
+                const src = tr.querySelector('.it-src').value;
+                const klas = tr.querySelector('.it-klas').value;
+                const ref = tr.querySelector('.it-ref').value;
+                const refAju = tr.querySelector('.it-ref-aju').value;
+                const note = tr.querySelector('.it-note').value;
+
+                if (!kd || !nm) hasEmptyKd = true;
+                items.push({
+                    kode_barang: kd,
+                    nama_barang: nm,
+                    sat: sat || 'PCE',
+                    qty_req: qty,
+                    source_type: src,
+                    klas: klas,
+                    ref_no_daftar: ref,
+                    ref_nomor_aju: refAju,
+                    note: note
+                });
+            });
+
+            if (hasEmptyKd) {
+                Swal.fire({ icon: 'warning', title: 'Data Belum Lengkap', text: 'Semua item barang harus memiliki Kode Barang dan Nama Barang.' });
+                return;
+            }
+
+            const payload = {
+                id: document.getElementById('fId').value,
+                plant_asal: plantAsal,
+                plant_tujuan: plantTujuan,
+                cmp_id: plantAsal,
+                req_no: document.getElementById('fReqNo').value.trim(),
+                req_date: document.getElementById('fReqDate').value,
+                need_date: document.getElementById('fNeedDate').value,
+                dept_pemohon: document.getElementById('fDeptPemohon').value,
+                dept_tujuan: document.getElementById('fDeptTujuan').value,
+                pic: document.getElementById('fPic').value.trim(),
+                wo_no: document.getElementById('fWoNo').value.trim(),
+                note: document.getElementById('fNote').value.trim(),
+                status: status,
+                items: items
+            };
+
+            try {
+                Swal.fire({ title: 'Menyimpan...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                const res = await fetch('department_request.php?action=save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const json = await res.json();
+                if (json.status !== 'OK') throw new Error(json.message);
+
+                Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message, timer: 2000, showConfirmButton: false });
+                closeModal('modalReqForm');
+                loadList();
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: 'Gagal Menyimpan', text: err.message });
+            }
+        }
+
+        // --- TRANSFER BPPB KE HOST TO HOST (BC 2.7) ---
+        function transferToH2H(id, reqNo, plantAsal, plantTujuan) {
+            if (!plantTujuan) plantTujuan = (plantAsal === 'FRM-1') ? 'FRM-2' : 'FRM-1';
+
+            const plantNames = {
+                'FRM-1': 'FRAMAS - 1 (MM2100)',
+                'FRM-2': 'FRAMAS - 2 (Kenari DS5)',
+                'FRM-3': 'FRAMAS - 3 (DS6)',
+                'PDPLB': 'PDPLB (PLB MM2100)'
+            };
+
+            Swal.fire({
+                title: 'Transfer BPPB ke Host to Host?',
+                html: `
+                    <div style="text-align:left; font-size:12px; line-height:1.6;">
+                        <p>Dokumen BPPB <strong>${escapeHtml(reqNo)}</strong> akan diproses menjadi <strong>Draft Dokumen BC 2.7</strong> (Perpindahan Antar Plant Framas):</p>
+                        <div style="background:#f5f7fa; padding:10px; border-radius:6px; border:1px solid #e1e4e8; margin-bottom:10px;">
+                            <div>🏢 <strong>Plant Asal (Pengirim):</strong> ${escapeHtml(plantNames[plantAsal] || plantAsal)}</div>
+                            <div>🎯 <strong>Plant Tujuan (Penerima):</strong> ${escapeHtml(plantNames[plantTujuan] || plantTujuan)}</div>
+                            <div>📋 <strong>Jenis Dokumen Pabean:</strong> BC 2.7 (TPB Antar Kawasan Berikat / PLB)</div>
+                        </div>
+                        <p style="color:#fa8c16; font-size:11.5px; margin:0;"><i class="fa-solid fa-circle-info"></i> Sistem akan meng-generate Nomor AJU resmi dan mengisi data entitas, barang, serta dokumen pelengkap secara otomatis ke CEISA 4.0.</p>
+                    </div>
+                `,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#1890ff',
+                cancelButtonColor: '#d9d9d9',
+                confirmButtonText: '🚀 Ya, Transfer ke BC 2.7',
+                cancelButtonText: 'Batal'
+            }).then(async (result) => {
+                if (!result.isConfirmed) return;
+
+                Swal.fire({
+                    title: 'Memproses Transfer BC 2.7...',
+                    text: 'Menyimpan header, entitas pengirim/penerima, dan rincian barang...',
+                    allowOutsideClick: false,
+                    didOpen: () => Swal.showLoading()
+                });
+
+                try {
+                    const formData = new FormData();
+                    formData.append('id', id);
+                    const res = await fetch('department_request.php?action=transfer_h2h', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const json = await res.json();
+                    if (json.status !== 'OK') throw new Error(json.message);
+
+                    Swal.fire({
+                        title: 'Berhasil Ditransfer ke H2H!',
+                        html: `
+                            <div style="font-size:12.5px; text-align:left; line-height:1.6;">
+                                <p style="color:#52c41a; font-weight:700;"><i class="fa-solid fa-circle-check"></i> Dokumen pabean BC 2.7 berhasil dibuat di Data Host to Host!</p>
+                                <div style="background:#f6ffed; border:1px solid #b7eb8f; padding:10px; border-radius:6px; margin-bottom:12px;">
+                                    <div><strong>Nomor AJU:</strong> <span style="font-family:monospace; font-weight:bold; color:#096dd9; font-size:13px;">${escapeHtml(json.nomor_aju)}</span></div>
+                                    <div><strong>Rute:</strong> ${escapeHtml(json.plant_asal)} ➔ ${escapeHtml(json.plant_tujuan)}</div>
+                                    <div><strong>Total Item:</strong> ${json.item_count} item (${Number(json.total_qty).toLocaleString('id-ID')} pcs)</div>
+                                </div>
+                                <p>Pilih tindakan selanjutnya untuk memproses dokumen:</p>
+                            </div>
+                        `,
+                        icon: 'success',
+                        showDenyButton: true,
+                        showCancelButton: true,
+                        confirmButtonText: '📝 Buka di Form Editor Dokumen',
+                        confirmButtonColor: '#1890ff',
+                        denyButtonText: '🌐 Buka di Data Host to Host',
+                        denyButtonColor: '#52c41a',
+                        cancelButtonText: 'Tutup'
+                    }).then((res2) => {
+                        loadList();
+                        if (res2.isConfirmed) {
+                            openInH2H(json.nomor_aju, json.plant_asal, 'editor');
+                        } else if (res2.isDenied) {
+                            openInH2H(json.nomor_aju, json.plant_asal, 'transfer');
+                        }
+                    });
+                } catch (err) {
+                    Swal.fire('Gagal Transfer H2H', err.message, 'error');
+                }
+            });
+        }
+
+        function openInH2H(nomorAju, cmpId, target = 'editor') {
+            if (window.parent && typeof window.parent.switchMainTab === 'function') {
+                if (target === 'editor') {
+                    window.parent.switchMainTab('editor', nomorAju);
+                } else {
+                    window.parent.switchMainTab('transfer');
+                }
+            } else {
+                if (target === 'editor') {
+                    window.open(`/editor.php?nomor_aju=${encodeURIComponent(nomorAju)}&cmp_id=${encodeURIComponent(cmpId)}`, '_blank');
+                } else {
+                    window.open(`/transfer.php?cmp_id=${encodeURIComponent(cmpId)}`, '_blank');
+                }
+            }
+        }
+
+        // --- ITEM PICKER MODAL SEARCH ---
+        function openItemPickerModal() {
+            const dept = document.getElementById('fDeptPemohon').value;
+            document.getElementById('pickerSearch').value = '';
+            runPickerSearch();
+            openModal('modalItemPicker');
+        }
+
+        function debouncePickerSearch() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => { runPickerSearch(); }, 300);
+        }
+
+        async function runPickerSearch() {
+            const tbody = document.getElementById('pickerTbody');
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Mencari barang...</td></tr>`;
+
+            const q = encodeURIComponent(document.getElementById('pickerSearch').value.trim());
+            const src = encodeURIComponent(document.getElementById('pickerSource').value);
+            const klas = encodeURIComponent(document.getElementById('pickerKlas').value);
+            const dept = encodeURIComponent(document.getElementById('fDeptPemohon').value);
+
+            try {
+                const res = await fetch(`department_request.php?action=search_goods&q=${q}&source=${src}&klas=${klas}&dept=${dept}&_t=${Date.now()}`);
+                const json = await res.json();
+                if (json.status !== 'OK') throw new Error(json.message);
+
+                if (!json.data || json.data.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--text-muted);"><i class="fa-solid fa-box-open" style="font-size:22px; opacity:0.4; display:block; margin-bottom:6px;"></i>Tidak ada barang ditemukan. Coba ubah kata kunci atau gunakan opsi Input Baru.</td></tr>`;
+                    return;
+                }
+
+                let html = '';
+                json.data.forEach(item => {
+                    const itemJson = JSON.stringify(item).replace(/"/g, '&quot;');
+                    html += `
+                        <tr>
+                            <td><span class="${item.badge_class}">${escapeHtml(item.source_label)}</span></td>
+                            <td><strong style="font-family:monospace; color:var(--primary);">${escapeHtml(item.kode_barang)}</strong></td>
+                            <td>
+                                <div>${escapeHtml(item.nama_barang)}</div>
+                                <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${escapeHtml(item.stok_info || '')}</div>
+                            </td>
+                            <td><span style="font-size:10px; background:rgba(0,0,0,0.05); padding:1px 5px; border-radius:3px;">${escapeHtml(item.klas)}</span></td>
+                            <td style="text-align:center; font-weight:700;">${escapeHtml(item.sat)}</td>
+                            <td style="font-size:10px;">
+                                <div>${escapeHtml(item.ref_bc)} ${escapeHtml(item.ref_no_daftar)}</div>
+                                <div style="color:var(--text-muted);">${escapeHtml(item.ref_supplier || item.ref_no_bukti || '')}</div>
+                            </td>
+                            <td style="text-align:center;">
+                                <button type="button" class="btn-action btn-primary" style="height:24px; padding:0 8px; font-size:10px;" onclick='selectPickerItem(${itemJson})'>
+                                    + Pilih
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                });
+                tbody.innerHTML = html;
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--danger); padding:16px;">Gagal memuat barang: ${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function selectPickerItem(item) {
+            addItemRow({
+                source_type: item.source,
+                kode_barang: item.kode_barang,
+                nama_barang: item.nama_barang,
+                sat: item.sat,
+                klas: item.klas,
+                qty_req: 1,
+                ref_bc: item.ref_bc,
+                ref_no_daftar: item.ref_no_daftar,
+                ref_no_bukti: item.ref_no_bukti,
+                ref_nomor_aju: item.ref_nomor_aju,
+                note: ''
+            });
+            Swal.mixin({ toast: true, position: 'top-end', timer: 1500, showConfirmButton: false }).fire({
+                icon: 'success',
+                title: `Item '${item.kode_barang}' ditambahkan`
+            });
+        }
+
+        // --- APPROVAL / STATUS ACTIONS ---
+        async function approveRequest(id, reqNo) {
+            const confirm = await Swal.fire({
+                title: 'Setujui BPPB?',
+                html: `Apakah Anda yakin ingin menyetujui BPPB <strong>${escapeHtml(reqNo)}</strong>?<br><small style="color:gray;">Setelah disetujui, BPPB dapat langsung ditransfer ke Host to Host menjadi dokumen pabean BC 2.7.</small>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Ya, Setujui',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#52c41a'
+            });
+            if (!confirm.isConfirmed) return;
+
+            postStatusChange(id, 'APPROVED');
+        }
+
+        async function rejectRequest(id, reqNo) {
+            const { value: reason } = await Swal.fire({
+                title: 'Tolak Permintaan?',
+                text: `Masukkan alasan penolakan permintaan ${reqNo}:`,
+                input: 'text',
+                inputPlaceholder: 'Contoh: Stok tidak mencukupi, salah departemen...',
+                showCancelButton: true,
+                confirmButtonText: 'Tolak Permintaan',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#f5222d',
+                inputValidator: (v) => { if (!v) return 'Alasan penolakan wajib diisi!'; }
+            });
+            if (!reason) return;
+
+            postStatusChange(id, 'REJECTED', reason);
+        }
+
+        async function completeRequest(id, reqNo) {
+            const confirm = await Swal.fire({
+                title: 'Selesaikan Pengeluaran?',
+                html: `Tandai permintaan <strong>${escapeHtml(reqNo)}</strong> sebagai selesai dikeluarkan (COMPLETED)?`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Ya, Selesai',
+                cancelButtonText: 'Batal'
+            });
+            if (!confirm.isConfirmed) return;
+
+            postStatusChange(id, 'COMPLETED');
+        }
+
+        async function deleteRequest(id, reqNo) {
+            const confirm = await Swal.fire({
+                title: 'Hapus Permintaan?',
+                text: `Apakah Anda yakin ingin menghapus permintaan ${reqNo}?`,
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Ya, Hapus',
+                cancelButtonText: 'Batal',
+                confirmButtonColor: '#f5222d'
+            });
+            if (!confirm.isConfirmed) return;
+
+            postStatusChange(id, 'DELETE');
+        }
+
+        async function postStatusChange(id, st, reason = '') {
+            try {
+                Swal.fire({ title: 'Memproses...', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+                const body = new URLSearchParams({ id: id, status: st, reason: reason });
+                const res = await fetch('department_request.php?action=update_status', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: body
+                });
+                const json = await res.json();
+                if (json.status !== 'OK') throw new Error(json.message);
+
+                Swal.fire({ icon: 'success', title: 'Berhasil', text: json.message, timer: 1800, showConfirmButton: false });
+                loadList();
+            } catch (err) {
+                Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
+            }
+        }
+
+        function printBppb(id) {
+            const w = window.open(`department_request.php?action=print_bppb&id=${encodeURIComponent(id)}`, '_blank', 'width=900,height=700,resizable=yes,scrollbars=yes');
+            if (w) w.focus();
+        }
+
+        // --- UTILS ---
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+    </script>
 
         function addItemRow(it = {}) {
             const tbody = document.getElementById('fItemsTbody');
