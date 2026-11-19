@@ -8823,3 +8823,23 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - **Standarisasi Konfigurasi Multi-Plant**:
      - Menjalankan migrasi data untuk memastikan seluruh record plant (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`, dan `SYSTEM`) pada database `framasbc` (MySQL 8 port 3307) memiliki `ERP_Name = 'FRAMAS'`.
      - Memperbarui skrip sinkronisasi staging `database/merge_to_framasbc.ps1` agar menyertakan kolom `app_mode`, `use_tabs`, dan mempertahankan nilai `ERP_Name = 'FRAMAS'` pada saat perintah `SYNC DB!` dijalankan.
+
+---
+
+### Diferensiasi Warna Visual Kartu Plant Aktif Multi-Lokasi Framas (19 November 2026)
+1. **Latar Belakang & Kebutuhan:**
+   - Sebelumnya, seluruh plant Framas (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`) menggunakan warna kartu plant aktif default yang sama (biru `#1890ff`), sehingga kurang kontras dalam membedakan plant operasional yang sedang aktif.
+   - Pengguna meminta agar setiap lokasi / plant memiliki identitas warna kartu yang berbeda secara visual ([`prnt.sc/HKK8bh1cpzkJ`](https://prnt.sc/HKK8bh1cpzkJ)).
+2. **Implementasi Diferensiasi Warna:**
+   - **Palet Warna Identitas Resmi Plant Framas**:
+     - 🔵 **FRM-1 (Plant 1 MM2100 TPB)**: Modern Corporate Blue — `linear-gradient(135deg, #1677ff 0%, #0958d9 100%)` (Aksen: `#1677ff`).
+     - 🟢 **FRM-2 (Plant 2 Kenari DS5 TPB)**: Emerald Kenari Green — `linear-gradient(135deg, #059669 0%, #047857 100%)` (Aksen: `#059669`).
+     - 🟣 **FRM-3 (Plant 3 Delta Silicon 6 TPB)**: Royal Violet / Purple — `linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)` (Aksen: `#7c3aed`).
+     - 🟠 **PDPLB (Pusat Logistik Berikat MM2100 PLB)**: Industrial Amber / Safety Orange — `linear-gradient(135deg, #ea580c 0%, #c2410c 100%)` (Aksen: `#ea580c`).
+     - 🔘 **SYSTEM (Superadmin / Global)**: Dark Slate / Charcoal — `linear-gradient(135deg, #334155 0%, #1e293b 100%)`.
+3. **Penyelarasan Skema & Integrasi Frontend**:
+   - Kolom `card_color` pada tabel `bc_ceisa_company` diperbesar menjadi `VARCHAR(120)` agar mendukung format CSS Linear Gradient penuh tanpa terpotong.
+   - Auto-heal `company.php` diperbarui untuk otomatis memverifikasi panjang kolom `card_color`.
+   - Skrip `database/merge_to_framasbc.ps1` dikonfigurasi untuk seeding awal masing-masing warna plant dan mengunci proteksi preservasi `d.card_color = IFNULL(s.card_color, d.card_color)`.
+   - Frontend [`index.php`](file:///d:/xampp/htdocs/inhost-web-id/index.php) diselaraskan pada sisi render awal (PHP `$framasPlantMeta`), transisi AJAX dinamis (`switchCompany`), dan modal pemilihan plant (`renderCompanyList`).
+   - Tombol chevron switcher pada kartu plant aktif disempurnakan dengan border semi-transparan dan efek hover kontras tinggi.

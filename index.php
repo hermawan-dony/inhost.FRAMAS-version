@@ -833,7 +833,8 @@ $framasPlantMeta = [
         'fullname' => 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
         'location' => 'Kawasan Industri MM 2100 Blok M 33-34',
         'role_tag' => 'Kawasan Berikat',
-        'color'    => '#1890ff',
+        'color'    => 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
+        'accent'   => '#1677ff',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
     ],
     'FRM-2' => [
@@ -844,7 +845,8 @@ $framasPlantMeta = [
         'fullname' => 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
         'location' => 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5',
         'role_tag' => 'Kawasan Berikat',
-        'color'    => '#52c41a',
+        'color'    => 'linear-gradient(135deg, #059669 0%, #047857 100%)',
+        'accent'   => '#059669',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
     ],
     'FRM-3' => [
@@ -855,7 +857,8 @@ $framasPlantMeta = [
         'fullname' => 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
         'location' => 'Jl. Ramin Blok G6A, Delta Silicon VI',
         'role_tag' => 'Kawasan Berikat',
-        'color'    => '#722ed1',
+        'color'    => 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
+        'accent'   => '#7c3aed',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
     ],
     'PDPLB' => [
@@ -866,7 +869,8 @@ $framasPlantMeta = [
         'fullname' => 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
         'location' => 'Kawasan Industri MM2100, Blok O-1-2, Gandamekar, Cikarang Barat',
         'role_tag' => 'Pusat Logistik Berikat',
-        'color'    => '#fa8c16',
+        'color'    => 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
+        'accent'   => '#ea580c',
         'docs'     => 'BC 1.6, 2.8, 3.3, 3.3.1'
     ]
 ];
@@ -874,6 +878,11 @@ $framasPlantMeta = [
 $activePlantMeta   = $framasPlantMeta[$sessionCmpId] ?? null;
 $displayPlantTitle = $activePlantMeta['title'] ?? ($sessionCmpName ?: 'FRAMAS');
 $displayPlantSub   = $activePlantMeta['sub'] ?? (!empty($sessionCmpId) ? '[' . $sessionCmpId . ']' : '');
+if (empty($sessionCardColor) || $sessionCardColor === 'default') {
+    if (!empty($activePlantMeta['color'])) {
+        $sessionCardColor = $activePlantMeta['color'];
+    }
+}
 
 // Sinkronisasi Hak Akses Dokumen Pengguna yang Sedang Login
 if (!empty($_SESSION['is_super_admin'])) {
@@ -1680,6 +1689,16 @@ if ($initialTab === 'editor') {
         body[data-theme="dark"] .sidebar-company-card.is-admin-clickable:hover .sidebar-company-chevron {
             color: #40a9ff;
             background: rgba(24, 144, 255, 0.22);
+        }
+        .sidebar-company-card[data-custom-color="true"] .sidebar-company-chevron {
+            background: var(--card-btn-bg, rgba(255, 255, 255, 0.2));
+            color: var(--card-btn-color, #ffffff);
+            border: 1px solid var(--card-btn-border, rgba(255, 255, 255, 0.35));
+        }
+        .sidebar-company-card[data-custom-color="true"].is-admin-clickable:hover .sidebar-company-chevron {
+            background: rgba(255, 255, 255, 0.35);
+            color: #ffffff;
+            transform: translateY(1px);
         }
         .sidebar-company-action,
         .sidebar-company-btn {
@@ -5688,7 +5707,8 @@ if ($initialTab === 'editor') {
                 legalName: 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
                 location: 'Kawasan Industri MM 2100 Blok M 33-34',
                 facility: 'Kawasan Berikat (TPB)',
-                accent: '#1890ff',
+                accent: '#1677ff',
+                cardColor: 'linear-gradient(135deg, #1677ff 0%, #0958d9 100%)',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
             },
             'FRM-2': {
@@ -5700,7 +5720,8 @@ if ($initialTab === 'editor') {
                 legalName: 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
                 location: 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5',
                 facility: 'Kawasan Berikat (TPB)',
-                accent: '#52c41a',
+                accent: '#059669',
+                cardColor: 'linear-gradient(135deg, #059669 0%, #047857 100%)',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
             },
             'FRM-3': {
@@ -5712,7 +5733,8 @@ if ($initialTab === 'editor') {
                 legalName: 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
                 location: 'Jl. Ramin Blok G6A, Delta Silicon VI',
                 facility: 'Kawasan Berikat (TPB)',
-                accent: '#722ed1',
+                accent: '#7c3aed',
+                cardColor: 'linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
             },
             'PDPLB': {
@@ -5724,7 +5746,8 @@ if ($initialTab === 'editor') {
                 legalName: 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
                 location: 'Kawasan Industri MM2100, Blok O-1-2, Kel. Gandamekar, Kec. Cikarang Barat, Kab. Bekasi',
                 facility: 'Pusat Logistik Berikat (PLB)',
-                accent: '#fa8c16',
+                accent: '#ea580c',
+                cardColor: 'linear-gradient(135deg, #ea580c 0%, #c2410c 100%)',
                 docs: 'BC 1.6, 2.8, 3.3, 3.3.1'
             }
         };
@@ -5888,8 +5911,12 @@ if ($initialTab === 'editor') {
                 if (json.status === 'OK') {
                     currentCmpId = json.cmp_id;
                     applyRoleMenuVisibility(json.company_roles, json.erp_name, json.is_inv);
-                    if (json.card_color !== undefined) {
-                        applySidebarCompanyCardColor(json.card_color);
+                    const pConfColor = FRAMAS_PLANTS_CONFIG[json.cmp_id];
+                    const activeCardColor = (json.card_color && json.card_color !== 'default') 
+                        ? json.card_color 
+                        : (pConfColor?.cardColor || pConfColor?.accent || '');
+                    if (activeCardColor) {
+                        applySidebarCompanyCardColor(activeCardColor);
                     }
 
                     const pConf = FRAMAS_PLANTS_CONFIG[json.cmp_id] || {

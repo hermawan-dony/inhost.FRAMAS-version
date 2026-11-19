@@ -490,6 +490,14 @@ if ($action === 'save') {
         @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN use_tabs TINYINT(1) NOT NULL DEFAULT 1 AFTER app_mode");
     }
 
+    // Pastikan kolom card_color cukup panjang untuk mendukung CSS linear-gradient
+    $chkColCardColor = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'card_color'");
+    if ($chkColCardColor && $rowCardColor = $chkColCardColor->fetch_assoc()) {
+        if (stripos($rowCardColor['Type'], 'varchar(120)') === false && stripos($rowCardColor['Type'], 'text') === false) {
+            @$koneksi->query("ALTER TABLE bc_ceisa_company MODIFY COLUMN card_color VARCHAR(120) DEFAULT '#1890ff'");
+        }
+    }
+
     // Ambil input roles perusahaan (array dari form checkbox atau string)
     $rolesInput = $_POST['company_roles'] ?? [];
     if (!is_array($rolesInput)) {

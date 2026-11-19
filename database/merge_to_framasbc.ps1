@@ -183,7 +183,7 @@ CREATE TABLE bc_ceisa_company (
   cmp_id VARCHAR(30) NOT NULL,
   cmp_name VARCHAR(150) DEFAULT NULL,
   logo VARCHAR(255) DEFAULT NULL,
-  card_color VARCHAR(20) DEFAULT '#1890ff',
+  card_color VARCHAR(120) DEFAULT '#1890ff',
   subdomain VARCHAR(50) DEFAULT NULL,
   app_password VARCHAR(100) DEFAULT NULL,
   npwp VARCHAR(30) DEFAULT NULL,
@@ -240,11 +240,18 @@ foreach ($t in $Tenants) {
     $name = $t.Name.Replace("'", "''")
     $alamat = $t.Alamat.Replace("'", "''")
     $allowed = if ($t.Roles -eq "plb") { "16,28,33,331" } else { "23,25,261,262,27,40,41" }
+    $color = switch ($t.CmpId) {
+        "FRM-1" { "linear-gradient(135deg, #1677ff 0%, #0958d9 100%)" }
+        "FRM-2" { "linear-gradient(135deg, #059669 0%, #047857 100%)" }
+        "FRM-3" { "linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)" }
+        "PDPLB" { "linear-gradient(135deg, #ea580c 0%, #c2410c 100%)" }
+        default { "linear-gradient(135deg, #1677ff 0%, #0958d9 100%)" }
+    }
     Invoke-Mysql5 @"
 INSERT INTO framas.bc_ceisa_company
-  (cmp_id, cmp_name, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, allowed_docs, ERP_Name, username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, token_ceisa, is_active, IS_INV, created_at, updated_at)
+  (cmp_id, cmp_name, card_color, subdomain, app_password, npwp, alamat, kode_kantor, company_roles, allowed_docs, ERP_Name, username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, token_ceisa, is_active, IS_INV, created_at, updated_at)
 VALUES
-  ('$($t.CmpId)', '$name', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', '$allowed', 'FRAMAS', 'maikelwawoh', 'Framas2007', 'MNTDETJSOBXDG4LMMZJES2CDK5CFGR2E', '1b6fdb63-0b91-4c3e-bd42-27b3cd9fe604', '1322604451', 1, 1, NOW(), NOW());
+  ('$($t.CmpId)', '$name', '$color', '$($t.Subdomain)', '1', '$($t.Npwp)', '$alamat', '050900', '$($t.Roles)', '$allowed', 'FRAMAS', 'maikelwawoh', 'Framas2007', 'MNTDETJSOBXDG4LMMZJES2CDK5CFGR2E', '1b6fdb63-0b91-4c3e-bd42-27b3cd9fe604', '1322604451', 1, 1, NOW(), NOW());
 "@ | Out-Null
     Log "Seed company $($t.CmpId) <= $($t.Src)"
 }
@@ -254,6 +261,7 @@ if (Table-Exists5 "framasbc" "bc_ceisa_company") {
 UPDATE framas.bc_ceisa_company d
 JOIN framasbc.bc_ceisa_company s ON d.cmp_id = s.cmp_id
 SET 
+  d.card_color     = IFNULL(s.card_color, d.card_color),
   d.ERP_Name       = IFNULL(s.ERP_Name, 'FRAMAS'),
   d.username_ceisa = IFNULL(s.username_ceisa, d.username_ceisa),
   d.password_ceisa = IFNULL(s.password_ceisa, d.password_ceisa),
