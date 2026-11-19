@@ -121,38 +121,38 @@ $framasPlantMeta = [
     'FRM-1' => [
         'code'     => 'FRM-1',
         'badge'    => 'PLANT 1',
-        'title'    => 'FRAMAS - 1',
-        'sub'      => 'Plant 1 MM2100',
-        'fullname' => 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
-        'location' => 'Kawasan Industri MM 2100 Blok M 33-34, Cikarang Barat, Bekasi',
-        'color'    => '#1890ff'
+        'title'    => 'framas 1',
+        'sub'      => 'framas 1',
+        'fullname' => 'framas 1',
+        'location' => '',
+        'color'    => '#1677ff'
     ],
     'FRM-2' => [
         'code'     => 'FRM-2',
         'badge'    => 'PLANT 2',
-        'title'    => 'FRAMAS - 2',
-        'sub'      => 'Plant 2 Kenari DS5',
-        'fullname' => 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
-        'location' => 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5, Cikarang',
-        'color'    => '#52c41a'
+        'title'    => 'framas 2',
+        'sub'      => 'framas 2',
+        'fullname' => 'framas 2',
+        'location' => '',
+        'color'    => '#059669'
     ],
     'FRM-3' => [
         'code'     => 'FRM-3',
         'badge'    => 'PLANT 3',
-        'title'    => 'FRAMAS - 3',
-        'sub'      => 'Plant 3 Delta Silicon 6',
-        'fullname' => 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
-        'location' => 'Jl. Ramin Blok G6A, Delta Silicon VI, Cikarang Pusat',
-        'color'    => '#722ed1'
+        'title'    => 'framas 3',
+        'sub'      => 'framas 3',
+        'fullname' => 'framas 3',
+        'location' => '',
+        'color'    => '#7c3aed'
     ],
     'PDPLB' => [
         'code'     => 'PDPLB',
         'badge'    => 'PLB',
         'title'    => 'PDPLB',
-        'sub'      => 'Pusat Logistik Berikat',
-        'fullname' => 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
-        'location' => 'Kawasan Industri MM2100, Blok O-1-2, Gandamekar, Cikarang Barat',
-        'color'    => '#fa8c16'
+        'sub'      => 'PDPLB',
+        'fullname' => 'PDPLB',
+        'location' => '',
+        'color'    => '#ea580c'
     ]
 ];
 
@@ -1533,19 +1533,19 @@ if ($action === 'print_bppb') {
         <div>
             <select id="filterPlantAsal" class="form-select-sm" onchange="loadList()">
                 <option value="ALL">Semua Plant Asal (Pengirim)</option>
-                <option value="FRM-1">Asal: FRAMAS 1 (MM2100)</option>
-                <option value="FRM-2">Asal: FRAMAS 2 (Kenari DS5)</option>
-                <option value="FRM-3">Asal: FRAMAS 3 (DS6)</option>
-                <option value="PDPLB">Asal: PDPLB (PLB MM2100)</option>
+                <option value="FRM-1">Asal: framas 1</option>
+                <option value="FRM-2">Asal: framas 2</option>
+                <option value="FRM-3">Asal: framas 3</option>
+                <option value="PDPLB">Asal: PDPLB</option>
             </select>
         </div>
         <div>
             <select id="filterPlantTujuan" class="form-select-sm" onchange="loadList()">
                 <option value="ALL">Semua Plant Tujuan (Penerima)</option>
-                <option value="FRM-1">Tujuan: FRAMAS 1 (MM2100)</option>
-                <option value="FRM-2">Tujuan: FRAMAS 2 (Kenari DS5)</option>
-                <option value="FRM-3">Tujuan: FRAMAS 3 (DS6)</option>
-                <option value="PDPLB">Tujuan: PDPLB (PLB MM2100)</option>
+                <option value="FRM-1">Tujuan: framas 1</option>
+                <option value="FRM-2">Tujuan: framas 2</option>
+                <option value="FRM-3">Tujuan: framas 3</option>
+                <option value="PDPLB">Tujuan: PDPLB</option>
             </select>
         </div>
         <div>
@@ -1619,21 +1619,21 @@ if ($action === 'print_bppb') {
 
                 <div class="form-grid-3">
                     <div class="form-group">
-                        <label class="form-label">Plant Pengirim (Asal) <span style="color:red;">*</span></label>
-                        <select id="fPlantAsal" class="form-control" onchange="onPlantAsalChange()">
-                            <option value="FRM-1">FRAMAS - 1 (Plant 1 MM2100)</option>
-                            <option value="FRM-2">FRAMAS - 2 (Kenari DS5)</option>
-                            <option value="FRM-3">FRAMAS - 3 (Delta Silicon VI)</option>
-                            <option value="PDPLB">PDPLB (PLB MM2100)</option>
+                        <label class="form-label">Plant Pengirim (Asal) <span style="color:red;">*</span> <i class="fa-solid fa-lock" style="font-size:11px; color:var(--text-muted); margin-left:4px;" title="Terkunci sesuai plant aktif"></i></label>
+                        <select id="fPlantAsal" class="form-control" disabled style="background-color: var(--bg-hover, #f1f5f9); cursor: not-allowed; font-weight:600; opacity:0.95;">
+                            <option value="FRM-1">framas 1</option>
+                            <option value="FRM-2">framas 2</option>
+                            <option value="FRM-3">framas 3</option>
+                            <option value="PDPLB">PDPLB</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Plant Penerima (Tujuan) <span style="color:red;">*</span></label>
                         <select id="fPlantTujuan" class="form-control" onchange="updateRoutePreview()">
-                            <option value="FRM-2">FRAMAS - 2 (Kenari DS5)</option>
-                            <option value="FRM-1">FRAMAS - 1 (Plant 1 MM2100)</option>
-                            <option value="FRM-3">FRAMAS - 3 (Delta Silicon VI)</option>
-                            <option value="PDPLB">PDPLB (PLB MM2100)</option>
+                            <option value="FRM-1">framas 1</option>
+                            <option value="FRM-2">framas 2</option>
+                            <option value="FRM-3">framas 3</option>
+                            <option value="PDPLB">PDPLB</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1644,9 +1644,9 @@ if ($action === 'print_bppb') {
 
                 <div class="route-banner" id="routeBanner">
                     <div class="route-badge-box">
-                        <span class="route-plant-badge origin" id="badgeOriginPlant">🏢 FRAMAS - 1</span>
+                        <span class="route-plant-badge origin" id="badgeOriginPlant"><i class="fa-solid fa-industry"></i> Asal: <strong>framas 1</strong></span>
                         <i class="fa-solid fa-arrow-right-long route-arrow"></i>
-                        <span class="route-plant-badge destination" id="badgeDestPlant">🎯 FRAMAS - 2</span>
+                        <span class="route-plant-badge destination" id="badgeDestPlant"><i class="fa-solid fa-location-dot"></i> Tujuan: <strong>framas 2</strong></span>
                     </div>
                     <div class="route-meta">
                         <strong>Perpindahan Barang Antar Fasilitas Framas Indonesia</strong>
@@ -2009,10 +2009,10 @@ if ($action === 'print_bppb') {
             const destBadge = document.getElementById('badgeDestPlant');
 
             const plantNames = {
-                'FRM-1': 'FRAMAS - 1 (MM2100)',
-                'FRM-2': 'FRAMAS - 2 (Kenari DS5)',
-                'FRM-3': 'FRAMAS - 3 (DS6)',
-                'PDPLB': 'PDPLB (PLB MM2100)'
+                'FRM-1': 'framas 1',
+                'FRM-2': 'framas 2',
+                'FRM-3': 'framas 3',
+                'PDPLB': 'PDPLB'
             };
 
             if (originBadge) originBadge.innerHTML = `<i class="fa-solid fa-industry"></i> Asal: <strong>${plantNames[pAsal] || pAsal}</strong>`;
@@ -2039,11 +2039,28 @@ if ($action === 'print_bppb') {
             }
         }
 
+        function syncPlantTujuanOptions() {
+            const pAsal = document.getElementById('fPlantAsal') ? document.getElementById('fPlantAsal').value : '';
+            const pTujuan = document.getElementById('fPlantTujuan');
+            if (!pTujuan || !pAsal) return;
+            Array.from(pTujuan.options).forEach(opt => {
+                if (opt.value === pAsal) {
+                    opt.disabled = true;
+                } else {
+                    opt.disabled = false;
+                }
+            });
+            if (pTujuan.value === pAsal) {
+                const firstAvail = Array.from(pTujuan.options).find(o => !o.disabled);
+                if (firstAvail) pTujuan.value = firstAvail.value;
+            }
+        }
+
         function openCreateModal() {
             const currentCmp = document.getElementById('fCmpId').value || 'FRM-1';
             document.getElementById('fId').value = '';
             document.getElementById('fPlantAsal').value = currentCmp;
-            document.getElementById('fPlantTujuan').value = (currentCmp === 'FRM-1') ? 'FRM-2' : 'FRM-1';
+            syncPlantTujuanOptions();
             document.getElementById('fReqNo').value = '';
             document.getElementById('fReqDate').value = new Date().toISOString().substring(0, 10);
             document.getElementById('fNeedDate').value = new Date().toISOString().substring(0, 10);
@@ -2068,6 +2085,7 @@ if ($action === 'print_bppb') {
                 const h = json.header;
                 document.getElementById('fId').value = h.id;
                 document.getElementById('fPlantAsal').value = h.cmp_id || 'FRM-1';
+                syncPlantTujuanOptions();
                 document.getElementById('fPlantTujuan').value = h.plant_tujuan || ((h.cmp_id === 'FRM-1') ? 'FRM-2' : 'FRM-1');
                 document.getElementById('fReqNo').value = h.display_req_no;
                 document.getElementById('fReqDate').value = h.display_req_date;
@@ -2229,10 +2247,10 @@ if ($action === 'print_bppb') {
             if (!plantTujuan) plantTujuan = (plantAsal === 'FRM-1') ? 'FRM-2' : 'FRM-1';
 
             const plantNames = {
-                'FRM-1': 'FRAMAS - 1 (MM2100)',
-                'FRM-2': 'FRAMAS - 2 (Kenari DS5)',
-                'FRM-3': 'FRAMAS - 3 (DS6)',
-                'PDPLB': 'PDPLB (PLB MM2100)'
+                'FRM-1': 'framas 1',
+                'FRM-2': 'framas 2',
+                'FRM-3': 'framas 3',
+                'PDPLB': 'PDPLB'
             };
 
             Swal.fire({

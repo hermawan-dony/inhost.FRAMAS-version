@@ -8843,3 +8843,20 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - Skrip `database/merge_to_framasbc.ps1` dikonfigurasi untuk seeding awal masing-masing warna plant dan mengunci proteksi preservasi `d.card_color = IFNULL(s.card_color, d.card_color)`.
    - Frontend [`index.php`](file:///d:/xampp/htdocs/inhost-web-id/index.php) diselaraskan pada sisi render awal (PHP `$framasPlantMeta`), transisi AJAX dinamis (`switchCompany`), dan modal pemilihan plant (`renderCompanyList`).
    - Tombol chevron switcher pada kartu plant aktif disempurnakan dengan border semi-transparan dan efek hover kontras tinggi.
+
+---
+
+### Penguncian Plant Pengirim (Asal) & Penyederhanaan Label Plant pada Department Request (19 November 2026)
+1. **Latar Belakang & Kebutuhan:**
+   - Pada modal formulir BPPB (`department_request.php`), dropdown `Plant Pengirim (Asal)` sebelumnya terbuka dan dapat diubah manual oleh pengguna.
+   - Pengguna meminta agar `Plant Pengirim (Asal)` di-**LOCK** (terkunci) dan otomatis diselaraskan dengan plant aktif yang sedang dipilih di sidebar.
+   - Label penamaan pada opsi pilihan plant disederhanakan murni menjadi: `framas 1`, `framas 2`, `framas 3`, `PDPLB` (tanpa keterangan alamat/detail panjang).
+2. **Implementasi & Penyesuaian:**
+   - **Lock Dropdown Plant Asal**: Dropdown `fPlantAsal` dipasangi atribut `disabled` dan ikon gembok (`fa-lock`), dengan style background abu-abu terang dan kursor `not-allowed`.
+   - **Sinkronisasi Otomatis**: Saat modal formulir BPPB dibuka (`openCreateModal`), nilai `fPlantAsal` otomatis diisi dengan `currentCmpId` aktif (`fCmpId`).
+   - **Pencegahan Rute Ganda**: Fungsi `syncPlantTujuanOptions()` otomatis mendisable opsi plant tujuan yang sama dengan plant asal.
+   - **Penyederhanaan Label**: Seluruh dropdown (`fPlantAsal`, `fPlantTujuan`, filter asal & tujuan), rute banner, modal konfirmasi transfer H2H BC 2.7, dan metadata cetak kini menampilkan nama bersih:
+     - `framas 1`
+     - `framas 2`
+     - `framas 3`
+     - `PDPLB`
