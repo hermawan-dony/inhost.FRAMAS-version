@@ -1001,9 +1001,9 @@ if (!function_exists('isMenuAllowed')) {
             return false;
         }
 
-        // Role PRODUKSI: mutasi produksi, it inventory, department request
+        // Role PRODUKSI: mutasi produksi, it inventory, department request, winline compare
         if ($role === 'produksi') {
-            return in_array($menuKey, ['inventory_modul', 'inv_stock_transfer', 'it_inventory', 'department_request']);
+            return in_array($menuKey, ['inventory_modul', 'inv_stock_transfer', 'it_inventory', 'department_request', 'winline_idn', 'winline_compare_inv']);
         }
 
         // Role WAREHOUSE: menu warehouse & modul inventory, bisa akses dashboard ceisa 4.0
@@ -1024,7 +1024,9 @@ if (!function_exists('isMenuAllowed')) {
                 'inv_stok_awal',
                 'inv_adjust_spp',
                 'it_inventory',
-                'department_request'
+                'department_request',
+                'winline_idn',
+                'winline_compare_inv'
             ]);
         }
 
@@ -1100,6 +1102,8 @@ $breadcrumbTitlesPhp = [
     'winline_dn_transfer'    => 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
     'winline_purchase_order' => 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
     'department_request'     => 'Department Request — Permintaan Pengeluaran Barang',
+    'winline_idn'            => 'Winline ERP — IDN (Incoming Delivery Note)',
+    'winline_compare_inv'    => 'Winline Compare — IDN vs IT Inventory / CEISA',
     'tools'           => 'INHOST TOOLS — Customs & Trade Utilities',
     'ticket'          => 'Pusat Tiket & Bantuan',
     'inv_qr_label'    => 'Warehouse - Cetak Label QR Dokumen BC',
@@ -1234,6 +1238,10 @@ if ($initialTab === 'editor') {
     $initSrc = "/winline_erp.php?type=purchase_order&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'department_request') {
     $initSrc = "/department_request.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'winline_idn') {
+    $initSrc = "/winline_compare.php?tab=idn&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
+} elseif ($initialTab === 'winline_compare_inv') {
+    $initSrc = "/winline_compare.php?tab=compare&cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'tools') {
     $initSrc = "/tools/index.php?cmp_id=" . urlencode($sessionCmpId) . "&embedded=1{$adminParam}&_t=" . time();
 } elseif ($initialTab === 'ticket' || $initialTab === 'system_tickets') {
@@ -3918,6 +3926,47 @@ if ($initialTab === 'editor') {
                         </a>
                     </div>
                     <?php endif; ?>
+
+                    <!-- Submenu: Winline Compare -->
+                    <?php 
+                    $isWinlineCompareAllowed = isMenuAllowed('winline_idn') || isMenuAllowed('winline_compare_inv');
+                    $isWinlineCompareActive = in_array($initialTab, ['winline_idn', 'winline_compare_inv']);
+                    ?>
+                    <?php if ($isWinlineCompareAllowed): ?>
+                    <div class="kt-menu__item kt-menu__item--submenu <?= $isWinlineCompareActive ? 'kt-menu__item--open' : '' ?>" id="nav-item-winline_compare_parent" style="display: <?= $hasStandardCustomsDocs ? '' : 'none' ?>;">
+                        <a class="kt-menu__link" onclick="toggleSubmenu('nav-item-winline_compare_parent')" title="Winline Compare (Rekonsiliasi Winline vs IT Inventory/Ceisa)">
+                            <span class="kt-menu__link-icon">
+                                <span class="icon-colored">⚖️</span>
+                                <span class="icon-monochrome"><svg viewBox="64 64 896 896" width="16" height="16" fill="currentColor"><path d="M848 356H548V140c0-6.6-5.4-12-12-12h-40c-6.6 0-12 5.4-12 12v216H176c-4.4 0-8 3.6-8 8v60c0 4.4 3.6 8 8 8h672c4.4 0 8-3.6 8-8v-60c0-4.4-3.6-8-8-8zM240 760c0 22.1 17.9 40 40 40h72c22.1 0 40-17.9 40-40V512H240v248zm432-248v248c0 22.1 17.9 40 40 40h72c22.1 0 40-17.9 40-40V512H672z"/></svg></span>
+                            </span>
+                            <span class="kt-menu__link-text" style="font-weight: 600;">Winline Compare</span>
+                            <span class="kt-menu__arrow">▶</span>
+                        </a>
+                        <div class="kt-menu__sub" id="winline_compare_submenu">
+                            <?php if (isMenuAllowed('winline_idn')): ?>
+                            <div class="kt-menu__item <?= ($initialTab === 'winline_idn') ? 'active' : '' ?>" id="nav-item-winline_idn" onclick="switchMainTab('winline_idn')">
+                                <a class="kt-menu__link" title="IDN (Incoming Delivery Note)">
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">📥</span>
+                                    </span>
+                                    <span class="kt-menu__link-text">IDN (Incoming Delivery Note)</span>
+                                </a>
+                            </div>
+                            <?php endif; ?>
+
+                            <?php if (isMenuAllowed('winline_compare_inv')): ?>
+                            <div class="kt-menu__item <?= ($initialTab === 'winline_compare_inv') ? 'active' : '' ?>" id="nav-item-winline_compare_inv" onclick="switchMainTab('winline_compare_inv')">
+                                <a class="kt-menu__link" title="IDN vs IT Inventory / CEISA">
+                                    <span class="kt-menu__link-icon">
+                                        <span class="icon-colored">🔄</span>
+                                    </span>
+                                    <span class="kt-menu__link-text">IDN vs IT Inventory</span>
+                                </a>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Group 1B: MANIFES ONLINE (BC 1.1) -->
@@ -4900,6 +4949,8 @@ if ($initialTab === 'editor') {
             'winline_dn_transfer': 'Winline ERP — DN Transfer (BC 2.7 Antar Framas)',
             'winline_purchase_order': 'Winline ERP — Purchase Order (BC 2.3, BC 4.0, BC 1.6)',
             'department_request': 'Department Request — Permintaan Pengeluaran Barang',
+            'winline_idn': 'Winline ERP — IDN (Incoming Delivery Note)',
+            'winline_compare_inv': 'Winline Compare — IDN vs IT Inventory',
             'tracking': 'Tracking Respon Pabean',
             'it_inventory_home': 'Bea Cukai - Home Dashboard',
             'it_inventory_1a': 'IT Inventory - 1A Pemasukan Barang',
@@ -4953,6 +5004,8 @@ if ($initialTab === 'editor') {
             if (tabId === 'winline_dn_transfer') return `/winline_erp.php?type=dn_transfer&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'winline_purchase_order') return `/winline_erp.php?type=purchase_order&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'department_request') return `/department_request.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'winline_idn') return `/winline_compare.php?tab=idn&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
+            if (tabId === 'winline_compare_inv') return `/winline_compare.php?tab=compare&cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'tools') return `/tools/index.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'ticket' || tabId === 'system_tickets') return `/ticket.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
             if (tabId === 'inv_qr_label') return `/erp/inv_qr_label.php?cmp_id=${encodeURIComponent(cmpId)}&embedded=1${adminParam}${themeParam}&_t=${Date.now()}`;
@@ -5066,6 +5119,12 @@ if ($initialTab === 'editor') {
             const adminInvParent = document.getElementById('nav-item-admin_inv_parent');
             if (adminInvParent && (tabId === 'inv_unposting_appv' || tabId === 'inv_stok_awal' || tabId === 'inv_adjust_spp')) {
                 adminInvParent.classList.add('kt-menu__item--open');
+            }
+
+            // Pastikan sub modul Winline Compare terbuka jika tab Winline Compare aktif
+            const winlineCompareParent = document.getElementById('nav-item-winline_compare_parent');
+            if (winlineCompareParent && (tabId === 'winline_idn' || tabId === 'winline_compare_inv')) {
+                winlineCompareParent.classList.add('kt-menu__item--open');
             }
 
             const bcEl = document.getElementById('topbarBreadcrumb');

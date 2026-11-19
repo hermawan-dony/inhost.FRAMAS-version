@@ -8744,6 +8744,60 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
 4. **Pembaruan Navigasi Sidebar `index.php`**:
    - Menambahkan pengecekan role `plb` pada fungsi JavaScript `applyRoleMenuVisibility` sehingga grup menu `WINLINE ERP` dan `DOKUMEN PABEAN` tetap tampil penuh saat pengguna berpindah ke plant `PDPLB`.
 
+---
+
+## [2026-11-19] Modul Winline Compare: IDN (Incoming Delivery Note) & Rekonsiliasi IDN vs IT Inventory / CEISA
+
+### A. Latar Belakang & Kebutuhan Fitur
+- Pengguna meminta penambahan sub-grup menu baru di sidebar navigasi di bawah grup **WINLINE ERP**:
+  - **`Winline Compare`**:
+    1. **`IDN (Incoming Delivery Note)`**: Mengambil data penerimaan barang masuk supplier langsung dari Microsoft SQL Server Winline ERP (`192.168.170.254`, Database `FRAMASDB`).
+    2. **`IDN vs IT Inventory`**: Rekonsiliasi ringkasan harian dan perbandingan dua sisi antara data penerimaan fisik IDN Winline dengan Dokumen Pemasukan Pabean (`BC 4.0`, `BC 2.3`, `BC 1.6`, `BC 2.6.2`, `BC 2.7 IN`).
+
+### B. Implementasi Fitur & Arsitektur Teknis
+1. **Navigasi Sidebar & Hak Akses (`index.php`)**:
+   - Dibuat submenu bertingkat (*collapsible accordion*) `Winline Compare` (`#nav-item-winline_compare_parent`) dengan icon `⚖️`.
+   - Terdiri dari 2 sub-menu:
+     - `nav-item-winline_idn` -> `IDN (Incoming Delivery Note)` (tab `winline_idn`).
+     - `nav-item-winline_compare_inv` -> `IDN vs IT Inventory` (tab `winline_compare_inv`).
+   - Otomatis membuka submenu (`kt-menu__item--open`) saat pengguna mengklik salah satu menu atau melakukan deep-link URL.
+   - Hak akses dibuka untuk role Administrator, Super Administrator (`dp`), Exim, Produksi, dan Warehouse.
+2. **Modul `winline_compare.php`**:
+   - Mendukung dua tab navigasi internal (`tab=idn` dan `tab=compare`) dengan sinkronisasi tema (Light / Dark mode).
+   - **Koneksi Database Cerdas**:
+     - Memanfaatkan helper terpusat `getWinlineDb()` ke SQL Server `192.168.170.254` (`FRAMASDB`).
+     - Safe error handling: Jika server Winline offline/timeout, aplikasi menampilkan banner informasi tanpa crash.
+3. **Tab 1: IDN (Incoming Delivery Note)**:
+   - Menjalankan kueri SQL Server Winline:
+     - Tabel: `cwldata..t025`, `cwldata..t026`, `cwldata..t002`, `cwldata..t023`.
+     - Filter: `LEFT(t025.c045, 3) = 'IDN'`, `t026.c003 <> 'TEXT'`, `t026.c055 <> 13`, `t026.c005 > 0`, range tanggal `t025.c029`.
+   - Default rentang tanggal: **HARI INI** (`date('Y-m-d')`).
+   - Quick date preset pills: *Hari Ini*, *Kemarin*, *7 Hari*, *Bulan Ini*, *Bulan Lalu*.
+   - Filter pencarian instan (No. IDN, No. PO, Nama Supplier, Kode Barang, Nama Barang).
+   - Kartu KPI: Total Dokumen IDN, Total PO, Total Baris Item, Total Qty Diterima, Total Supplier.
+   - Fitur Export data ke format Microsoft Excel (`.xls`).
+4. **Tab 2: IDN vs IT Inventory / CEISA (Winline Compare)**:
+   - **Pilihan Sumber Data Pabean (Toggle Switcher)**:
+     - 🔘 **Tabel BC_1ab2 (IT Inventory Pemasukan)** [Default]
+     - 🔘 **Tabel bc_ceisa_data (Hasil Sinkronisasi CEISA 4.0)**
+   - **Filter Fleksibel**:
+     - Multiselect Dokumen Pabean Inbound: `BC 4.0`, `BC 2.3`, `BC 1.6`, `BC 2.6.2`, `BC 2.7 IN`.
+     - Filter Plant Framas: `ALL`, `FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`.
+     - Filter Status: *Semua*, *Hanya Selisih (Varian)*, *Hanya Match (Sesuai)*, *Hanya di Winline*, *Hanya di Pabean*.
+   - **Tabel Rekonsiliasi Harian (Daily Summary Table)**:
+     - Membandingkan per tanggal: Winline (Dokumen, Item, Qty) vs Bea Cukai (Dokumen, Item, Qty).
+     - Menghitung deviasi secara otomatis: Selisih Dokumen (`Δ Dok`) dan Selisih Qty (`Δ Qty`).
+     - Badge status otomatis:
+       - 🟢 **MATCH** (Jika Qty seimbang & dokumen sesuai).
+       - 🔴 **SELISIH** (Jika terdapat deviasi Qty atau Dokumen).
+       - 🔵 **HANYA WINLINE** (Ada di Winline tapi belum ada di Pabean).
+       - 🟠 **HANYA PABEAN** (Ada di Pabean tapi belum masuk IDN Winline).
+   - **Modal Drill-down Perbandingan Dua Sisi (Side-by-Side Detail)**:
+     - Klik tombol "🔍 Rincian" pada baris tanggal untuk melihat perbandingan dua kolom:
+       - **Sisi Kiri**: Rincian seluruh item IDN Winline (No. IDN, No. PO, Supplier, Kode Barang, Qty).
+       - **Sisi Kanan**: Rincian seluruh item Pemasukan Pabean (No. Daftar/Aju, No. Bukti/PO/SJ, Pemasok, Kode Barang, Qty).
+   - Fitur Export Rekap Rekonsiliasi ke format Excel (`.xls`).
+
 
 
 
