@@ -463,17 +463,17 @@ try {
             $asalDataVal   = (string)($row['asalData'] ?? '');
             $statusPkbVal  = (string)($row['statusPkb'] ?? '');
 
-            // Resolusi plant / cmp_id yang presisi (termasuk multi-plant Framas)
-            if (!empty($cmpId) && $cmpId !== 'ALL' && $cmpId !== '*') {
-                $targetCmpId = $cmpId;
-            } elseif (strpos($nomorAju, 'FRM01') !== false) {
+            // Resolusi plant / cmp_id yang presisi (termasuk multi-plant Framas 1 Entitas di CEISA 4.0)
+            if (strpos($nomorAju, 'FRM01') !== false || strpos($nomorAju, 'FRM1') !== false) {
                 $targetCmpId = 'FRM-1';
-            } elseif (strpos($nomorAju, 'FRM02') !== false) {
+            } elseif (strpos($nomorAju, 'FRM02') !== false || strpos($nomorAju, 'FRM2') !== false) {
                 $targetCmpId = 'FRM-2';
-            } elseif (strpos($nomorAju, 'FRM03') !== false) {
+            } elseif (strpos($nomorAju, 'FRM03') !== false || strpos($nomorAju, 'FRM3') !== false) {
                 $targetCmpId = 'FRM-3';
-            } elseif (strpos($nomorAju, 'PDPLB') !== false) {
+            } elseif (strpos($nomorAju, 'PDPLB') !== false || strpos($nomorAju, 'PLB') !== false || in_array($kdDokVal, ['16','28','33','331'])) {
                 $targetCmpId = 'PDPLB';
+            } elseif (!empty($cmpId) && $cmpId !== 'ALL' && $cmpId !== '*') {
+                $targetCmpId = $cmpId;
             } else {
                 $targetCmpId = !empty($cmpId) ? $cmpId : (!empty($core15) ? $core15 : (preg_replace('/[^0-9]/', '', $idPrshVal) ?: ''));
             }

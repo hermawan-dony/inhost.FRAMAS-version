@@ -521,10 +521,32 @@ try {
 } catch {}
 Log "Phase3: Collation standardization complete."
 
+# ---------- Phase 4: Harmonize multi-plant cmp_id on bc_ceisa_data ----------
+Log "Phase4: Harmonize multi-plant cmp_id on bc_ceisa_data (Framas 1-Entitas CEISA)"
+Invoke-Mysql8 @"
+UPDATE framasbc.bc_ceisa_data SET cmp_id = 'FRM-1' WHERE nomorAju LIKE '%FRM01%' OR nomorAju LIKE '%FRM1%';
+UPDATE framasbc.bc_ceisa_data SET cmp_id = 'FRM-2' WHERE nomorAju LIKE '%FRM02%' OR nomorAju LIKE '%FRM2%';
+UPDATE framasbc.bc_ceisa_data SET cmp_id = 'FRM-3' WHERE nomorAju LIKE '%FRM03%' OR nomorAju LIKE '%FRM3%';
+UPDATE framasbc.bc_ceisa_data SET cmp_id = 'PDPLB' WHERE nomorAju LIKE '%PDPLB%' OR nomorAju LIKE '%PLB%' OR kodeDokumen IN ('16','28','33','331');
+
+UPDATE framasbc.bc_ceisa_data d
+JOIN (SELECT NOMOR_AJU, MAX(cmp_id) AS cmp_id FROM framasbc.bc_1ab2 GROUP BY NOMOR_AJU) b ON d.nomorAju = b.NOMOR_AJU
+SET d.cmp_id = b.cmp_id
+WHERE d.nomorAju NOT LIKE '%FRM%' AND d.nomorAju NOT LIKE '%PLB%' AND d.kodeDokumen NOT IN ('16','28','33','331');
+
+UPDATE framasbc.bc_ceisa_data d
+JOIN (SELECT NOMOR_AJU, MAX(cmp_id) AS cmp_id FROM framasbc.bc_ceisa_header GROUP BY NOMOR_AJU) h ON d.nomorAju = h.NOMOR_AJU
+SET d.cmp_id = h.cmp_id
+WHERE d.nomorAju NOT LIKE '%FRM%' AND d.nomorAju NOT LIKE '%PLB%' AND d.kodeDokumen NOT IN ('16','28','33','331')
+  AND d.cmp_id = 'FRM-1';
+"@ | Out-Null
+Log "Phase4: Harmonization complete."
+
 $sum2 = Invoke-Mysql8 @"
 SELECT table_schema, COUNT(*) AS tables, ROUND(SUM(data_length+index_length)/1024/1024,2) AS size_mb
 FROM information_schema.tables WHERE table_schema='framasbc';
 SELECT cmp_id, COUNT(*) AS headers FROM framasbc.bc_ceisa_header GROUP BY cmp_id ORDER BY cmp_id;
+SELECT cmp_id, COUNT(*) AS ceisa_portal_docs FROM framasbc.bc_ceisa_data GROUP BY cmp_id ORDER BY cmp_id;
 SELECT cmp_id, cmp_name, company_roles, subdomain FROM framasbc.bc_ceisa_company ORDER BY cmp_id;
 SELECT cmp_id, COUNT(*) AS users FROM framasbc.bc_ceisa_login GROUP BY cmp_id ORDER BY cmp_id;
 "@

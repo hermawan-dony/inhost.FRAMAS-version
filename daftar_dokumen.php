@@ -139,8 +139,24 @@ if ($action === 'list') {
             }
 
             if ($isMultiPlantNpwp) {
-                // Untuk grup multi-plant, isolasi ketat berdasarkan cmp_id plant yang aktif
-                $where[] = "a.cmp_id = '$realCmpId'";
+                // Untuk entitas multi-plant (seperti FRAMAS 1 Entitas di CEISA dengan NPWP bersama):
+                // Dokumen plant aktif diambil dari cmp_id atau penomoran nomorAju khas plant
+                $plantPattern = '';
+                if ($realCmpId === 'FRM-1') {
+                    $plantPattern = "a.nomorAju LIKE '%FRM01%' OR a.nomorAju LIKE '%FRM1%'";
+                } elseif ($realCmpId === 'FRM-2') {
+                    $plantPattern = "a.nomorAju LIKE '%FRM02%' OR a.nomorAju LIKE '%FRM2%'";
+                } elseif ($realCmpId === 'FRM-3') {
+                    $plantPattern = "a.nomorAju LIKE '%FRM03%' OR a.nomorAju LIKE '%FRM3%'";
+                } elseif ($realCmpId === 'PDPLB') {
+                    $plantPattern = "a.nomorAju LIKE '%PDPLB%' OR a.nomorAju LIKE '%PLB%' OR a.kodeDokumen IN ('16','28','33','331')";
+                }
+
+                if (!empty($plantPattern)) {
+                    $where[] = "(a.cmp_id = '$realCmpId' OR ($plantPattern))";
+                } else {
+                    $where[] = "a.cmp_id = '$realCmpId'";
+                }
             } else {
                 $cmpList = array_unique(array_filter([$cleanCmp, $realCmpId, $cmpNpwp]));
                 $escapedCmpList = "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $cmpList)) . "'";
