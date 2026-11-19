@@ -8546,4 +8546,42 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - `editor.php`: Selector dropdown AJU disatukan untuk plant Framas.
    - `it_inventory.php`: Filter inventory (`cmpFilter`, `cmpDetailFilter`, `cmpIssueFilter`) disatukan untuk seluruh plant Framas.
 
+---
+
+## [2026-11-19] Redesain Profesional Login Portal Pabean Framas, Fitur Terjemahan Multi-Bahasa & Pengaktifan Kartu Belum Import H2H
+
+### A. Latar Belakang & Permintaan Pengguna
+1. **Redesain Halaman Login (`prnt.sc/F855EkUDNPs6`)**:
+   - Pengguna meminta tampilan login portal `app.framas.web.id/h2h/index.php` dibuat jauh lebih profesional dan modern untuk kebutuhan korporat enterprise.
+2. **Fitur Terjemahan 3 Bahasa (Indonesia, English, Vietnam)**:
+   - Pengguna meminta: *"tambahkan juga fitur terjemah ke ENGLISH, INDONESIA, VIETNAM, juga yang ada di index.php support terjemah, pake bawaan google translate aja lebih mudah"*.
+   - Khusus proyek Framas (karena manajemen dan operasional Framas melibatkan ekspatriat dan tim multi-nasional).
+3. **Kartu Belum Import H2H (`rmb.inhost.id`)**:
+   - Pengguna menyoroti kartu ringkasan KPI `[BELUM IMPORT H2H]` yang dilengkapi tombol `[⚡ Select All]` dan `[📊 Rekap]` agar aktif, tampil sempurna, dan dapat digunakan di Dashboard Dokumen Framas.
+
+### B. Solusi & Implementasi Teknis
+1. **Peningkatan Tampilan Login Eksekutif (`index.php`)**:
+   - Menambahkan lapisan vignette frosted glass lembut di latar belakang (`.login-wrap::before`) yang memadukan corak budaya motif batik dengan nuansa modern modern UI/UX.
+   - Merancang ulang kartu login (`.login-card`) dengan radius 18px, border tipis berbayang mewah, dan aksen garis gradien 3 warna (`#1677ff` -> `#13c2c2` -> `#722ed1`).
+   - Menambahkan badge keamanan enterprise di atas logo: `🛡️ CEISA 4.0 • Enterprise SSO`.
+   - Menampilkan badge plant operasional interaktif di bawah judul portal: `FRM-1` (Kenari), `FRM-2` (Delta Silicon), `FRM-3` (Plant 3), dan `PDPLB` (PLB MM2100).
+   - Memperbesar field input menjadi 42px dengan icon representatif, focus glow halus, dan tombol submit modern gradient dengan efek hover mengangkat (lift effect).
+   - Menambahkan identitas korporat di bagian bawah kartu: `PT FRAMAS INDONESIA • NPWP: 01.081.606.4-431.000`.
+2. **Fitur Terjemahan Multi-Bahasa Google Translate (`id`, `en`, `vi`)**:
+   - Menambahkan kontrol pilihan bahasa elegan (segmented pill) dengan bendera negara:
+     - 🇮🇩 **ID** (Bahasa Indonesia)
+     - 🇬🇧 **EN** (English)
+     - 🇻🇳 **VI** (Tiếng Việt)
+   - Selector terjemahan dipasang pada dua tempat strategis:
+     - Di sudut kanan atas halaman Login (berdampingan dengan tombol tema).
+     - Di topbar header aplikasi utama (`#kt_header`) berdampingan dengan tombol tema dan user badge.
+   - Integrasi engine Google Translate resmi (`google.translate.TranslateElement`) dengan CSS pembersihan mutlak (`.goog-te-banner-frame`, `body { top:0 !important; }`, `.goog-tooltip` disembunyikan sepenuhnya sehingga tidak ada banner atau elemen mengganggu).
+   - Bahasa pilihan disimpan di `localStorage` dan cookie `googtrans` agar otomatis tersinkronisasi ke tab dan iframe (`daftar_dokumen.php`, dll).
+3. **Kartu dan Rekap Belum Import H2H (`daftar_dokumen.php`)**:
+   - Memastikan `show_unimported_h2h = 1` aktif pada seluruh plant Framas (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`) dan akun `SYSTEM`.
+   - Mengubah inisialisasi chip `kpiChipNotH2H` menjadi `display:inline-flex` agar langsung muncul tanpa flickering.
+   - Format angka metrik diseragamkan dengan separator ribuan `.toLocaleString('id-ID')`.
+   - Memastikan fitur `⚡ Select All` (pilih massal dokumen belum H2H) dan `📊 Rekap` (popup analisis bulanan dokumen belum H2H) dapat diakses dengan lancar.
+
+
 

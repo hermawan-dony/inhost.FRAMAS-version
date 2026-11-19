@@ -2462,17 +2462,95 @@ if ($initialTab === 'editor') {
             background: transparent;
         }
 
+        /* Subtle radial frosted glow behind login card */
+        .login-wrap::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle at center, rgba(255, 255, 255, 0.45) 0%, rgba(240, 244, 250, 0.78) 100%);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            pointer-events: none;
+            z-index: 1;
+        }
+        body[data-theme="dark"] .login-wrap::before {
+            background: radial-gradient(circle at center, rgba(15, 23, 42, 0.65) 0%, rgba(9, 14, 26, 0.92) 100%);
+        }
+
         .login-wrap .login-card,
         .login-wrap .login-theme-box,
+        .login-wrap .lang-select-box,
         .login-wrap .login-page-footer {
             position: relative;
             z-index: 3;
         }
 
+        /* Language Switcher Pill Styles */
+        .lang-select-box {
+            display: inline-flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.92);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
+            padding: 3px;
+            border-radius: 20px;
+            gap: 2px;
+            transition: all 0.2s ease;
+        }
+        body[data-theme="dark"] .lang-select-box {
+            background: rgba(20, 27, 45, 0.92);
+            border-color: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+        }
+        .topbar-lang-select {
+            height: 28px;
+            padding: 2px 4px;
+            border-radius: 14px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            box-shadow: none;
+        }
+        .lang-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            padding: 3px 8px;
+            border-radius: 14px;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted, #64748b);
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            line-height: 1;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            user-select: none;
+        }
+        .topbar-lang-select .lang-btn {
+            padding: 2px 6px;
+            font-size: 10px;
+            border-radius: 10px;
+        }
+        .lang-btn:hover {
+            color: #1677ff;
+            background: rgba(22, 119, 255, 0.08);
+        }
+        .lang-btn.active {
+            background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
+            color: #ffffff !important;
+            box-shadow: 0 2px 6px rgba(22, 119, 255, 0.35);
+        }
+        .lang-btn .flag-icon {
+            font-size: 12px;
+            line-height: 1;
+        }
+
         .login-theme-box {
-            backdrop-filter: blur(12px) !important;
-            -webkit-backdrop-filter: blur(12px) !important;
-            background: rgba(255, 255, 255, 0.85) !important;
+            backdrop-filter: blur(14px) !important;
+            -webkit-backdrop-filter: blur(14px) !important;
+            background: rgba(255, 255, 255, 0.92) !important;
             border: 1px solid rgba(0, 0, 0, 0.08) !important;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06) !important;
             padding: 3px !important;
@@ -2480,24 +2558,25 @@ if ($initialTab === 'editor') {
             transition: all 0.2s ease;
         }
         body[data-theme="dark"] .login-theme-box {
-            background: rgba(20, 27, 45, 0.88) !important;
+            background: rgba(20, 27, 45, 0.92) !important;
             border-color: rgba(255, 255, 255, 0.12) !important;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
         }
 
         .login-card {
             position: relative;
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.96);
+            border: 1px solid rgba(226, 232, 240, 0.85);
+            border-radius: 18px;
             width: 100%;
-            max-width: 420px;
-            padding: 36px 32px 30px;
+            max-width: 440px;
+            padding: 32px 32px 28px;
             box-shadow: 
-                0 10px 25px -5px rgba(15, 23, 42, 0.08),
-                0 8px 10px -6px rgba(15, 23, 42, 0.04);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+                0 25px 60px -15px rgba(15, 23, 42, 0.14),
+                0 0 0 1px rgba(255, 255, 255, 0.85) inset,
+                0 8px 20px -6px rgba(0, 0, 0, 0.06);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
             z-index: 2;
             overflow: hidden;
             animation: loginCardFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2505,7 +2584,7 @@ if ($initialTab === 'editor') {
         @keyframes loginCardFadeIn {
             from {
                 opacity: 0;
-                transform: translateY(12px) scale(0.99);
+                transform: translateY(14px) scale(0.985);
             }
             to {
                 opacity: 1;
@@ -2513,9 +2592,11 @@ if ($initialTab === 'editor') {
             }
         }
         body[data-theme="dark"] .login-card {
-            background: #111827;
-            border: 1px solid #1f2937;
-            box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.5);
+            background: rgba(17, 24, 39, 0.94);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 
+                0 25px 60px -15px rgba(0, 0, 0, 0.65),
+                0 0 0 1px rgba(255, 255, 255, 0.05) inset;
         }
         .login-card::before {
             content: '';
@@ -2523,41 +2604,64 @@ if ($initialTab === 'editor') {
             top: 0;
             left: 0;
             right: 0;
-            height: 3px;
-            background: linear-gradient(90deg, #1890ff 0%, #096dd9 100%);
+            height: 4px;
+            background: linear-gradient(90deg, #1677ff 0%, #13c2c2 45%, #722ed1 100%);
+            border-radius: 18px 18px 0 0;
+        }
+
+        .login-security-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 3px 12px;
+            background: rgba(22, 119, 255, 0.06);
+            border: 1px solid rgba(22, 119, 255, 0.18);
+            border-radius: 20px;
+            font-size: 10px;
+            font-weight: 700;
+            color: #1677ff;
+            letter-spacing: 0.3px;
+            margin-bottom: 14px;
+            text-transform: uppercase;
+        }
+        body[data-theme="dark"] .login-security-pill {
+            background: rgba(22, 119, 255, 0.14);
+            border-color: rgba(22, 119, 255, 0.3);
+            color: #69b1ff;
         }
 
         .login-header {
             text-align: center;
-            margin-bottom: 24px;
+            margin-bottom: 20px;
         }
         .login-brand-badge {
             display: inline-flex;
             align-items: center;
             gap: 14px;
             padding: 8px 18px;
-            background: #f8fafc;
+            background: rgba(248, 250, 252, 0.85);
             border: 1px solid #e2e8f0;
             border-radius: 14px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-            margin-bottom: 16px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.04);
+            margin-bottom: 14px;
             transition: all 0.2s;
         }
         body[data-theme="dark"] .login-brand-badge {
-            background: #151d2f;
+            background: rgba(21, 29, 47, 0.85);
             border-color: #27354f;
         }
         .login-brand-logo {
-            width: 54px;
-            height: 54px;
-            max-width: 72px;
-            max-height: 54px;
+            width: 52px;
+            height: 52px;
+            max-width: 68px;
+            max-height: 52px;
             object-fit: contain;
-            border-radius: 9px;
+            border-radius: 10px;
             background: #ffffff;
-            padding: 3px;
+            padding: 4px;
             border: 1px solid rgba(0, 0, 0, 0.06);
-            filter: drop-shadow(0 2px 5px rgba(24, 144, 255, 0.16));
+            filter: drop-shadow(0 2px 6px rgba(22, 119, 255, 0.16));
             flex-shrink: 0;
         }
         body[data-theme="dark"] .login-brand-logo {
@@ -2567,8 +2671,8 @@ if ($initialTab === 'editor') {
         .login-brand-title {
             font-size: 21px;
             font-weight: 800;
-            letter-spacing: 0.5px;
-            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+            letter-spacing: 0.4px;
+            background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             line-height: 1.15;
@@ -2581,6 +2685,83 @@ if ($initialTab === 'editor') {
             text-transform: uppercase;
             line-height: 1.25;
             margin-top: 2px;
+        }
+
+        .login-plant-badges {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+            margin-bottom: 4px;
+        }
+        .plant-chip {
+            font-size: 9.5px;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border: 1px solid transparent;
+            letter-spacing: 0.2px;
+        }
+        .plant-chip.frm1 { background: #e6f4ff; color: #0958d9; border-color: #91caff; }
+        .plant-chip.frm2 { background: #f6ffed; color: #389e0d; border-color: #b7eb8f; }
+        .plant-chip.frm3 { background: #f9f0ff; color: #531dab; border-color: #d3adf7; }
+        .plant-chip.plb  { background: #fff7e6; color: #d46b08; border-color: #ffd591; }
+        body[data-theme="dark"] .plant-chip.frm1 { background: #111d2c; color: #4096ff; border-color: #15395b; }
+        body[data-theme="dark"] .plant-chip.frm2 { background: #162312; color: #73d13d; border-color: #274916; }
+        body[data-theme="dark"] .plant-chip.frm3 { background: #22102e; color: #b37feb; border-color: #431b6b; }
+        body[data-theme="dark"] .plant-chip.plb  { background: #2b1d11; color: #ffa940; border-color: #593815; }
+
+        .login-card-meta {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            margin-top: 16px;
+            font-size: 10.5px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+        .meta-dot {
+            color: #cbd5e1;
+            font-size: 12px;
+        }
+
+        /* Clean Google Translate Overrides */
+        .goog-te-banner-frame.skiptranslate,
+        .goog-te-banner-frame,
+        iframe.goog-te-banner-frame {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            position: absolute !important;
+            top: -9999px !important;
+        }
+        body {
+            top: 0px !important;
+            position: static !important;
+        }
+        .goog-tooltip,
+        .goog-tooltip:hover,
+        #goog-gt-tt,
+        .goog-te-balloon-frame {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        .goog-text-highlight {
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+        .skiptranslate:not(.lang-select-box):not(.lang-btn) {
+            display: none !important;
+        }
+        #google_translate_element {
+            display: none !important;
         }
         .login-header h2 {
             font-size: 16.5px;
@@ -2615,10 +2796,10 @@ if ($initialTab === 'editor') {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
             color: var(--text-main);
-            padding: 0 12px;
-            height: 36px;
-            border-radius: 8px;
-            font-size: 12px;
+            padding: 0 14px;
+            height: 42px;
+            border-radius: 10px;
+            font-size: 13px;
             font-family: inherit;
             outline: none;
             transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -2626,8 +2807,8 @@ if ($initialTab === 'editor') {
             width: 100%;
         }
         .form-group input:focus, .form-group select:focus {
-            border-color: #1890ff;
-            box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.18);
+            border-color: #1677ff;
+            box-shadow: 0 0 0 3px rgba(22, 119, 255, 0.18);
         }
         body[data-theme="dark"] .form-group input,
         body[data-theme="dark"] .form-group select {
@@ -2759,18 +2940,18 @@ if ($initialTab === 'editor') {
 
         .btn-login-submit {
             width: 100%;
-            height: 42px !important;
-            font-size: 13px !important;
-            font-weight: 600 !important;
+            height: 44px !important;
+            font-size: 13.5px !important;
+            font-weight: 700 !important;
             letter-spacing: 0.6px !important;
-            border-radius: 8px !important;
-            margin-top: 10px;
+            border-radius: 10px !important;
+            margin-top: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%) !important;
-            box-shadow: 0 4px 14px rgba(24, 144, 255, 0.32) !important;
+            background: linear-gradient(135deg, #1677ff 0%, #0958d9 100%) !important;
+            box-shadow: 0 6px 18px rgba(22, 119, 255, 0.35) !important;
             border: none !important;
             color: #ffffff !important;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
@@ -2778,12 +2959,12 @@ if ($initialTab === 'editor') {
         }
         .btn-login-submit:hover {
             transform: translateY(-1.5px) !important;
-            box-shadow: 0 6px 20px rgba(24, 144, 255, 0.45) !important;
-            background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%) !important;
+            box-shadow: 0 8px 24px rgba(22, 119, 255, 0.5) !important;
+            background: linear-gradient(135deg, #4096ff 0%, #1677ff 100%) !important;
         }
         .btn-login-submit:active {
             transform: translateY(0) !important;
-            box-shadow: 0 2px 6px rgba(24, 144, 255, 0.25) !important;
+            box-shadow: 0 2px 8px rgba(22, 119, 255, 0.25) !important;
         }
 
         .login-divider {
@@ -3208,18 +3389,42 @@ if ($initialTab === 'editor') {
     <?php endif; ?>
 
     <!-- 1. STANDALONE LOGIN SCREEN -->
-    <div style="position:fixed; top:20px; right:24px; z-index:100;">
+    <div style="position:fixed; top:20px; right:24px; z-index:100; display:flex; align-items:center; gap:8px;">
+        <!-- Language Switcher Pill (ID, EN, VI) -->
+        <div class="lang-select-box" id="loginLangSelect">
+            <button type="button" class="lang-btn active" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia">
+                <span class="flag-icon">🇮🇩</span> <span>ID</span>
+            </button>
+            <button type="button" class="lang-btn" data-lang="en" onclick="setAppLanguage('en')" title="English">
+                <span class="flag-icon">🇬🇧</span> <span>EN</span>
+            </button>
+            <button type="button" class="lang-btn" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">
+                <span class="flag-icon">🇻🇳</span> <span>VI</span>
+            </button>
+        </div>
+
         <div class="theme-select login-theme-box">
             <button class="theme-btn active" data-theme="light" onclick="setTheme('light')" style="border-radius:16px;"><i class="fa-solid fa-sun" style="font-size:10.5px; margin-right:3px;"></i> Light</button>
             <button class="theme-btn" data-theme="dark" onclick="setTheme('dark')" style="border-radius:16px;"><i class="fa-solid fa-moon" style="font-size:10.5px; margin-right:3px;"></i> Dark</button>
         </div>
     </div>
 
+    <!-- Hidden Google Translate Element -->
+    <div id="google_translate_element" style="display:none;"></div>
+
     <div class="login-wrap">
         <div class="login-card">
             <div class="login-header">
+                <!-- Security SSO Pill -->
+                <div style="display:flex; justify-content:center;">
+                    <div class="login-security-pill">
+                        <i class="fa-solid fa-shield-halved"></i>
+                        <span>CEISA 4.0 &bull; Enterprise SSO</span>
+                    </div>
+                </div>
+
                 <!-- Brand Badge (Logo, App Name, Subtitle) -->
-                <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:14px;">
+                <div style="display:flex; justify-content:center; align-items:center; gap:10px; margin-bottom:12px;">
                     <div class="login-brand-badge">
                         <img src="<?= htmlspecialchars($appSettings['app_logo']) ?>" alt="<?= htmlspecialchars($appSettings['app_name']) ?>" class="login-brand-logo" onerror="if(this.src.indexOf('inhost.web.id') === -1 && this.getAttribute('src') && this.getAttribute('src').indexOf('/uploads/') === 0) { this.src = 'https://inhost.web.id' + this.getAttribute('src'); } else { this.src = '/assets/logo.png'; }">
                         <div style="text-align:left;">
@@ -3234,12 +3439,18 @@ if ($initialTab === 'editor') {
                 <?php if ($isAdminOnlyLogin): ?>
                     <div style="margin-top:2px; margin-bottom:14px;">
                         <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;">Login Administrator</h2>
-                        <p style="font-size:12px; color:var(--text-muted); margin:0;">Silakan masukkan akun Administrator</p>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0;">Silakan masukkan kredensial Administrator</p>
                     </div>
                 <?php elseif ($isFramasPortal): ?>
-                    <div style="margin-top:2px; margin-bottom:14px;">
-                        <h2 style="font-size:18px; margin-bottom:4px; font-weight:700; color:var(--text-main); letter-spacing:-0.2px;">Masuk ke Sistem</h2>
-                        <p style="font-size:12px; color:var(--text-muted); margin:0;">Portal Akses CEISA 4.0 &bull; FRAMAS Group</p>
+                    <div style="margin-top:2px; margin-bottom:12px;">
+                        <h2 style="font-size:19px; margin-bottom:4px; font-weight:800; color:var(--text-main); letter-spacing:-0.3px;">Masuk ke Portal Pabean</h2>
+                        <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;">PT FRAMAS INDONESIA &bull; CEISA 4.0 Single Core</p>
+                        <div class="login-plant-badges">
+                            <span class="plant-chip frm1" title="Plant FRM-1: Kawasan Berikat Kenari"><i class="fa-solid fa-industry"></i> FRM-1</span>
+                            <span class="plant-chip frm2" title="Plant FRM-2: Delta Silicon"><i class="fa-solid fa-industry"></i> FRM-2</span>
+                            <span class="plant-chip frm3" title="Plant FRM-3: Plant 3 DS 6"><i class="fa-solid fa-industry"></i> FRM-3</span>
+                            <span class="plant-chip plb" title="Plant PDPLB: Pusat Logistik Berikat"><i class="fa-solid fa-warehouse"></i> PDPLB</span>
+                        </div>
                     </div>
                 <?php elseif ($subdomainCompany): ?>
                     <?php if ($showLoginCompanyTitle): ?>
@@ -3315,6 +3526,11 @@ if ($initialTab === 'editor') {
                     <span><?= $isAdminOnlyLogin ? 'MASUK SEBAGAI ADMINISTRATOR' : 'MASUK KE SISTEM' ?></span>
                 </button>
             </form>
+            <div class="login-card-meta">
+                <span><i class="fa-solid fa-building" style="margin-right:4px;"></i> PT FRAMAS INDONESIA</span>
+                <span class="meta-dot">&bull;</span>
+                <span>NPWP: 01.081.606.4-431.000</span>
+            </div>
             <script>
                 (function() {
                     var u = document.getElementById('loginUsername');
@@ -4288,6 +4504,19 @@ if ($initialTab === 'editor') {
                         <span id="topbarUserBadge" style="display:none !important;"></span>
                     </div>
 
+                    <!-- Language Selector (ID, EN, VI) -->
+                    <div class="lang-select-box topbar-lang-select" id="topbarLangSelect">
+                        <button type="button" class="lang-btn active" data-lang="id" onclick="setAppLanguage('id')" title="Bahasa Indonesia">
+                            <span class="flag-icon">🇮🇩</span> <span>ID</span>
+                        </button>
+                        <button type="button" class="lang-btn" data-lang="en" onclick="setAppLanguage('en')" title="English">
+                            <span class="flag-icon">🇬🇧</span> <span>EN</span>
+                        </button>
+                        <button type="button" class="lang-btn" data-lang="vi" onclick="setAppLanguage('vi')" title="Tiếng Việt">
+                            <span class="flag-icon">🇻🇳</span> <span>VI</span>
+                        </button>
+                    </div>
+
                     <!-- Theme Selector -->
                     <div class="theme-select">
                         <button class="theme-btn active" data-theme="light" onclick="setTheme('light')">☀️</button>
@@ -5115,6 +5344,72 @@ if ($initialTab === 'editor') {
                 }
                 grp.style.display = anyVisibleInGroup ? 'block' : 'none';
             });
+        }
+
+        function googleTranslateElementInit() {
+            try {
+                new google.translate.TranslateElement({
+                    pageLanguage: 'id',
+                    includedLanguages: 'id,en,vi',
+                    autoDisplay: false
+                }, 'google_translate_element');
+            } catch(e) {}
+        }
+
+        function setAppLanguage(lang) {
+            if (!['id', 'en', 'vi'].includes(lang)) lang = 'id';
+            localStorage.setItem('ceisa_app_lang', lang);
+
+            const host = window.location.hostname;
+            const expires = 'Thu, 01 Jan 2030 00:00:00 UTC';
+            const transVal = (lang === 'id') ? '/id/id' : ('/id/' + lang);
+
+            document.cookie = 'googtrans=' + transVal + '; path=/;';
+            document.cookie = 'googtrans=' + transVal + '; domain=' + host + '; path=/;';
+            if (host.includes('.')) {
+                document.cookie = 'googtrans=' + transVal + '; domain=.' + host + '; path=/;';
+            }
+
+            updateActiveLangUI(lang);
+
+            const combo = document.querySelector('.goog-te-combo');
+            if (combo) {
+                combo.value = lang;
+                combo.dispatchEvent(new Event('change'));
+            } else {
+                window.location.reload();
+            }
+
+            if (window.tabIframes) {
+                Object.values(window.tabIframes).forEach(ifrm => {
+                    try {
+                        if (ifrm && ifrm.contentWindow) {
+                            const ifrmCombo = ifrm.contentDocument && ifrm.contentDocument.querySelector('.goog-te-combo');
+                            if (ifrmCombo) {
+                                ifrmCombo.value = lang;
+                                ifrmCombo.dispatchEvent(new Event('change'));
+                            }
+                        }
+                    } catch(e) {}
+                });
+            }
+        }
+
+        function updateActiveLangUI(lang) {
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-lang') === lang);
+            });
+        }
+
+        function loadSavedLanguage() {
+            let currentLang = 'id';
+            const match = document.cookie.match(/(?:^|;\s*)googtrans=\/id\/([a-z]{2})/);
+            if (match && ['id', 'en', 'vi'].includes(match[1])) {
+                currentLang = match[1];
+            } else {
+                currentLang = localStorage.getItem('ceisa_app_lang') || 'id';
+            }
+            updateActiveLangUI(currentLang);
         }
 
         function setTheme(theme) {
@@ -6136,6 +6431,7 @@ if ($initialTab === 'editor') {
         window.onload = function() {
             initLoginFormProtection();
             loadSavedTheme();
+            loadSavedLanguage();
             loadSavedIconStyle();
             loadSidebarPinState();
             applyRoleMenuVisibility();
@@ -6147,5 +6443,6 @@ if ($initialTab === 'editor') {
             checkAlertNotificationBadge();
         };
     </script>
+    <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 </body>
 </html>

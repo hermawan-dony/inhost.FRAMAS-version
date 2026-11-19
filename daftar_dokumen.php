@@ -1132,6 +1132,39 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
+        /* Clean Google Translate Overrides */
+        .goog-te-banner-frame.skiptranslate,
+        .goog-te-banner-frame,
+        iframe.goog-te-banner-frame {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            position: absolute !important;
+            top: -9999px !important;
+        }
+        body {
+            top: 0px !important;
+            position: static !important;
+        }
+        .goog-tooltip,
+        .goog-tooltip:hover,
+        #goog-gt-tt,
+        .goog-te-balloon-frame {
+            display: none !important;
+            visibility: hidden !important;
+        }
+        .goog-text-highlight {
+            background-color: transparent !important;
+            box-shadow: none !important;
+        }
+        .skiptranslate {
+            display: none !important;
+        }
+        #google_translate_element {
+            display: none !important;
+        }
+
         :root, body[data-theme="light"], html[data-theme="light"] body {
             --bg-body: #f0f2f5;
             --bg-card: #ffffff;
@@ -2738,7 +2771,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     <span class="kpi-label kpi-label-success">Selesai Proses</span>
                     <strong class="kpi-val kpi-val-success" id="kpiPosted">0</strong>
                 </div>
-                <div class="kpi-chip" id="kpiChipNotH2H" onclick="filterByCard('not_h2h')" title="Klik untuk memfilter hanya dokumen yang belum diimpor ke Data Host to Host (bc_ceisa_header)" style="display:none; align-items:center;">
+                <div class="kpi-chip" id="kpiChipNotH2H" onclick="filterByCard('not_h2h')" title="Klik untuk memfilter hanya dokumen yang belum diimpor ke Data Host to Host (bc_ceisa_header)" style="display:inline-flex; align-items:center;">
                     <span class="kpi-label" style="color:#d46b08; font-weight:600;">Belum Import H2H</span>
                     <strong class="kpi-val" style="color:#d46b08;" id="kpiNotH2H">0</strong>
                     <button type="button" class="btn-rekap-pill" id="btnQuickSelectNotH2H" onclick="event.stopPropagation(); toggleSelectAllNotH2H();" title="Pilih / Batal Pilih Semua Dokumen yang Belum Masuk H2H" style="background:#fff7e6; color:#d46b08; border-color:#ffd591; margin-left:6px; font-weight:600;">
@@ -4145,20 +4178,22 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 }
             });
 
-            if (document.getElementById('kpiTotal')) document.getElementById('kpiTotal').innerText = ajuData.length;
-            if (document.getElementById('kpiUnposted')) document.getElementById('kpiUnposted').innerText = unposted;
-            if (document.getElementById('kpiPosted')) document.getElementById('kpiPosted').innerText = posted;
+            if (document.getElementById('kpiTotal')) document.getElementById('kpiTotal').innerText = ajuData.length.toLocaleString('id-ID');
+            if (document.getElementById('kpiUnposted')) document.getElementById('kpiUnposted').innerText = unposted.toLocaleString('id-ID');
+            if (document.getElementById('kpiPosted')) document.getElementById('kpiPosted').innerText = posted.toLocaleString('id-ID');
 
             // Card Belum Import H2H
             const chipNotH2H = document.getElementById('kpiChipNotH2H');
             if (chipNotH2H) {
-                const selectedCmp = document.getElementById('filterCmp')?.value || initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>';
+                const selectedCmp = (document.getElementById('filterCmp')?.value || initialCmp || '<?= htmlspecialchars($sessionCmpId) ?>').toUpperCase();
                 if (companyShowUnimportedMap && typeof companyShowUnimportedMap[selectedCmp] !== 'undefined') {
                     isH2HVisible = (parseInt(companyShowUnimportedMap[selectedCmp], 10) === 1);
+                } else if (['FRM-1', 'FRM-2', 'FRM-3', 'PDPLB', 'SYSTEM', 'FRAMAS', ''].includes(selectedCmp)) {
+                    isH2HVisible = true;
                 }
                 if (isH2HVisible) {
                     chipNotH2H.style.display = 'inline-flex';
-                    if (document.getElementById('kpiNotH2H')) document.getElementById('kpiNotH2H').innerText = notH2H;
+                    if (document.getElementById('kpiNotH2H')) document.getElementById('kpiNotH2H').innerText = notH2H.toLocaleString('id-ID');
                 } else {
                     chipNotH2H.style.display = 'none';
                     if (currentCardFilter === 'not_h2h') {
@@ -4172,7 +4207,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             if (chipNotInv) {
                 if (isInvEnabled) {
                     chipNotInv.style.display = 'inline-flex';
-                    if (document.getElementById('kpiNotInv')) document.getElementById('kpiNotInv').innerText = notInv;
+                    if (document.getElementById('kpiNotInv')) document.getElementById('kpiNotInv').innerText = notInv.toLocaleString('id-ID');
                 } else {
                     chipNotInv.style.display = 'none';
                     if (currentCardFilter === 'not_inv') {
@@ -6501,6 +6536,19 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             }, 300);
         };
     </script>
+    <div id="google_translate_element" style="display:none;"></div>
+    <script type="text/javascript">
+        function googleTranslateElementInit() {
+            try {
+                new google.translate.TranslateElement({
+                    pageLanguage: 'id',
+                    includedLanguages: 'id,en,vi',
+                    autoDisplay: false
+                }, 'google_translate_element');
+            } catch(e) {}
+        }
+    </script>
+    <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 </body>
 </html>
 
