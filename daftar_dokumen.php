@@ -4402,13 +4402,13 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 const ajuStr = (r.nomor_aju || '').toUpperCase();
                 const curCmp = (r.cmp_id || '').toUpperCase();
                 if (curCmp === 'FRM-1' || ajuStr.includes('FRM01') || ajuStr.includes('FRM1')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-blue" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 1</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-blue" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 1 MM2100 (Kawasan Industri MM 2100 Blok M 33-34)">PLANT 1</span>';
                 } else if (curCmp === 'FRM-2' || ajuStr.includes('FRM02') || ajuStr.includes('FRM2')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 2</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-green" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 2 Kenari DS5 (Kenari Raya Blok G2 Delta Silicon 5)">PLANT 2</span>';
                 } else if (curCmp === 'FRM-3' || ajuStr.includes('FRM03') || ajuStr.includes('FRM3')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-purple" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLANT 3</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-purple" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Plant 3 DS6 (Jl. Ramin Blok G6A Delta Silicon VI)">PLANT 3</span>';
                 } else if (curCmp === 'PDPLB' || ajuStr.includes('PDPLB') || ajuStr.includes('PLB')) {
-                    plantBadgeHtml = '<span class="ant-tag ant-tag-orange" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;">PLB</span>';
+                    plantBadgeHtml = '<span class="ant-tag ant-tag-orange" style="font-size:9px; padding:0 4px; line-height:16px; margin:0; border-radius:3px;" title="Pusat Logistik Berikat (Kawasan Industri MM2100 Blok O-1-2)">PLB</span>';
                 }
 
                 html += `

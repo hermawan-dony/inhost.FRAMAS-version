@@ -827,9 +827,9 @@ $framasPlantMeta = [
         'code'     => 'FRM-1',
         'badge'    => 'PLANT 1',
         'title'    => 'FRAMAS - 1',
-        'sub'      => 'Plant 1 Kenari • TPB',
-        'fullname' => 'PT FRAMAS INDONESIA (TPB Kenari)',
-        'location' => 'Lippo Cikarang',
+        'sub'      => 'Plant 1 MM2100 • TPB',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
+        'location' => 'Kawasan Industri MM 2100 Blok M 33-34',
         'role_tag' => 'Kawasan Berikat',
         'color'    => '#1890ff',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -838,9 +838,9 @@ $framasPlantMeta = [
         'code'     => 'FRM-2',
         'badge'    => 'PLANT 2',
         'title'    => 'FRAMAS - 2',
-        'sub'      => 'Plant 2 Delta • TPB',
-        'fullname' => 'PT FRAMAS INDONESIA (Delta Silicon)',
-        'location' => 'Delta Silicon MM2100',
+        'sub'      => 'Plant 2 Kenari • Delta Silicon 5',
+        'fullname' => 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
+        'location' => 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5',
         'role_tag' => 'Kawasan Berikat',
         'color'    => '#52c41a',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -851,7 +851,7 @@ $framasPlantMeta = [
         'title'    => 'FRAMAS - 3',
         'sub'      => 'Plant 3 DS 6 • TPB',
         'fullname' => 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
-        'location' => 'Delta Silicon 6 Lippo Cikarang',
+        'location' => 'Jl. Ramin Blok G6A, Delta Silicon VI',
         'role_tag' => 'Kawasan Berikat',
         'color'    => '#722ed1',
         'docs'     => 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -862,7 +862,7 @@ $framasPlantMeta = [
         'title'    => 'FRAMAS - PLB',
         'sub'      => 'Pusat Logistik Berikat • MM2100',
         'fullname' => 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
-        'location' => 'MM2100 Cikarang Barat',
+        'location' => 'Kawasan Industri MM2100, Blok O-1-2, Gandamekar, Cikarang Barat',
         'role_tag' => 'Pusat Logistik Berikat',
         'color'    => '#fa8c16',
         'docs'     => 'BC 1.6, 2.8, 3.3, 3.3.1'
@@ -3446,10 +3446,10 @@ if ($initialTab === 'editor') {
                         <h2 style="font-size:19px; margin-bottom:4px; font-weight:800; color:var(--text-main); letter-spacing:-0.3px;">Masuk ke Portal Pabean</h2>
                         <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;">PT FRAMAS INDONESIA &bull; CEISA 4.0 Single Core</p>
                         <div class="login-plant-badges">
-                            <span class="plant-chip frm1" title="Plant FRM-1: Kawasan Berikat Kenari"><i class="fa-solid fa-industry"></i> FRM-1</span>
-                            <span class="plant-chip frm2" title="Plant FRM-2: Delta Silicon"><i class="fa-solid fa-industry"></i> FRM-2</span>
-                            <span class="plant-chip frm3" title="Plant FRM-3: Plant 3 DS 6"><i class="fa-solid fa-industry"></i> FRM-3</span>
-                            <span class="plant-chip plb" title="Plant PDPLB: Pusat Logistik Berikat"><i class="fa-solid fa-warehouse"></i> PDPLB</span>
+                            <span class="plant-chip frm1" title="Plant FRM-1: Kawasan Industri MM 2100 Blok M 33-34"><i class="fa-solid fa-industry"></i> FRM-1 (MM2100)</span>
+                            <span class="plant-chip frm2" title="Plant FRM-2: Kenari Raya Delta Silicon 5"><i class="fa-solid fa-industry"></i> FRM-2 (Kenari DS5)</span>
+                            <span class="plant-chip frm3" title="Plant FRM-3: Jl. Ramin Delta Silicon VI"><i class="fa-solid fa-industry"></i> FRM-3 (DS6)</span>
+                            <span class="plant-chip plb" title="Plant PDPLB: Kawasan Industri MM2100 Blok O-1-2"><i class="fa-solid fa-warehouse"></i> PDPLB (PLB)</span>
                         </div>
                     </div>
                 <?php elseif ($subdomainCompany): ?>
@@ -5618,9 +5618,9 @@ if ($initialTab === 'editor') {
                 order: 1,
                 badge: 'PLANT 1',
                 shortTitle: 'FRAMAS - 1',
-                subTitle: 'Plant 1 Kenari • TPB',
-                legalName: 'PT FRAMAS INDONESIA (TPB Kenari)',
-                location: 'Jl. Kenari II Blok G2, Lippo Cikarang',
+                subTitle: 'Plant 1 MM2100 • TPB',
+                legalName: 'PT FRAMAS INDONESIA (Plant 1 MM2100)',
+                location: 'Kawasan Industri MM 2100 Blok M 33-34',
                 facility: 'Kawasan Berikat (TPB)',
                 accent: '#1890ff',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -5630,9 +5630,9 @@ if ($initialTab === 'editor') {
                 order: 2,
                 badge: 'PLANT 2',
                 shortTitle: 'FRAMAS - 2',
-                subTitle: 'Plant 2 Delta • TPB',
-                legalName: 'PT FRAMAS INDONESIA (Delta Silicon)',
-                location: 'Delta Silicon, MM2100',
+                subTitle: 'Plant 2 Kenari • Delta Silicon 5',
+                legalName: 'PT FRAMAS INDONESIA (Plant 2 Kenari DS5)',
+                location: 'Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5',
                 facility: 'Kawasan Berikat (TPB)',
                 accent: '#52c41a',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -5644,7 +5644,7 @@ if ($initialTab === 'editor') {
                 shortTitle: 'FRAMAS - 3',
                 subTitle: 'Plant 3 DS 6 • TPB',
                 legalName: 'PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)',
-                location: 'Delta Silicon 6, Lippo Cikarang',
+                location: 'Jl. Ramin Blok G6A, Delta Silicon VI',
                 facility: 'Kawasan Berikat (TPB)',
                 accent: '#722ed1',
                 docs: 'BC 2.3, 2.5, 2.6.1, 2.6.2, 2.7, 4.0, 4.1'
@@ -5656,7 +5656,7 @@ if ($initialTab === 'editor') {
                 shortTitle: 'FRAMAS - PLB',
                 subTitle: 'Pusat Logistik Berikat • MM2100',
                 legalName: 'PT FRAMAS INDONESIA (Pusat Logistik Berikat)',
-                location: 'MM2100, Cikarang Barat',
+                location: 'Kawasan Industri MM2100, Blok O-1-2, Kel. Gandamekar, Kec. Cikarang Barat, Kab. Bekasi',
                 facility: 'Pusat Logistik Berikat (PLB)',
                 accent: '#fa8c16',
                 docs: 'BC 1.6, 2.8, 3.3, 3.3.1'

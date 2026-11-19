@@ -92,21 +92,21 @@ function Get-PkCols5([string]$schema, [string]$table) {
 $Tenants = @(
     @{
         Src = "tpbdb"; CmpId = "FRM-1"
-        Name = "PT FRAMAS INDONESIA (TPB / FRM-1)"
+        Name = "PT FRAMAS INDONESIA (PLANT 1 / MM2100)"
         Roles = "tpb"; Subdomain = "frm-1"
-        Alamat = "JL. KENARI RAYA BLOK G2, KAVLING 08B-09A DELTA SILICON 5, KAWASAN INDUSTRI LIPPO CIKARANG, KEL.CICAU, KEC. CIKARANG PUSAT, KAB. BEKASI, JAWA BARAT"
+        Alamat = "KAWASAN INDUSTRI MM 2100 BLOK M 33-34, KELURAHAN GANDAMEKAR, KECAMATAN CIKARANG BARAT, KAB. BEKASI, JAWA BARAT"
         Npwp = "010816064431000"
     },
     @{
         Src = "tpbdelta"; CmpId = "FRM-2"
-        Name = "PT FRAMAS INDONESIA (DELTA / FRM-2)"
+        Name = "PT FRAMAS INDONESIA (PLANT 2 / KENARI DS5)"
         Roles = "tpb"; Subdomain = "frm-2"
-        Alamat = "KAWASAN INDUSTRI MM 2100 BLOK M 33-34, KELURAHAN GANDA MEKAR, KECAMATAN CIKARANG BARAT, BEKASI, JAWA BARAT"
+        Alamat = "JL. KENARI RAYA BLOK G2, KAVLING 08B-09A DELTA SILICON 5, KAWASAN INDUSTRI LIPPO CIKARANG, KEL. CICAU, KEC. CIKARANG PUSAT, KAB. BEKASI, JAWA BARAT"
         Npwp = "010816064431000"
     },
     @{
         Src = "tpbfrm3"; CmpId = "FRM-3"
-        Name = "PT FRAMAS INDONESIA (PLANT 3 / FRM-3)"
+        Name = "PT FRAMAS INDONESIA (PLANT 3 / DS6)"
         Roles = "tpb"; Subdomain = "frm-3"
         Alamat = "JL RAMIN BLOK G6A, DELTA SILICON VI, KAWASAN INDUSTRI LIPPO CIKARANG, DESA/KELURAHAN JAYAMUKTI, KEC. CIKARANG PUSAT, KAB. BEKASI, JAWA BARAT"
         Npwp = "010816064431000"
@@ -115,7 +115,7 @@ $Tenants = @(
         Src = "tpbplb"; CmpId = "PDPLB"
         Name = "PT FRAMAS INDONESIA (PLB / PDPLB)"
         Roles = "plb"; Subdomain = "pdplb"
-        Alamat = "KAWASAN INDUSTRI MM 2100, JL. SULAWESI, KAB. BEKASI, JAWA BARAT, 17530"
+        Alamat = "KAWASAN INDUSTRI MM2100, BLOK O-1-2, KEL. GANDAMEKAR, KEC. CIKARANG BARAT, KAB. BEKASI, JAWA BARAT"
         Npwp = "010816064431000"
     }
 )

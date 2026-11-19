@@ -8583,5 +8583,29 @@ Seluruh skenario kegagalan saat perintah **`SYNC DB!`** diatasi secara menyeluru
    - Format angka metrik diseragamkan dengan separator ribuan `.toLocaleString('id-ID')`.
    - Memastikan fitur `⚡ Select All` (pilih massal dokumen belum H2H) dan `📊 Rekap` (popup analisis bulanan dokumen belum H2H) dapat diakses dengan lancar.
 
+---
+
+## [2026-11-19] Koreksi Presisi Alamat & Identitas Plant Framas Indonesia
+
+### A. Latar Belakang & Koreksi Pengguna
+- Pengguna mengoreksi penamaan dan lokasi alamat plant Framas pada modal switcher (`prnt.sc/XqcwXSmPp8Xz`) dan database:
+  - **Plant 1 (FRM-1)**: Alamat aktual di **KAWASAN INDUSTRI MM 2100 BLOK M 33-34** (sebelumnya tertukar dengan Kenari).
+  - **Plant 2 (FRM-2)**: Alamat aktual di **KENARI RAYA BLOK G2, KAVLING 08B-09A DELTA SILICON 5**.
+  - **Plant 3 (FRM-3)**: Alamat aktual di **JL RAMIN BLOK G6A, DELTA SILICON VI**.
+  - **PDPLB (Pusat Logistik Berikat)**: Alamat aktual di **KAWASAN INDUSTRI MM2100, BLOK O-1-2, KEL. GANDAMEKAR, KEC. CIKARANG BARAT, KAB. BEKASI, JAWA BARAT**.
+
+### B. Tindakan Perbaikan
+1. **Frontend & Modal Switcher (`index.php`)**:
+   - Memperbarui objek konfigurasi `FRAMAS_PLANTS_CONFIG` dan PHP `$framasPlantMeta`:
+     - `FRM-1`: `FRAMAS - 1` `PT FRAMAS INDONESIA (Plant 1 MM2100)` • `Kawasan Industri MM 2100 Blok M 33-34`
+     - `FRM-2`: `FRAMAS - 2` `PT FRAMAS INDONESIA (Plant 2 Kenari DS5)` • `Kenari Raya Blok G2, Kavling 08B-09A Delta Silicon 5`
+     - `FRM-3`: `FRAMAS - 3` `PT FRAMAS INDONESIA (Plant 3 Delta Silicon 6)` • `Jl. Ramin Blok G6A, Delta Silicon VI`
+     - `PDPLB`: `FRAMAS - PLB` `PT FRAMAS INDONESIA (Pusat Logistik Berikat)` • `Kawasan Industri MM2100, Blok O-1-2, Kel. Gandamekar, Kec. Cikarang Barat, Kab. Bekasi`
+   - Memperbarui title tooltip badge plant di login screen dan tabel `daftar_dokumen.php`.
+2. **Database Aktif (`framasbc` Port 3307)**:
+   - Mengeksekusi UPDATE pada tabel `bc_ceisa_company` untuk `FRM-1`, `FRM-2`, `FRM-3`, dan `PDPLB` dengan alamat dan nama yang telah dikoreksi presisi.
+3. **Skrip Otomasi Sinkronisasi (`database/merge_to_framasbc.ps1`)**:
+   - Memperbarui pemetaan metadata tenant `$Tenants` sehingga setiap kali perintah `SYNC DB!` dieksekusi di masa mendatang, nama dan alamat yang benar akan selalu terjaga otomatis.
+
 
 
