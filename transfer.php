@@ -726,7 +726,7 @@ if ($action === 'post_it') {
 
     // Insert ke bc_1ab2 (Multi-tenancy dengan cmp_id)
     $sqlInsert = "INSERT INTO bc_1ab2 (
-        cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES, NDPBM
+        cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS, KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER, SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO, SESUAI, QTY_AKTUAL, TGL_PROSES, NDPBM, GROSS
     )
     SELECT 
         IFNULL(h.cmp_id, '') AS cmp_id,
@@ -747,7 +747,7 @@ if ($action === 'post_it') {
         b.kode_satuan AS UNIT,
         b.jumlah_satuan AS QTY,
         IFNULL(h.kode_valuta, 'IDR') AS KURS,
-        IFNULL(b.harga_penyerahan, IFNULL(b.cif, 0)) AS NILAI,
+        IF(IFNULL(h.kode_valuta, 'IDR') != 'IDR', COALESCE(NULLIF(b.cif, 0), NULLIF(b.fob, 0), NULLIF(b.harga_ekspor, 0), NULLIF(b.nilai_barang, 0), b.harga_penyerahan, 0), COALESCE(NULLIF(b.harga_penyerahan, 0), NULLIF(b.cif_rupiah, 0), NULLIF(b.cif, 0), 0)) AS NILAI,
         '$ab' AS AB,
         h.nomor_aju AS ID_HEADER,
         '' AS SJ,
@@ -755,13 +755,14 @@ if ($action === 'post_it') {
         '' AS FAKTUR,
         h.nomor_aju AS NOMOR_AJU,
         b.seri_barang,
-        IFNULL(b.harga_penyerahan, 0) AS HARGA_PENYERAHAN,
+        IF(IFNULL(b.harga_penyerahan, 0) > 0, b.harga_penyerahan, IF(IFNULL(b.cif_rupiah, 0) > 0, b.cif_rupiah, COALESCE(NULLIF(b.cif, 0), NULLIF(b.fob, 0), NULLIF(b.harga_ekspor, 0), NULLIF(b.nilai_barang, 0), 0) * IFNULL(h.ndpbm, 1))) AS HARGA_PENYERAHAN,
         IFNULL(b.cif, 0) AS CIF,
         IFNULL(b.netto, 0) AS NETTO,
         'Y' AS SESUAI,
         b.jumlah_satuan AS QTY_AKTUAL,
         h.tanggal_daftar AS TGL_PROSES,
-        IFNULL(h.ndpbm, 1) AS NDPBM
+        IFNULL(h.ndpbm, 1) AS NDPBM,
+        COALESCE(NULLIF(b.bruto, 0), NULLIF(h.bruto, 0), b.netto, 0) AS GROSS
     FROM bc_ceisa_header h
     JOIN bc_ceisa_barang b ON h.nomor_aju = b.nomor_aju
     LEFT JOIN (

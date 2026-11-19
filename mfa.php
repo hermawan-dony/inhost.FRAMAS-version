@@ -1,14 +1,18 @@
 <?php
 /**
- * CEISA 4.0 - Standalone MFA Token Window (mfa.php)
+ * CEISA 4.0 & INSW KEK - Standalone MFA Token Window (mfa.php)
  * Menampilkan Google Authenticator TOTP token yang dapat dicopy,
  * dan otomatis berganti setiap 30 detik saat jendela terbuka.
+ * Mendukung CEISA 4.0 dan Portal INSW / LNSW (NSWId).
  */
 session_start();
 require_once __DIR__ . '/koneksi.php';
 
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
 $defaultCmpId = $_REQUEST['cmp_id'] ?? ($_SESSION['company_cmp_id'] ?? '');
+$type = strtolower(trim($_REQUEST['type'] ?? 'ceisa')); // 'ceisa' atau 'insw'
+$isMfaInsw = ($type === 'insw');
+$pageTitle = $isMfaInsw ? 'MFA Token INSW (NSWId)' : 'MFA Token Ceisa 4.0';
 
 // Jika bukan admin dan ada session company, paksa defaultCmpId ke perusahaan user
 if (!$isAdmin && !empty($_SESSION['company_cmp_id'])) {
@@ -17,8 +21,12 @@ if (!$isAdmin && !empty($_SESSION['company_cmp_id'])) {
 
 // Ambil daftar perusahaan: jika Admin tampilkan semua, jika bukan Admin hanya perusahaan sendiri
 $companies = [];
+$secretCheckCol = $isMfaInsw 
+    ? "IF(secret_mfa_insw IS NOT NULL AND secret_mfa_insw != '', 1, 0)" 
+    : "IF(secret_mfa IS NOT NULL AND secret_mfa != '', 1, 0)";
+
 if ($isAdmin) {
-    $res = $koneksi->query("SELECT cmp_id, cmp_name, username_ceisa, IF(secret_mfa IS NOT NULL AND secret_mfa != '', 1, 0) as has_secret FROM bc_ceisa_company WHERE is_active = 1 ORDER BY cmp_name ASC");
+    $res = $koneksi->query("SELECT cmp_id, cmp_name, username_ceisa, insw_client_id, $secretCheckCol as has_secret FROM bc_ceisa_company WHERE is_active = 1 ORDER BY cmp_name ASC");
     if ($res) {
         while ($r = $res->fetch_assoc()) {
             $companies[] = $r;
@@ -28,7 +36,7 @@ if ($isAdmin) {
         }
     }
 } else {
-    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, username_ceisa, IF(secret_mfa IS NOT NULL AND secret_mfa != '', 1, 0) as has_secret FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
+    $stmt = $koneksi->prepare("SELECT cmp_id, cmp_name, username_ceisa, insw_client_id, $secretCheckCol as has_secret FROM bc_ceisa_company WHERE cmp_id = ? LIMIT 1");
     if ($stmt) {
         $stmt->bind_param("s", $defaultCmpId);
         $stmt->execute();
@@ -57,7 +65,7 @@ if (empty($currentCmpName) && !empty($companies)) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MFA Token Ceisa 4.0</title>
+    <title><?= htmlspecialchars($pageTitle) ?></title>
     <script>
         (function() {
             var theme = localStorage.getItem('ceisa_theme') || 'light';
@@ -73,9 +81,9 @@ if (empty($currentCmpName) && !empty($companies)) {
             --text-main: rgba(0, 0, 0, 0.85);
             --text-muted: #8c8c8c;
             --border-color: #e8e8e8;
-            --primary: #1890ff;
-            --primary-hover: #40a9ff;
-            --primary-light: #e6f7ff;
+            --primary: <?= $isMfaInsw ? '#722ed1' : '#1890ff' ?>;
+            --primary-hover: <?= $isMfaInsw ? '#9254de' : '#40a9ff' ?>;
+            --primary-light: <?= $isMfaInsw ? '#f9f0ff' : '#e6f7ff' ?>;
             --success: #52c41a;
             color-scheme: light;
         }
@@ -86,9 +94,9 @@ if (empty($currentCmpName) && !empty($companies)) {
             --text-main: rgba(255, 255, 255, 0.85);
             --text-muted: #8c8c8c;
             --border-color: #303030;
-            --primary: #177ddc;
-            --primary-hover: #3c9ae8;
-            --primary-light: #112a45;
+            --primary: <?= $isMfaInsw ? '#9254de' : '#177ddc' ?>;
+            --primary-hover: <?= $isMfaInsw ? '#b37feb' : '#3c9ae8' ?>;
+            --primary-light: <?= $isMfaInsw ? '#22075e' : '#112a45' ?>;
             --success: #49aa19;
             color-scheme: dark;
         }
@@ -124,7 +132,7 @@ if (empty($currentCmpName) && !empty($companies)) {
             gap: 8px;
         }
 
-        /* CARD SESUAI SCREENSHOT PENGGUNA */
+        /* CARD SESUAI STANDAR CEISA & INSW */
         .totp-card {
             background-color: var(--bg-card);
             border: 1px solid var(--border-color);
@@ -139,7 +147,7 @@ if (empty($currentCmpName) && !empty($companies)) {
 
         .totp-card:hover {
             border-color: var(--primary);
-            box-shadow: 0 4px 12px rgba(24, 144, 255, 0.14);
+            box-shadow: 0 4px 12px <?= $isMfaInsw ? 'rgba(114, 46, 209, 0.16)' : 'rgba(24, 144, 255, 0.14)' ?>;
             transform: translateY(-1px);
         }
 
@@ -147,7 +155,7 @@ if (empty($currentCmpName) && !empty($companies)) {
             transform: translateY(0);
         }
 
-        /* Baris 1: Issuer (portal-beacukai) */
+        /* Baris 1: Issuer (portal-beacukai / NSWId) */
         .totp-issuer {
             font-size: 11px;
             font-weight: 500;
@@ -162,14 +170,14 @@ if (empty($currentCmpName) && !empty($companies)) {
         .totp-badge-auto {
             font-size: 8.5px;
             font-weight: 600;
-            background: #e6f7ff;
-            color: #1890ff;
-            padding: 1px 4px;
+            background: var(--primary-light);
+            color: var(--primary);
+            padding: 1px 5px;
             border-radius: 2px;
-            border: 1px solid #91d5ff;
+            border: 1px solid <?= $isMfaInsw ? '#d3adf7' : '#91d5ff' ?>;
         }
 
-        /* Baris 2: OTP 6 Digit Besar (882437) */
+        /* Baris 2: OTP 6 Digit Besar */
         .totp-code-wrap {
             margin: 6px 0;
             display: flex;
@@ -181,14 +189,14 @@ if (empty($currentCmpName) && !empty($companies)) {
             font-family: 'Roboto Mono', 'Poppins', monospace;
             font-size: 32px;
             font-weight: 700;
-            color: #0b82df;
+            color: <?= $isMfaInsw ? '#722ed1' : '#0b82df' ?>;
             letter-spacing: 1.5px;
             line-height: 1.1;
             transition: color 0.2s ease;
         }
 
         [data-theme="dark"] .totp-code {
-            color: #177ddc;
+            color: <?= $isMfaInsw ? '#9254de' : '#177ddc' ?>;
         }
 
         .totp-code.is-refreshing {
@@ -208,7 +216,7 @@ if (empty($currentCmpName) && !empty($companies)) {
             transform: scale(1.1);
         }
 
-        /* Baris 3: Username (maikelwawoh) */
+        /* Baris 3: Username */
         .totp-username {
             font-size: 11px;
             font-weight: 500;
@@ -249,43 +257,10 @@ if (empty($currentCmpName) && !empty($companies)) {
         }
 
         .progress-bar-fill.danger {
-            background: #f5222d;
+            background: #ff4d4f;
         }
 
-        /* Selector Perusahaan */
-        .cmp-select-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .cmp-select-wrap label {
-            font-size: 9px;
-            font-weight: 600;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            letter-spacing: 0.3px;
-        }
-
-        .cmp-select {
-            width: 100%;
-            height: 24px;
-            border-radius: 2px;
-            border: 1px solid var(--border-color);
-            background: var(--bg-card);
-            color: var(--text-main);
-            padding: 0 6px;
-            font-size: 10px;
-            outline: none;
-            cursor: pointer;
-            font-family: inherit;
-        }
-
-        .cmp-select:focus {
-            border-color: var(--primary);
-        }
-
-        /* Action Buttons */
+        /* Tombol Bawah */
         .actions-wrap {
             display: flex;
             gap: 6px;
@@ -293,38 +268,69 @@ if (empty($currentCmpName) && !empty($companies)) {
 
         .btn {
             flex: 1;
-            height: 24px;
-            border-radius: 2px;
+            height: 28px;
             border: 1px solid var(--border-color);
             background: var(--bg-card);
             color: var(--text-main);
             font-size: 10px;
             font-weight: 500;
+            border-radius: 4px;
+            cursor: pointer;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
-            cursor: pointer;
-            transition: all 0.2s;
-            text-decoration: none;
-            font-family: inherit;
+            gap: 5px;
+            transition: all 0.2s ease;
         }
 
         .btn:hover {
-            color: var(--primary);
             border-color: var(--primary);
-            background: var(--primary-light);
+            color: var(--primary);
         }
 
         .btn-primary {
             background: var(--primary);
-            color: #fff;
             border-color: var(--primary);
+            color: #ffffff;
         }
 
         .btn-primary:hover {
             background: var(--primary-hover);
-            color: #fff;
+            border-color: var(--primary-hover);
+            color: #ffffff;
+        }
+
+        /* Company Switcher Select */
+        .cmp-select-wrap {
+            margin-bottom: 2px;
+        }
+
+        .cmp-select-wrap label {
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .cmp-select {
+            width: 100%;
+            height: 25px;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            background-color: var(--bg-card);
+            color: var(--text-main);
+            font-size: 10px;
+            padding: 0 6px;
+            outline: none;
+            transition: border-color 0.2s;
+            cursor: pointer;
+        }
+
+        .cmp-select:focus {
+            border-color: var(--primary);
         }
 
         /* Toast Feedback */
@@ -358,11 +364,15 @@ if (empty($currentCmpName) && !empty($companies)) {
         <!-- Selector Perusahaan (HANYA MUNCUL JIKA LOGIN SEBAGAI ADMIN) -->
         <?php if ($isAdmin): ?>
         <div class="cmp-select-wrap">
-            <label>Profil Akun Perusahaan</label>
+            <label>Profil Akun Perusahaan <?= $isMfaInsw ? '(NSWId / INSW)' : '(CEISA 4.0)' ?></label>
             <select id="selectCompany" class="cmp-select" onchange="changeCompany(this.value)">
-                <?php foreach ($companies as $c): ?>
+                <?php foreach ($companies as $c): 
+                    $userLabel = $isMfaInsw 
+                        ? (!empty($c['insw_client_id']) ? $c['insw_client_id'] : ($c['username_ceisa'] ?: 'user_insw'))
+                        : ($c['username_ceisa'] ?: 'user');
+                ?>
                     <option value="<?= htmlspecialchars($c['cmp_id']) ?>" <?= ($c['cmp_id'] === $defaultCmpId) ? 'selected' : '' ?>>
-                        <?= htmlspecialchars($c['cmp_name']) ?> (<?= htmlspecialchars($c['username_ceisa'] ?: 'user') ?>) <?= $c['has_secret'] ? '🔑' : '⚠️ (No Secret)' ?>
+                        <?= htmlspecialchars($c['cmp_name']) ?> (<?= htmlspecialchars($userLabel) ?>) <?= $c['has_secret'] ? '🔑' : '⚠️ (No Secret)' ?>
                     </option>
                 <?php endforeach; ?>
             </select>
@@ -370,7 +380,7 @@ if (empty($currentCmpName) && !empty($companies)) {
         <?php else: ?>
         <div style="margin-bottom: 2px; padding: 5px 8px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 4px; display: flex; align-items: center; justify-content: space-between;">
             <div style="font-size: 10px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 5px;">
-                <span>🏢</span>
+                <span><?= $isMfaInsw ? '🌐' : '🏢' ?></span>
                 <span><?= htmlspecialchars($currentCmpName) ?></span>
             </div>
             <span style="font-size: 9px; color: var(--text-muted); font-family: monospace;">[<?= htmlspecialchars($defaultCmpId) ?>]</span>
@@ -381,8 +391,8 @@ if (empty($currentCmpName) && !empty($companies)) {
         <div class="totp-card" id="cardTotp" onclick="copyOtp()" title="Klik untuk menyalin kode OTP">
             <!-- Baris 1: Issuer -->
             <div class="totp-issuer">
-                <span id="labelIssuer">portal-beacukai</span>
-                <span class="totp-badge-auto">Live TOTP</span>
+                <span id="labelIssuer"><?= $isMfaInsw ? 'NSWId' : 'portal-beacukai' ?></span>
+                <span class="totp-badge-auto"><?= $isMfaInsw ? 'Live NSWId TOTP' : 'Live TOTP' ?></span>
             </div>
 
             <!-- Baris 2: Code 6 Digit Besar -->
@@ -402,6 +412,12 @@ if (empty($currentCmpName) && !empty($companies)) {
                 </div>
                 <span style="font-family:monospace; font-weight:700; width:22px; text-align:right;" id="labelSeconds">30s</span>
             </div>
+        </div>
+
+        <!-- Box Peringatan jika Secret Belum Diisi -->
+        <div id="boxEmptySecretNotice" style="display:none; padding:7px 10px; background:rgba(250, 173, 20, 0.12); border:1px solid #faad14; border-radius:4px; font-size:9.5px; color:#d46b08; line-height:1.45;">
+            <strong><i class="fa-solid fa-circle-exclamation"></i> Secret Key Belum Diisi</strong><br>
+            Secret Key akun <strong>NSWId</strong> belum disimpan untuk perusahaan ini. Silakan buka menu <strong>Kelola Perusahaan</strong> &rarr; Tab <strong>Akun CEISA &amp; TOTP MFA</strong> &rarr; isi field <strong>Secret Key TOTP MFA INSW</strong> dari Authenticator Anda.
         </div>
 
         <!-- Tombol Aksi Cepat -->
@@ -424,6 +440,7 @@ if (empty($currentCmpName) && !empty($companies)) {
 
     <script>
         const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
+        const mfaType = '<?= htmlspecialchars($type) ?>';
         let currentCmpId = '<?= htmlspecialchars($defaultCmpId) ?>';
         let remainingSeconds = 30;
         let countdownTimer = null;
@@ -434,32 +451,39 @@ if (empty($currentCmpName) && !empty($companies)) {
             isFetching = true;
 
             const codeEl = document.getElementById('labelCode');
+            const noticeEl = document.getElementById('boxEmptySecretNotice');
             if (manual) {
                 codeEl.classList.add('is-refreshing');
             }
 
             try {
                 const adminParam = isAdmin ? '&is_admin=1' : '&is_admin=0';
-                const res = await fetch(`api_mfa.php?cmp_id=${encodeURIComponent(currentCmpId)}${adminParam}&t=${Date.now()}`);
+                const typeParam = mfaType ? `&type=${encodeURIComponent(mfaType)}` : '';
+                const res = await fetch(`api_mfa.php?cmp_id=${encodeURIComponent(currentCmpId)}${adminParam}${typeParam}&t=${Date.now()}`);
                 const data = await res.json();
 
                 codeEl.classList.remove('is-refreshing');
 
                 if (data.status === 'OK') {
                     codeEl.innerText = data.otp;
-                    document.getElementById('labelIssuer').innerText = data.issuer || 'portal-beacukai';
-                    document.getElementById('labelUsername').innerText = data.username || 'maikelwawoh';
+                    codeEl.style.fontSize = '32px';
+                    codeEl.style.color = (mfaType === 'insw') ? '#722ed1' : '#0b82df';
+                    document.getElementById('labelIssuer').innerText = data.issuer || (mfaType === 'insw' ? 'NSWId' : 'portal-beacukai');
+                    document.getElementById('labelUsername').innerText = data.username || 'user';
                     remainingSeconds = parseInt(data.remaining_seconds, 10) || 30;
+                    if (noticeEl) noticeEl.style.display = 'none';
                     updateTimerDisplay();
                 } else if (data.status === 'EMPTY_SECRET') {
                     codeEl.innerText = 'NO SECRET';
                     document.getElementById('labelUsername').innerText = data.username || 'user';
-                    codeEl.style.fontSize = '24px';
+                    codeEl.style.fontSize = '22px';
                     codeEl.style.color = '#faad14';
+                    if (noticeEl) noticeEl.style.display = 'block';
                 } else {
                     codeEl.innerText = 'ERROR';
-                    codeEl.style.fontSize = '24px';
+                    codeEl.style.fontSize = '22px';
                     codeEl.style.color = '#f5222d';
+                    if (noticeEl) noticeEl.style.display = 'none';
                 }
             } catch (err) {
                 codeEl.classList.remove('is-refreshing');

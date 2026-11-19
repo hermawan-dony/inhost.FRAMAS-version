@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 /**
  * CEISA 4.0 - Warehouse: Delivery (warehouse_delivery.php)
  * Modul Pengeluaran Barang Aktual Fisik Gudang & Posting ke IT Inventory (Laporan 1B - Pengeluaran).
@@ -55,7 +55,7 @@ if ($action === 'list') {
     $filter_tgl2 = trim($_GET['tgl_akhir'] ?? '');
 
     $escCmp = $koneksi->real_escape_string($filter_cmp);
-    $allOutboundCodes = ['25', '261', '27', '30', '33', '331', '41', '613', '631'];
+    $allOutboundCodes = ['25', '41', '261', '27', '613', '631', '30', '33', '331'];
     $allowedOutboundWh = (!empty($isAdmin) && (empty($filter_cmp) || $filter_cmp === 'ALL')) 
         ? $allOutboundCodes 
         : array_values(array_filter($allOutboundCodes, 'isWhOutDocPermitted'));
@@ -333,12 +333,12 @@ if ($action === 'confirm_post') {
                 cmp_id, BC, NOMOR_DAFTAR, TANGGAL_DAFTAR, NO_BUKTI, TGL_BUKTI, NAMA_BS,
                 KODE_BARANG, POS_TARIF, URAIAN, KLAS, UNIT, QTY, KURS, NILAI, AB, ID_HEADER,
                 SJ, INVOICE, FAKTUR, NOMOR_AJU, SERI_BARANG, HARGA_PENYERAHAN, CIF, NETTO,
-                SESUAI, QTY_AKTUAL, MEMO, DOK, TGL_PROSES, CRT_DT, CRT_USER
+                SESUAI, QTY_AKTUAL, MEMO, DOK, TGL_PROSES, CRT_DT, CRT_USER, GROSS
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, NOW(), ?
+                ?, ?, ?, ?, ?, NOW(), ?, ?
             )
         ");
 
@@ -371,21 +371,32 @@ if ($action === 'confirm_post') {
             $hs = $b['pos_tarif'] ?: ($b['hs'] ?? '');
             $satuan = $b['kode_satuan'] ?: 'PCE';
             $valuta = $h['kode_valuta'] ?: 'IDR';
-            $nilai  = floatval($b['harga_penyerahan'] ?: ($b['fob'] ?: ($b['cif'] ?: 0)));
+            $cif = floatval($b['cif'] ?? 0);
+            $fob = floatval($b['fob'] ?? 0);
+            $hargaPenyerahan = floatval($b['harga_penyerahan'] ?? 0);
+            if ($valuta !== 'IDR') {
+                $nilai = ($fob > 0) ? $fob : (($cif > 0) ? $cif : $hargaPenyerahan);
+                if ($hargaPenyerahan <= 0) {
+                    $ndpbm = floatval($h['ndpbm'] ?? 1);
+                    if ($ndpbm <= 0) $ndpbm = 1;
+                    $hargaPenyerahan = $nilai * $ndpbm;
+                }
+            } else {
+                $nilai = ($hargaPenyerahan > 0) ? $hargaPenyerahan : (($fob > 0) ? $fob : $cif);
+            }
             $ab     = 'B'; // Delivery = Pengeluaran (1B)
             $noBukti = !empty($invoice) ? $invoice : (!empty($sj) ? $sj : $noDaftar);
             $tglBukti = $h['tanggal_pernyataan'] ?: ($h['tanggal_daftar'] ?: date('Y-m-d'));
             $faktur = '';
-            $hargaPenyerahan = floatval($b['harga_penyerahan'] ?? 0);
-            $cif = floatval($b['cif'] ?? 0);
             $netto = floatval($b['netto'] ?? 0);
+            $gross = floatval($b['bruto'] ?: ($h['bruto'] ?: $netto));
 
             $stmtInsert->bind_param(
-                "ssssssssssssdsssssssiddssssssss",
+                "ssssssssssssdsssssssiddssssssssd",
                 $docCmp, $kodeBc, $noDaftar, $tglDaftar, $noBukti, $tglBukti, $customer,
                 $b['kode_barang'], $hs, $b['uraian'], $klas, $satuan, $qtyDok, $valuta, $nilai, $ab, $nomor_aju,
                 $sj, $invoice, $faktur, $nomor_aju, $seri, $hargaPenyerahan, $cif, $netto,
-                $sesuai, $qtyAkt, $memo, $dok, $tgl_proses, $currentUser
+                $sesuai, $qtyAkt, $memo, $dok, $tgl_proses, $currentUser, $gross
             );
 
             if (!$stmtInsert->execute()) {
@@ -955,14 +966,14 @@ if ($action === 'detail_tab') {
                             <select id="filterBc" class="filter-control" onchange="loadList()">
                                 <option value="">Semua Dokumen Keluar</option>
                                 <?php if (isWhOutDocPermitted('25')): ?><option value="25">BC 2.5 (Pengeluaran KB ke TLDDP)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('261')): ?><option value="261">BC 2.6.1 (Subkon Keluar)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('27')): ?><option value="27">BC 2.7 (TPB ke TPB OUT)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option><?php endif; ?>
+                                <?php if (isWhOutDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('30')): ?><option value="30">BC 3.0 (Ekspor PEB)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('33')): ?><option value="33">BC 3.3 (Ekspor PLB)</option><?php endif; ?>
                                 <?php if (isWhOutDocPermitted('331')): ?><option value="331">BC 3.3.1 (P3BET PLB)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('41')): ?><option value="41">BC 4.1 (Pengeluaran TLDDP)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('613')): ?><option value="613">PPKEK 6.1.3 (Pengeluaran KEK)</option><?php endif; ?>
-                                <?php if (isWhOutDocPermitted('631')): ?><option value="631">PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
                             </select>
                         </div>
                         <div class="filter-col">

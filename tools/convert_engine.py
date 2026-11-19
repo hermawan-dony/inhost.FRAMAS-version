@@ -94,7 +94,11 @@ def format_npwp_ceisa40(npwp_str):
     NPWP 16 digit -> tambahkan '000000' = 22 digit
     Jika sudah >= 22 digit, kembalikan apa adanya.
     """
-    digits = re.sub(r'\D', '', str(npwp_str or ''))
+    clean_s = str(npwp_str or '').strip()
+    digits = re.sub(r'\D', '', clean_s)
+    # Jika seluruhnya 0 (contoh identitas dummy/luar negeri 000000000000000)
+    if digits and digits == '0' * len(digits):
+        return digits
     if len(digits) == 15:
         return '0' + digits + '000000'
     elif len(digits) == 16:
@@ -338,11 +342,15 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
         'KODE TUJUAN TPB': clean_val(find_field(hdr, ['KODE TUJUAN TPB', 'TUJUAN TPB']))
     }
 
-    # Format identitas jenis 6 (NPWP 16/22 digit)
+    # Format identitas jenis 6 (NPWP 16/22 digit / NITKU)
     def make_entitas_id(raw_id, raw_jenis_id):
         raw_str = clean_val(raw_id)
+        digits = re.sub(r'\D', '', raw_str)
+        # Jika kosong atau seluruhnya 0 (identitas dummy/luar negeri non-NPWP)
+        if not digits or digits == '0' * len(digits):
+            return raw_str, clean_val(raw_jenis_id) or '0'
         formatted_id = format_npwp_ceisa40(raw_str)
-        if len(formatted_id) == 22 or len(re.sub(r'\D', '', raw_str)) in (15, 16):
+        if len(formatted_id) == 22:
             return formatted_id, '6'
         return raw_str, clean_val(raw_jenis_id) or '1'
 
@@ -597,13 +605,52 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
         kd_satuan = clean_val(find_field(b, ['KODE SATUAN', 'JENIS SATUAN', 'SATUAN']))
         jml_satuan = to_float(find_field(b, ['JUMLAH SATUAN', 'JUMLAH']))
 
+        # Deteksi Scrap / Sisa Produksi vs Hasil Produksi
+        raw_kat = clean_val(find_field(b, ['KODE KATEGORI BARANG', 'KATEGORI BARANG', 'KATEGORI_BARANG']))
+        raw_kond = clean_val(find_field(b, ['KODE KONDISI BARANG', 'KONDISI BARANG', 'KONDISI_BARANG']))
+        raw_perh = clean_val(find_field(b, ['KODE PERHITUNGAN', 'KODE_PERHITUNGAN', 'CARA PERHITUNGAN']))
+
+        uraian_upper = uraian_val.upper()
+        is_scrap = raw_kat in ('2', '5') or any(kw in uraian_upper for kw in ['SCRAP', 'SCRAPT', 'SISA', 'LIMBAH', 'WASTE'])
+
+        if raw_kat:
+            kd_kategori = raw_kat
+        elif is_bc25:
+            kd_kategori = '5' if is_scrap else '1'
+        else:
+            kd_kategori = ''
+
+        if raw_kond:
+            kd_kondisi = raw_kond
+        elif is_bc25:
+            kd_kondisi = '2' if is_scrap else '1'
+        else:
+            kd_kondisi = ''
+
+        if is_bc25:
+            # Aturan resmi BC 2.5 CEISA 4.0:
+            # Scrap / Sisa Produksi (kategori 2/5 / uraian Scrap) WAJIB menggunakan 1 (Harga Penyerahan).
+            # Barang Jadi Hasil Produksi (kategori 1) menggunakan 0 (Harga Pemasukan).
+            if is_scrap:
+                kd_perhitungan = '1'
+            elif raw_perh in ('0', '1'):
+                kd_perhitungan = raw_perh
+            else:
+                kd_perhitungan = '0'
+        else:
+            kd_perhitungan = raw_perh if raw_perh in ('0', '1') else '0'
+
         barang_lookup[seri_b_num] = {
             'kode_satuan': kd_satuan,
             'jumlah_satuan': jml_satuan,
             'harga_penyerahan': brg_hp,
             'cif': brg_cif,
             'cif_rupiah': brg_cif_rupiah,
-            'ndpbm': brg_ndpbm
+            'ndpbm': brg_ndpbm,
+            'kd_kategori': kd_kategori,
+            'kd_kondisi': kd_kondisi,
+            'kd_perhitungan': kd_perhitungan,
+            'is_scrap': is_scrap
         }
 
         rows_barang.append({
@@ -640,15 +687,15 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
             'NILAI BARANG': 0.0,
             'NILAI JASA': 0.0,
             'KODE GUNA BARANG': clean_val(find_field(b, ['KODE GUNA BARANG', 'KODE GUNA'])) or ('4' if is_bc25 else ''),
-            'KODE KATEGORI BARANG': clean_val(find_field(b, ['KODE KATEGORI BARANG', 'KATEGORI BARANG'])) or ('5' if is_bc25 else ''),
-            'KODE KONDISI BARANG': clean_val(find_field(b, ['KODE KONDISI BARANG', 'KONDISI BARANG'])) or ('2' if is_bc25 else ''),
-            'KODE PERHITUNGAN': '1' if is_bc25 else (clean_val(find_field(b, ['KODE PERHITUNGAN'])) or '0'),
+            'KODE KATEGORI BARANG': kd_kategori,
+            'KODE KONDISI BARANG': kd_kondisi,
+            'KODE PERHITUNGAN': kd_perhitungan,
             'ISI PER KEMASAN': 0.0
         })
 
     # 8. GENERATE SHEET: BARANGTARIF (Mendukung KODE PUNGUTAN / JENIS TARIF)
     rows_btarif = []
-    total_bayar_map = {'PPN': 0.0, 'PPH': 0.0, 'BM': 0.0}
+    total_bayar_map = {'BM': 0.0, 'PPN': 0.0, 'PPH': 0.0}
 
     existing_tarifs = {}
     for t in src_btarif:
@@ -662,40 +709,66 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
         hp = b_info['harga_penyerahan']
         kd_sat = b_info['kode_satuan']
         jml_sat = b_info['jumlah_satuan']
+        is_hp_barang = (b_info.get('kd_perhitungan') == '0')
 
         # Jenis pungutan standar BC 2.5: BM, PPH, PPN (urutan resmi CEISA 4.0: BM, PPH, PPN)
         standard_pungutans = ['BM', 'PPH', 'PPN'] if is_bc25 else ['BM', 'PPN', 'PPH']
 
         for kd_p in standard_pungutans:
             raw_t = existing_tarifs.get((seri_b_num, kd_p), {})
+            input_tarif = find_field(raw_t, ['TARIF'])
+            input_nb = find_field(raw_t, ['TARIF NILAI BAYAR', 'NILAI BAYAR'])
+            input_fas = clean_val(find_field(raw_t, ['KODE FASILITAS']))
 
             if kd_p == 'PPN':
-                tarif = to_float(find_field(raw_t, ['TARIF']), 11.0)
-                nilai_bayar = round(hp * (tarif / 100.0), 2) if is_bc25 else to_float(find_field(raw_t, ['NILAI BAYAR', 'TARIF NILAI BAYAR']))
-                kd_fasilitas = '1' if is_bc25 else clean_val(find_field(raw_t, ['KODE FASILITAS'], '0'))
+                default_tarif = 11.0
             elif kd_p == 'PPH':
-                tarif = to_float(find_field(raw_t, ['TARIF']), 2.5)
-                nilai_bayar = round(hp * (tarif / 100.0), 2) if is_bc25 else to_float(find_field(raw_t, ['NILAI BAYAR', 'TARIF NILAI BAYAR']))
-                kd_fasilitas = '1' if is_bc25 else clean_val(find_field(raw_t, ['KODE FASILITAS'], '0'))
-            else:  # BM
-                tarif = to_float(find_field(raw_t, ['TARIF']), 0.0)
-                nilai_bayar = 0.0 if (is_bc25 and tarif == 0) else to_float(find_field(raw_t, ['NILAI BAYAR', 'TARIF NILAI BAYAR']))
-                kd_fasilitas = '1' if is_bc25 else clean_val(find_field(raw_t, ['KODE FASILITAS'], '0'))
+                default_tarif = 2.5
+            else:
+                default_tarif = 0.0
 
-            if kd_fasilitas == '1':
+            tarif = to_float(input_tarif, default_tarif) if input_tarif != '' else default_tarif
+
+            # Logika perhitungan BarangTarif
+            if is_bc25 and not is_hp_barang:
+                # BC 2.5 Scrap / Harga Penyerahan: PPN 11%, PPh 2.5% dihitung langsung dari Harga Penyerahan
+                if kd_p in ('PPN', 'PPH'):
+                    nilai_bayar = round(hp * (tarif / 100.0), 2)
+                    kd_fasilitas = '1'
+                else:  # BM
+                    nilai_bayar = round(hp * (tarif / 100.0), 2) if tarif > 0 else 0.0
+                    kd_fasilitas = '1' if nilai_bayar > 0 else '1'
+            elif input_nb != '':
+                # Prioritas: Jika di berkas input sudah ada data NILAI BAYAR (Barang Jadi Hasil Produksi)
+                nilai_bayar = to_float(input_nb)
+                kd_fasilitas = input_fas if input_fas != '' else ('0' if nilai_bayar > 0 else '1')
+            else:
+                # Fallback kalkulasi otomatis
+                if is_bc25:
+                    if kd_p in ('PPN', 'PPH'):
+                        nilai_bayar = round(hp * (tarif / 100.0), 2)
+                        kd_fasilitas = '1'
+                    else:  # BM
+                        nilai_bayar = 0.0
+                        kd_fasilitas = '1'
+                else:
+                    nilai_bayar = 0.0
+                    kd_fasilitas = input_fas if input_fas != '' else '0'
+
+            if nilai_bayar > 0:
                 total_bayar_map[kd_p] = total_bayar_map.get(kd_p, 0.0) + nilai_bayar
 
             rows_btarif.append({
                 'NOMOR AJU': nomor_aju,
                 'SERI BARANG': seri_b_num,
                 'KODE PUNGUTAN': kd_p,
-                'KODE TARIF': '1',
+                'KODE TARIF': clean_val(find_field(raw_t, ['TARIF KODE TARIF', 'KODE TARIF'])) or '1',
                 'TARIF': tarif,
                 'KODE FASILITAS': kd_fasilitas,
-                'TARIF FASILITAS': 100.0,
+                'TARIF FASILITAS': to_float(find_field(raw_t, ['TARIF FASILITAS']), 100.0),
                 'NILAI BAYAR': nilai_bayar,
-                'NILAI FASILITAS': 0.0,
-                'NILAI SUDAH DILUNASI': 0.0,
+                'NILAI FASILITAS': to_float(find_field(raw_t, ['TARIF NILAI FASILITAS', 'NILAI FASILITAS'])),
+                'NILAI SUDAH DILUNASI': to_float(find_field(raw_t, ['TARIF NILAI SUDAH DILUNASI', 'NILAI SUDAH DILUNASI'])),
                 'KODE SATUAN': kd_sat,
                 'JUMLAH SATUAN': jml_sat
             })
@@ -751,6 +824,7 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
 
     # 11. GENERATE SHEET: BAHANBAKUTARIF (Mendukung KODE PUNGUTAN / JENIS TARIF)
     rows_bbtarif = []
+    total_bb_bayar_map = {'BM': 0.0, 'PPN': 0.0, 'PPH': 0.0}
     for bbt in src_bbtarif:
         seri_b = find_field(bbt, ['SERI BARANG', 'SERI_BARANG', 'SERI'])
         seri_bb = find_field(bbt, ['SERI BAHAN BAKU', 'SERI_BAHAN_BAKU', 'SERI BB'])
@@ -758,23 +832,39 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
         if not seri_b or not seri_bb or not kd_p:
             continue
 
-        # Pada BC 2.5, pungutan bahan baku mendapat fasilitas / tidak bayar (0.0) karena sudah dibayar di barang
-        nilai_bayar_bb = 0.0 if is_bc25 else to_float(find_field(bbt, ['NILAI BAYAR', 'TARIF NILAI BAYAR']))
-        kd_fas_bb = '0' if is_bc25 else clean_val(find_field(bbt, ['KODE FASILITAS'], '0'))
+        seri_b_int = int(seri_b) if str(seri_b).isdigit() else 1
+        b_info = barang_lookup.get(seri_b_int, {})
+        is_hp_barang = (b_info.get('kd_perhitungan') == '0')
+
+        raw_nb_bb = find_field(bbt, ['NILAI BAYAR', 'TARIF NILAI BAYAR', 'NILAI_BAYAR'])
+        raw_fas_bb = clean_val(find_field(bbt, ['KODE FASILITAS', 'KODE_FASILITAS']))
+
+        # Pada BC 2.5:
+        # Jika Barang Jadi Hasil Produksi (kd_perhitungan == '0'): nilai bayar bahan baku diambil dari input!
+        # Jika Scrap (kd_perhitungan == '1'): nilai bayar bahan baku 0.0 (karena bayar di barang)
+        if is_bc25 and not is_hp_barang:
+            nilai_bayar_bb = 0.0
+            kd_fas_bb = raw_fas_bb or '0'
+        else:
+            nilai_bayar_bb = to_float(raw_nb_bb)
+            kd_fas_bb = raw_fas_bb or ('0' if nilai_bayar_bb > 0 else '0')
+
+        if nilai_bayar_bb > 0:
+            total_bb_bayar_map[kd_p] = total_bb_bayar_map.get(kd_p, 0.0) + nilai_bayar_bb
 
         rows_bbtarif.append({
             'NOMOR AJU': clean_val(find_field(bbt, ['NOMOR AJU', 'NOMOR_AJU'])) or nomor_aju,
-            'SERI BARANG': int(seri_b) if str(seri_b).isdigit() else 1,
-            'SERI BAHAN BAKU': int(seri_bb) if str(seri_bb).isdigit() else 1,
+            'SERI BARANG': seri_b_int,
+            'SERI BAHAN BAKU': int(seri_bb) if str(seri_bb).isdigit() else seri_bb,
             'KODE ASAL BAHAN BAKU': clean_val(find_field(bbt, ['KODE ASAL BAHAN BAKU', 'KODE_ASAL_BAHAN_BAKU'], '0')),
             'KODE PUNGUTAN': kd_p,
-            'KODE TARIF': '1',
+            'KODE TARIF': clean_val(find_field(bbt, ['KODE TARIF', 'KODE_TARIF'])) or '1',
             'TARIF': to_float(find_field(bbt, ['TARIF'])),
             'KODE FASILITAS': kd_fas_bb,
-            'TARIF FASILITAS': 100.0,
+            'TARIF FASILITAS': to_float(find_field(bbt, ['TARIF FASILITAS']), 100.0),
             'NILAI BAYAR': nilai_bayar_bb,
-            'NILAI FASILITAS': 0.0,
-            'NILAI SUDAH DILUNASI': 0.0,
+            'NILAI FASILITAS': to_float(find_field(bbt, ['NILAI FASILITAS'])),
+            'NILAI SUDAH DILUNASI': to_float(find_field(bbt, ['NILAI SUDAH DILUNASI'])),
             'KODE SATUAN': clean_val(find_field(bbt, ['KODE SATUAN', 'SATUAN'])),
             'JUMLAH SATUAN': 0.0,
             'KODE SUB KOMODITI CUKAI': None
@@ -796,21 +886,67 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
         })
 
     # 13. GENERATE SHEET: PUNGUTAN (Kalkulasi Akurat & Pembulatan Ribuan CEISA 4.0)
+    # Mapping NPWP Billing dari sheet Billing input
+    billing_map = {}
+    for bl in src_billing:
+        jt = clean_val(find_field(bl, ['JENIS TARIF', 'KODE JENIS PUNGUTAN', 'KODE PUNGUTAN', 'PUNGUTAN'])).upper()
+        npwp_b = clean_val(find_field(bl, ['NPWP BILLING', 'NPWP_BILLING', 'NPWP']))
+        if jt and npwp_b:
+            billing_map[jt] = format_npwp_ceisa40(npwp_b)
+
+    # Fallback NPWP Billing dari pengusaha
+    fallback_npwp_billing = format_npwp_ceisa40(id_pengusaha) if id_pengusaha else None
+
     rows_pungutan = []
-    if is_bc25:
+    # Cek apakah sheet Pungutan input memiliki data dengan nilai > 0
+    has_valid_src_pungutan = False
+    for p in src_pungutan:
+        val_p = to_float(find_field(p, ['NILAI PUNGUTAN', 'NILAI_PUNGUTAN', 'NILAI']))
+        if val_p > 0:
+            has_valid_src_pungutan = True
+            break
+
+    if has_valid_src_pungutan:
+        for p in src_pungutan:
+            j_tarif = clean_val(find_field(p, ['KODE JENIS PUNGUTAN', 'JENIS TARIF', 'KODE PUNGUTAN'])).upper()
+            if not j_tarif:
+                continue
+            val_p = to_float(find_field(p, ['NILAI PUNGUTAN', 'NILAI_PUNGUTAN', 'NILAI']))
+            kd_fas = clean_val(find_field(p, ['KODE FASILITAS TARIF', 'KODE FASILITAS', 'KODE_FASILITAS']))
+            if not kd_fas:
+                kd_fas = '0' if val_p > 0 else '1'
+
+            npwp_b = clean_val(find_field(p, ['NPWP BILLING', 'NPWP_BILLING']))
+            if npwp_b:
+                npwp_b = format_npwp_ceisa40(npwp_b)
+            else:
+                npwp_b = billing_map.get(j_tarif) or fallback_npwp_billing
+
+            rows_pungutan.append({
+                'NOMOR AJU': clean_val(find_field(p, ['NOMOR AJU', 'NOMOR_AJU'])) or nomor_aju,
+                'KODE FASILITAS TARIF': kd_fas,
+                'KODE JENIS PUNGUTAN': j_tarif,
+                'NILAI PUNGUTAN': val_p,
+                'NPWP BILLING': npwp_b
+            })
+    elif is_bc25:
         # Pungutan Bayar BC 2.5: PPN dan PPH (BM jika > 0)
-        # Urutan resmi di sheet PUNGUTAN: PPN, PPH (hanya yang nilai bayar > 0)
-        for kd_p in ['PPN', 'PPH', 'BM']:
-            tot = total_bayar_map.get(kd_p, 0.0)
+        # Urutan resmi di sheet PUNGUTAN: BM, PPN, PPH
+        for kd_p in ['BM', 'PPN', 'PPH']:
+            tot_bb = total_bb_bayar_map.get(kd_p, 0.0)
+            tot_brg = total_bayar_map.get(kd_p, 0.0)
+            # Jika ada BM bahan baku impor, utamakan BM bahan baku
+            tot = tot_bb if (kd_p == 'BM' and tot_bb > 0) else (tot_brg if tot_brg > 0 else tot_bb)
             if tot > 0:
                 # Pembulatan ke ribuan terdekat / round to thousand (aturan CEISA DJBC)
                 nilai_pungutan_billing = float(math.ceil(tot / 1000.0) * 1000)
+                npwp_b = billing_map.get(kd_p) or fallback_npwp_billing
                 rows_pungutan.append({
                     'NOMOR AJU': nomor_aju,
                     'KODE FASILITAS TARIF': '1',
                     'KODE JENIS PUNGUTAN': kd_p,
                     'NILAI PUNGUTAN': nilai_pungutan_billing,
-                    'NPWP BILLING': None
+                    'NPWP BILLING': npwp_b
                 })
     else:
         # Dokumen selain BC 2.5: ambil dari sheet pungutan sumber
@@ -818,7 +954,9 @@ def convert_reprint_to_ceisa4(input_path, output_path, structure_json_path=None)
             j_tarif = clean_val(find_field(p, ['KODE JENIS PUNGUTAN', 'JENIS TARIF', 'KODE PUNGUTAN'])).upper()
             if not j_tarif:
                 continue
-            npwp_b = clean_val(find_field(p, ['NPWP BILLING', 'NPWP_BILLING'])) or None
+            npwp_b = clean_val(find_field(p, ['NPWP BILLING', 'NPWP_BILLING']))
+            if npwp_b:
+                npwp_b = format_npwp_ceisa40(npwp_b)
             val_p = to_float(find_field(p, ['NILAI PUNGUTAN', 'NILAI_PUNGUTAN', 'NILAI']))
             rows_pungutan.append({
                 'NOMOR AJU': clean_val(find_field(p, ['NOMOR AJU', 'NOMOR_AJU'])) or nomor_aju,

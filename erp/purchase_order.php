@@ -1434,42 +1434,7 @@ $vQ = $koneksi->query("SELECT KODE as kode, NAMA as nama, ALAMAT as alamat, NPWP
                        ORDER BY NAMA ASC");
 if ($vQ) while ($v = $vQ->fetch_assoc()) $vendors[] = $v;
 
-// Auto-Heal: Jika tabel bc_bs belum ada data vendor, otomatis sinkronkan dari bc_ceisa_entitas
-if (empty($vendors)) {
-    try {
-        $syncQ = $koneksi->query("SELECT DISTINCT NAMA_ENTITAS, ALAMAT_ENTITAS, NOMOR_IDENTITAS, NIB_ENTITAS
-                                  FROM bc_ceisa_entitas
-                                  WHERE KODE_ENTITAS IN ('5', '7', '3') AND NAMA_ENTITAS IS NOT NULL AND TRIM(NAMA_ENTITAS) != ''
-                                  ORDER BY NAMA_ENTITAS ASC");
-        if ($syncQ && $syncQ->num_rows > 0) {
-            $seqV = 1;
-            while ($ent = $syncQ->fetch_assoc()) {
-                $vNama = trim($ent['NAMA_ENTITAS']);
-                $vAlamat = trim($ent['ALAMAT_ENTITAS'] ?? '');
-                $vNpwp = trim($ent['NOMOR_IDENTITAS'] ?? '');
-                $vNitku = trim($ent['NIB_ENTITAS'] ?? '');
-                $vKode = 'VND-' . str_pad($seqV++, 4, '0', STR_PAD_LEFT);
-                $escNm = $koneksi->real_escape_string($vNama);
-                $escAl = $koneksi->real_escape_string($vAlamat);
-                $escNp = $koneksi->real_escape_string($vNpwp);
-                $escNt = $koneksi->real_escape_string($vNitku);
-                
-                $koneksi->query("INSERT IGNORE INTO bc_bs (cmp_id, KODE, NAMA, NAMA_PENDEK, ALAMAT, NPWP, nitku, TIPE, AKTIF, PAY_TERM, kurs)
-                                 VALUES ('$escCmp', '$vKode', '$escNm', LEFT('$escNm', 30), '$escAl', '$escNp', '$escNt', 'S', 'Y', 'Net 30', 'IDR')");
-                
-                $vendors[] = [
-                    'kode' => $vKode,
-                    'nama' => $vNama,
-                    'alamat' => $vAlamat,
-                    'npwp' => $vNpwp,
-                    'nitku' => $vNitku,
-                    'term' => 'Net 30',
-                    'kurs' => 'IDR'
-                ];
-            }
-        }
-    } catch (\Throwable $eSync) {}
-}
+// Note: Auto-Heal vendor disabled to preserve clean multi-tenant isolation
 
 // Mata Uang
 $currencies = ['IDR', 'USD', 'EUR', 'JPY', 'SGD', 'CNY', 'GBP'];

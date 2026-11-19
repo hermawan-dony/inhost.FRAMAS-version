@@ -11,9 +11,11 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once __DIR__ . '/koneksi.php';
 require_once __DIR__ . '/app_settings_helper.php';
+require_once __DIR__ . '/wa_helper.php';
 
 // Validasi Keamanan: Super Administrator atau User Perusahaan yang terotentikasi
 $isSuperAdmin = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
+$isSuperAdminDp = (!empty($_SESSION['is_super_admin']) || (isset($_SESSION['user_id']) && strtolower($_SESSION['user_id']) === 'dp'));
 $isAdmin = $isSuperAdmin;
 $sessionCmpId = $_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '');
 if (empty($sessionCmpId) && !empty($_REQUEST['cmp_id'])) {
@@ -114,6 +116,92 @@ if ($action === 'get') {
 }
 
 // -------------------------------------------------------------
+// 1.B AJAX API: TEST WHATSAPP GATEWAY (Khusus Super Administrator 'dp')
+// -------------------------------------------------------------
+if ($action === 'test_wa') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!$isSuperAdminDp) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya Super Administrator (dp) yang berhak melakukan tes pengiriman WhatsApp.']);
+        exit;
+    }
+    
+    $targetPhone = trim($_POST['target_phone'] ?? '');
+    $customKey   = trim($_POST['api_key'] ?? '');
+    $message     = trim($_POST['message'] ?? 'Tes Notifikasi WhatsApp Gateway dari Portal CEISA 4.0 & ERP Hub');
+
+    if (empty($targetPhone)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor tujuan WhatsApp wajib diisi (format: 628xxx)!']);
+        exit;
+    }
+
+    $res = sendWaMessage($targetPhone, $message, $koneksi, !empty($customKey) ? $customKey : null);
+    echo json_encode($res);
+    exit;
+}
+
+// -------------------------------------------------------------
+// 1.C AJAX API: TEST WHATSAPP MEDIA (Khusus Super Administrator 'dp')
+// -------------------------------------------------------------
+if ($action === 'test_wa_media') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!$isSuperAdminDp) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya Super Administrator (dp) yang berhak melakukan tes pengiriman media WhatsApp.']);
+        exit;
+    }
+
+    $targetPhone = trim($_POST['target_phone'] ?? '');
+    $mediaType   = trim($_POST['media_type'] ?? 'image');
+    $mediaUrl    = trim($_POST['media_url'] ?? '');
+    $caption     = trim($_POST['caption'] ?? '');
+    $customKey   = trim($_POST['api_key'] ?? '');
+
+    if (empty($targetPhone)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Nomor tujuan WhatsApp wajib diisi (format: 628xxx)!']);
+        exit;
+    }
+    if (empty($mediaUrl)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'URL berkas media wajib diisi!']);
+        exit;
+    }
+
+    $res = sendWaMedia($targetPhone, $mediaType, $mediaUrl, $caption, $koneksi, !empty($customKey) ? $customKey : null);
+    echo json_encode($res);
+    exit;
+}
+
+// -------------------------------------------------------------
+// 1.D AJAX API: GET WHATSAPP INBOX (Khusus Super Administrator 'dp')
+// -------------------------------------------------------------
+if ($action === 'get_wa_inbox') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!$isSuperAdminDp) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya Super Administrator (dp) yang berhak membaca kotak masuk WhatsApp.']);
+        exit;
+    }
+
+    $customKey = trim($_POST['api_key'] ?? ($_GET['api_key'] ?? ''));
+    $res = getWaInbox($koneksi, !empty($customKey) ? $customKey : null);
+    echo json_encode($res);
+    exit;
+}
+
+// -------------------------------------------------------------
+// 1.E AJAX API: GET WHATSAPP CONTACTS (Khusus Super Administrator 'dp')
+// -------------------------------------------------------------
+if ($action === 'get_wa_contacts') {
+    header('Content-Type: application/json; charset=utf-8');
+    if (!$isSuperAdminDp) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'Hanya Super Administrator (dp) yang berhak membaca kontak WhatsApp.']);
+        exit;
+    }
+
+    $customKey = trim($_POST['api_key'] ?? ($_GET['api_key'] ?? ''));
+    $res = getWaContacts($koneksi, !empty($customKey) ? $customKey : null);
+    echo json_encode($res);
+    exit;
+}
+
+// -------------------------------------------------------------
 // 2. AJAX API: SAVE SETTINGS
 // -------------------------------------------------------------
 if ($action === 'save') {
@@ -171,6 +259,16 @@ if ($action === 'save') {
     $tahunBuku    = trim($_POST['default_tahun_buku'] ?? 'auto');
 
     // Tampilan & UI
+    $appFont      = trim($_POST['app_font'] ?? 'Poppins');
+    $allowedFonts = ['Poppins', 'Inter', 'Source Sans Pro', 'Roboto', 'Segoe UI'];
+    if (!in_array($appFont, $allowedFonts, true)) {
+        $appFont = 'Poppins';
+    }
+    $appFontSize      = trim($_POST['app_font_size'] ?? '9.5px');
+    $allowedFontSizes = ['9px', '9.5px', '10px', '10.5px', '11px', '12px'];
+    if (!in_array($appFontSize, $allowedFontSizes, true)) {
+        $appFontSize = '9.5px';
+    }
     $defaultTheme = trim($_POST['default_theme'] ?? 'light');
     $defaultSide  = trim($_POST['default_sidebar'] ?? 'pinned');
     $sidebarIcon  = trim($_POST['sidebar_icon_style'] ?? 'colored');
@@ -183,6 +281,23 @@ if ($action === 'save') {
     if ($showMenuTracking !== '1') $showMenuTracking = '0';
     $enableVisitorMenuLog = isset($_POST['enable_visitor_menu_log']) ? trim($_POST['enable_visitor_menu_log']) : '1';
     if ($enableVisitorMenuLog !== '0') $enableVisitorMenuLog = '1';
+
+    // Mode Modul, Workspace Tab & Lisensi Billing (HANYA BISA DIAKSES & DIUBAH OLEH 'dp' SUPER ADMINISTRATOR)
+    $currentSetForAuth = getAppSettings($koneksi, $scopeCmp);
+    if ($isSuperAdminDp) {
+        $appMode = trim($_POST['app_mode'] ?? ($currentSetForAuth['app_mode'] ?? 'standard'));
+        if ($appMode !== 'enterprise') $appMode = 'standard';
+
+        $enableWorkspaceTabs = trim($_POST['enable_workspace_tabs'] ?? ($currentSetForAuth['enable_workspace_tabs'] ?? '1'));
+        if ($enableWorkspaceTabs !== '0') $enableWorkspaceTabs = '1';
+
+        $licenseModel = trim($_POST['license_model'] ?? ($currentSetForAuth['license_model'] ?? 'unlimited'));
+        if ($licenseModel !== 'subscription') $licenseModel = 'unlimited';
+    } else {
+        $appMode = $currentSetForAuth['app_mode'] ?? 'standard';
+        $enableWorkspaceTabs = $currentSetForAuth['enable_workspace_tabs'] ?? '1';
+        $licenseModel = $currentSetForAuth['license_model'] ?? 'unlimited';
+    }
 
     // 1. Upload File Logo Kustom jika ada
     if (isset($_FILES['logo_file']) && $_FILES['logo_file']['error'] === UPLOAD_ERR_OK) {
@@ -245,6 +360,8 @@ if ($action === 'save') {
         'lock_inventory_aju' => $lockInvAju,
         'require_confirm_ya' => $requireYa,
         'default_tahun_buku' => $tahunBuku,
+        'app_font'           => $appFont,
+        'app_font_size'      => $appFontSize,
         'default_theme'      => $defaultTheme,
         'default_sidebar'    => $defaultSide,
         'sidebar_icon_style'       => $sidebarIcon,
@@ -253,7 +370,10 @@ if ($action === 'save') {
         'show_menu_tracking'       => $showMenuTracking,
         'default_page_size'        => $pageSize,
         'toast_duration'           => $toastDur,
-        'enable_visitor_menu_log'  => $enableVisitorMenuLog
+        'enable_visitor_menu_log'  => $enableVisitorMenuLog,
+        'app_mode'                 => $appMode,
+        'enable_workspace_tabs'    => $enableWorkspaceTabs,
+        'license_model'            => $licenseModel
     ];
 
     // Hanya simpan CEISA Gateway jika mengedit Global (atau jika Admin)
@@ -266,7 +386,29 @@ if ($action === 'save') {
         $payload['api_timeout']                 = $apiTimeout;
     }
 
+    // Konfigurasi WhatsApp Gateway (HANYA BISA DISIMPAN OLEH 'dp' SUPER ADMINISTRATOR)
+    if ($isSuperAdminDp) {
+        if (isset($_POST['wa_api_key'])) {
+            $payload['wa_api_key'] = trim($_POST['wa_api_key']);
+        }
+        if (isset($_POST['wa_api_url'])) {
+            $payload['wa_api_url'] = trim($_POST['wa_api_url']);
+        }
+        if (isset($_POST['wa_admin_number'])) {
+            $payload['wa_admin_number'] = formatWaNumber($_POST['wa_admin_number']);
+        }
+        if (isset($_POST['wa_notif_enabled'])) {
+            $payload['wa_notif_enabled'] = trim($_POST['wa_notif_enabled']) === '1' ? '1' : '0';
+        }
+    }
+
     $updated = saveAppSettings($payload, $koneksi, $sessionUser, $scopeCmp);
+
+    // Sinkronkan ke session aktif jika scope adalah perusahaan aktif atau global
+    if (empty($scopeCmp) || $scopeCmp === $sessionCmpId) {
+        $_SESSION['use_tabs'] = ($enableWorkspaceTabs === '0') ? 0 : 1;
+        $_SESSION['app_mode'] = ($appMode === 'enterprise') ? 'enterprise' : 'standar';
+    }
 
     $msg = empty($scopeCmp) 
         ? 'Pengaturan aplikasi Global berhasil diperbarui!' 
@@ -357,16 +499,22 @@ if ($isCustomScope) {
             var urlParams = new URLSearchParams(window.location.search);
             var th = urlParams.get('theme') || localStorage.getItem('ceisa_theme') || '<?= htmlspecialchars($themeParam) ?>' || 'light';
             document.documentElement.setAttribute('data-theme', th);
+            var savedFont = '<?= htmlspecialchars($currentSettings['app_font'] ?? 'Poppins') ?>';
+            document.documentElement.style.setProperty('--app-font', "'" + savedFont + "', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
+            var savedFontSize = '<?= htmlspecialchars($currentSettings['app_font_size'] ?? '9.5px') ?>';
+            document.documentElement.style.setProperty('--app-font-size', savedFontSize);
+            document.documentElement.style.setProperty('--form-font-size', savedFontSize);
         })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Roboto:wght@300;400;500;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <style>
         :root {
+            --app-font: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             --bg-base: #f0f2f5;
             --bg-card: #ffffff;
             --bg-header: #fafafa;
@@ -412,12 +560,16 @@ if ($isCustomScope) {
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Poppins', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            font-family: var(--app-font);
             font-size: 10.5px;
             background: var(--bg-base);
             color: var(--text-main);
             padding: 6px 12px 24px;
             min-height: 100vh;
+        }
+
+        input, select, textarea, button {
+            font-family: var(--app-font);
         }
 
         /* Header Page */
@@ -1086,6 +1238,11 @@ if ($isCustomScope) {
                     <button type="button" class="tab-btn" onclick="switchSettingsTab('tab-ui', this)">
                         <i class="fa-solid fa-palette"></i> Tampilan &amp; Preferensi
                     </button>
+                    <?php if ($isSuperAdminDp): ?>
+                    <button type="button" class="tab-btn" onclick="switchSettingsTab('tab-wa', this)">
+                        <i class="fa-brands fa-whatsapp" style="color:#25d366;"></i> WhatsApp Gateway (dp)
+                    </button>
+                    <?php endif; ?>
                 </div>
 
                 <!-- 1. TAB: IDENTITAS & BRANDING -->
@@ -1259,6 +1416,16 @@ if ($isCustomScope) {
                             <select class="form-control" id="inp_show_login_company_title" name="show_login_company_title">
                                 <option value="0" <?= (($currentSettings['show_login_company_title'] ?? '0') === '0') ? 'selected' : '' ?>>👁️‍🗨️ Sembunyikan (HIDE - Default: Bersih, Rapi &amp; Ringkas)</option>
                                 <option value="1" <?= (($currentSettings['show_login_company_title'] ?? '0') === '1') ? 'selected' : '' ?>>👁️ Tampilkan (SHOW - Tampilkan teks Nama Perusahaan &amp; Portal Akses)</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="grid-column: span 2;">
+                            <label>
+                                <span>Menu Tracking Respon Pabean</span>
+                                <span class="hint">Visibilitas menu Tracking Respon Pabean di sidebar</span>
+                            </label>
+                            <select class="form-control" id="inp_show_menu_tracking" name="show_menu_tracking">
+                                <option value="0" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '0') ? 'selected' : '' ?>>👁️‍🗨️ Sembunyikan (HIDE - Bawaan / Default Framas)</option>
+                                <option value="1" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '1') ? 'selected' : '' ?>>👁️ Tampilkan (SHOW)</option>
                             </select>
                         </div>
                     </div>
@@ -1531,8 +1698,99 @@ if ($isCustomScope) {
 
                 <!-- 5. TAB: TAMPILAN & PREFERENSI -->
                 <div class="tab-pane" id="tab-ui">
+                    <?php if ($isSuperAdminDp): ?>
                     <div class="form-section-title">
+                        <i class="fa-solid fa-layer-group"></i> Mode Modul Sistem &amp; Arsitektur Navigasi Portal
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <span>Mode Modul &amp; Tampilan Sidebar</span>
+                                <span class="hint">Pilihan antara tampilan standar klasik atau enterprise multi-modul</span>
+                            </label>
+                            <select class="form-control" id="inp_app_mode" name="app_mode">
+                                <option value="standard" <?= (($currentSettings['app_mode'] ?? 'standard') === 'standard') ? 'selected' : '' ?>>📋 Mode Standar (Sidebar Tunggal Klasik - Kepabeanan &amp; IT Inventory)</option>
+                                <option value="enterprise" <?= (($currentSettings['app_mode'] ?? 'standard') === 'enterprise') ? 'selected' : '' ?>>🏢 Mode Enterprise (Dual-Rail Outlook Sidebar - Modul ERP Purchasing, Sales &amp; Finance)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <span>Fitur Tab Workspace (Multi-Document Tabs)</span>
+                                <span class="hint">Kemampuan membuka banyak menu sekaligus dalam tab-tab di atas</span>
+                            </label>
+                            <select class="form-control" id="inp_enable_workspace_tabs" name="enable_workspace_tabs">
+                                <option value="1" <?= (($currentSettings['enable_workspace_tabs'] ?? '1') === '1') ? 'selected' : '' ?>>🗂️ Aktif (Multi-Tab Workspace - Tanpa Reload Halaman)</option>
+                                <option value="0" <?= (($currentSettings['enable_workspace_tabs'] ?? '1') === '0') ? 'selected' : '' ?>>📄 Non-Aktif (Mode Single Page Klasik / Tanpa Bar Tab)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-section-title" style="margin-top: 15px;">
+                        <i class="fa-solid fa-credit-card"></i> Model Lisensi &amp; Langganan (Subscription Billing)
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <span>Model Lisensi Penggunaan</span>
+                                <span class="hint">Pengaturan masa aktif dan sistem penagihan otomatis</span>
+                            </label>
+                            <select class="form-control" id="inp_license_model" name="license_model">
+                                <option value="unlimited" <?= (($currentSettings['license_model'] ?? 'unlimited') === 'unlimited') ? 'selected' : '' ?>>♾️ Mode Unlimited (Bebas Masa Aktif / Lifetime)</option>
+                                <option value="subscription" <?= (($currentSettings['license_model'] ?? 'unlimited') === 'subscription') ? 'selected' : '' ?>>💳 Mode Berbayar Langganan (Subscription Based - Billing QRIS)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <span>Status Persiapan Integrasi QRIS Payment Gateway</span>
+                                <span class="hint">Arsitektur penagihan otomatis invoice per perusahaan</span>
+                            </label>
+                            <div style="padding: 7px 10px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 6px; font-size: 11px; color: var(--text-secondary); line-height: 1.4;">
+                                <i class="fa-solid fa-circle-check" style="color: #52c41a;"></i> Skema database <code>subscription_type</code> &amp; <code>expired_date</code> telah siap aktif. Integrasi checkout QRIS siap dikembangkan pada fase berikutnya.
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <div class="form-section-title" <?= $isSuperAdminDp ? 'style="margin-top: 15px;"' : '' ?>>
                         <i class="fa-solid fa-palette"></i> Preferensi Tampilan Portal &amp; Grid Tabel
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>
+                                <span>Tipe Font Utama Aplikasi (Typography Family)</span>
+                                <span class="hint">Standarisasi tipografi seragam untuk menu navigasi portal, formulir input, dan tabel data ERP</span>
+                            </label>
+                            <select class="form-control" id="inp_app_font" name="app_font" onchange="previewAppFont(this.value)">
+                                <option value="Poppins" <?= (($currentSettings['app_font'] ?? 'Poppins') === 'Poppins') ? 'selected' : '' ?>>✨ Poppins (Bawaan / Standar Rekomendasi)</option>
+                                <option value="Inter" <?= (($currentSettings['app_font'] ?? 'Poppins') === 'Inter') ? 'selected' : '' ?>>🏢 Inter (Enterprise &amp; Modern Clean Sans)</option>
+                                <option value="Source Sans Pro" <?= (($currentSettings['app_font'] ?? 'Poppins') === 'Source Sans Pro') ? 'selected' : '' ?>>📊 Source Sans Pro (Klasik ERP &amp; DataGrid)</option>
+                                <option value="Roboto" <?= (($currentSettings['app_font'] ?? 'Poppins') === 'Roboto') ? 'selected' : '' ?>>📱 Roboto (Clean Material Design)</option>
+                                <option value="Segoe UI" <?= (($currentSettings['app_font'] ?? 'Poppins') === 'Segoe UI') ? 'selected' : '' ?>>🪟 Segoe UI (Windows Desktop Native)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>
+                                <span>Ukuran Font Kontrol &amp; Form (Base Font Size)</span>
+                                <span class="hint">Skala ukuran teks formulir input, label, dropdown, grid data, dan side menu</span>
+                            </label>
+                            <select class="form-control" id="inp_app_font_size" name="app_font_size" onchange="previewAppFontSize(this.value)">
+                                <option value="9.5px" <?= (($currentSettings['app_font_size'] ?? '9.5px') === '9.5px') ? 'selected' : '' ?>>✨ 9.5px (Kompak Standar PB / Seragam Side Menu - Rekomendasi)</option>
+                                <option value="9px" <?= (($currentSettings['app_font_size'] ?? '9.5px') === '9px') ? 'selected' : '' ?>>📐 9.0px (Sangat Kompak / Ultra-dense)</option>
+                                <option value="10px" <?= (($currentSettings['app_font_size'] ?? '9.5px') === '10px') ? 'selected' : '' ?>>📏 10.0px (Kompak Sedang)</option>
+                                <option value="10.5px" <?= (($currentSettings['app_font_size'] ?? '9.5px') === '10.5px') ? 'selected' : '' ?>>📄 10.5px (Standar Normal)</option>
+                                <option value="11px" <?= (($currentSettings['app_font_size'] ?? '9.5px') === '11px') ? 'selected' : '' ?>>🔍 11.0px (Besar &amp; Nyaman)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row single" style="margin-top:-6px;">
+                        <div class="form-group">
+                            <div id="fontPreviewBox" style="padding: 7px 12px; background: var(--bg-base); border: 1px solid var(--border-color); border-radius: 6px; font-size: <?= htmlspecialchars($currentSettings['app_font_size'] ?? '9.5px') ?>; font-family: '<?= htmlspecialchars($currentSettings['app_font'] ?? 'Poppins') ?>', sans-serif;">
+                                <span style="font-size:9px; color:var(--text-muted); display:block; margin-bottom:2px; font-weight:600; text-transform:uppercase;">Pratinjau Karakter &amp; Ukuran (Live Preview):</span>
+                                <b>PO-2026-001</b> • PT. INHOST TEKNOLOGI • Alamat Supplier: Jl. Industri No. 8 • ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 1234567890 • Rp 125.000.000
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-row">
@@ -1608,19 +1866,6 @@ if ($isCustomScope) {
                         </div>
                     </div>
 
-                    <div class="form-row single">
-                        <div class="form-group">
-                            <label>
-                                <span>Menu Tracking Respon Pabean</span>
-                                <span class="hint">Visibilitas menu Tracking Respon Pabean di sidebar</span>
-                            </label>
-                            <select class="form-control" id="inp_show_menu_tracking" name="show_menu_tracking">
-                                <option value="0" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '0') ? 'selected' : '' ?>>👁️‍🗨️ Sembunyikan (HIDE - Bawaan / Default Framas)</option>
-                                <option value="1" <?= (($currentSettings['show_menu_tracking'] ?? '0') === '1') ? 'selected' : '' ?>>👁️ Tampilkan (SHOW)</option>
-                            </select>
-                        </div>
-                    </div>
-
                     <div class="form-section-title" style="margin-top: 15px;">
                         <i class="fa-solid fa-chart-line"></i> Audit &amp; Pemantauan Pengunjung (Visitor &amp; Menu Analytics)
                     </div>
@@ -1640,6 +1885,190 @@ if ($isCustomScope) {
                         </div>
                     </div>
                 </div>
+
+                <?php if ($isSuperAdminDp): ?>
+                <!-- 6. TAB: WHATSAPP GATEWAY (KHUSUS DP) -->
+                <div class="tab-pane" id="tab-wa">
+                    <div class="form-section-title">
+                        <i class="fa-brands fa-whatsapp" style="color:#25d366;"></i> Konfigurasi Notifikasi WhatsApp (WA Gateway)
+                    </div>
+                    
+                    <div style="margin-bottom:12px; padding:10px 14px; background:rgba(37,211,102,0.08); border:1px solid rgba(37,211,102,0.3); border-radius:6px; font-size:11px; color:var(--text-main); line-height:1.5;">
+                        <i class="fa-solid fa-shield-halved" style="color:#25d366; margin-right:4px;"></i> <strong>Khusus Super Administrator (dp):</strong> Pengaturan API Key WhatsApp digunakan untuk seluruh notifikasi otomatis sistem (notifikasi tiket baru dan penyelesaian kendala ke nomor WA pengguna &amp; admin).
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group" style="flex:2;">
+                            <label>
+                                <span>API Key WhatsApp Gateway *</span>
+                                <span class="hint">Bearer Token API Gateway WhatsApp (https://my.vpsmurah.co.id)</span>
+                            </label>
+                            <div style="position:relative;">
+                                <input type="password" class="form-control" id="inp_wa_api_key" name="wa_api_key" 
+                                       value="<?= htmlspecialchars($currentSettings['wa_api_key'] ?? 'sk-api-5adnzcm2j7vbeyl8y25xuew3598f24tbzlm4l8b1') ?>" 
+                                       style="padding-right:32px;">
+                                <button type="button" onclick="toggleWaKeyVisibility()" style="position:absolute; right:8px; top:50%; transform:translateY(-50%); border:none; background:none; cursor:pointer; color:var(--text-muted);">
+                                    <i class="fa-solid fa-eye" id="iconWaEye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label>
+                                <span>Status Notifikasi WA</span>
+                                <span class="hint">Aktifkan atau nonaktifkan pengiriman otomatis</span>
+                            </label>
+                            <select class="form-control" id="inp_wa_notif_enabled" name="wa_notif_enabled">
+                                <option value="1" <?= (($currentSettings['wa_notif_enabled'] ?? '1') === '1') ? 'selected' : '' ?>>✅ Aktif (Kirim Otomatis)</option>
+                                <option value="0" <?= (($currentSettings['wa_notif_enabled'] ?? '1') === '0') ? 'selected' : '' ?>>⛔ Non-Aktif</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group" style="flex:1;">
+                            <label>
+                                <span>Nomor WA Admin Mas Wawan / dp (Format 628xxx)</span>
+                                <span class="hint">Menerima alert pesan setiap kali ada pengguna membuat Tiket baru</span>
+                            </label>
+                            <input type="text" class="form-control" id="inp_wa_admin_number" name="wa_admin_number" 
+                                   value="<?= htmlspecialchars($currentSettings['wa_admin_number'] ?? '') ?>" 
+                                   placeholder="Contoh: 6281234567890" onblur="if(this.value) this.value = formatWaJs(this.value)">
+                        </div>
+                        <div class="form-group" style="flex:1;">
+                            <label>
+                                <span>Endpoint API URL</span>
+                                <span class="hint">REST API Endpoint Pengiriman Pesan</span>
+                            </label>
+                            <input type="text" class="form-control" id="inp_wa_api_url" name="wa_api_url" 
+                                   value="<?= htmlspecialchars($currentSettings['wa_api_url'] ?? 'https://my.vpsmurah.co.id/api/svc/v1/wa-api/messages') ?>" readonly style="background:var(--bg-base); opacity:0.85;">
+                        </div>
+                    </div>
+
+                    <div class="form-section-title" style="margin-top:16px; display:flex; align-items:center; justify-content:space-between;">
+                        <span><i class="fa-solid fa-network-wired" style="color:#25d366;"></i> Operasional WhatsApp Gateway (Inbox, Kontak, Media &amp; Pesan)</span>
+                    </div>
+
+                    <!-- Subtabs WhatsApp Gateway -->
+                    <div style="display:flex; gap:6px; margin-bottom:12px; border-bottom:1px solid var(--border-color); padding-bottom:8px;">
+                        <button type="button" class="ant-btn ant-btn-sm wa-subtab-btn active" id="btnWaSub_inbox" onclick="switchWaSubTab('inbox')" style="height:24px; font-size:9.5px; padding:0 10px;">
+                            <i class="fa-solid fa-inbox" style="color:#1890ff;"></i> Kotak Masuk (Inbox)
+                        </button>
+                        <button type="button" class="ant-btn ant-btn-sm wa-subtab-btn" id="btnWaSub_contacts" onclick="switchWaSubTab('contacts')" style="height:24px; font-size:9.5px; padding:0 10px;">
+                            <i class="fa-solid fa-address-book" style="color:#722ed1;"></i> Buku Kontak
+                        </button>
+                        <button type="button" class="ant-btn ant-btn-sm wa-subtab-btn" id="btnWaSub_media" onclick="switchWaSubTab('media')" style="height:24px; font-size:9.5px; padding:0 10px;">
+                            <i class="fa-solid fa-photo-film" style="color:#fa8c16;"></i> Kirim Media (Foto/File)
+                        </button>
+                        <button type="button" class="ant-btn ant-btn-sm wa-subtab-btn" id="btnWaSub_text" onclick="switchWaSubTab('text')" style="height:24px; font-size:9.5px; padding:0 10px;">
+                            <i class="fa-solid fa-comment-dots" style="color:#25d366;"></i> Kirim Pesan Teks
+                        </button>
+                    </div>
+
+                    <!-- 1. SUBPANEL: INBOX -->
+                    <div id="waSubPanel_inbox" class="wa-subpanel" style="background:var(--bg-base); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <div>
+                                <strong style="font-size:11px;"><i class="fa-solid fa-inbox" style="color:#1890ff;"></i> Kotak Masuk Pesan WhatsApp</strong>
+                                <div style="font-size:9px; color:var(--text-muted);">Membaca pesan WhatsApp yang masuk ke nomor gateway via <code>GET /api/svc/v1/wa-api/inbox</code></div>
+                            </div>
+                            <button type="button" class="ant-btn ant-btn-sm" onclick="loadWaInbox()" id="btnRefreshInbox" style="height:24px; font-size:9.5px;">
+                                <i class="fa-solid fa-rotate"></i> Muat Ulang Inbox
+                            </button>
+                        </div>
+                        <div id="waInboxContent">
+                            <div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;">
+                                <i class="fa-solid fa-inbox" style="font-size:24px; display:block; margin-bottom:6px; opacity:0.4;"></i>
+                                Klik tombol <strong>"Muat Ulang Inbox"</strong> untuk memeriksa pesan WhatsApp terbaru.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. SUBPANEL: KONTAK -->
+                    <div id="waSubPanel_contacts" class="wa-subpanel" style="display:none; background:var(--bg-base); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:8px;">
+                            <div>
+                                <strong style="font-size:11px;"><i class="fa-solid fa-address-book" style="color:#722ed1;"></i> Daftar Kontak WhatsApp Gateway</strong>
+                                <div style="font-size:9px; color:var(--text-muted);">Membaca kontak yang tersimpan di nomor gateway via <code>GET /api/svc/v1/wa-api/contacts</code></div>
+                            </div>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <input type="text" id="filterWaContacts" class="form-control" placeholder="Cari nama / nomor..." oninput="filterContactsList()" style="width:160px; height:24px; font-size:9.5px;">
+                                <button type="button" class="ant-btn ant-btn-sm" onclick="loadWaContacts()" id="btnRefreshContacts" style="height:24px; font-size:9.5px;">
+                                    <i class="fa-solid fa-rotate"></i> Muat Kontak
+                                </button>
+                            </div>
+                        </div>
+                        <div id="waContactsContent">
+                            <div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;">
+                                <i class="fa-solid fa-address-book" style="font-size:24px; display:block; margin-bottom:6px; opacity:0.4;"></i>
+                                Klik tombol <strong>"Muat Kontak"</strong> untuk mengambil daftar kontak dari gateway.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. SUBPANEL: KIRIM MEDIA -->
+                    <div id="waSubPanel_media" class="wa-subpanel" style="display:none; background:var(--bg-base); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px;">
+                        <div style="margin-bottom:10px;">
+                            <strong style="font-size:11px;"><i class="fa-solid fa-photo-film" style="color:#fa8c16;"></i> Kirim Berkas Media (Gambar, Dokumen, Video, Audio)</strong>
+                            <div style="font-size:9px; color:var(--text-muted);">Mengirimkan berkas via REST API <code>POST /api/svc/v1/wa-api/media</code></div>
+                        </div>
+                        <div class="form-row" style="margin-bottom:8px;">
+                            <div class="form-group" style="flex:1;">
+                                <label>Nomor Tujuan (628xxx): *</label>
+                                <input type="text" class="form-control" id="media_wa_phone" placeholder="Contoh: 6281234567890" onblur="if(this.value) this.value = formatWaJs(this.value)">
+                            </div>
+                            <div class="form-group" style="flex:1;">
+                                <label>Tipe Media: *</label>
+                                <select class="form-control" id="media_wa_type">
+                                    <option value="image">🖼️ Image / Foto (JPG/PNG)</option>
+                                    <option value="document">📄 Document / Berkas (PDF/XLS/DOC)</option>
+                                    <option value="video">🎥 Video (MP4)</option>
+                                    <option value="audio">🎵 Audio (MP3/OGG)</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row" style="margin-bottom:8px;">
+                            <div class="form-group" style="flex:2;">
+                                <label>URL Langsung Berkas Media: *</label>
+                                <input type="text" class="form-control" id="media_wa_url" placeholder="https://domain.com/path/berkas.jpg">
+                            </div>
+                            <div class="form-group" style="flex:2;">
+                                <label>Keterangan / Caption Pesan (Opsional):</label>
+                                <input type="text" class="form-control" id="media_wa_caption" placeholder="Contoh: Lampiran Dokumen Invoice / Pemberitahuan">
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <button type="button" class="btn btn-default" onclick="sendTestWaMedia()" id="btnSendMedia" style="border-color:#fa8c16; color:#fa8c16;">
+                                <i class="fa-solid fa-paper-plane"></i> Kirim Media Sekarang
+                            </button>
+                            <span id="testWaMediaResult" style="font-size:10.5px; font-weight:600;"></span>
+                        </div>
+                    </div>
+
+                    <!-- 4. SUBPANEL: KIRIM PESAN TEKS -->
+                    <div id="waSubPanel_text" class="wa-subpanel" style="display:none; background:var(--bg-base); border:1px solid var(--border-color); border-radius:6px; padding:12px 14px;">
+                        <div style="margin-bottom:10px;">
+                            <strong style="font-size:11px;"><i class="fa-solid fa-comment-dots" style="color:#25d366;"></i> Uji Coba Pengiriman Pesan Teks</strong>
+                            <div style="font-size:9px; color:var(--text-muted);">Mengirimkan pesan teks via REST API <code>POST /api/svc/v1/wa-api/messages</code></div>
+                        </div>
+                        <div class="form-row" style="margin-bottom:8px;">
+                            <div class="form-group" style="flex:1;">
+                                <label>Nomor HP Tujuan Tes (628xxx):</label>
+                                <input type="text" class="form-control" id="test_wa_phone" placeholder="Contoh: 6281234567890" onblur="if(this.value) this.value = formatWaJs(this.value)">
+                            </div>
+                            <div class="form-group" style="flex:2;">
+                                <label>Isi Pesan Uji Coba:</label>
+                                <input type="text" class="form-control" id="test_wa_message" value="Halo Mas Wawan! Tes pengiriman WhatsApp Gateway CEISA 4.0 berhasil terhubung.">
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center;">
+                            <button type="button" class="btn btn-default" onclick="sendTestWaMessage()" id="btnTestWa" style="border-color:#25d366; color:#25d366;">
+                                <i class="fa-brands fa-whatsapp"></i> Kirim Tes Pesan Sekarang
+                            </button>
+                            <span id="testWaResult" style="margin-left:14px; font-size:10.5px; font-weight:600;"></span>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
 
             </div>
 
@@ -1938,6 +2367,39 @@ if ($isCustomScope) {
             if (simLogo) simLogo.src = appLogo;
         }
 
+        function previewAppFont(fontName) {
+            const fontBox = document.getElementById('fontPreviewBox');
+            if (fontBox) {
+                const fontStack = "'" + fontName + "', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+                fontBox.style.fontFamily = fontStack;
+            }
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'LIVE_FONT_CHANGE',
+                        font: fontName
+                    }, '*');
+                }
+            } catch(e) {}
+        }
+
+        function previewAppFontSize(size) {
+            const fontBox = document.getElementById('fontPreviewBox');
+            if (fontBox) {
+                fontBox.style.fontSize = size;
+            }
+            document.documentElement.style.setProperty('--app-font-size', size);
+            document.documentElement.style.setProperty('--form-font-size', size);
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                        type: 'LIVE_FONT_SIZE_CHANGE',
+                        fontSize: size
+                    }, '*');
+                }
+            } catch(e) {}
+        }
+
         function previewSidebarFontSizeLive() {
             updateLivePreview();
             try {
@@ -1964,7 +2426,7 @@ if ($isCustomScope) {
 
             Swal.fire({
                 title: 'Menyimpan Pengaturan...',
-                text: 'Menerapkan konfigurasi identitas dan wallpaper portal',
+                text: 'Menerapkan konfigurasi identitas, font, dan preferensi portal',
                 allowOutsideClick: false,
                 didOpen: () => { Swal.showLoading(); }
             });
@@ -1982,13 +2444,29 @@ if ($isCustomScope) {
 
                 const json = await res.json();
                 if (json.status === 'OK') {
+                    if (json.settings && json.settings.app_font) {
+                        try {
+                            localStorage.setItem('ceisa_app_font', json.settings.app_font);
+                        } catch(e) {}
+                    }
+                    if (json.settings && json.settings.app_font_size) {
+                        try {
+                            localStorage.setItem('ceisa_app_font_size', json.settings.app_font_size);
+                        } catch(e) {}
+                    }
                     Swal.fire({
                         icon: 'success',
                         title: 'Berhasil Disimpan!',
                         text: json.message,
-                        timer: 2000,
+                        timer: 1500,
                         showConfirmButton: false
                     }).then(() => {
+                        if (window.parent && window.parent !== window) {
+                            try {
+                                window.parent.location.reload();
+                                return;
+                            } catch(e) {}
+                        }
                         window.location.reload();
                     });
 
@@ -1999,6 +2477,18 @@ if ($isCustomScope) {
                                 type: 'APP_SETTINGS_UPDATED',
                                 settings: json.settings
                             }, '*');
+                            if (json.settings && json.settings.app_font) {
+                                window.parent.postMessage({
+                                    type: 'CHANGE_FONT',
+                                    font: json.settings.app_font
+                                }, '*');
+                            }
+                            if (json.settings && json.settings.app_font_size) {
+                                window.parent.postMessage({
+                                    type: 'CHANGE_FONT_SIZE',
+                                    fontSize: json.settings.app_font_size
+                                }, '*');
+                            }
                         }
                     } catch(e) {}
 
@@ -2126,6 +2616,366 @@ if ($isCustomScope) {
                     }
                 }
             });
+        }
+        function toggleWaKeyVisibility() {
+            const inp = document.getElementById('inp_wa_api_key');
+            const icon = document.getElementById('iconWaEye');
+            if (!inp) return;
+            if (inp.type === 'password') {
+                inp.type = 'text';
+                if (icon) icon.className = 'fa-solid fa-eye-slash';
+            } else {
+                inp.type = 'password';
+                if (icon) icon.className = 'fa-solid fa-eye';
+            }
+        }
+
+        function formatWaJs(val) {
+            if (!val) return '';
+            let clean = String(val).replace(/[^0-9]/g, '');
+            if (clean.startsWith('08')) {
+                clean = '62' + clean.slice(1);
+            } else if (clean.startsWith('8')) {
+                clean = '62' + clean;
+            }
+            return clean;
+        }
+
+        async function sendTestWaMessage() {
+            const phoneEl = document.getElementById('test_wa_phone');
+            const msgEl = document.getElementById('test_wa_message');
+            const apiKeyEl = document.getElementById('inp_wa_api_key');
+            const btn = document.getElementById('btnTestWa');
+            const resBox = document.getElementById('testWaResult');
+
+            const phone = phoneEl ? phoneEl.value.trim() : '';
+            const msg = msgEl ? msgEl.value.trim() : '';
+            const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+
+            if (!phone) {
+                Swal.fire('Peringatan', 'Harap isi nomor HP tujuan tes (format 628xxx)!', 'warning');
+                return;
+            }
+
+            const normPhone = formatWaJs(phone);
+            if (!normPhone.startsWith('628') || normPhone.length < 10) {
+                Swal.fire('Peringatan', 'Format nomor tidak valid! Gunakan format 628xxx (contoh: 6281234567890).', 'warning');
+                return;
+            }
+
+            if (phoneEl) phoneEl.value = normPhone;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mengirimkan...';
+            resBox.innerHTML = '';
+
+            const fd = new FormData();
+            fd.append('action', 'test_wa');
+            fd.append('target_phone', normPhone);
+            fd.append('message', msg || 'Tes Notifikasi WA CEISA 4.0');
+            fd.append('api_key', apiKey);
+
+            try {
+                const resp = await fetch('setting_aplikasi.php', { method: 'POST', body: fd });
+                const json = await resp.json();
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-brands fa-whatsapp"></i> Kirim Tes Pesan Sekarang';
+
+                if (json.status === 'OK') {
+                    resBox.innerHTML = '<span style="color:#52c41a;"><i class="fa-solid fa-check"></i> Pesan terkirim ke ' + normPhone + '!</span>';
+                    Swal.fire('Berhasil Terkirim', 'Pesan WhatsApp berhasil dikirimkan ke ' + normPhone + '.', 'success');
+                } else {
+                    resBox.innerHTML = '<span style="color:#ff4d4f;"><i class="fa-solid fa-xmark"></i> ' + (json.message || 'Gagal mengirim') + '</span>';
+                    Swal.fire('Gagal Kirim', json.message || 'Terjadi kesalahan pada gateway WA.', 'error');
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-brands fa-whatsapp"></i> Kirim Tes Pesan Sekarang';
+                resBox.innerHTML = '<span style="color:#ff4d4f;"><i class="fa-solid fa-xmark"></i> Koneksi error: ' + e.message + '</span>';
+                Swal.fire('Error', 'Koneksi ke server gagal: ' + e.message, 'error');
+            }
+        }
+
+        function switchWaSubTab(tab) {
+            document.querySelectorAll('.wa-subtab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.wa-subpanel').forEach(p => p.style.display = 'none');
+            
+            const btn = document.getElementById('btnWaSub_' + tab);
+            const panel = document.getElementById('waSubPanel_' + tab);
+            if (btn) btn.classList.add('active');
+            if (panel) panel.style.display = 'block';
+
+            if (tab === 'inbox') {
+                loadWaInbox();
+            } else if (tab === 'contacts') {
+                loadWaContacts();
+            }
+        }
+
+        async function sendTestWaMedia() {
+            const phoneEl = document.getElementById('media_wa_phone');
+            const typeEl = document.getElementById('media_wa_type');
+            const urlEl = document.getElementById('media_wa_url');
+            const capEl = document.getElementById('media_wa_caption');
+            const apiKeyEl = document.getElementById('inp_wa_api_key');
+            const btn = document.getElementById('btnSendMedia');
+            const resBox = document.getElementById('testWaMediaResult');
+
+            const phone = phoneEl ? phoneEl.value.trim() : '';
+            const type = typeEl ? typeEl.value : 'image';
+            const url = urlEl ? urlEl.value.trim() : '';
+            const caption = capEl ? capEl.value.trim() : '';
+            const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+
+            if (!phone) {
+                Swal.fire('Peringatan', 'Harap isi nomor HP tujuan (format 628xxx)!', 'warning');
+                return;
+            }
+            if (!url) {
+                Swal.fire('Peringatan', 'Harap isi URL berkas media!', 'warning');
+                return;
+            }
+
+            const normPhone = formatWaJs(phone);
+            if (!normPhone.startsWith('628') || normPhone.length < 10) {
+                Swal.fire('Peringatan', 'Format nomor tidak valid! Gunakan format 628xxx (contoh: 6281234567890).', 'warning');
+                return;
+            }
+            if (phoneEl) phoneEl.value = normPhone;
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Mengirimkan Media...';
+            resBox.innerHTML = '';
+
+            const fd = new FormData();
+            fd.append('action', 'test_wa_media');
+            fd.append('target_phone', normPhone);
+            fd.append('media_type', type);
+            fd.append('media_url', url);
+            fd.append('caption', caption);
+            fd.append('api_key', apiKey);
+
+            try {
+                const resp = await fetch('setting_aplikasi.php', { method: 'POST', body: fd });
+                const json = await resp.json();
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Kirim Media Sekarang';
+
+                if (json.status === 'OK') {
+                    resBox.innerHTML = '<span style="color:#52c41a;"><i class="fa-solid fa-check"></i> Media terkirim ke ' + normPhone + '!</span>';
+                    Swal.fire('Media Berhasil Terkirim', 'Berkas media WhatsApp berhasil dikirimkan ke ' + normPhone + '.', 'success');
+                } else {
+                    resBox.innerHTML = '<span style="color:#ff4d4f;"><i class="fa-solid fa-xmark"></i> ' + (json.message || 'Gagal mengirim') + '</span>';
+                    Swal.fire('Gagal Kirim Media', json.message || 'Terjadi kesalahan pada gateway WA.', 'error');
+                }
+            } catch (e) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> Kirim Media Sekarang';
+                resBox.innerHTML = '<span style="color:#ff4d4f;"><i class="fa-solid fa-xmark"></i> Koneksi error: ' + e.message + '</span>';
+                Swal.fire('Error', 'Koneksi ke server gagal: ' + e.message, 'error');
+            }
+        }
+
+        async function loadWaInbox() {
+            const container = document.getElementById('waInboxContent');
+            const apiKeyEl = document.getElementById('inp_wa_api_key');
+            const btn = document.getElementById('btnRefreshInbox');
+            const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Memuat...';
+            container.innerHTML = '<div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;"><i class="fa-solid fa-spinner fa-spin"></i> Menghubungi API Gateway WhatsApp (GET /inbox)...</div>';
+
+            const fd = new FormData();
+            fd.append('action', 'get_wa_inbox');
+            fd.append('api_key', apiKey);
+
+            try {
+                const resp = await fetch('setting_aplikasi.php', { method: 'POST', body: fd });
+                const json = await resp.json();
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Muat Ulang Inbox';
+
+                if (json.status === 'OK' && Array.isArray(json.data) && json.data.length > 0) {
+                    let rows = json.data.map((m, idx) => {
+                        const sender = escapeHtml(m.from || m.sender || m.number || '-');
+                        const name = escapeHtml(m.name || m.pushName || sender);
+                        const text = escapeHtml(m.text || m.message || m.body || '-');
+                        const time = escapeHtml(m.timestamp || m.date || m.time || '-');
+                        return `
+                            <tr>
+                                <td style="text-align:center;">${idx + 1}</td>
+                                <td><strong>${name}</strong><br><span style="font-size:9px; color:var(--text-muted); font-family:monospace;">${sender}</span></td>
+                                <td style="word-break:break-word;">${text}</td>
+                                <td style="font-size:9px; color:var(--text-muted); white-space:nowrap;">${time}</td>
+                                <td style="text-align:center;">
+                                    <button type="button" class="ant-btn ant-btn-sm" style="height:20px; font-size:9px; padding:0 6px;" onclick="quickReplyWa('${sender}')" title="Balas Pesan">
+                                        <i class="fa-solid fa-reply"></i> Balas
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+
+                    container.innerHTML = `
+                        <div style="overflow-x:auto;">
+                            <table class="table-setting" style="width:100%; font-size:9.5px; border-collapse:collapse;">
+                                <thead>
+                                    <tr style="background:var(--bg-card); text-align:left;">
+                                        <th style="width:30px; text-align:center; padding:5px 6px;">No</th>
+                                        <th style="width:150px; padding:5px 6px;">Pengirim</th>
+                                        <th style="padding:5px 6px;">Isi Pesan</th>
+                                        <th style="width:120px; padding:5px 6px;">Waktu</th>
+                                        <th style="width:60px; text-align:center; padding:5px 6px;">Aksi</th>
+                                    </tr>
+                                </thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                        </div>
+                    `;
+                } else if (json.message && (json.message.includes('belum tersedia') || json.message.includes('inbox'))) {
+                    container.innerHTML = `
+                        <div style="padding:14px; background:rgba(250,140,22,0.08); border:1px solid rgba(250,140,22,0.3); border-radius:6px; font-size:10px; color:var(--text-main); line-height:1.6;">
+                            <div style="font-weight:700; color:#fa8c16; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Respons Gateway WhatsApp Upstream:
+                            </div>
+                            <div style="font-family:monospace; font-size:9.5px; background:var(--bg-card); padding:6px 8px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:8px;">
+                                ${escapeHtml(json.message)}
+                            </div>
+                            <span style="color:var(--text-secondary);">
+                                <strong>Status Fitur:</strong> Modul baca Inbox di antarmuka CEISA 4.0 sudah <strong>100% siap dan terintegrasi</strong> dengan endpoint <code>GET /api/svc/v1/wa-api/inbox</code>. Begitu endpoint inbox diaktifkan pada server gateway (vpsmurah.co.id), seluruh pesan masuk akan langsung tampil otomatis pada tabel di atas.
+                            </span>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;">
+                            <i class="fa-solid fa-inbox" style="font-size:24px; display:block; margin-bottom:6px; opacity:0.4;"></i>
+                            ${escapeHtml(json.message || 'Kotak masuk kosong. Belum ada pesan WhatsApp yang diterima.')}
+                        </div>
+                    `;
+                }
+            } catch(e) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Muat Ulang Inbox';
+                container.innerHTML = '<div style="padding:12px; color:#ff4d4f; font-size:10px;"><i class="fa-solid fa-xmark"></i> Gagal memuat inbox: ' + escapeHtml(e.message) + '</div>';
+            }
+        }
+
+        let rawWaContacts = [];
+        async function loadWaContacts() {
+            const container = document.getElementById('waContactsContent');
+            const apiKeyEl = document.getElementById('inp_wa_api_key');
+            const btn = document.getElementById('btnRefreshContacts');
+            const apiKey = apiKeyEl ? apiKeyEl.value.trim() : '';
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Memuat...';
+            container.innerHTML = '<div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;"><i class="fa-solid fa-spinner fa-spin"></i> Menghubungi API Gateway WhatsApp (GET /contacts)...</div>';
+
+            const fd = new FormData();
+            fd.append('action', 'get_wa_contacts');
+            fd.append('api_key', apiKey);
+
+            try {
+                const resp = await fetch('setting_aplikasi.php', { method: 'POST', body: fd });
+                const json = await resp.json();
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Muat Kontak';
+
+                if (json.status === 'OK' && Array.isArray(json.data) && json.data.length > 0) {
+                    rawWaContacts = json.data;
+                    renderContactsTable(rawWaContacts);
+                } else if (json.message && (json.message.includes('belum tersedia') || json.message.includes('contacts'))) {
+                    container.innerHTML = `
+                        <div style="padding:14px; background:rgba(250,140,22,0.08); border:1px solid rgba(250,140,22,0.3); border-radius:6px; font-size:10px; color:var(--text-main); line-height:1.6;">
+                            <div style="font-weight:700; color:#fa8c16; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
+                                <i class="fa-solid fa-triangle-exclamation"></i> Respons Gateway WhatsApp Upstream:
+                            </div>
+                            <div style="font-family:monospace; font-size:9.5px; background:var(--bg-card); padding:6px 8px; border-radius:4px; border:1px solid var(--border-color); margin-bottom:8px;">
+                                ${escapeHtml(json.message)}
+                            </div>
+                            <span style="color:var(--text-secondary);">
+                                <strong>Status Fitur:</strong> Modul baca Kontak di antarmuka CEISA 4.0 sudah <strong>100% siap dan terintegrasi</strong> dengan endpoint <code>GET /api/svc/v1/wa-api/contacts</code>. Begitu endpoint kontak diaktifkan pada server gateway (vpsmurah.co.id), seluruh kontak akan langsung tampil otomatis pada tabel di atas.
+                            </span>
+                        </div>
+                    `;
+                } else {
+                    container.innerHTML = `
+                        <div style="text-align:center; padding:18px; color:var(--text-muted); font-size:10px;">
+                            <i class="fa-solid fa-address-book" style="font-size:24px; display:block; margin-bottom:6px; opacity:0.4;"></i>
+                            ${escapeHtml(json.message || 'Tidak ada kontak ditemukan pada gateway WhatsApp.')}
+                        </div>
+                    `;
+                }
+            } catch(e) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-rotate"></i> Muat Kontak';
+                container.innerHTML = '<div style="padding:12px; color:#ff4d4f; font-size:10px;"><i class="fa-solid fa-xmark"></i> Gagal memuat kontak: ' + escapeHtml(e.message) + '</div>';
+            }
+        }
+
+        function renderContactsTable(list) {
+            const container = document.getElementById('waContactsContent');
+            if (!list || list.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:14px; color:var(--text-muted); font-size:10px;">Tidak ada kontak yang cocok dengan filter pencarian.</div>';
+                return;
+            }
+            let rows = list.map((c, idx) => {
+                const name = escapeHtml(c.name || c.notify || c.pushName || '-');
+                const phone = escapeHtml(c.id || c.number || c.jid || '').replace(/@s\.whatsapp\.net/, '');
+                return `
+                    <tr>
+                        <td style="text-align:center;">${idx + 1}</td>
+                        <td><strong>${name}</strong></td>
+                        <td><code style="color:var(--primary);">${phone}</code></td>
+                        <td style="text-align:center;">
+                            <button type="button" class="ant-btn ant-btn-sm" style="height:20px; font-size:9px; padding:0 6px;" onclick="quickReplyWa('${phone}')" title="Kirim Pesan">
+                                <i class="fa-solid fa-paper-plane"></i> Chat
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div style="max-height:260px; overflow-y:auto;">
+                    <table class="table-setting" style="width:100%; font-size:9.5px; border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:var(--bg-card); text-align:left;">
+                                <th style="width:30px; text-align:center; padding:5px 6px;">No</th>
+                                <th style="padding:5px 6px;">Nama Kontak</th>
+                                <th style="padding:5px 6px;">Nomor WA</th>
+                                <th style="width:70px; text-align:center; padding:5px 6px;">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            `;
+        }
+
+        function filterContactsList() {
+            const q = (document.getElementById('filterWaContacts')?.value || '').toLowerCase().trim();
+            if (!q) {
+                renderContactsTable(rawWaContacts);
+                return;
+            }
+            const filtered = rawWaContacts.filter(c => {
+                const name = (c.name || c.notify || c.pushName || '').toLowerCase();
+                const phone = (c.id || c.number || c.jid || '').toLowerCase();
+                return name.includes(q) || phone.includes(q);
+            });
+            renderContactsTable(filtered);
+        }
+
+        function quickReplyWa(phone) {
+            const clean = formatWaJs(phone);
+            switchWaSubTab('text');
+            const phoneEl = document.getElementById('test_wa_phone');
+            if (phoneEl) {
+                phoneEl.value = clean;
+                phoneEl.focus();
+            }
         }
     </script>
 </body>

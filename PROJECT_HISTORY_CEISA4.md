@@ -8301,3 +8301,38 @@ Berikut rangkuman menyeluruh seluruh modifikasi, perbaikan sistem, dan penambaha
 2. **`daftar_dokumen.php`**: Mengintegrasikan fitur ekspor Excel `exportDaftarDokumenExcel()`, badge status H2H/Lokal, dan `session_write_close()` non-blocking.
 3. **`editor.php` & `transfer.php`**: Menerapkan `session_write_close()` untuk mencegah request blocking serta try-catch pada posting IT Inventory.
 4. **`index.php`**: Mendaftarkan routing baru (`tools`, `ticket`, `inv_qr_label`, `coretax_xml`, `erp_*`) dan icon menu navigasi di sidebar.
+
+
+---
+
+## 📌 48. INTEGRASI AMAN PEMBARUAN UPSTREAM VPS JAKARTA (19 NOVEMBER 2026)
+
+### A. Latar Belakang & Kebutuhan
+1. Penarikan dan integrasi pembaruan dari repository upstream VPS Jakarta (`inhost-base/main` / `inhost.web.id` commit `39c28ad` s/d `cb4d29c`).
+2. Sinkronisasi satu arah murni ke lokal (`d:\xampp\htdocs\inhost-web-id`) mematuhi RULE 0 (DILARANG push/deploy ke VPS Bekasi atau cPanel).
+3. Mempertahankan konfigurasi port MySQL 3307 database `framasbc`, multi-plant routing (`FRM-1`, `FRM-2`, `FRM-3`, `PDPLB`), integrasi Winline ERP, autentikasi single-core Framas, dan optimasi query anti-Cartesian product pada dokumen bersama.
+
+### B. Fitur & Peningkatan yang Diintegrasikan:
+1. **Redesign Merge Duplicate Items (`material.php`)**:
+   - Pembaruan tampilan merge duplikasi bahan baku dengan tabel interaktif, validasi kesesuaian satuan (UoM), auto-code reuse, dan otomatisasi penghapusan tanda kurung siku `[` `]`.
+2. **WhatsApp Gateway Integrasi (`wa_helper.php` & `setting_aplikasi.php`)**:
+   - Helper pengiriman notifikasi WhatsApp berbasis API Gateway serta konfigurasi antarmuka pada menu Pengaturan Aplikasi (URL API, Token/API Key, dan nomor tujuan default), dengan tetap mempertahankan pengaturan khusus Framas `show_menu_tracking`.
+3. **LNSW KEK Gen2 Services (`kek_integration.php` & `kek_service.php`)**:
+   - Modul integrasi Kawasan Ekonomi Khusus (KEK) generasi 2 dengan otentikasi HMAC-SHA256, API MFA INSW token (`secret_mfa_insw`), dan auto-fallback token.
+4. **Optimasi IT Inventory & Modul Mutasi (`it_inventory.php` & `mutasi.php`)**:
+   - Desain filter 1 baris (compact single-line filter) pada IT Inventory untuk kemudahan pencarian dokumen, serta modal mutasi interaktif (`mutasi.php`) untuk penelusuran histori barang.
+5. **RAM Cache Cleaner & Server Monitor (`server_monitor.php` & `tools/api.php`)**:
+   - Utilitas pemantau server dengan fitur pembersih cache memori RAM dan manajemen INSW KEK keys.
+6. **Ketahanan Hapus Dokumen Rekap (`daftar_dokumen.php`)**:
+   - Penanganan query pembersihan dokumen rekap lokal yang mencakup pembersihan aman tabel sekunder (`bc_ceisa_status`, `bc_ceisa_respons`, `bc_ceisa_aju_posted`, `bc_ceisa_sppb`, `bc_ceisa_get_pdf`, `bc_ceisa_json`) dalam blok try-catch, serta penanganan respon teks non-JSON dengan eksekusi `filterClientTable()`.
+   - Tetap menjaga integritas join anti-Cartesian product (`LEFT JOIN bc_ceisa_company cmp ON a.cmp_id = cmp.cmp_id`) dan filter isolasi multi-plant.
+7. **Pembaruan Konverter Pabean (`tools/convert_engine.py`)**:
+   - Dukungan NITKU 22 digit dan engine kalkulasi pabean BC 2.5 terbaru.
+8. **Isolasi Multi-Tenant Vendor & Saldo Awal**:
+   - Peningkatan pemisahan hak akses per perusahaan pada `stok_awal_tahun.php`, `erp/buyer_supplier.php`, dan `erp/purchase_order.php`.
+
+### C. Migrasi Database (DDL):
+- Eksekusi DDL pada database `framasbc` (port 3307):
+  ```sql
+  ALTER TABLE bc_ceisa_company ADD COLUMN secret_mfa_insw VARCHAR(64) NULL AFTER secret_mfa;
+  ```

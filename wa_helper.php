@@ -177,6 +177,258 @@ function sendWaMessage($to, $message, $dbConn = null, $customApiKey = null) {
 }
 
 /**
+ * Mendapatkan base URL gateway WhatsApp (menghapus sub-path seperti /messages)
+ * 
+ * @param string|null $apiUrl
+ * @return string Base URL (contoh: https://my.vpsmurah.co.id/api/svc/v1/wa-api)
+ */
+function getWaBaseApiUrl($apiUrl = null) {
+    $url = !empty($apiUrl) ? trim($apiUrl) : DEFAULT_WA_API_URL;
+    return preg_replace('#/(messages|media|inbox|contacts)/?$#i', '', rtrim($url, '/'));
+}
+
+/**
+ * Mengirim pesan media WhatsApp (Gambar, Dokumen, Video, Audio) via Gateway REST API
+ * 
+ * curl -X POST "https://my.vpsmurah.co.id/api/svc/v1/wa-api/media" \
+ *   -H "Authorization: Bearer sk-api-xxxxx" \
+ *   -H "Content-Type: application/json" \
+ *   -d '{"to":"6281234567890","type":"image","url":"https://.../foto.jpg","caption":"Promo"}'
+ * 
+ * @param string $to Nomor tujuan (format 628xxx)
+ * @param string $type Tipe media ('image', 'document', 'video', 'audio')
+ * @param string $url URL langsung berkas media
+ * @param string $caption Keterangan media opsional
+ * @param mysqli|null $dbConn
+ * @param string|null $customApiKey
+ * @return array
+ */
+function sendWaMedia($to, $type, $url, $caption = '', $dbConn = null, $customApiKey = null) {
+    $normalizedTo = formatWaNumber($to);
+    if (empty($normalizedTo)) {
+        return [
+            'status'    => 'ERROR',
+            'message'   => 'Nomor WhatsApp tidak valid. Harap gunakan format 628xxx (contoh: 6281234567890).',
+            'http_code' => 400
+        ];
+    }
+    if (empty($url)) {
+        return [
+            'status'    => 'ERROR',
+            'message'   => 'URL media wajib diisi.',
+            'http_code' => 400
+        ];
+    }
+
+    $config = getWaConfig($dbConn);
+    if ($customApiKey === null && !$config['notif_enabled']) {
+        return [
+            'status'    => 'DISABLED',
+            'message'   => 'Notifikasi WhatsApp sedang dinonaktifkan pada Pengaturan Sistem.',
+            'http_code' => 200
+        ];
+    }
+
+    $apiKey = !empty($customApiKey) ? trim($customApiKey) : $config['api_key'];
+    $baseUrl = getWaBaseApiUrl($config['api_url'] ?? DEFAULT_WA_API_URL);
+    $mediaEndpoint = $baseUrl . '/media';
+
+    $cleanType = strtolower(trim($type));
+    if (!in_array($cleanType, ['image', 'document', 'video', 'audio'])) {
+        $cleanType = 'image';
+    }
+
+    $payload = json_encode([
+        'to'      => $normalizedTo,
+        'type'    => $cleanType,
+        'url'     => trim($url),
+        'caption' => (string)$caption
+    ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+    $ch = curl_init($mediaEndpoint);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => $payload,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json',
+            'Accept: application/json'
+        ],
+        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_CONNECTTIMEOUT => 10,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        return [
+            'status'    => 'ERROR',
+            'message'   => 'Koneksi ke gateway WA gagal: ' . $curlErr,
+            'http_code' => 0,
+            'response'  => ''
+        ];
+    }
+
+    $decoded = json_decode($response, true);
+    $isSuccess = ($httpCode >= 200 && $httpCode < 300);
+
+    return [
+        'status'    => $isSuccess ? 'OK' : 'ERROR',
+        'message'   => $isSuccess ? ($decoded['message'] ?? 'Media WhatsApp berhasil dikirim.') : ($decoded['message'] ?? $decoded['error'] ?? 'Gateway WA mengembalikan error (' . $httpCode . ')'),
+        'http_code' => $httpCode,
+        'response'  => $response,
+        'decoded'   => $decoded
+    ];
+}
+
+/**
+ * Membaca Kotak Masuk (Inbox) WhatsApp dari Gateway REST API
+ * 
+ * curl -X GET "https://my.vpsmurah.co.id/api/svc/v1/wa-api/inbox" \
+ *   -H "Authorization: Bearer sk-api-xxxxx"
+ * 
+ * @param mysqli|null $dbConn
+ * @param string|null $customApiKey
+ * @return array
+ */
+function getWaInbox($dbConn = null, $customApiKey = null) {
+    $config = getWaConfig($dbConn);
+    $apiKey = !empty($customApiKey) ? trim($customApiKey) : $config['api_key'];
+    $baseUrl = getWaBaseApiUrl($config['api_url'] ?? DEFAULT_WA_API_URL);
+    $inboxEndpoint = $baseUrl . '/inbox';
+
+    $ch = curl_init($inboxEndpoint);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPGET        => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json'
+        ],
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        return [
+            'status'    => 'ERROR',
+            'message'   => 'Koneksi ke gateway WA gagal: ' . $curlErr,
+            'http_code' => 0,
+            'response'  => '',
+            'data'      => []
+        ];
+    }
+
+    $decoded = json_decode($response, true);
+    $isSuccess = ($httpCode >= 200 && $httpCode < 300);
+
+    // Ambil array data pesan masuk jika ada
+    $inboxData = [];
+    if (is_array($decoded)) {
+        if (!empty($decoded['data']) && is_array($decoded['data'])) {
+            $inboxData = $decoded['data'];
+        } elseif (!empty($decoded['messages']) && is_array($decoded['messages'])) {
+            $inboxData = $decoded['messages'];
+        } elseif (!empty($decoded['inbox']) && is_array($decoded['inbox'])) {
+            $inboxData = $decoded['inbox'];
+        } elseif ($isSuccess && !isset($decoded['error']) && array_is_list($decoded)) {
+            $inboxData = $decoded;
+        }
+    }
+
+    return [
+        'status'    => $isSuccess ? 'OK' : 'ERROR',
+        'message'   => $isSuccess ? 'Inbox berhasil dimuat.' : ($decoded['error'] ?? $decoded['message'] ?? 'Gateway WA mengembalikan error (' . $httpCode . ')'),
+        'http_code' => $httpCode,
+        'response'  => $response,
+        'decoded'   => $decoded,
+        'data'      => $inboxData
+    ];
+}
+
+/**
+ * Membaca Daftar Kontak WhatsApp dari Gateway REST API
+ * 
+ * curl -X GET "https://my.vpsmurah.co.id/api/svc/v1/wa-api/contacts" \
+ *   -H "Authorization: Bearer sk-api-xxxxx"
+ * 
+ * @param mysqli|null $dbConn
+ * @param string|null $customApiKey
+ * @return array
+ */
+function getWaContacts($dbConn = null, $customApiKey = null) {
+    $config = getWaConfig($dbConn);
+    $apiKey = !empty($customApiKey) ? trim($customApiKey) : $config['api_key'];
+    $baseUrl = getWaBaseApiUrl($config['api_url'] ?? DEFAULT_WA_API_URL);
+    $contactsEndpoint = $baseUrl . '/contacts';
+
+    $ch = curl_init($contactsEndpoint);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPGET        => true,
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $apiKey,
+            'Accept: application/json'
+        ],
+        CURLOPT_TIMEOUT        => 20,
+        CURLOPT_CONNECTTIMEOUT => 8,
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => false
+    ]);
+
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErr  = curl_error($ch);
+    curl_close($ch);
+
+    if ($curlErr) {
+        return [
+            'status'    => 'ERROR',
+            'message'   => 'Koneksi ke gateway WA gagal: ' . $curlErr,
+            'http_code' => 0,
+            'response'  => '',
+            'data'      => []
+        ];
+    }
+
+    $decoded = json_decode($response, true);
+    $isSuccess = ($httpCode >= 200 && $httpCode < 300);
+
+    $contactsData = [];
+    if (is_array($decoded)) {
+        if (!empty($decoded['data']) && is_array($decoded['data'])) {
+            $contactsData = $decoded['data'];
+        } elseif (!empty($decoded['contacts']) && is_array($decoded['contacts'])) {
+            $contactsData = $decoded['contacts'];
+        } elseif ($isSuccess && !isset($decoded['error']) && array_is_list($decoded)) {
+            $contactsData = $decoded;
+        }
+    }
+
+    return [
+        'status'    => $isSuccess ? 'OK' : 'ERROR',
+        'message'   => $isSuccess ? 'Daftar kontak berhasil dimuat.' : ($decoded['error'] ?? $decoded['message'] ?? 'Gateway WA mengembalikan error (' . $httpCode . ')'),
+        'http_code' => $httpCode,
+        'response'  => $response,
+        'decoded'   => $decoded,
+        'data'      => $contactsData
+    ];
+}
+
+/**
  * Auto-heal kolom database & konfigurasi awal
  */
 function ensureWaTablesAndColumns($dbConn) {

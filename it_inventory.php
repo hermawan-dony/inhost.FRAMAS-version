@@ -27,6 +27,10 @@ if (isset($_GET['is_admin'])) {
     $is_admin = (int)$_GET['is_admin'];
 }
 
+if (!empty($cmp_id) && $cmp_id !== 'ALL') {
+    ceisa_switch_company_db($cmp_id);
+}
+
 $escCmp = (!empty($cmp_id) && $cmp_id !== 'ALL' && isset($koneksi) && $koneksi) ? $koneksi->real_escape_string($cmp_id) : '';
 $cmpFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
 $cmpHdrFilter = (!empty($escCmp)) ? " AND (h.cmp_id = '$escCmp' OR h.cmp_id = '')" : "";
@@ -56,8 +60,8 @@ if (empty($cmp_name)) {
     $cmp_name = 'PT. FRAMAS INDONESIA';
 }
 
-$companyAllowedDocs = ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs);
-$effectiveAllowedDocs = ceisa_get_effective_allowed_docs($companyAllowedDocs);
+$companyAllowedDocs = is_array(ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs)) ? ceisa_resolve_allowed_docs($targetCompanyRoles, $targetCompanyAllowedDocs) : [];
+$effectiveAllowedDocs = is_array(ceisa_get_effective_allowed_docs($companyAllowedDocs)) ? ceisa_get_effective_allowed_docs($companyAllowedDocs) : [];
 
 if (!function_exists('isItDocPermitted')) {
     function isItDocPermitted($d) {
@@ -66,14 +70,18 @@ if (!function_exists('isItDocPermitted')) {
             return true;
         }
         if (!empty($is_admin)) {
-            return in_array((string)$d, $companyAllowedDocs);
+            return !empty($companyAllowedDocs) ? in_array((string)$d, $companyAllowedDocs) : true;
         }
-        return in_array((string)$d, $effectiveAllowedDocs);
+        return !empty($effectiveAllowedDocs) ? in_array((string)$d, $effectiveAllowedDocs) : false;
     }
 }
 
-$allowedInbound = array_values(array_filter(['20', '23', '40', '16', '261', '28', '611'], 'isItDocPermitted'));
+$allowedInbound = array_values(array_filter(['27', '20', '23', '40', '16', '261', '28', '611'], 'isItDocPermitted'));
 $allowedOutbound = array_values(array_filter(['30', '25', '41', '262', '33', '331', '613', '631'], 'isItDocPermitted'));
+
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
 
 // AJAX Endpoint: Detail Arsip Revisi (bc_1ab2_revisi)
 if (isset($_GET['action']) && $_GET['action'] === 'get_revisi') {
@@ -110,6 +118,76 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_revisi') {
     exit;
 }
 
+if (isset($_GET['action']) && $_GET['action'] === 'get_mutasi_detail') {
+    header('Content-Type: application/json; charset=utf-8');
+    $kode  = trim($_GET["kode"] ?? '');
+    $awal  = trim($_GET["awal"] ?? date('Y-m-01'));
+    $akhir = trim($_GET["akhir"] ?? date('Y-m-d'));
+    $ab    = strtoupper(trim($_GET["ab"] ?? 'A'));
+    $klas  = trim($_GET["klas"] ?? '');
+
+    $escKode  = $koneksi->real_escape_string($kode);
+    $escAwal  = $koneksi->real_escape_string($awal);
+    $escAkhir = $koneksi->real_escape_string($akhir);
+    $escAb    = $koneksi->real_escape_string($ab);
+
+    $cmpDetailFilter = (!empty($escCmp)) ? " AND (a.cmp_id = '$escCmp' OR a.cmp_id = '')" : "";
+    $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+
+    $sql = "
+    SELECT 'Eksternal' AS TIPE, a.KODE_BARANG, a.UNIT AS SATUAN, a.QTY_AKTUAL AS JUMLAH, a.TGL_BUKTI, a.NO_BUKTI, a.NAMA_BS, 
+    a.BC, a.NOMOR_DAFTAR AS NOMOR_DOK, a.TANGGAL_DAFTAR AS TGL_DOK, a.NOMOR_AJU, a.TGL_PROSES
+    FROM bc_1ab2 a
+    WHERE substr(date_format(a.tgl_proses, '%Y-%m'), 1, 4) = substr('$escAwal', 1, 4)
+    AND a.tgl_proses BETWEEN '$escAwal' AND '$escAkhir' AND a.ab = '$escAb' 
+    AND a.KODE_BARANG = '$escKode'
+    $cmpDetailFilter
+
+    UNION ALL
+
+    SELECT 'Issue' AS TIPE, na.kode_barang, na.sat AS SATUAN, na.qty AS JUMLAH, ni.tgl AS TGL_BUKTI, ni.no_bukti AS NO_BUKTI, '*** Issue Produksi ***' AS NAMA_BS, NULL AS BC, NULL AS NOMOR_DOK, NULL AS TGL_DOK, null AS NOMOR_AJU, null AS TGL_PROSES
+    FROM bc_issue_hdr ni, bc_issue_dtl na
+    WHERE ni.id = na.id_hdr and (ni.iscancel IS NULL OR ni.iscancel <> 'Y')
+    AND substr(ni.tgl, 1, 4) = substr('$escAwal', 1, 4)
+    AND ni.tgl BETWEEN '$escAwal' AND '$escAkhir' AND ni.ab = '$escAb' 
+    AND na.kode_barang = '$escKode' 
+    $cmpIssueFilter
+
+    ORDER BY TIPE, TGL_PROSES ASC, NO_BUKTI ASC
+    ";
+
+    $hasil = $koneksi->query($sql);
+    $rows = [];
+    $sumjml = 0;
+    if ($hasil) {
+        while ($r = $hasil->fetch_assoc()) {
+            $sumjml += (float)$r['JUMLAH'];
+            $rows[] = $r;
+        }
+    }
+
+    $uraianBarang = '';
+    $qMat = $koneksi->query("SELECT URAIAN FROM bc_material WHERE KODE_BARANG = '$escKode' LIMIT 1");
+    if ($qMat && $rm = $qMat->fetch_assoc()) {
+        $uraianBarang = $rm['URAIAN'];
+    }
+
+    echo json_encode([
+        'status' => 'success',
+        'kode' => $kode,
+        'uraian' => $uraianBarang,
+        'ab' => $ab,
+        'label_ab' => ($ab === 'A') ? 'MASUK' : 'KELUAR',
+        'label_bs' => ($ab === 'A') ? 'Pengirim' : 'Penerima',
+        'awal' => $awal,
+        'akhir' => $akhir,
+        'total_qty' => $sumjml,
+        'count' => count($rows),
+        'data' => $rows
+    ]);
+    exit;
+}
+
 $theme = $_GET['theme'] ?? 'light';
 $activeTab = $_GET['tab'] ?? '';
 if (empty($activeTab)) {
@@ -120,7 +198,7 @@ if (!in_array($activeTab, ['home', '1a', '1b', '1c', '1d', 'log'])) {
 }
 
 // Format Default Tanggal
-$tgl_awal_default  = date('Y-01-01');
+$tgl_awal_default  = in_array($activeTab, ['1a', '1b', '1d']) ? date('Y-m-01') : date('Y-01-01');
 $tgl_akhir_default = date('Y-m-d');
 
 $tgl1 = $_GET['tgl1'] ?? $tgl_awal_default;
@@ -131,16 +209,31 @@ if ($bc_filter !== '%' && !empty($bc_filter) && !isItDocPermitted($bc_filter)) {
 }
 $search_field = $_GET['search_field'] ?? 'all';
 $search_kw = trim($_GET['search_kw'] ?? '');
-$klas_filter = trim($_GET['klas'] ?? '');
-if (empty($klas_filter) || $klas_filter === '%') {
-    $klas_filter = 'Raw Materials';
+
+if (in_array($activeTab, ['1a', '1b'])) {
+    $klas_filter = trim($_GET['klas'] ?? '%');
+    if (empty($klas_filter)) $klas_filter = '%';
+} else {
+    $klas_filter = trim($_GET['klas'] ?? '');
+    if (empty($klas_filter) || $klas_filter === '%') {
+        $klas_filter = 'Raw Materials';
+    }
 }
-$limit = isset($_GET['limit']) ? max(50, min(10000, (int)$_GET['limit'])) : 1000;
+
+// Opsi Tampilan Tab 1A & 1B (Group Mode & Kolom Tambahan No. AJU, Netto, Gross)
+$group_mode = isset($_GET['group_mode']) ? (int)$_GET['group_mode'] : 0;
+$show_ext   = isset($_GET['show_ext']) ? (int)$_GET['show_ext'] : 1;
+
+// Opsi Tampilan Tab 1D Mutasi (Tampilkan Semua Stok vs Hanya yang Ada Mutasi)
+$stok_param = $_GET['stok'] ?? 'N';
+$show_all_stok = ($stok_param === 'Y' || $stok_param === '1');
 
 // Helper Format Angka
-function fnum($val, $dec = 2) {
-    if ($val === null || $val === '') return '0.00';
-    return number_format((float)$val, $dec, '.', ',');
+if (!function_exists('fnum')) {
+    function fnum($val, $dec = 2) {
+        if ($val === null || $val === '') return '0.00';
+        return number_format((float)$val, $dec, '.', ',');
+    }
 }
 
 // Ambil Referensi Jenis Klas dari bc_tipe untuk Tab 1D Mutasi Barang
@@ -152,13 +245,38 @@ if ($resKlas) {
     while ($rk = $resKlas->fetch_assoc()) {
         $g = trim($rk['grp'] ?? '');
         $t = trim($rk['tipe'] ?? '');
-        if ($g === 'CG' && !empty($t)) {
+        if ($g === 'CG' && !empty($t) && !in_array($t, $cgTypes)) {
             $cgTypes[] = $t;
         }
     }
 }
 if (empty($cgTypes)) {
     $cgTypes = ['Mold', 'Machine', 'Part Machine', 'Tools', 'Factory Equipment'];
+}
+
+// Sub-filter khusus Capital Goods (Mold, Machine, Part Machine, Tools, Factory Equipment)
+$sub_klas = trim($_GET['sub_klas'] ?? '%');
+if (in_array($klas_filter, $cgTypes)) {
+    $sub_klas = $klas_filter;
+    $klas_filter = 'Capital Goods';
+}
+$isCapitalGoods = in_array($klas_filter, ['Capital Goods', 'CG']);
+
+$stokCheckboxLabel = 'Tampilkan Semua Stok';
+if (in_array($klas_filter, ['Raw Materials', 'Raw Material', 'RM'])) {
+    $stokCheckboxLabel = 'Tampilkan Semua Stok Bahan Baku / Penolong';
+} elseif (in_array($klas_filter, ['Finished Goods', 'Finished Good', 'FG'])) {
+    $stokCheckboxLabel = 'Tampilkan Semua Stok Barang Jadi';
+} elseif ($isCapitalGoods) {
+    if (!empty($sub_klas) && $sub_klas !== '%' && $sub_klas !== '-- SEMUA KLAS --') {
+        $stokCheckboxLabel = 'Tampilkan Semua Stok ' . $sub_klas;
+    } else {
+        $stokCheckboxLabel = 'Tampilkan Semua Stok Mesin dan Peralatan';
+    }
+} elseif (in_array($klas_filter, ['Wastes', 'Waste', 'W'])) {
+    $stokCheckboxLabel = 'Tampilkan Semua Stok Scrap / Wastes';
+} elseif (in_array($klas_filter, ['Work In Progress', 'WIP', 'WI'])) {
+    $stokCheckboxLabel = 'Tampilkan Semua Stok Barang Dalam Proses (WIP)';
 }
 
 // =========================================================================
@@ -171,6 +289,10 @@ $stats = [
     'total_qty'  => 0,
     'total_nilai' => 0,
     'total_cif'  => 0,
+    'total_harga_penyerahan' => 0,
+    'total_netto' => 0,
+    'total_gross' => 0,
+    'total_stok' => 0,
     'total_awal' => 0,
     'total_masuk' => 0,
     'total_keluar' => 0,
@@ -185,16 +307,15 @@ if ($activeTab === 'home') {
     $dataRows = [];
 } elseif ($activeTab === '1a') {
     // -------------------------------------------------------------
-    // TAB 1A: PEMASUKAN BARANG (Inbound)
+    // TAB 1A: PEMASUKAN BARANG (Inbound) - MUTLAK DARI bc_1ab2
+    // Sesuai PowerBuilder: w_rpt_1a_tpb.srw & d_rpt_1a_tpb.srd
     // -------------------------------------------------------------
-    $check1ab = $koneksi->query("SELECT COUNT(*) FROM bc_1ab2 WHERE ab = 'A'$cmpFilter")->fetch_row()[0];
-
-    if ($check1ab > 0) {
-        $sql = "SELECT ID_HEADER ID, SERI_BARANG ID_BRG, BC JENIS_DOC, NOMOR_DAFTAR NO_DOC, TANGGAL_DAFTAR TGL_DOC, 
+    $sql = "SELECT ID_HEADER ID, SERI_BARANG ID_BRG, BC JENIS_DOC, NOMOR_DAFTAR NO_DOC, TANGGAL_DAFTAR TGL_DOC, 
                 NO_BUKTI, TGL_BUKTI, NAMA_BS NAMA_PENERIMA_BARANG, NAMA_BS VENDOR, KODE_BARANG, URAIAN NAMA_BARANG, 
                 QTY_AKTUAL JUMLAH, UNIT SATUAN, NILAI, POS_TARIF, NOMOR_AJU NO_AJU, SJ, INVOICE, FAKTUR, NOMOR_PO, 
                 TUJUAN_PENGIRIMAN, TUJUAN_PEMASUKAN, ifnull(KURS, 'IDR') KODE_VALUTA, KLAS, 
-                coalesce(TGL_PROSES, TANGGAL_DAFTAR) TANGGAL_PROSES, NETTO, CIF 
+                coalesce(TGL_PROSES, TANGGAL_DAFTAR) TANGGAL_PROSES, NETTO, CIF,
+                HARGA_PENYERAHAN, GROSS 
                 FROM bc_1ab2 
                 WHERE ab = 'A' AND coalesce(TGL_PROSES, TANGGAL_DAFTAR) BETWEEN ? AND ? $cmpFilter ";
         $params = [$tgl1, $tgl2];
@@ -209,35 +330,21 @@ if ($activeTab === 'home') {
             $sql .= " AND BC IN ($inList) ";
         }
 
-        if (!empty($search_kw)) {
-            if ($search_field === 'no_daftar') {
-                $sql .= " AND NOMOR_DAFTAR LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'kode_barang') {
-                $sql .= " AND KODE_BARANG LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'nama_barang') {
-                $sql .= " AND URAIAN LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'vendor') {
-                $sql .= " AND NAMA_BS LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'no_bukti') {
-                $sql .= " AND NO_BUKTI LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } else {
-                $sql .= " AND (KODE_BARANG LIKE ? OR URAIAN LIKE ? OR NOMOR_DAFTAR LIKE ? OR NAMA_BS LIKE ? OR NOMOR_AJU LIKE ?) ";
-                $kw = "%$search_kw%";
-                $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
-                $types .= "sssss";
-            }
+        if ($klas_filter !== '%' && !empty($klas_filter)) {
+            $sql .= " AND KLAS = ? ";
+            $params[] = $klas_filter;
+            $types .= "s";
         }
-        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT $limit";
+
+        if (!empty($search_kw)) {
+            $sql .= " AND (KODE_BARANG LIKE ? OR URAIAN LIKE ? OR NOMOR_DAFTAR LIKE ? OR NAMA_BS LIKE ? OR NOMOR_AJU LIKE ? OR NO_BUKTI LIKE ? OR POS_TARIF LIKE ?) ";
+            $kw = "%$search_kw%";
+            $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
+            $types .= "sssssss";
+        }
+
+        // Urutkan berdasarkan dokumen pabean & bukti penerimaan agar pengelompokan (Group Mode) konsisten
+        $sql .= " ORDER BY coalesce(TGL_PROSES, TANGGAL_DAFTAR) ASC, BC ASC, NOMOR_DAFTAR ASC, NO_BUKTI ASC, SERI_BARANG ASC LIMIT 5000";
 
         $stmt = $koneksi->prepare($sql);
         if ($stmt) {
@@ -249,108 +356,24 @@ if ($activeTab === 'home') {
                 $stats['total_qty'] += (float)$row['JUMLAH'];
                 $stats['total_nilai'] += (float)$row['NILAI'];
                 $stats['total_cif'] += (float)$row['CIF'];
+                $stats['total_harga_penyerahan'] += (float)($row['HARGA_PENYERAHAN'] ?? 0);
+                $stats['total_netto'] += (float)($row['NETTO'] ?? 0);
+                $stats['total_gross'] += (float)($row['GROSS'] ?? 0);
             }
             $stmt->close();
         }
-    } else {
-        // Fallback / Live CEISA Headers for Inbound
-        // Inbound BC Codes: 20, 23, 40, 16, 261, 28, 611
-        $inListFallback = !empty($allowedInbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedInbound)) . "'" : "'__NONE__'";
-        if ($is_admin && (empty($cmp_id) || $cmp_id === 'ALL')) {
-            $inListFallback = "'20', '23', '40', '16', '261', '28', '611'";
-        }
-        $sql = "SELECT h.nomor_aju AS ID, b.seri_barang AS ID_BRG, CONCAT('BC ', h.kode_dokumen) AS JENIS_DOC,
-                h.nomor_daftar AS NO_DOC, h.tanggal_daftar AS TGL_DOC,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS NO_BUKTI,
-                (SELECT d.tanggal_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS TGL_BUKTI,
-                coalesce((SELECT e.nama_entitas FROM bc_ceisa_entitas e WHERE e.nomor_aju = h.nomor_aju LIMIT 1), 'PERUSAHAAN') AS NAMA_PENERIMA_BARANG,
-                coalesce((SELECT e.nama_entitas FROM bc_ceisa_entitas e WHERE e.nomor_aju = h.nomor_aju AND e.kode_entitas IN ('PENGIRIM','PENJUAL','PEMASOK','5','7') LIMIT 1), 'PEMASOK') AS VENDOR,
-                b.kode_barang AS KODE_BARANG, b.uraian AS NAMA_BARANG, b.jumlah_satuan AS JUMLAH, b.kode_satuan AS SATUAN,
-                coalesce(b.cif, b.harga_penyerahan, 0) AS NILAI, b.hs AS POS_TARIF, h.nomor_aju AS NO_AJU,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '217' LIMIT 1) AS SJ,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '380' LIMIT 1) AS INVOICE,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '408' LIMIT 1) AS FAKTUR,
-                '' AS NOMOR_PO, '' AS TUJUAN_PENGIRIMAN, '' AS TUJUAN_PEMASUKAN,
-                coalesce(h.kode_valuta, 'IDR') AS KODE_VALUTA, b.tipe AS KLAS,
-                h.tanggal_daftar AS TANGGAL_PROSES, b.netto AS NETTO, b.cif AS CIF
-                FROM bc_ceisa_header h
-                JOIN bc_ceisa_barang b ON h.nomor_aju = b.nomor_aju
-                WHERE h.kode_dokumen IN ($inListFallback)$cmpHdrFilter ";
-
-        $params = [];
-        $types = "";
-
-        if ($bc_filter !== '%' && !empty($bc_filter)) {
-            $cleanBc = str_replace('BC ', '', $bc_filter);
-            $sql .= " AND h.kode_dokumen = ? ";
-            $params[] = $cleanBc;
-            $types .= "s";
-        }
-
-        if (!empty($search_kw)) {
-            if ($search_field === 'no_daftar') {
-                $sql .= " AND h.nomor_daftar LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'kode_barang') {
-                $sql .= " AND b.kode_barang LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'nama_barang') {
-                $sql .= " AND b.uraian LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'no_aju') {
-                $sql .= " AND h.nomor_aju LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } else {
-                $sql .= " AND (b.kode_barang LIKE ? OR b.uraian LIKE ? OR h.nomor_daftar LIKE ? OR h.nomor_aju LIKE ?) ";
-                $kw = "%$search_kw%";
-                $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
-                $types .= "ssss";
-            }
-        }
-        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT $limit";
-
-        if (!empty($params)) {
-            $stmt = $koneksi->prepare($sql);
-            if ($stmt) {
-                $stmt->bind_param($types, ...$params);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                while ($row = $res->fetch_assoc()) {
-                    $dataRows[] = $row;
-                    $stats['total_qty'] += (float)$row['JUMLAH'];
-                    $stats['total_nilai'] += (float)$row['NILAI'];
-                    $stats['total_cif'] += (float)$row['CIF'];
-                }
-                $stmt->close();
-            }
-        } else {
-            $res = $koneksi->query($sql);
-            if ($res) {
-                while ($row = $res->fetch_assoc()) {
-                    $dataRows[] = $row;
-                    $stats['total_qty'] += (float)$row['JUMLAH'];
-                    $stats['total_nilai'] += (float)$row['NILAI'];
-                    $stats['total_cif'] += (float)$row['CIF'];
-                }
-            }
-        }
-    }
+        $stats['total_rows'] = count($dataRows);
 } elseif ($activeTab === '1b') {
     // -------------------------------------------------------------
-    // TAB 1B: PENGELUARAN BARANG (Outbound)
+    // TAB 1B: PENGELUARAN BARANG (Outbound) - MUTLAK DARI bc_1ab2
+    // Sesuai PowerBuilder: w_rpt_1b.srw & d_rpt_1b.srd
     // -------------------------------------------------------------
-    $check1ab = $koneksi->query("SELECT COUNT(*) FROM bc_1ab2 WHERE ab = 'B'$cmpFilter")->fetch_row()[0];
-
-    if ($check1ab > 0) {
-        $sql = "SELECT ID_HEADER ID, SERI_BARANG ID_BRG, BC JENIS_DOC, NOMOR_DAFTAR NO_DOC, TANGGAL_DAFTAR TGL_DOC, 
+    $sql = "SELECT ID_HEADER ID, SERI_BARANG ID_BRG, BC JENIS_DOC, NOMOR_DAFTAR NO_DOC, TANGGAL_DAFTAR TGL_DOC, 
                 NO_BUKTI, TGL_BUKTI, NAMA_BS NAMA_PENERIMA_BARANG, NAMA_BS VENDOR, KODE_BARANG, URAIAN NAMA_BARANG, 
                 QTY_AKTUAL JUMLAH, UNIT SATUAN, NILAI, POS_TARIF, NOMOR_AJU NO_AJU, SJ, INVOICE, FAKTUR, NOMOR_PO, 
                 TUJUAN_PENGIRIMAN, TUJUAN_PEMASUKAN, ifnull(KURS, 'IDR') KODE_VALUTA, KLAS, 
-                coalesce(TGL_PROSES, TANGGAL_DAFTAR) TANGGAL_PROSES, NETTO, CIF 
+                coalesce(TGL_PROSES, TANGGAL_DAFTAR) TANGGAL_PROSES, NETTO, CIF,
+                HARGA_PENYERAHAN, GROSS 
                 FROM bc_1ab2 
                 WHERE ab = 'B' AND coalesce(TGL_PROSES, TANGGAL_DAFTAR) BETWEEN ? AND ? $cmpFilter ";
         $params = [$tgl1, $tgl2];
@@ -365,31 +388,21 @@ if ($activeTab === 'home') {
             $sql .= " AND BC IN ($inList) ";
         }
 
-        if (!empty($search_kw)) {
-            if ($search_field === 'no_daftar') {
-                $sql .= " AND NOMOR_DAFTAR LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'kode_barang') {
-                $sql .= " AND KODE_BARANG LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'nama_barang') {
-                $sql .= " AND URAIAN LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'vendor') {
-                $sql .= " AND NAMA_BS LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } else {
-                $sql .= " AND (KODE_BARANG LIKE ? OR URAIAN LIKE ? OR NOMOR_DAFTAR LIKE ? OR NAMA_BS LIKE ? OR NOMOR_AJU LIKE ?) ";
-                $kw = "%$search_kw%";
-                $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
-                $types .= "sssss";
-            }
+        if ($klas_filter !== '%' && !empty($klas_filter)) {
+            $sql .= " AND KLAS = ? ";
+            $params[] = $klas_filter;
+            $types .= "s";
         }
-        $sql .= " ORDER BY TGL_DOC DESC, NO_DOC DESC, ID_BRG ASC LIMIT $limit";
+
+        if (!empty($search_kw)) {
+            $sql .= " AND (KODE_BARANG LIKE ? OR URAIAN LIKE ? OR NOMOR_DAFTAR LIKE ? OR NAMA_BS LIKE ? OR NOMOR_AJU LIKE ? OR NO_BUKTI LIKE ? OR POS_TARIF LIKE ?) ";
+            $kw = "%$search_kw%";
+            $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
+            $types .= "sssssss";
+        }
+
+        // Urutkan berdasarkan dokumen pabean & bukti pengeluaran agar pengelompokan (Group Mode) konsisten
+        $sql .= " ORDER BY coalesce(TGL_PROSES, TANGGAL_DAFTAR) ASC, BC ASC, NOMOR_DAFTAR ASC, NO_BUKTI ASC, SERI_BARANG ASC LIMIT 5000";
 
         $stmt = $koneksi->prepare($sql);
         if ($stmt) {
@@ -401,96 +414,13 @@ if ($activeTab === 'home') {
                 $stats['total_qty'] += (float)$row['JUMLAH'];
                 $stats['total_nilai'] += (float)$row['NILAI'];
                 $stats['total_cif'] += (float)$row['CIF'];
+                $stats['total_harga_penyerahan'] += (float)($row['HARGA_PENYERAHAN'] ?? 0);
+                $stats['total_netto'] += (float)($row['NETTO'] ?? 0);
+                $stats['total_gross'] += (float)($row['GROSS'] ?? 0);
             }
             $stmt->close();
         }
-    } else {
-        // Fallback / Live CEISA Headers for Outbound
-        // Outbound BC Codes: 30, 25, 41, 262, 33, 331, 613, 631
-        $outListFallback = !empty($allowedOutbound) ? "'" . implode("','", array_map([$koneksi, 'real_escape_string'], $allowedOutbound)) . "'" : "'__NONE__'";
-        if ($is_admin && (empty($cmp_id) || $cmp_id === 'ALL')) {
-            $outListFallback = "'30', '25', '41', '262', '33', '331', '613', '631'";
-        }
-        $sql = "SELECT h.nomor_aju AS ID, b.seri_barang AS ID_BRG, CONCAT('BC ', h.kode_dokumen) AS JENIS_DOC,
-                h.nomor_daftar AS NO_DOC, h.tanggal_daftar AS TGL_DOC,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS NO_BUKTI,
-                (SELECT d.tanggal_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen IN ('380','217','999') LIMIT 1) AS TGL_BUKTI,
-                coalesce((SELECT e.nama_entitas FROM bc_ceisa_entitas e WHERE e.nomor_aju = h.nomor_aju AND e.kode_entitas IN ('PENERIMA','PEMBELI','IMPORTIR','3','8') LIMIT 1), 'PENERIMA') AS NAMA_PENERIMA_BARANG,
-                coalesce((SELECT e.nama_entitas FROM bc_ceisa_entitas e WHERE e.nomor_aju = h.nomor_aju LIMIT 1), 'PERUSAHAAN') AS VENDOR,
-                b.kode_barang AS KODE_BARANG, b.uraian AS NAMA_BARANG, b.jumlah_satuan AS JUMLAH, b.kode_satuan AS SATUAN,
-                coalesce(b.harga_penyerahan, b.cif, b.harga_ekspor, 0) AS NILAI, b.hs AS POS_TARIF, h.nomor_aju AS NO_AJU,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '217' LIMIT 1) AS SJ,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '380' LIMIT 1) AS INVOICE,
-                (SELECT d.nomor_dokumen FROM bc_ceisa_dokumen d WHERE d.nomor_aju = h.nomor_aju AND d.kode_dokumen = '408' LIMIT 1) AS FAKTUR,
-                '' AS NOMOR_PO, '' AS TUJUAN_PENGIRIMAN, '' AS TUJUAN_PEMASUKAN,
-                coalesce(h.kode_valuta, 'IDR') AS KODE_VALUTA, b.tipe AS KLAS,
-                h.tanggal_daftar AS TANGGAL_PROSES, b.netto AS NETTO, b.cif AS CIF
-                FROM bc_ceisa_header h
-                JOIN bc_ceisa_barang b ON h.nomor_aju = b.nomor_aju
-                WHERE h.kode_dokumen IN ($outListFallback)$cmpHdrFilter ";
-
-        $params = [];
-        $types = "";
-
-        if ($bc_filter !== '%' && !empty($bc_filter)) {
-            $cleanBc = str_replace('BC ', '', $bc_filter);
-            $sql .= " AND h.kode_dokumen = ? ";
-            $params[] = $cleanBc;
-            $types .= "s";
-        }
-
-        if (!empty($search_kw)) {
-            if ($search_field === 'no_daftar') {
-                $sql .= " AND h.nomor_daftar LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'kode_barang') {
-                $sql .= " AND b.kode_barang LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'nama_barang') {
-                $sql .= " AND b.uraian LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } elseif ($search_field === 'no_aju') {
-                $sql .= " AND h.nomor_aju LIKE ? ";
-                $params[] = "%$search_kw%";
-                $types .= "s";
-            } else {
-                $sql .= " AND (b.kode_barang LIKE ? OR b.uraian LIKE ? OR h.nomor_daftar LIKE ? OR h.nomor_aju LIKE ?) ";
-                $kw = "%$search_kw%";
-                $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
-                $types .= "ssss";
-            }
-        }
-        $sql .= " ORDER BY h.tanggal_daftar DESC, h.nomor_daftar DESC, b.seri_barang ASC LIMIT $limit";
-
-        if (!empty($params)) {
-            $stmt = $koneksi->prepare($sql);
-            if ($stmt) {
-                $stmt->bind_param($types, ...$params);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                while ($row = $res->fetch_assoc()) {
-                    $dataRows[] = $row;
-                    $stats['total_qty'] += (float)$row['JUMLAH'];
-                    $stats['total_nilai'] += (float)$row['NILAI'];
-                    $stats['total_cif'] += (float)$row['CIF'];
-                }
-                $stmt->close();
-            }
-        } else {
-            $res = $koneksi->query($sql);
-            if ($res) {
-                while ($row = $res->fetch_assoc()) {
-                    $dataRows[] = $row;
-                    $stats['total_qty'] += (float)$row['JUMLAH'];
-                    $stats['total_nilai'] += (float)$row['NILAI'];
-                    $stats['total_cif'] += (float)$row['CIF'];
-                }
-            }
-        }
-    }
+        $stats['total_rows'] = count($dataRows);
 } elseif ($activeTab === '1c') {
     // -------------------------------------------------------------
     // TAB 1C: POSISI BARANG DALAM PROSES (WIP)
@@ -542,87 +472,181 @@ if ($activeTab === 'home') {
 } elseif ($activeTab === '1d') {
     // -------------------------------------------------------------
     // TAB 1D: MUTASI BARANG
-    // Sesuai d_rpt_1d_2025.srd & w_rpt_1d.srw
+    // Sesuai D:\xampp\htdocs\bc3\1d_bb, 1d_bj, 1d_ma, 1d_s\sql.php
     // -------------------------------------------------------------
     $klasVal = (empty($klas_filter) || $klas_filter === '%') ? 'Raw Materials' : $klas_filter;
 
-    // Filter SQL untuk klasifikasi
-    if (in_array($klasVal, ['Capital Goods', 'CG'])) {
-        $klasSql = "KLAS IN ('Mold', 'Machine', 'Part Machine', 'Tools', 'Factory Equipment', 'Capital Goods')";
-    } elseif ($klasVal === 'Raw Materials' || $klasVal === 'Raw Material') {
+    // Filter SQL untuk klasifikasi (Mendukung Sub-filter khusus Capital Goods: Mold, Machine, Part Machine, dll)
+    if ($isCapitalGoods) {
+        if (!empty($sub_klas) && $sub_klas !== '%' && $sub_klas !== '-- SEMUA KLAS --') {
+            $escSub = $koneksi->real_escape_string($sub_klas);
+            $klasSql = "KLAS = '$escSub'";
+        } else {
+            $quotedCg = "'" . implode("','", array_map(function($v) use ($koneksi) { return $koneksi->real_escape_string($v); }, $cgTypes)) . "', 'Capital Goods', 'CG', 'Office Equipments'";
+            $klasSql = "KLAS IN ($quotedCg)";
+        }
+    } elseif ($klasVal === 'Raw Materials' || $klasVal === 'Raw Material' || $klasVal === 'RM') {
         $klasSql = "KLAS IN ('Raw Materials', 'Raw Material')";
-    } elseif ($klasVal === 'Finished Goods' || $klasVal === 'Finished Good') {
+    } elseif ($klasVal === 'Finished Goods' || $klasVal === 'Finished Good' || $klasVal === 'FG') {
         $klasSql = "KLAS IN ('Finished Goods', 'Finished Good')";
-    } elseif ($klasVal === 'Work In Progress' || $klasVal === 'WIP') {
+    } elseif ($klasVal === 'Work In Progress' || $klasVal === 'WIP' || $klasVal === 'WI') {
         $klasSql = "KLAS IN ('Work In Progress', 'WIP')";
-    } elseif ($klasVal === 'Wastes' || $klasVal === 'Waste') {
-        $klasSql = "KLAS IN ('Wastes', 'Waste')";
+    } elseif ($klasVal === 'Wastes' || $klasVal === 'Waste' || $klasVal === 'W') {
+        $klasSql = "KLAS IN ('Wastes', 'Waste', 'Scrap')";
     } else {
         $escKlas = $koneksi->real_escape_string($klasVal);
         $klasSql = "KLAS = '$escKlas'";
     }
 
-    $sql1d = "SELECT NI.*, 
-              (AWAL + MASUK - KELUAR) AS AKHIR,
-              coalesce(ADJ_TBL.ADJ, 0) AS ADJ,
-              coalesce(SO_TBL.SO, 0) AS SO,
-              ((AWAL + MASUK - KELUAR) - coalesce(SO_TBL.SO, 0) - coalesce(ADJ_TBL.ADJ, 0)) AS SELISIH
-              FROM (
-                  SELECT MASTER.KODE_BARANG, MASTER.URAIAN, MODEL, MASTER.KODE_SATUAN, 
-                         coalesce(AWAL.STOK,0) AWAL, coalesce(MASUK.STOK,0) MASUK, coalesce(KELUAR.STOK,0) KELUAR 
-                  FROM (SELECT * FROM bc_material WHERE $klasSql$cmpFilter) MASTER
-                  LEFT JOIN (
-                      SELECT kode_barang, unit, sum(stok) stok
-                      FROM (
-                          SELECT kode_barang, unit, sum(CASE WHEN ab = 'A' THEN QTY_AKTUAL ELSE QTY_AKTUAL * -1 END) stok
-                          FROM bc_1ab2
-                          WHERE substr(date_format(tgl_proses, '%Y-%m'), 1, 4) = substr(?, 1, 4) AND $klasSql AND tgl_proses < ?$cmpFilter
-                          GROUP BY kode_barang, unit
-                      ) subA GROUP BY kode_barang, unit
-                  ) AWAL ON (MASTER.KODE_BARANG, MASTER.KODE_SATUAN) = (AWAL.KODE_BARANG, AWAL.unit)
-                  LEFT JOIN (
-                      SELECT kode_barang, unit, sum(QTY_AKTUAL) stok
-                      FROM bc_1ab2
-                      WHERE ab = 'A' AND $klasSql AND tgl_proses BETWEEN ? AND ?$cmpFilter
-                      GROUP BY kode_barang, unit
-                  ) MASUK ON (MASTER.KODE_BARANG, MASTER.KODE_SATUAN) = (MASUK.KODE_BARANG, MASUK.unit)
-                  LEFT JOIN (
-                      SELECT kode_barang, unit, sum(QTY_AKTUAL) stok
-                      FROM bc_1ab2
-                      WHERE ab = 'B' AND $klasSql AND tgl_proses BETWEEN ? AND ?$cmpFilter
-                      GROUP BY kode_barang, unit
-                  ) KELUAR ON (MASTER.KODE_BARANG, MASTER.KODE_SATUAN) = (KELUAR.KODE_BARANG, KELUAR.unit)
-              ) NI 
-              LEFT JOIN (
-                  SELECT X.kode_barang, X.UNIT, sum(CASE WHEN X.ab = 'A' THEN X.qty ELSE X.qty * -1 END) AS ADJ
-                  FROM bc_1ab2 X 
-                  WHERE X.tanggal_daftar BETWEEN ? AND ? AND X.bc = 'SPP'$cmpFilter
-                  GROUP BY X.kode_barang, X.UNIT
-              ) ADJ_TBL ON NI.KODE_BARANG = ADJ_TBL.kode_barang AND NI.KODE_SATUAN = ADJ_TBL.UNIT
-              LEFT JOIN (
-                  SELECT X.kode_barang, X.unit, SUM(X.AKTUAL) AS SO
-                  FROM bc_so X 
-                  WHERE X.TGL_SO = ? AND X.TIPE = 'SO'$cmpFilter
-                  GROUP BY X.kode_barang, X.unit
-              ) SO_TBL ON NI.KODE_BARANG = SO_TBL.kode_barang AND NI.KODE_SATUAN = SO_TBL.unit ";
+    $as_now = date('Y-m-d');
+    $escAwal  = $koneksi->real_escape_string($tgl1);
+    $escAkhir = $koneksi->real_escape_string($tgl2);
+    $escNow   = $koneksi->real_escape_string($as_now);
 
-    $params = [$tgl1, $tgl1, $tgl1, $tgl2, $tgl1, $tgl2, $tgl1, $tgl2, $tgl2];
-    $types = "sssssssss";
+    $cmpDetailFilter = (!empty($escCmp)) ? " AND (cmp_id = '$escCmp' OR cmp_id = '')" : "";
+    $cmpIssueFilter  = (!empty($escCmp)) ? " AND (na.cmp_id = '$escCmp' OR na.cmp_id = '')" : "";
+
+    $sql1d = "
+    SELECT NI.*, (AWAL + MASUK - KELUAR) AKHIR, 
+    coalesce((SELECT sum(CASE WHEN ab = 'A' THEN qty ELSE qty * -1 END) FROM bc_1ab2 X 
+              WHERE tgl_proses BETWEEN '$escAwal' AND '$escAkhir' AND bc = 'SPP' 
+              AND X.kode_barang = NI.KODE_BARANG AND X.UNIT = KODE_SATUAN $cmpDetailFilter), 0) ADJ,
+    coalesce((SELECT SUM(AKTUAL) FROM bc_so X 
+              WHERE TGL_SO = '$escAkhir' AND TIPE = 'SO' 
+              AND X.kode_barang = NI.KODE_BARANG AND X.unit = KODE_SATUAN $cmpDetailFilter), 0) SO,
+    (coalesce((SELECT SUM(SELISIH) FROM bc_so X 
+               WHERE substr(tgl_so,1,4) = substr('$escAwal',1,4) AND tgl_so >= '$escAwal' 
+               AND X.kode_barang = NI.KODE_BARANG AND X.unit = KODE_SATUAN $cmpDetailFilter), 0)
+     - 
+     coalesce((SELECT sum(CASE WHEN ab = 'A' THEN qty ELSE qty * -1 END) FROM bc_1ab2 X 
+               WHERE tgl_proses BETWEEN '$escAwal' AND '$escAkhir' AND bc = 'SPP' 
+               AND X.kode_barang = NI.KODE_BARANG AND X.UNIT = KODE_SATUAN $cmpDetailFilter), 0)
+    ) SELISIH
+
+    FROM
+    (
+        SELECT MASTER.KODE_BARANG, MASTER.URAIAN, MASTER.MODEL, MASTER.KODE_SATUAN, 
+               coalesce(JML.STOK, 0) STOK, coalesce(AWAL.STOK, 0) AWAL,
+               coalesce(MASUK.STOK, 0) MASUK, coalesce(KELUAR.STOK, 0) KELUAR 
+        FROM (SELECT * FROM bc_material WHERE $klasSql $cmpDetailFilter) MASTER
+        
+        LEFT JOIN
+        (
+            SELECT kode_barang, unit, sum(stok) stok
+            FROM (
+                SELECT kode_barang, unit, 
+                sum(CASE WHEN ab = 'A' THEN QTY_AKTUAL ELSE QTY_AKTUAL * -1 END) stok
+                FROM bc_1ab2
+                WHERE substr(date_format(tgl_proses, '%Y-%m'), 1, 4) = substr('$escAwal', 1, 4) 
+                AND tgl_proses < '$escAwal' $cmpDetailFilter
+                GROUP BY kode_barang, unit 
+                  
+                UNION ALL
+                
+                SELECT kode_barang, unit, stok_awal
+                FROM bc_so0 a
+                WHERE tahun = substr('$escAwal', 1, 4) $cmpDetailFilter
+                
+                UNION ALL
+                
+                SELECT na.kode_barang, na.sat as unit, sum(CASE WHEN ni.ab = 'A' THEN na.qty ELSE na.qty * -1 END) stok
+                FROM bc_issue_hdr ni, bc_issue_dtl na
+                WHERE ni.id = na.id_hdr and (ni.iscancel IS NULL OR ni.iscancel <> 'Y')
+                AND substr(ni.tgl, 1, 4) = substr('$escAwal', 1, 4)
+                AND ni.tgl < '$escAwal' $cmpIssueFilter
+                GROUP BY na.kode_barang, na.sat
+            ) xx
+            GROUP BY kode_barang, unit
+        ) AWAL ON MASTER.KODE_BARANG = AWAL.KODE_BARANG AND MASTER.KODE_SATUAN = AWAL.UNIT
+        
+        LEFT JOIN
+        (
+            SELECT kode_barang, unit, sum(qty) stok
+            FROM (
+                SELECT kode_barang, unit, QTY_AKTUAL qty
+                FROM bc_1ab2
+                WHERE substr(date_format(tgl_proses, '%Y-%m'), 1, 4) = substr('$escAwal', 1, 4) 
+                AND tgl_proses BETWEEN '$escAwal' AND '$escAkhir' AND ab = 'A' $cmpDetailFilter
+               
+                UNION ALL
+                
+                SELECT na.kode_barang, na.sat as unit, na.qty
+                FROM bc_issue_hdr ni, bc_issue_dtl na
+                WHERE ni.id = na.id_hdr and (ni.iscancel IS NULL OR ni.iscancel <> 'Y')
+                AND substr(ni.tgl, 1, 4) = substr('$escAwal', 1, 4)
+                AND ni.tgl BETWEEN '$escAwal' AND '$escAkhir' AND ni.ab = 'A' $cmpIssueFilter
+            ) xx
+            GROUP BY kode_barang, unit
+        ) MASUK ON MASTER.KODE_BARANG = MASUK.KODE_BARANG AND MASTER.KODE_SATUAN = MASUK.UNIT
+        
+        LEFT JOIN
+        (
+            SELECT kode_barang, unit, sum(qty) stok
+            FROM (
+                SELECT kode_barang, unit, QTY_AKTUAL qty
+                FROM bc_1ab2
+                WHERE substr(date_format(tgl_proses, '%Y-%m'), 1, 4) = substr('$escAwal', 1, 4) 
+                AND tgl_proses BETWEEN '$escAwal' AND '$escAkhir' AND ab = 'B' $cmpDetailFilter
+               
+                UNION ALL
+                
+                SELECT na.kode_barang, na.sat as unit, na.qty
+                FROM bc_issue_hdr ni, bc_issue_dtl na
+                WHERE ni.id = na.id_hdr and (ni.iscancel IS NULL OR ni.iscancel <> 'Y')
+                AND substr(ni.tgl, 1, 4) = substr('$escAwal', 1, 4)
+                AND ni.tgl BETWEEN '$escAwal' AND '$escAkhir' AND ni.ab = 'B' $cmpIssueFilter
+            ) xx
+            GROUP BY kode_barang, unit
+        ) KELUAR ON MASTER.KODE_BARANG = KELUAR.KODE_BARANG AND MASTER.KODE_SATUAN = KELUAR.UNIT
+        
+        LEFT JOIN
+        (
+            SELECT kode_barang, unit, sum(stok) STOK
+            FROM (
+                SELECT kode_barang, unit, 
+                sum(CASE WHEN ab = 'A' THEN QTY_AKTUAL ELSE QTY_AKTUAL * -1 END) stok
+                FROM bc_1ab2
+                WHERE substr(date_format(tgl_proses, '%Y-%m'), 1, 4) = substr('$escNow', 1, 4) 
+                AND tgl_proses <= '$escNow' $cmpDetailFilter
+                GROUP BY kode_barang, unit 
+                  
+                UNION ALL
+                
+                SELECT kode_barang, unit, stok_awal
+                FROM bc_so0 a
+                WHERE tahun = substr('$escNow', 1, 4) $cmpDetailFilter
+                
+                UNION ALL
+                
+                SELECT na.kode_barang, na.sat as unit, sum(CASE WHEN ni.ab = 'A' THEN na.qty ELSE na.qty * -1 END) stok
+                FROM bc_issue_hdr ni, bc_issue_dtl na
+                WHERE ni.id = na.id_hdr and (ni.iscancel IS NULL OR ni.iscancel <> 'Y')
+                AND substr(ni.tgl, 1, 4) = substr('$escNow', 1, 4)
+                AND ni.tgl <= '$escNow' $cmpIssueFilter
+                GROUP BY na.kode_barang, na.sat		
+            ) xx
+            GROUP BY kode_barang, unit
+        ) JML ON MASTER.KODE_BARANG = JML.KODE_BARANG AND MASTER.KODE_SATUAN = JML.UNIT
+        
+    ) NI
+    WHERE 1=1 ";
 
     if (!empty($search_kw)) {
-        $sql1d .= " WHERE (NI.KODE_BARANG LIKE ? OR NI.URAIAN LIKE ? OR NI.MODEL LIKE ?) ";
-        $kw = "%$search_kw%";
-        $params[] = $kw; $params[] = $kw; $params[] = $kw;
-        $types .= "sss";
+        $escKw = $koneksi->real_escape_string($search_kw);
+        $sql1d .= " AND (NI.KODE_BARANG LIKE '%$escKw%' OR NI.URAIAN LIKE '%$escKw%' OR NI.MODEL LIKE '%$escKw%') ";
     }
 
-    $stmt = $koneksi->prepare($sql1d);
-    if ($stmt) {
-        $stmt->bind_param($types, ...$params);
-        $stmt->execute();
-        $res = $stmt->get_result();
+    if (!$show_all_stok) {
+        $sql1d .= " AND (NI.MASUK > 0 OR NI.KELUAR > 0) ";
+    }
+
+    $sql1d .= " ORDER BY NI.KODE_BARANG ASC ";
+
+    $res = $koneksi->query($sql1d);
+    if ($res) {
         while ($row = $res->fetch_assoc()) {
             $dataRows[] = $row;
+            $stats['total_stok'] += (float)$row['STOK'];
             $stats['total_awal'] += (float)$row['AWAL'];
             $stats['total_masuk'] += (float)$row['MASUK'];
             $stats['total_keluar'] += (float)$row['KELUAR'];
@@ -631,7 +655,6 @@ if ($activeTab === 'home') {
             $stats['total_so'] += (float)$row['SO'];
             $stats['total_selisih'] += (float)$row['SELISIH'];
         }
-        $stmt->close();
     }
 } elseif ($activeTab === 'log') {
     // -------------------------------------------------------------
@@ -655,7 +678,7 @@ if ($activeTab === 'home') {
         $params[] = $kw; $params[] = $kw; $params[] = $kw; $params[] = $kw;
         $types .= "ssss";
     }
-    $sqlLog .= " ORDER BY r.ROWID DESC LIMIT $limit";
+    $sqlLog .= " ORDER BY r.ROWID DESC LIMIT 500";
 
     if (!empty($params)) {
         $stmt = $koneksi->prepare($sqlLog);
@@ -866,6 +889,172 @@ $stats['total_rows'] = count($dataRows);
             border-color: #73d13d;
         }
 
+        /* LAPORAN 1A CUSTOM STYLES */
+        .filter-panel-1a {
+            background: var(--bg-filter);
+            border: 1px solid var(--border-card);
+            border-radius: 4px;
+            padding: 3px 6px;
+            margin-bottom: 4px;
+        }
+        .filter-panel-1a .filter-control {
+            height: 21px;
+            font-size: 9.5px;
+            padding: 1px 4px;
+            border: 1px solid var(--border-input);
+            border-radius: 3px;
+            background: var(--bg-input);
+            color: var(--text-main);
+            outline: none;
+        }
+        .filter-panel-1a .filter-control:focus {
+            border-color: var(--primary);
+        }
+        .ant-table thead tr:first-child th {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            background: var(--table-head-bg);
+        }
+        .ant-table thead tr:nth-child(2) th {
+            position: sticky;
+            top: 24px;
+            z-index: 4;
+            background: var(--table-head-bg);
+        }
+        .ant-table tbody tr.row-selected td {
+            background-color: #69c0ff !important;
+            color: #000000 !important;
+        }
+        html[data-theme="dark"] .ant-table tbody tr.row-selected td,
+        body[data-theme="dark"] .ant-table tbody tr.row-selected td {
+            background-color: #11355c !important;
+            color: #ffffff !important;
+        }
+        /* INNER REPORT HEADER BANNER: Sembunyikan dari layar (hanya untuk Print PDF & Export Excel) */
+        .report-header-banner {
+            display: none;
+        }
+
+        @page {
+            size: A4 landscape;
+            margin: 4mm;
+        }
+
+        @media print {
+            @page {
+                size: A4 landscape;
+                margin: 4mm;
+            }
+            html, body {
+                background: #ffffff !important;
+                color: #000000 !important;
+                font-family: 'Poppins', -apple-system, BlinkMacSystemFont, Arial, sans-serif !important;
+                font-size: 6.2pt !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                overflow: visible !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            .screen-only-header,
+            .ant-tabs-nav,
+            .filter-panel-1a,
+            .filter-panel,
+            .kpi-container,
+            .ant-modal-mask,
+            #tableFilterInput,
+            #rowCountBadge,
+            button,
+            .ant-btn {
+                display: none !important;
+            }
+            .report-header-banner {
+                display: block !important;
+                text-align: center !important;
+                margin: 0 0 6px 0 !important;
+                padding: 0 !important;
+            }
+            .report-header-banner .banner-title {
+                font-size: 11pt !important;
+                font-weight: 700 !important;
+                color: #000000 !important;
+                letter-spacing: 0.2px !important;
+                margin-bottom: 2px !important;
+            }
+            .report-header-banner .banner-sub {
+                font-size: 8pt !important;
+                font-weight: 600 !important;
+                color: #222222 !important;
+            }
+            .table-scroll,
+            .ant-table-wrapper {
+                max-height: none !important;
+                overflow: visible !important;
+                width: 100% !important;
+                max-width: 100% !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                border: none !important;
+            }
+            .ant-table {
+                width: 100% !important;
+                max-width: 100% !important;
+                table-layout: auto !important;
+                border-collapse: collapse !important;
+                font-size: 6.2pt !important;
+                page-break-inside: auto !important;
+            }
+            .ant-table tr {
+                page-break-inside: avoid !important;
+                page-break-after: auto !important;
+            }
+            .ant-table thead {
+                display: table-header-group !important;
+            }
+            .ant-table tfoot {
+                display: table-footer-group !important;
+            }
+            .ant-table th, .ant-table td {
+                border: 0.5pt solid #333333 !important;
+                padding: 2px 2.5px !important;
+                font-size: 6.2pt !important;
+                line-height: 1.15 !important;
+                color: #000000 !important;
+                word-break: break-word !important;
+                white-space: normal !important;
+                box-sizing: border-box !important;
+            }
+            .ant-table th {
+                background: #f0f0f0 !important;
+                font-weight: 700 !important;
+                text-align: center !important;
+            }
+            .ant-table td.col-no,
+            .ant-table td.col-jenis,
+            .ant-table td.col-tgldoc,
+            .ant-table td.col-tglbukti,
+            .ant-table td.col-ext-netto,
+            .ant-table td.col-ext-gross,
+            .ant-table td:nth-child(8),
+            .ant-table td:nth-child(11),
+            .ant-table td:nth-child(12),
+            .ant-table td:nth-child(13),
+            .ant-table td:nth-child(14),
+            .ant-table td:nth-child(15) {
+                white-space: nowrap !important;
+            }
+            .ant-badge {
+                border: none !important;
+                background: transparent !important;
+                color: #000000 !important;
+                padding: 0 !important;
+                font-size: 6.2pt !important;
+                font-weight: normal !important;
+            }
+        }
         /* FILTER PANEL */
         .filter-panel {
             display: flex;
@@ -944,8 +1133,8 @@ $stats['total_rows'] = count($dataRows);
         }
         .table-scroll {
             width: 100%;
-            max-height: calc(100vh - 210px);
-            min-height: 380px;
+            max-height: calc(100vh - 120px);
+            min-height: 420px;
             overflow: auto;
         }
         .ant-table {
@@ -1262,21 +1451,12 @@ $stats['total_rows'] = count($dataRows);
             background: var(--row-hover) !important;
             color: var(--primary) !important;
         }
-        th.sortable-th::after {
-            content: " ↕";
-            opacity: 0.35;
-            font-size: 9px;
-            margin-left: 4px;
+        th.sortable-th::after,
+        #mainDataTable thead th::after {
+            content: none !important;
         }
-        th.sortable-th.sort-asc::after {
-            content: " ▲";
-            opacity: 1;
-            color: var(--primary);
-        }
-        th.sortable-th.sort-desc::after {
-            content: " ▼";
-            opacity: 1;
-            color: var(--primary);
+        .sort-icon {
+            display: none !important;
         }
     </style>
 </head>
@@ -1300,25 +1480,24 @@ $stats['total_rows'] = count($dataRows);
     <!-- TOP TABS NAVIGATION -->
     <div class="ant-tabs-nav">
         <a href="?tab=home&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === 'home' ? 'active' : '' ?>">
-            <span>🏠</span> Dashboard Home
+            <i class="fa-solid fa-house" style="margin-right:4px;"></i> Dashboard Home
         </a>
         <a href="?tab=1a&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === '1a' ? 'active' : '' ?>">
-            <span>📦</span> 1A - Pemasukan Barang
+            <i class="fa-solid fa-box-archive" style="margin-right:4px;"></i> 1A - Pemasukan Barang
         </a>
         <a href="?tab=1b&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === '1b' ? 'active' : '' ?>">
-            <span>📤</span> 1B - Pengeluaran Barang
+            <i class="fa-solid fa-dolly" style="margin-right:4px;"></i> 1B - Pengeluaran Barang
         </a>
         <a href="?tab=1c&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === '1c' ? 'active' : '' ?>">
-            <span>⚙️</span> 1C - Posisi WIP
+            <i class="fa-solid fa-gears" style="margin-right:4px;"></i> 1C - Posisi WIP
         </a>
         <a href="?tab=1d&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === '1d' ? 'active' : '' ?>">
-            <span>🔄</span> 1D - Mutasi Barang
+            <i class="fa-solid fa-arrows-rotate" style="margin-right:4px;"></i> 1D - Mutasi Barang
         </a>
         <a href="?tab=log&cmp_id=<?= urlencode($cmp_id) ?>&theme=<?= $theme ?>" class="ant-tabs-tab <?= $activeTab === 'log' ? 'active' : '' ?>">
-            <span>📜</span> Log Perubahan Data
+            <i class="fa-solid fa-clock-rotate-left" style="margin-right:4px;"></i> Log Perubahan Data
         </a>
     </div>
-
     <?php if ($activeTab === 'home'): ?>
     <!-- ============================================================== -->
     <!-- DASHBOARD HOME CONCEPT KHUSUS PEJABAT BEA CUKAI & IT INVENTORY -->
@@ -1424,85 +1603,222 @@ $stats['total_rows'] = count($dataRows);
         </div>
     </div>
     <?php else: ?>
-    <!-- FILTER BAR -->
+    <?php if (in_array($activeTab, ['1a', '1b'])): ?>
+    <?php 
+        $tabTitle = ($activeTab === '1a') ? 'Laporan 1A - Laporan Pemasukan Barang per Dokumen Pabean' : 'Laporan 1B - Laporan Pengeluaran Barang per Dokumen Pabean';
+        $reportBannerTitle = ($activeTab === '1a') ? 'Laporan Pemasukan Barang per Dokumen Pabean' : 'Laporan Pengeluaran Barang per Dokumen Pabean';
+        $tabIcon = ($activeTab === '1a') ? 'fa-file-import' : 'fa-file-export';
+        $tabIconColor = ($activeTab === '1a') ? 'var(--primary)' : '#f5222d';
+    ?>
+    <!-- ============================================================== -->
+    <!-- TAB 1A / 1B: LAPORAN DOKUMEN PABEAN (PEMASUKAN & PENGELUARAN)  -->
+    <!-- Sesuai Desain PowerBuilder TPB-ERP & Standar CEISA 4.0        -->
+    <!-- ============================================================== -->
+    <!-- FILTER BAR TAB 1A & 1B (COMPACT 1-LINE TOOLBAR) -->
+    <form method="GET" action="it_inventory.php" id="filterForm1AB" class="filter-panel-1a" style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; padding:3px 8px; margin-bottom:4px; overflow-x:auto;">
+        <input type="hidden" name="tab" value="<?= htmlspecialchars($activeTab) ?>">
+        <input type="hidden" name="theme" value="<?= htmlspecialchars($theme) ?>">
+        <input type="hidden" name="cmp_id" value="<?= htmlspecialchars($cmp_id) ?>">
+        <input type="hidden" id="inputGroupMode" name="group_mode" value="<?= $group_mode ? '1' : '0' ?>">
+        <input type="hidden" id="inputShowExt" name="show_ext" value="<?= $show_ext ? '1' : '0' ?>">
+
+        <!-- LEFT CONTROLS -->
+        <div style="display:inline-flex; align-items:center; gap:8px; flex-shrink:0;">
+            <!-- PERIODE -->
+            <div style="display:inline-flex; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--text-muted); margin:0; white-space:nowrap;">Periode:</label>
+                <input type="date" name="tgl1" class="filter-control" style="width:112px; height:21px; font-size:9.5px; padding:0 3px;" value="<?= htmlspecialchars($tgl1) ?>">
+                <span style="font-size:9px; color:var(--text-muted);">-s/d-</span>
+                <input type="date" name="tgl2" class="filter-control" style="width:112px; height:21px; font-size:9.5px; padding:0 3px;" value="<?= htmlspecialchars($tgl2) ?>">
+            </div>
+
+            <!-- JENIS DOKUMEN -->
+            <div style="display:inline-flex; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--text-muted); margin:0; white-space:nowrap;">BC:</label>
+                <select name="bc" class="filter-control" style="width:105px; height:21px; font-size:9.5px; padding:0 3px;">
+                    <option value="%" <?= $bc_filter === '%' ? 'selected' : '' ?>>- SEMUA BC -</option>
+                    <?php if ($activeTab === '1a'): ?>
+                        <?php if (isItDocPermitted('27')): ?><option value="27" <?= $bc_filter === '27' ? 'selected' : '' ?>>27 - BC 2.7</option><?php endif; ?>
+                        <?php if (isItDocPermitted('23')): ?><option value="23" <?= $bc_filter === '23' ? 'selected' : '' ?>>23 - BC 2.3</option><?php endif; ?>
+                        <?php if (isItDocPermitted('40')): ?><option value="40" <?= $bc_filter === '40' ? 'selected' : '' ?>>40 - BC 4.0</option><?php endif; ?>
+                        <?php if (isItDocPermitted('20')): ?><option value="20" <?= $bc_filter === '20' ? 'selected' : '' ?>>20 - BC 2.0</option><?php endif; ?>
+                        <?php if (isItDocPermitted('611')): ?><option value="611" <?= $bc_filter === '611' ? 'selected' : '' ?>>611 - PPKEK 6.1.1</option><?php endif; ?>
+                        <?php if (isItDocPermitted('16')): ?><option value="16" <?= $bc_filter === '16' ? 'selected' : '' ?>>16 - BC 1.6</option><?php endif; ?>
+                        <?php if (isItDocPermitted('261')): ?><option value="261" <?= $bc_filter === '261' ? 'selected' : '' ?>>261 - BC 2.6.1</option><?php endif; ?>
+                        <?php if (isItDocPermitted('28')): ?><option value="28" <?= $bc_filter === '28' ? 'selected' : '' ?>>28 - BC 2.8</option><?php endif; ?>
+                    <?php else: ?>
+                        <?php if (isItDocPermitted('30')): ?><option value="30" <?= $bc_filter === '30' ? 'selected' : '' ?>>30 - BC 3.0</option><?php endif; ?>
+                        <?php if (isItDocPermitted('25')): ?><option value="25" <?= $bc_filter === '25' ? 'selected' : '' ?>>25 - BC 2.5</option><?php endif; ?>
+                        <?php if (isItDocPermitted('41')): ?><option value="41" <?= $bc_filter === '41' ? 'selected' : '' ?>>41 - BC 4.1</option><?php endif; ?>
+                        <?php if (isItDocPermitted('27')): ?><option value="27" <?= $bc_filter === '27' ? 'selected' : '' ?>>27 - BC 2.7</option><?php endif; ?>
+                        <?php if (isItDocPermitted('613')): ?><option value="613" <?= $bc_filter === '613' ? 'selected' : '' ?>>613 - PPKEK 6.1.3</option><?php endif; ?>
+                        <?php if (isItDocPermitted('631')): ?><option value="631" <?= $bc_filter === '631' ? 'selected' : '' ?>>631 - PPKEK 6.3.1</option><?php endif; ?>
+                        <?php if (isItDocPermitted('262')): ?><option value="262" <?= $bc_filter === '262' ? 'selected' : '' ?>>262 - BC 2.6.2</option><?php endif; ?>
+                        <?php if (isItDocPermitted('33')): ?><option value="33" <?= $bc_filter === '33' ? 'selected' : '' ?>>33 - BC 3.3</option><?php endif; ?>
+                        <?php if (isItDocPermitted('331')): ?><option value="331" <?= $bc_filter === '331' ? 'selected' : '' ?>>331 - BC 3.3.1</option><?php endif; ?>
+                    <?php endif; ?>
+                </select>
+            </div>
+
+            <!-- KLASIFIKASI -->
+            <div style="display:inline-flex; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--text-muted); margin:0; white-space:nowrap;">Klas:</label>
+                <select name="klas" class="filter-control" style="width:110px; height:21px; font-size:9.5px; padding:0 3px;">
+                    <option value="%" <?= ($klas_filter === '%' || empty($klas_filter)) ? 'selected' : '' ?>>-- SEMUA KLAS --</option>
+                    <option value="Raw Materials" <?= $klas_filter === 'Raw Materials' ? 'selected' : '' ?>>Raw Materials</option>
+                    <option value="Finished Goods" <?= $klas_filter === 'Finished Goods' ? 'selected' : '' ?>>Finished Goods</option>
+                    <option value="Work In Progress" <?= $klas_filter === 'Work In Progress' ? 'selected' : '' ?>>Work In Progress</option>
+                    <option value="Capital Goods" <?= $klas_filter === 'Capital Goods' ? 'selected' : '' ?>>Capital Goods</option>
+                    <option value="Wastes" <?= $klas_filter === 'Wastes' ? 'selected' : '' ?>>Wastes</option>
+                </select>
+            </div>
+
+            <!-- CARI / FILTER -->
+            <div style="position:relative; display:inline-flex; align-items:center;">
+                <input type="text" name="search_kw" id="filterSearchKw" class="filter-control" style="width:125px; height:21px; font-size:9.5px; padding:0 20px 0 5px;" placeholder="Filter Data / Teks.." value="<?= htmlspecialchars($search_kw) ?>" onkeyup="filterTableInstant(this.value)">
+                <i class="fa-solid fa-magnifying-glass" style="position:absolute; right:5px; top:5px; font-size:9.5px; color:var(--text-muted); pointer-events:none;"></i>
+            </div>
+
+            <!-- CHECKBOXES (INLINE) -->
+            <div style="display:inline-flex; align-items:center; gap:8px; padding-left:4px; border-left:1px solid var(--border-light);">
+                <label style="display:inline-flex; align-items:center; gap:3px; font-size:9.5px; font-weight:600; color:var(--text-main); cursor:pointer; user-select:none; margin:0; white-space:nowrap;">
+                    <input type="checkbox" id="chkGroupMode" value="1" <?= $group_mode ? 'checked' : '' ?> onchange="toggleGroupMode(this.checked)" style="cursor:pointer; width:12px; height:12px; margin:0;">
+                    Tampilan Grup
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:3px; font-size:9.5px; font-weight:600; color:var(--text-main); cursor:pointer; user-select:none; margin:0; white-space:nowrap;">
+                    <input type="checkbox" id="chkShowAjuNettoGross" value="1" <?= $show_ext ? 'checked' : '' ?> onchange="toggleAjuNettoGross(this.checked)" style="cursor:pointer; width:12px; height:12px; margin:0;">
+                    Tampilkan No. AJU, Netto, Gross
+                </label>
+            </div>
+        </div>
+
+        <!-- RIGHT ACTION BUTTONS -->
+        <div style="display:inline-flex; align-items:center; gap:4px; flex-shrink:0;">
+            <button type="submit" class="ant-btn ant-btn-primary" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-desktop"></i> Tampilkan
+            </button>
+            <button type="button" class="ant-btn" onclick="printReport()" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; background:#d4380d; border-color:#d4380d; color:#ffffff !important; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-file-pdf"></i> Cetak ke PDF
+            </button>
+            <button type="button" class="ant-btn ant-btn-success" onclick="exportToExcelCustom('<?= $activeTab ?>')" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-file-excel"></i> Export ke XLS
+            </button>
+        </div>
+    </form>
+
+    <!-- INNER REPORT HEADER BANNER (Hanya tampil saat Print PDF & Save Excel) -->
+    <div class="report-header-banner">
+        <div class="banner-title"><?= $reportBannerTitle ?></div>
+        <div class="banner-sub"><?= htmlspecialchars($cmp_name) ?> - Periode : <?= htmlspecialchars($tgl1) ?> s/d <?= htmlspecialchars($tgl2) ?></div>
+    </div>
+    <?php elseif ($activeTab === '1d'): ?>
+    <?php 
+        $klasLabelTitle = 'Barang';
+        if (in_array($klas_filter, ['Raw Materials', 'Raw Material', 'RM'])) {
+            $klasLabelTitle = 'Bahan Baku';
+        } elseif (in_array($klas_filter, ['Finished Goods', 'Finished Good', 'FG'])) {
+            $klasLabelTitle = 'Barang Jadi';
+        } elseif ($isCapitalGoods) {
+            if (!empty($sub_klas) && $sub_klas !== '%' && $sub_klas !== '-- SEMUA KLAS --') {
+                $klasLabelTitle = 'Mesin dan Peralatan (' . $sub_klas . ')';
+            } else {
+                $klasLabelTitle = 'Mesin dan Peralatan';
+            }
+        } elseif (in_array($klas_filter, ['Wastes', 'Waste', 'W'])) {
+            $klasLabelTitle = 'Barang Sisa / Scrap';
+        } elseif (in_array($klas_filter, ['Work In Progress', 'WIP', 'WI'])) {
+            $klasLabelTitle = 'Barang Dalam Proses (WIP)';
+        }
+        $reportBannerTitle = 'Laporan Pertanggungjawaban Mutasi ' . $klasLabelTitle;
+    ?>
+    <!-- ============================================================== -->
+    <!-- TAB 1D: LAPORAN MUTASI BARANG (COMPACT 1-LINE TOOLBAR)         -->
+    <!-- Sesuai D:\xampp\htdocs\bc3\1d_bb, 1d_bj, 1d_ma, 1d_s           -->
+    <!-- ============================================================== -->
+    <form method="GET" action="it_inventory.php" id="filterForm1D" class="filter-panel-1a" style="display:flex; align-items:center; justify-content:space-between; gap:6px; flex-wrap:nowrap; padding:3px 8px; margin-bottom:4px; overflow-x:auto;">
+        <input type="hidden" name="tab" value="1d">
+        <input type="hidden" name="theme" value="<?= htmlspecialchars($theme) ?>">
+        <input type="hidden" name="cmp_id" value="<?= htmlspecialchars($cmp_id) ?>">
+
+        <!-- LEFT CONTROLS -->
+        <div style="display:inline-flex; align-items:center; gap:8px; flex-shrink:0;">
+            <!-- PERIODE -->
+            <div style="display:inline-flex; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--text-muted); margin:0; white-space:nowrap;">Periode:</label>
+                <input type="date" name="tgl1" class="filter-control" style="width:112px; height:21px; font-size:9.5px; padding:0 3px;" value="<?= htmlspecialchars($tgl1) ?>">
+                <span style="font-size:9px; color:var(--text-muted);">-s/d-</span>
+                <input type="date" name="tgl2" class="filter-control" style="width:112px; height:21px; font-size:9.5px; padding:0 3px;" value="<?= htmlspecialchars($tgl2) ?>">
+            </div>
+
+            <!-- KLASIFIKASI -->
+            <div style="display:inline-flex; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--text-muted); margin:0; white-space:nowrap;">Klas:</label>
+                <select name="klas" id="selectKlas1D" class="filter-control" style="width:125px; height:21px; font-size:9.5px; padding:0 3px;" onchange="handleKlasChange(this.value)">
+                    <option value="Raw Materials" <?= in_array($klas_filter, ['Raw Materials', 'Raw Material', 'RM']) ? 'selected' : '' ?>>Raw Materials</option>
+                    <option value="Finished Goods" <?= in_array($klas_filter, ['Finished Goods', 'Finished Good', 'FG']) ? 'selected' : '' ?>>Finished Goods</option>
+                    <option value="Capital Goods" <?= $isCapitalGoods ? 'selected' : '' ?>>Capital Goods</option>
+                    <option value="Wastes" <?= in_array($klas_filter, ['Wastes', 'Waste', 'W']) ? 'selected' : '' ?>>Wastes</option>
+                    <option value="Work In Progress" <?= in_array($klas_filter, ['Work In Progress', 'WIP', 'WI']) ? 'selected' : '' ?>>Work In Progress</option>
+                    <option value="%" <?= ($klas_filter === '%' || empty($klas_filter)) ? 'selected' : '' ?>>-- SEMUA KLAS --</option>
+                </select>
+            </div>
+
+            <!-- SUB-KLAS KHUSUS CAPITAL GOODS -->
+            <div id="subKlasContainer" style="display:<?= $isCapitalGoods ? 'inline-flex' : 'none' ?>; align-items:center; gap:3px;">
+                <label style="font-size:9.5px; font-weight:600; color:var(--primary); margin:0; white-space:nowrap;">Sub-Klas:</label>
+                <select name="sub_klas" id="subKlasSelect" class="filter-control" style="width:125px; height:21px; font-size:9.5px; padding:0 3px; font-weight:600;" onchange="this.form.submit()">
+                    <option value="%" <?= ($sub_klas === '%' || empty($sub_klas) || $sub_klas === '-- SEMUA KLAS --') ? 'selected' : '' ?>>-- SEMUA KLAS --</option>
+                    <?php foreach ($cgTypes as $cgt): ?>
+                        <option value="<?= htmlspecialchars($cgt) ?>" <?= $sub_klas === $cgt ? 'selected' : '' ?>><?= htmlspecialchars($cgt) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+
+            <!-- CARI / FILTER -->
+            <div style="position:relative; display:inline-flex; align-items:center;">
+                <input type="text" name="search_kw" id="filterSearchKw" class="filter-control" style="width:130px; height:21px; font-size:9.5px; padding:0 20px 0 5px;" placeholder="Filter Data / Cari Teks.." value="<?= htmlspecialchars($search_kw) ?>" onkeyup="filterTableInstant(this.value)">
+                <i class="fa-solid fa-magnifying-glass" style="position:absolute; right:5px; top:5px; font-size:9.5px; color:var(--text-muted); pointer-events:none;"></i>
+            </div>
+
+            <!-- CHECKBOX TAMPILKAN SEMUA STOK -->
+            <div style="display:inline-flex; align-items:center; gap:4px; padding-left:4px; border-left:1px solid var(--border-light);">
+                <label style="display:inline-flex; align-items:center; gap:3px; font-size:9.5px; font-weight:600; color:var(--text-main); cursor:pointer; user-select:none; margin:0; white-space:nowrap;">
+                    <input type="checkbox" name="stok" id="chkStok" value="Y" <?= $show_all_stok ? 'checked' : '' ?> onchange="this.form.submit()" style="cursor:pointer; width:12px; height:12px; margin:0;">
+                    <?= htmlspecialchars($stokCheckboxLabel) ?>
+                </label>
+            </div>
+        </div>
+
+        <!-- RIGHT ACTION BUTTONS -->
+        <div style="display:inline-flex; align-items:center; gap:4px; flex-shrink:0;">
+            <button type="submit" class="ant-btn ant-btn-primary" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-desktop"></i> Tampilkan
+            </button>
+            <button type="button" class="ant-btn" onclick="printReport()" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; background:#d4380d; border-color:#d4380d; color:#ffffff !important; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-file-pdf"></i> Cetak ke PDF
+            </button>
+            <button type="button" class="ant-btn ant-btn-success" onclick="exportToExcelCustom('1d')" style="height:21px; font-size:9.5px; padding:0 8px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+                <i class="fa-solid fa-file-excel"></i> Export ke XLS
+            </button>
+        </div>
+    </form>
+
+    <!-- INNER REPORT HEADER BANNER (Hanya tampil saat Print PDF & Save Excel) -->
+    <div class="report-header-banner">
+        <div class="banner-title"><?= $reportBannerTitle ?></div>
+        <div class="banner-sub"><?= htmlspecialchars($cmp_name) ?> - Periode : <?= htmlspecialchars($tgl1) ?> s/d <?= htmlspecialchars($tgl2) ?></div>
+    </div>
+    <?php else: ?>
+    <!-- FILTER BAR FOR OTHER TABS (1C, LOG) -->
     <form method="GET" action="it_inventory.php" class="filter-panel">
         <input type="hidden" name="tab" value="<?= htmlspecialchars($activeTab) ?>">
         <input type="hidden" name="theme" value="<?= htmlspecialchars($theme) ?>">
         <input type="hidden" name="cmp_id" value="<?= htmlspecialchars($cmp_id) ?>">
 
-        <?php if ($activeTab === '1a' || $activeTab === '1b'): ?>
-            <div class="filter-col">
-                <label>Dokumen Pabean (BC)</label>
-                <select name="bc" class="filter-control" style="width: 140px;">
-                    <option value="%" <?= $bc_filter === '%' ? 'selected' : '' ?>>Semua Dokumen (%)</option>
-                    <?php if ($activeTab === '1a'): ?>
-                        <?php if (isItDocPermitted('611')): ?><option value="611" <?= $bc_filter === '611' ? 'selected' : '' ?>>PPKEK 6.1.1 (KEK Masuk)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('20')): ?><option value="20" <?= $bc_filter === '20' ? 'selected' : '' ?>>BC 2.0 (Impor)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('23')): ?><option value="23" <?= $bc_filter === '23' ? 'selected' : '' ?>>BC 2.3 (TPB Masuk)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('40')): ?><option value="40" <?= $bc_filter === '40' ? 'selected' : '' ?>>BC 4.0 (TLDDP Masuk)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('16')): ?><option value="16" <?= $bc_filter === '16' ? 'selected' : '' ?>>BC 1.6 (Pemasukan PLB)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('261')): ?><option value="261" <?= $bc_filter === '261' ? 'selected' : '' ?>>BC 2.6.1 (Subkon Masuk)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('28')): ?><option value="28" <?= $bc_filter === '28' ? 'selected' : '' ?>>BC 2.8 (Impor PLB)</option><?php endif; ?>
-                    <?php else: ?>
-                        <?php if (isItDocPermitted('613')): ?><option value="613" <?= $bc_filter === '613' ? 'selected' : '' ?>>PPKEK 6.1.3 (KEK Keluar)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('631')): ?><option value="631" <?= $bc_filter === '631' ? 'selected' : '' ?>>PPKEK 6.3.1 (Pengeluaran ke LDP)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('25')): ?><option value="25" <?= $bc_filter === '25' ? 'selected' : '' ?>>BC 2.5 (TLDDP Keluar)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('30')): ?><option value="30" <?= $bc_filter === '30' ? 'selected' : '' ?>>BC 3.0 (Ekspor)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('41')): ?><option value="41" <?= $bc_filter === '41' ? 'selected' : '' ?>>BC 4.1 (TLDDP Keluar)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('262')): ?><option value="262" <?= $bc_filter === '262' ? 'selected' : '' ?>>BC 2.6.2 (Subkon Keluar)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('33')): ?><option value="33" <?= $bc_filter === '33' ? 'selected' : '' ?>>BC 3.3 (Ekspor PLB)</option><?php endif; ?>
-                        <?php if (isItDocPermitted('331')): ?><option value="331" <?= $bc_filter === '331' ? 'selected' : '' ?>>BC 3.3.1 (P3BET PLB)</option><?php endif; ?>
-                    <?php endif; ?>
-                </select>
-            </div>
-            <div class="filter-col">
-                <label>Tanggal Mulai</label>
-                <input type="date" name="tgl1" class="filter-control" value="<?= htmlspecialchars($tgl1) ?>">
-            </div>
-            <div class="filter-col">
-                <label>Tanggal Akhir</label>
-                <input type="date" name="tgl2" class="filter-control" value="<?= htmlspecialchars($tgl2) ?>">
-            </div>
-            <div class="filter-col">
-                <label>Cari Berdasarkan</label>
-                <select name="search_field" class="filter-control" style="width: 130px;">
-                    <option value="all" <?= $search_field === 'all' ? 'selected' : '' ?>>Semua Kolom</option>
-                    <option value="no_daftar" <?= $search_field === 'no_daftar' ? 'selected' : '' ?>>No Pendaftaran</option>
-                    <option value="kode_barang" <?= $search_field === 'kode_barang' ? 'selected' : '' ?>>Kode Barang</option>
-                    <option value="nama_barang" <?= $search_field === 'nama_barang' ? 'selected' : '' ?>>Nama / Uraian</option>
-                    <option value="vendor" <?= $search_field === 'vendor' ? 'selected' : '' ?>><?= $activeTab === '1a' ? 'Vendor / Pemasok' : 'Buyer / Penerima' ?></option>
-                    <option value="no_bukti" <?= $search_field === 'no_bukti' ? 'selected' : '' ?>>No Bukti / Invoice</option>
-                    <option value="no_aju" <?= $search_field === 'no_aju' ? 'selected' : '' ?>>Nomor Aju</option>
-                </select>
-            </div>
-        <?php elseif ($activeTab === '1c'): ?>
+        <?php if ($activeTab === '1c'): ?>
             <div class="filter-col">
                 <label>Tanggal Cut-off Posisi WIP</label>
                 <input type="date" name="tgl2" class="filter-control" value="<?= htmlspecialchars($tgl2) ?>">
-            </div>
-        <?php elseif ($activeTab === '1d'): ?>
-            <div class="filter-col">
-                <label>Periode Awal</label>
-                <input type="date" name="tgl1" class="filter-control" value="<?= htmlspecialchars($tgl1) ?>">
-            </div>
-            <div class="filter-col">
-                <label>Periode Akhir</label>
-                <input type="date" name="tgl2" class="filter-control" value="<?= htmlspecialchars($tgl2) ?>">
-            </div>
-            <div class="filter-col">
-                <label>Klasifikasi Barang</label>
-                <select name="klas" class="filter-control" style="min-width: 210px;">
-                    <option value="Raw Materials" <?= in_array($klas_filter, ['Raw Materials', 'Raw Material', 'RM']) ? 'selected' : '' ?>>RM - Raw Material</option>
-                    <option value="Finished Goods" <?= in_array($klas_filter, ['Finished Goods', 'Finished Good', 'FG']) ? 'selected' : '' ?>>FG - Finished Goods</option>
-                    <option value="Work In Progress" <?= in_array($klas_filter, ['Work In Progress', 'WIP', 'WI']) ? 'selected' : '' ?>>WI - Work In Progress</option>
-                    <optgroup label="CG - Capital Goods">
-                        <option value="Capital Goods" <?= in_array($klas_filter, ['Capital Goods', 'CG']) ? 'selected' : '' ?>>CG - Capital Goods (Semua)</option>
-                        <?php foreach ($cgTypes as $cgt): ?>
-                            <option value="<?= htmlspecialchars($cgt) ?>" <?= $klas_filter === $cgt ? 'selected' : '' ?>><?= htmlspecialchars($cgt) ?></option>
-                        <?php endforeach; ?>
-                    </optgroup>
-                    <option value="Wastes" <?= in_array($klas_filter, ['Wastes', 'Waste', 'W']) ? 'selected' : '' ?>>W - Wastes</option>
-                </select>
             </div>
         <?php elseif ($activeTab === 'log'): ?>
             <div class="filter-col">
@@ -1520,31 +1836,20 @@ $stats['total_rows'] = count($dataRows);
             <input type="text" name="search_kw" class="filter-control" style="width: 160px;" placeholder="Ketik kata kunci..." value="<?= htmlspecialchars($search_kw) ?>">
         </div>
 
-        <div class="filter-col">
-            <label>Limit Data</label>
-            <select name="limit" class="filter-control" style="width: 110px;">
-                <option value="250" <?= $limit === 250 ? 'selected' : '' ?>>250 baris</option>
-                <option value="500" <?= $limit === 500 ? 'selected' : '' ?>>500 baris</option>
-                <option value="1000" <?= $limit === 1000 ? 'selected' : '' ?>>1.000 baris</option>
-                <option value="2500" <?= $limit === 2500 ? 'selected' : '' ?>>2.500 baris</option>
-                <option value="5000" <?= $limit === 5000 ? 'selected' : '' ?>>5.000 baris</option>
-            </select>
-        </div>
-
         <button type="submit" class="ant-btn ant-btn-primary">
-            🔍 Muat Data
+            <i class="fa-solid fa-magnifying-glass"></i> Muat Data
         </button>
         <a href="it_inventory.php?tab=<?= $activeTab ?>&theme=<?= $theme ?>" class="ant-btn">
-            🔄 Reset
+            <i class="fa-solid fa-rotate-left"></i> Reset
         </a>
         <button type="button" class="ant-btn ant-btn-success" onclick="exportToExcel('<?= $activeTab ?>')" title="Simpan sebagai file Excel (.xlsx)">
-            📗 Save Excel (.xlsx)
+            <i class="fa-solid fa-file-excel"></i> Save Excel (.xlsx)
         </button>
         <button type="button" class="ant-btn" onclick="exportTableToCSV('<?= $activeTab ?>')" title="Unduh CSV">
-            📄 CSV
+            <i class="fa-solid fa-file-csv"></i> CSV
         </button>
         <button type="button" class="ant-btn" onclick="copyTableClipboard()" title="Salin data ke clipboard">
-            📋 Copy Grid
+            <i class="fa-solid fa-clipboard"></i> Copy Grid
         </button>
     </form>
 
@@ -1554,50 +1859,10 @@ $stats['total_rows'] = count($dataRows);
             <span class="kpi-label">Total Data:</span>
             <span class="kpi-val"><?= number_format($stats['total_rows']) ?> Baris</span>
         </div>
-        <?php if ($activeTab === '1a' || $activeTab === '1b'): ?>
-            <div class="kpi-chip">
-                <span class="kpi-label">Total Qty:</span>
-                <span class="kpi-val" style="color:#1890ff;"><?= fnum($stats['total_qty']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Total Nilai:</span>
-                <span class="kpi-val" style="color:#52c41a;"><?= fnum($stats['total_nilai']) ?></span>
-            </div>
-            <?php if ($stats['total_cif'] > 0): ?>
-            <div class="kpi-chip">
-                <span class="kpi-label">Total CIF:</span>
-                <span class="kpi-val" style="color:#722ed1;"><?= fnum($stats['total_cif']) ?></span>
-            </div>
-            <?php endif; ?>
-        <?php elseif ($activeTab === '1c'): ?>
+        <?php if ($activeTab === '1c'): ?>
             <div class="kpi-chip">
                 <span class="kpi-label">Total Saldo WIP:</span>
                 <span class="kpi-val" style="color:#1890ff;"><?= fnum($stats['total_qty']) ?></span>
-            </div>
-        <?php elseif ($activeTab === '1d'): ?>
-            <div class="kpi-chip">
-                <span class="kpi-label">Saldo Awal:</span>
-                <span class="kpi-val"><?= fnum($stats['total_awal']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Pemasukan:</span>
-                <span class="kpi-val" style="color:#52c41a;">+<?= fnum($stats['total_masuk']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Pengeluaran:</span>
-                <span class="kpi-val" style="color:#f5222d;">-<?= fnum($stats['total_keluar']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Saldo Buku:</span>
-                <span class="kpi-val" style="color:#1890ff;"><?= fnum($stats['total_akhir']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Stock Opname:</span>
-                <span class="kpi-val"><?= fnum($stats['total_so']) ?></span>
-            </div>
-            <div class="kpi-chip">
-                <span class="kpi-label">Selisih:</span>
-                <span class="kpi-val" style="color:<?= $stats['total_selisih'] != 0 ? '#faad14' : '#52c41a' ?>;"><?= fnum($stats['total_selisih']) ?></span>
             </div>
         <?php endif; ?>
     </div>
@@ -1605,47 +1870,53 @@ $stats['total_rows'] = count($dataRows);
     <!-- TABLE SEARCH & SORT TOOLBAR -->
     <div style="display:flex; justify-content:space-between; align-items:center; padding:7px 12px; background:var(--bg-filter); border:1px solid var(--border-card); border-bottom:none; border-radius:4px 4px 0 0; gap:10px; flex-wrap:wrap; margin-top:8px;">
         <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:13px;">⚡</span>
+            <i class="fa-solid fa-bolt" style="color:#faad14; font-size:12px;"></i>
             <input type="text" id="tableFilterInput" class="filter-control" placeholder="Cari instan di tabel (semua kolom)..." onkeyup="filterTableInstant()" style="width: 240px; padding:3px 8px;">
             <span id="rowCountBadge" class="ant-badge ant-badge-blue"><?= count($dataRows) ?> Baris Data</span>
-            <button type="button" class="ant-btn" onclick="clearTableFilter()" style="height:22px; padding:0 6px; font-size:10px;">✕ Clear</button>
+            <button type="button" class="ant-btn" onclick="clearTableFilter()" style="height:22px; padding:0 6px; font-size:10px;">&times; Clear</button>
         </div>
         <div style="font-size:10.5px; color:var(--text-muted); display:flex; align-items:center; gap:12px;">
-            <span>💡 Klik judul kolom untuk mengurutkan (Sort ▲▼)</span>
+            <span><i class="fa-regular fa-lightbulb" style="color:#faad14;"></i> Klik judul kolom untuk mengurutkan (Sort &#9650;&#9660;)</span>
             <button type="button" class="ant-btn ant-btn-success" onclick="exportToExcel('<?= $activeTab ?>')" style="height:23px; font-weight:600; padding:0 8px;">
-                📗 Save Excel (.xlsx)
+                <i class="fa-solid fa-file-excel"></i> Save Excel (.xlsx)
             </button>
         </div>
     </div>
-
+    <?php endif; ?>
     <!-- MAIN DATA TABLE -->
     <div class="ant-table-wrapper" style="border-top-left-radius:0; border-top-right-radius:0;">
         <div class="table-scroll">
             <table class="ant-table" id="mainDataTable">
                 <thead>
-                <?php if ($activeTab === '1a' || $activeTab === '1b'): ?>
+                <?php if (in_array($activeTab, ['1a', '1b'])): ?>
+                    <?php 
+                        $partnerHeader = ($activeTab === '1a') ? 'Pengirim Barang' : 'Penerima Barang';
+                        $buktiHeader   = ($activeTab === '1a') ? 'Bukti Penerimaan' : 'Bukti Pengeluaran';
+                    ?>
                     <tr>
-                        <th style="width:30px; text-align:center;">No</th>
-                        <th>Jenis BC</th>
-                        <th>No Daftar</th>
-                        <th>Tgl Daftar</th>
-                        <th>No Bukti</th>
-                        <th>Tgl Bukti</th>
-                        <th><?= $activeTab === '1a' ? 'Vendor / Pemasok' : 'Buyer / Penerima' ?></th>
-                        <th>Kode Barang</th>
-                        <th>Uraian / Nama Barang</th>
-                        <th style="text-align:right;">Jumlah</th>
-                        <th>Satuan</th>
-                        <th>Valuta</th>
-                        <th style="text-align:right;">Nilai</th>
-                        <th>Pos Tarif (HS)</th>
-                        <th>Klasifikasi</th>
-                        <th>Nomor Aju</th>
-                        <th>Invoice</th>
-                        <th>Faktur</th>
-                        <th>Surat Jalan</th>
-                        <th style="text-align:right;">Netto</th>
-                        <th style="text-align:right;">CIF</th>
+                        <th rowspan="2" style="width:30px; text-align:center;">No.</th>
+                        <th colspan="3" style="text-align:center;">Dokumen Pabean</th>
+                        <th colspan="2" style="text-align:center;"><?= $buktiHeader ?></th>
+                        <th rowspan="2"><?= $partnerHeader ?></th>
+                        <th rowspan="2">Kode Barang</th>
+                        <th rowspan="2">HS Kode</th>
+                        <th rowspan="2">Nama Barang</th>
+                        <th rowspan="2">Klasifikasi</th>
+                        <th rowspan="2" style="text-align:center;">Sat</th>
+                        <th rowspan="2" style="text-align:right;">Jumlah</th>
+                        <th rowspan="2" style="text-align:center;">Kurs</th>
+                        <th rowspan="2" style="text-align:right;">Nilai</th>
+                        <th rowspan="2" style="text-align:right;">Harga Rupiah</th>
+                        <th rowspan="2" class="col-ext col-ext-aju" style="text-align:center; <?= !$show_ext ? 'display:none;' : '' ?>">No. AJU</th>
+                        <th rowspan="2" class="col-ext col-ext-netto" style="text-align:right; <?= !$show_ext ? 'display:none;' : '' ?>">Netto</th>
+                        <th rowspan="2" class="col-ext col-ext-gross" style="text-align:right; <?= !$show_ext ? 'display:none;' : '' ?>">Gross</th>
+                    </tr>
+                    <tr>
+                        <th style="text-align:center;">Jenis</th>
+                        <th>Nomor</th>
+                        <th style="text-align:center;">Tanggal</th>
+                        <th>Nomor</th>
+                        <th style="text-align:center;">Tanggal</th>
                     </tr>
                 <?php elseif ($activeTab === '1c'): ?>
                     <tr>
@@ -1659,18 +1930,19 @@ $stats['total_rows'] = count($dataRows);
                     </tr>
                 <?php elseif ($activeTab === '1d'): ?>
                     <tr>
-                        <th style="width:30px; text-align:center;">No</th>
-                        <th>Kode Barang</th>
-                        <th>Uraian Barang</th>
-                        <th>Model</th>
-                        <th>Satuan</th>
-                        <th style="text-align:right;">Saldo Awal</th>
+                        <th style="width:30px; text-align:center;">No.</th>
+                        <th style="text-align:center;">Kode Barang</th>
+                        <th>Nama Barang</th>
+                        <th style="text-align:center;">Satuan</th>
+                        <th style="text-align:right;">Jumlah<br>Barang</th>
+                        <th style="text-align:right; width:90px;"><u>Saldo Awal</u><br><span style="font-weight:normal; font-size:8.5px;"><?= htmlspecialchars($tgl1) ?></span></th>
                         <th style="text-align:right;">Pemasukan</th>
                         <th style="text-align:right;">Pengeluaran</th>
                         <th style="text-align:right;">Penyesuaian</th>
-                        <th style="text-align:right;">Saldo Buku</th>
-                        <th style="text-align:right;">Stock Opname</th>
+                        <th style="text-align:right; width:90px;"><u>Saldo Akhir</u><br><span style="font-weight:normal; font-size:8.5px;"><?= htmlspecialchars($tgl2) ?></span></th>
+                        <th style="text-align:right;">Stok Opname</th>
                         <th style="text-align:right;">Selisih</th>
+                        <th style="text-align:center;">Keterangan</th>
                     </tr>
                 <?php elseif ($activeTab === 'log'): ?>
                     <tr>
@@ -1689,105 +1961,237 @@ $stats['total_rows'] = count($dataRows);
                 <?php endif; ?>
                 </thead>
                 <tbody>
-                <?php if (empty($dataRows)): ?>
-                    <tr>
-                        <td colspan="21" style="text-align:center; padding: 24px; color: var(--text-muted);">
-                            📭 Tidak ada data yang ditemukan untuk kriteria filter ini.
-                        </td>
-                    </tr>
+                <?php if (in_array($activeTab, ['1a', '1b'])): ?>
+                    <?php if (empty($dataRows)): ?>
+                        <tr>
+                            <td colspan="19" style="text-align:center; padding: 24px; color: var(--text-muted);">
+                                Tidak ada data yang ditemukan untuk kriteria filter ini.
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php
+                        $rowNo = 1;
+                        $groupNo = 0;
+                        $lastGroupKey = null;
+                        foreach ($dataRows as $idx => $r):
+                            $groupKey = trim($r['JENIS_DOC'] ?? '') . '::' . trim($r['NO_DOC'] ?? '') . '::' . trim($r['TGL_DOC'] ?? '') . '::' . trim($r['NO_BUKTI'] ?? '') . '::' . trim($r['NO_AJU'] ?? '');
+                            $isFirstInGroup = ($groupKey !== $lastGroupKey);
+                            if ($isFirstInGroup) {
+                                $groupNo++;
+                                $lastGroupKey = $groupKey;
+                            }
+
+                            $jenisDoc = htmlspecialchars($r['JENIS_DOC'] ?? '-');
+                            $noDoc    = htmlspecialchars($r['NO_DOC'] ?? '-');
+                            $tglDoc   = htmlspecialchars($r['TGL_DOC'] ?? '-');
+                            $noBukti  = htmlspecialchars($r['NO_BUKTI'] ?? '-');
+                            $tglBukti = htmlspecialchars($r['TGL_BUKTI'] ?? '-');
+                            $partner  = htmlspecialchars(($activeTab === '1a') ? ($r['VENDOR'] ?? ($r['NAMA_PENERIMA_BARANG'] ?? '-')) : ($r['NAMA_PENERIMA_BARANG'] ?? ($r['VENDOR'] ?? '-')));
+                            $kodeBrg  = htmlspecialchars($r['KODE_BARANG'] ?? '-');
+                            $hsKode   = htmlspecialchars($r['POS_TARIF'] ?? '-');
+                            $namaBrg  = htmlspecialchars($r['NAMA_BARANG'] ?? '-');
+                            $klas     = htmlspecialchars($r['KLAS'] ?? '-');
+                            $satuan   = htmlspecialchars($r['SATUAN'] ?? '-');
+                            $kurs     = htmlspecialchars($r['KODE_VALUTA'] ?? 'IDR');
+                            $noAju    = htmlspecialchars($r['NO_AJU'] ?? '-');
+
+                            $qtyVal    = (float)($r['JUMLAH'] ?? 0);
+                            $qtyDisp   = (fmod($qtyVal, 1) == 0) ? number_format($qtyVal, 0) : number_format($qtyVal, 2);
+
+                            $nilaiVal  = (float)($r['NILAI'] ?? 0);
+                            $nilaiDisp = (fmod($nilaiVal, 1) == 0) ? number_format($nilaiVal, 0) : number_format($nilaiVal, 2);
+
+                            $hargaPnyVal  = (float)($r['HARGA_PENYERAHAN'] ?? 0);
+                            $hargaPnyDisp = (fmod($hargaPnyVal, 1) == 0) ? number_format($hargaPnyVal, 0) : number_format($hargaPnyVal, 2);
+
+                            $nettoVal  = (float)($r['NETTO'] ?? 0);
+                            $nettoDisp = number_format($nettoVal, 2);
+
+                            $grossVal  = (float)($r['GROSS'] ?? 0);
+                            $grossDisp = number_format($grossVal, 2);
+                        ?>
+                        <tr data-row-idx="<?= $idx ?>"
+                            data-group-no="<?= $groupNo ?>"
+                            data-row-no="<?= $rowNo ?>"
+                            data-is-first="<?= $isFirstInGroup ? '1' : '0' ?>"
+                            onclick="selectReportRow(this)">
+
+                            <td class="col-no" data-orig-text="<?= $rowNo ?>" style="text-align:center; color:var(--text-muted);">
+                                <?= $group_mode ? ($isFirstInGroup ? $groupNo : '') : $rowNo ?>
+                            </td>
+
+                            <td class="col-grp col-jenis" data-orig-text="<?= $jenisDoc ?>" style="text-align:center;">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $jenisDoc ?>
+                            </td>
+
+                            <td class="col-grp col-nodoc" data-orig-text="<?= $noDoc ?>" style="font-weight:600;">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noDoc ?>
+                            </td>
+
+                            <td class="col-grp col-tgldoc" data-orig-text="<?= $tglDoc ?>" style="text-align:center;">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $tglDoc ?>
+                            </td>
+
+                            <td class="col-grp col-nobukti" data-orig-text="<?= $noBukti ?>">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noBukti ?>
+                            </td>
+
+                            <td class="col-grp col-tglbukti" data-orig-text="<?= $tglBukti ?>" style="text-align:center;">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $tglBukti ?>
+                            </td>
+
+                            <td class="col-grp col-partner" data-orig-text="<?= $partner ?>">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $partner ?>
+                            </td>
+
+                            <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= $kodeBrg ?></td>
+                            <td><?= $hsKode ?></td>
+                            <td><?= $namaBrg ?></td>
+                            <td><span class="ant-badge ant-badge-gold"><?= $klas ?></span></td>
+                            <td style="text-align:center;"><?= $satuan ?></td>
+                            <td style="text-align:right; font-weight:600;"><?= $qtyDisp ?></td>
+                            <td style="text-align:center;"><?= $kurs ?></td>
+                            <td style="text-align:right; font-weight:600; color:#52c41a;"><?= $nilaiDisp ?></td>
+                            <td style="text-align:right; font-weight:600;"><?= $hargaPnyDisp ?></td>
+
+                            <!-- No. AJU (Ikut Grouping seperti Nomor Daftar & Bisa di-hide) -->
+                            <td class="col-ext col-ext-aju col-grp" data-orig-text="<?= $noAju ?>" style="text-align:center; font-family:monospace; <?= !$show_ext ? 'display:none;' : '' ?>">
+                                <?= ($group_mode && !$isFirstInGroup) ? '' : $noAju ?>
+                            </td>
+                            <td class="col-ext col-ext-netto" style="text-align:right; <?= !$show_ext ? 'display:none;' : '' ?>">
+                                <?= $nettoDisp ?>
+                            </td>
+                            <td class="col-ext col-ext-gross" style="text-align:right; <?= !$show_ext ? 'display:none;' : '' ?>">
+                                <?= $grossDisp ?>
+                            </td>
+                        </tr>
+                        <?php $rowNo++; endforeach; ?>
+                    <?php endif; ?>
                 <?php else: ?>
-                    <?php $no = 1; foreach ($dataRows as $r): ?>
-                        <?php if ($activeTab === '1a' || $activeTab === '1b'): ?>
-                            <tr>
-                                <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
-                                <td><span class="ant-badge ant-badge-blue"><?= htmlspecialchars($r['JENIS_DOC'] ?? '-') ?></span></td>
-                                <td style="font-weight:600;"><?= htmlspecialchars($r['NO_DOC'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['TGL_DOC'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['NO_BUKTI'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['TGL_BUKTI'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($activeTab === '1a' ? ($r['VENDOR'] ?? '-') : ($r['NAMA_PENERIMA_BARANG'] ?? '-')) ?></td>
-                                <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= htmlspecialchars($r['KODE_BARANG'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['NAMA_BARANG'] ?? '-') ?></td>
-                                <td style="text-align:right; font-weight:600;"><?= fnum($r['JUMLAH'] ?? 0) ?></td>
-                                <td><?= htmlspecialchars($r['SATUAN'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['KODE_VALUTA'] ?? 'IDR') ?></td>
-                                <td style="text-align:right; font-weight:600; color:#52c41a;"><?= fnum($r['NILAI'] ?? 0) ?></td>
-                                <td><?= htmlspecialchars($r['POS_TARIF'] ?? '-') ?></td>
-                                <td><span class="ant-badge ant-badge-gold"><?= htmlspecialchars($r['KLAS'] ?? '-') ?></span></td>
-                                <td style="font-family:monospace;"><?= htmlspecialchars($r['NO_AJU'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['INVOICE'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['FAKTUR'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['SJ'] ?? '-') ?></td>
-                                <td style="text-align:right;"><?= fnum($r['NETTO'] ?? 0) ?></td>
-                                <td style="text-align:right;"><?= fnum($r['CIF'] ?? 0) ?></td>
-                            </tr>
-                        <?php elseif ($activeTab === '1c'): ?>
-                            <tr>
-                                <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
-                                <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= htmlspecialchars($r['KODE_BARANG'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['URAIAN'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['MODEL'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['KODE_SATUAN'] ?? '-') ?></td>
-                                <td style="text-align:right; font-weight:700; color:#1890ff;"><?= fnum($r['JUMLAH'] ?? 0) ?></td>
-                                <td><span class="ant-badge ant-badge-green">Aktif di WIP</span></td>
-                            </tr>
-                        <?php elseif ($activeTab === '1d'): ?>
-                            <tr>
-                                <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
-                                <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= htmlspecialchars($r['KODE_BARANG'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['URAIAN'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['MODEL'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['KODE_SATUAN'] ?? '-') ?></td>
-                                <td style="text-align:right;"><?= fnum($r['AWAL'] ?? 0) ?></td>
-                                <td style="text-align:right; font-weight:600; color:#52c41a;">+<?= fnum($r['MASUK'] ?? 0) ?></td>
-                                <td style="text-align:right; font-weight:600; color:#f5222d;">-<?= fnum($r['KELUAR'] ?? 0) ?></td>
-                                <td style="text-align:right;"><?= fnum($r['ADJ'] ?? 0) ?></td>
-                                <td style="text-align:right; font-weight:700; color:#1890ff;"><?= fnum($r['AKHIR'] ?? 0) ?></td>
-                                <td style="text-align:right;"><?= fnum($r['SO'] ?? 0) ?></td>
-                                <td style="text-align:right; font-weight:700; color:<?= ((float)($r['SELISIH'] ?? 0)) != 0 ? '#faad14' : '#52c41a' ?>;">
-                                    <?= fnum($r['SELISIH'] ?? 0) ?>
-                                </td>
-                            </tr>
-                        <?php elseif ($activeTab === 'log'): ?>
-                            <tr>
-                                <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
-                                <td><?= htmlspecialchars($r['TGL_REQ'] ?? '-') ?></td>
-                                <td><span class="ant-badge ant-badge-blue"><?= htmlspecialchars($r['BC'] ?? '-') ?></span></td>
-                                <td style="font-family:monospace; font-weight:600;"><?= htmlspecialchars($r['NOMOR_AJU'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['NAMA_BS'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['USER_REQ'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['ALASAN'] ?? '-') ?></td>
-                                <td style="text-align:center;">
-                                    <?php if (($r['STATUS'] ?? '') === 'Y'): ?>
-                                        <span class="ant-badge ant-badge-green">Disetujui</span>
-                                    <?php elseif (($r['STATUS'] ?? '') === 'N'): ?>
-                                        <span class="ant-badge ant-badge-red">Ditolak</span>
-                                    <?php else: ?>
-                                        <span class="ant-badge ant-badge-gold">Diajukan</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?= htmlspecialchars($r['USER_APPV'] ?? '-') ?></td>
-                                <td><?= htmlspecialchars($r['TGL_APPV'] ?? '-') ?></td>
-                                <td style="text-align:center;">
-                                    <button type="button" class="ant-btn ant-btn-sm" onclick="showRevisiDetail('<?= htmlspecialchars($r['NOMOR_AJU']) ?>', <?= (int)$r['ROWID'] ?>)">
-                                        🔍 Detail (<?= (int)($r['JUMLAH_REVISI'] ?? 0) ?>)
-                                    </button>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
+                    <?php if (empty($dataRows)): ?>
+                        <tr>
+                            <td colspan="21" style="text-align:center; padding: 24px; color: var(--text-muted);">
+                                Tidak ada data yang ditemukan untuk kriteria filter ini.
+                            </td>
+                        </tr>
+                    <?php else: ?>
+                        <?php $no = 1; foreach ($dataRows as $r): ?>
+                            <?php if ($activeTab === '1c'): ?>
+                                <tr>
+                                    <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
+                                    <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= htmlspecialchars($r['KODE_BARANG'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['URAIAN'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['MODEL'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['KODE_SATUAN'] ?? '-') ?></td>
+                                    <td style="text-align:right; font-weight:700; color:#1890ff;"><?= fnum($r['JUMLAH'] ?? 0) ?></td>
+                                    <td><span class="ant-badge ant-badge-green">Aktif di WIP</span></td>
+                                </tr>
+                            <?php elseif ($activeTab === '1d'): ?>
+                                <?php
+                                    $kodeBrg = htmlspecialchars($r['KODE_BARANG'] ?? '-');
+                                    $namaBrg = htmlspecialchars($r['URAIAN'] ?? '-');
+                                    $satuan  = htmlspecialchars($r['KODE_SATUAN'] ?? '-');
+                                    $stokJml = (float)($r['STOK'] ?? 0);
+                                    $saldoAwal = (float)($r['AWAL'] ?? 0);
+                                    $masuk     = (float)($r['MASUK'] ?? 0);
+                                    $keluar    = (float)($r['KELUAR'] ?? 0);
+                                    $adj       = (float)($r['ADJ'] ?? 0);
+                                    $saldoAkhir = (float)($r['AKHIR'] ?? 0);
+                                    $so        = (float)($r['SO'] ?? 0);
+                                    $selisih   = (float)($r['SELISIH'] ?? 0);
+
+                                    $ket = '';
+                                    if ($selisih == 0) { $ket = 'Sesuai'; }
+                                    elseif ($selisih > 0) { $ket = 'Selisih Lebih'; }
+                                    elseif ($selisih < 0) { $ket = 'Selisih Kurang'; }
+                                    if ($so == 0 && $selisih == 0 && $adj == 0) {
+                                        $ket = '';
+                                    }
+
+                                    $soDisp = ($so == 0 && $selisih == 0 && $adj == 0) ? '' : fnum($so);
+                                    $selisihDisp = ($so == 0 && $selisih == 0 && $adj == 0) ? '' : fnum($selisih);
+                                    $adjDisp = ($adj == 0) ? '0' : fnum($adj);
+                                ?>
+                                <tr onclick="selectReportRow(this)">
+                                    <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
+                                    <td style="font-family:monospace; font-weight:600; color:var(--primary);"><?= $kodeBrg ?></td>
+                                    <td><?= $namaBrg ?></td>
+                                    <td style="text-align:center;"><?= $satuan ?></td>
+                                    <td style="text-align:right; font-weight:600;"><?= fnum($stokJml) ?></td>
+                                    <td style="text-align:right;"><?= fnum($saldoAwal) ?></td>
+                                    <td style="text-align:right; font-weight:600; color:#52c41a; cursor:pointer;"
+                                        title="Dobel-klik untuk melihat Rincian Mutasi Masuk"
+                                        ondblclick="openMutasiDetail('<?= addslashes($r['KODE_BARANG']) ?>', 'A', '<?= $tgl1 ?>', '<?= $tgl2 ?>', '<?= addslashes($klasVal) ?>')">
+                                        <a href="javascript:void(0)" onclick="openMutasiDetail('<?= addslashes($r['KODE_BARANG']) ?>', 'A', '<?= $tgl1 ?>', '<?= $tgl2 ?>', '<?= addslashes($klasVal) ?>')" style="text-decoration:none; color:inherit;">
+                                            <?= fnum($masuk) ?>
+                                        </a>
+                                    </td>
+                                    <td style="text-align:right; font-weight:600; color:#f5222d; cursor:pointer;"
+                                        title="Dobel-klik untuk melihat Rincian Mutasi Keluar"
+                                        ondblclick="openMutasiDetail('<?= addslashes($r['KODE_BARANG']) ?>', 'B', '<?= $tgl1 ?>', '<?= $tgl2 ?>', '<?= addslashes($klasVal) ?>')">
+                                        <a href="javascript:void(0)" onclick="openMutasiDetail('<?= addslashes($r['KODE_BARANG']) ?>', 'B', '<?= $tgl1 ?>', '<?= $tgl2 ?>', '<?= addslashes($klasVal) ?>')" style="text-decoration:none; color:inherit;">
+                                            <?= fnum($keluar) ?>
+                                        </a>
+                                    </td>
+                                    <td style="text-align:right;"><?= $adjDisp ?></td>
+                                    <td style="text-align:right; font-weight:700; color:#1890ff;"><?= fnum($saldoAkhir) ?></td>
+                                    <td style="text-align:right;"><?= $soDisp ?></td>
+                                    <td style="text-align:right; font-weight:700; color:<?= $selisih != 0 ? '#faad14' : '#52c41a' ?>;"><?= $selisihDisp ?></td>
+                                    <td style="text-align:center;">
+                                        <?php if ($ket === 'Sesuai'): ?>
+                                            <span class="ant-badge ant-badge-green">Sesuai</span>
+                                        <?php elseif ($ket === 'Selisih Lebih'): ?>
+                                            <span class="ant-badge ant-badge-blue">Selisih Lebih</span>
+                                        <?php elseif ($ket === 'Selisih Kurang'): ?>
+                                            <span class="ant-badge ant-badge-red">Selisih Kurang</span>
+                                        <?php else: ?>
+                                            -
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php elseif ($activeTab === 'log'): ?>
+                                <tr>
+                                    <td style="text-align:center; color: var(--text-muted);"><?= $no++ ?></td>
+                                    <td><?= htmlspecialchars($r['TGL_REQ'] ?? '-') ?></td>
+                                    <td><span class="ant-badge ant-badge-blue"><?= htmlspecialchars($r['BC'] ?? '-') ?></span></td>
+                                    <td style="font-family:monospace; font-weight:600;"><?= htmlspecialchars($r['NOMOR_AJU'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['NAMA_BS'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['USER_REQ'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['ALASAN'] ?? '-') ?></td>
+                                    <td style="text-align:center;">
+                                        <?php if (($r['STATUS'] ?? '') === 'Y'): ?>
+                                            <span class="ant-badge ant-badge-green">Disetujui</span>
+                                        <?php elseif (($r['STATUS'] ?? '') === 'N'): ?>
+                                            <span class="ant-badge ant-badge-red">Ditolak</span>
+                                        <?php else: ?>
+                                            <span class="ant-badge ant-badge-gold">Diajukan</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><?= htmlspecialchars($r['USER_APPV'] ?? '-') ?></td>
+                                    <td><?= htmlspecialchars($r['TGL_APPV'] ?? '-') ?></td>
+                                    <td style="text-align:center;">
+                                        <button type="button" class="ant-btn ant-btn-sm" onclick="showRevisiDetail('<?= htmlspecialchars($r['NOMOR_AJU']) ?>', <?= (int)$r['ROWID'] ?>)">
+                                            <i class="fa-solid fa-magnifying-glass"></i> Detail (<?= (int)($r['JUMLAH_REVISI'] ?? 0) ?>)
+                                        </button>
+                                    </td>
+                                </tr>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
                 <?php endif; ?>
                 </tbody>
                 <?php if (!empty($dataRows)): ?>
                 <tfoot>
-                <?php if ($activeTab === '1a' || $activeTab === '1b'): ?>
+                <?php if (in_array($activeTab, ['1a', '1b'])): ?>
                     <tr>
-                        <th colspan="9" style="text-align:right;">TOTAL:</th>
-                        <th style="text-align:right;"><?= fnum($stats['total_qty']) ?></th>
-                        <th colspan="2"></th>
-                        <th style="text-align:right; color:#52c41a;"><?= fnum($stats['total_nilai']) ?></th>
-                        <th colspan="7"></th>
-                        <th style="text-align:right;"><?= fnum($stats['total_cif']) ?></th>
+                        <th colspan="12" style="text-align:right;">TOTAL:</th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_qty']) ?></th>
+                        <th style="text-align:center;"></th>
+                        <th style="text-align:right; font-weight:700; color:#52c41a;"><?= fnum($stats['total_nilai']) ?></th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_harga_penyerahan']) ?></th>
+                        <th class="col-ext col-ext-aju" style="<?= !$show_ext ? 'display:none;' : '' ?>"></th>
+                        <th class="col-ext col-ext-netto" style="text-align:right; font-weight:700; <?= !$show_ext ? 'display:none;' : '' ?>"><?= fnum($stats['total_netto']) ?></th>
+                        <th class="col-ext col-ext-gross" style="text-align:right; font-weight:700; <?= !$show_ext ? 'display:none;' : '' ?>"><?= fnum($stats['total_gross']) ?></th>
                     </tr>
                 <?php elseif ($activeTab === '1c'): ?>
                     <tr>
@@ -1797,14 +2201,16 @@ $stats['total_rows'] = count($dataRows);
                     </tr>
                 <?php elseif ($activeTab === '1d'): ?>
                     <tr>
-                        <th colspan="5" style="text-align:right;">TOTAL KESELURUHAN:</th>
-                        <th style="text-align:right;"><?= fnum($stats['total_awal']) ?></th>
-                        <th style="text-align:right; color:#52c41a;">+<?= fnum($stats['total_masuk']) ?></th>
-                        <th style="text-align:right; color:#f5222d;">-<?= fnum($stats['total_keluar']) ?></th>
-                        <th style="text-align:right;"><?= fnum($stats['total_adj']) ?></th>
-                        <th style="text-align:right; color:#1890ff;"><?= fnum($stats['total_akhir']) ?></th>
-                        <th style="text-align:right;"><?= fnum($stats['total_so']) ?></th>
-                        <th style="text-align:right;"><?= fnum($stats['total_selisih']) ?></th>
+                        <th colspan="4" style="text-align:right;">TOTAL:</th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_stok']) ?></th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_awal']) ?></th>
+                        <th style="text-align:right; font-weight:700; color:#52c41a;"><?= fnum($stats['total_masuk']) ?></th>
+                        <th style="text-align:right; font-weight:700; color:#f5222d;"><?= fnum($stats['total_keluar']) ?></th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_adj']) ?></th>
+                        <th style="text-align:right; font-weight:700; color:#1890ff;"><?= fnum($stats['total_akhir']) ?></th>
+                        <th style="text-align:right; font-weight:700;"><?= fnum($stats['total_so']) ?></th>
+                        <th style="text-align:right; font-weight:700; color:<?= $stats['total_selisih'] != 0 ? '#faad14' : '#52c41a' ?>;"><?= fnum($stats['total_selisih']) ?></th>
+                        <th></th>
                     </tr>
                 <?php endif; ?>
                 </tfoot>
@@ -1813,6 +2219,40 @@ $stats['total_rows'] = count($dataRows);
         </div>
     </div>
     <?php endif; // Akhir dari if ($activeTab === 'home') else ?>
+</div>
+
+<!-- MODAL DETAIL BREAKDOWN MUTASI (MASUK / KELUAR) -->
+<div class="ant-modal-mask" id="mutasiModalMask" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.65); z-index:1050; align-items:center; justify-content:center; backdrop-filter:blur(2px);">
+    <div class="ant-modal" style="width:94%; max-width:1150px; background:var(--bg-card); border-radius:6px; box-shadow:0 8px 32px rgba(0,0,0,0.25); display:flex; flex-direction:column; max-height:88vh; overflow:hidden; border:1px solid var(--border-card);">
+        <div class="ant-modal-header" style="display:flex; justify-content:space-between; align-items:center; padding:8px 14px; background:var(--table-head-bg); border-bottom:1px solid var(--border-card);">
+            <div>
+                <span style="font-size:11px; font-weight:700; color:var(--text-main); display:inline-flex; align-items:center; gap:6px;">
+                    <i id="mutasiModalIcon" class="fa-solid fa-arrow-down-long" style="color:#52c41a;"></i>
+                    <span id="mutasiModalTitle">Detail Mutasi</span>
+                </span>
+                <div id="mutasiModalSub" style="font-size:9px; color:var(--text-muted); margin-top:2px;"></div>
+            </div>
+            <div style="display:inline-flex; align-items:center; gap:6px;">
+                <button type="button" class="ant-btn ant-btn-sm" id="btnPopupExternal" onclick="openExternalMutasiWindow()" title="Buka di Jendela Baru (Pop-out)" style="height:22px; font-size:9.5px; padding:0 6px;">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> Pop-out
+                </button>
+                <button type="button" class="ant-btn ant-btn-sm ant-btn-success" onclick="exportMutasiModalToExcel()" title="Export ke Excel" style="height:22px; font-size:9.5px; padding:0 6px;">
+                    <i class="fa-solid fa-file-excel"></i> Excel
+                </button>
+                <button type="button" class="ant-btn ant-btn-sm" onclick="closeMutasiModal()" style="height:22px; font-size:11px; padding:0 6px; line-height:1;">✕</button>
+            </div>
+        </div>
+        <div class="ant-modal-body" id="mutasiModalBody" style="padding:10px; overflow-y:auto; flex:1;">
+            <div style="text-align:center; padding:30px; color:var(--text-muted);">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size:20px; color:var(--primary);"></i>
+                <div style="margin-top:8px;">Memuat rincian breakdown mutasi...</div>
+            </div>
+        </div>
+        <div class="ant-modal-footer" style="padding:6px 14px; background:var(--table-head-bg); border-top:1px solid var(--border-card); display:flex; justify-content:space-between; align-items:center;">
+            <span id="mutasiModalCount" style="font-size:9.5px; color:var(--text-muted);"></span>
+            <button type="button" class="ant-btn ant-btn-primary" onclick="closeMutasiModal()" style="height:22px; font-size:9.5px; padding:0 12px;">Tutup</button>
+        </div>
+    </div>
 </div>
 
 <!-- MODAL DETAIL REVISI (bc_1ab2_revisi) -->
@@ -1832,14 +2272,156 @@ $stats['total_rows'] = count($dataRows);
 </div>
 
 <script>
-    // Copy Grid to Clipboard
+    // =========================================================================
+    // FITUR INTERAKTIF TAB 1A & 1B: PEMASUKAN & PENGELUARAN (PowerBuilder TPB-ERP)
+    // =========================================================================
+
+    // Toggle Tampilan Grup (Client-side instant zero-reload toggle)
+    function toggleGroupMode(isGrouped) {
+        const input = document.getElementById('inputGroupMode');
+        if (input) input.value = isGrouped ? '1' : '0';
+        try { localStorage.setItem('it_group_mode', isGrouped ? '1' : '0'); } catch(e){}
+
+        const rows = document.querySelectorAll('#mainDataTable tbody tr[data-row-idx]');
+        rows.forEach(tr => {
+            const isFirst = tr.getAttribute('data-is-first') === '1';
+            const groupNo = tr.getAttribute('data-group-no');
+            const rowNo   = tr.getAttribute('data-row-no');
+
+            const noCell = tr.querySelector('.col-no');
+            if (noCell) {
+                noCell.innerText = isGrouped ? (isFirst ? groupNo : '') : rowNo;
+            }
+
+            const grpCells = tr.querySelectorAll('.col-grp');
+            grpCells.forEach(td => {
+                if (isGrouped && !isFirst) {
+                    td.innerText = '';
+                } else {
+                    td.innerText = td.getAttribute('data-orig-text') || '';
+                }
+            });
+        });
+    }
+
+    // Toggle Tampilkan No. AJU, Netto, Gross (Client-side instant toggle)
+    function toggleAjuNettoGross(show) {
+        const input = document.getElementById('inputShowExt');
+        if (input) input.value = show ? '1' : '0';
+        try { localStorage.setItem('it_show_ext', show ? '1' : '0'); } catch(e){}
+
+        const extCols = document.querySelectorAll('.col-ext');
+        extCols.forEach(el => {
+            el.style.display = show ? '' : 'none';
+        });
+    }
+
+    // Row selection highlight (Sky Blue)
+    function selectReportRow(tr) {
+        document.querySelectorAll('#mainDataTable tbody tr.row-selected').forEach(r => r.classList.remove('row-selected'));
+        tr.classList.add('row-selected');
+    }
+
+    // Cetak ke PDF
+    function printReport() {
+        const prevTitle = document.title;
+        const activeTab = '<?= $activeTab ?>';
+        const sheetCode = (activeTab || "1A").toUpperCase();
+        const tabWord = (sheetCode === '1B') ? 'Pengeluaran' : 'Pemasukan';
+        const dateStr = '<?= htmlspecialchars($tgl1) ?>_sd_<?= htmlspecialchars($tgl2) ?>';
+        document.title = "Laporan_" + sheetCode + "_" + tabWord + "_Barang_" + dateStr;
+        window.print();
+        setTimeout(() => { document.title = prevTitle; }, 1000);
+    }
+
+    // Export Table Tab 1A / 1B to Excel (.xlsx) using SheetJS
+    function exportToExcelCustom(tabName) {
+        if (typeof XLSX === 'undefined') {
+            alert('Library Excel (SheetJS) belum selesai termuat. Silakan gunakan tombol CSV.');
+            return;
+        }
+        const table = document.getElementById("mainDataTable");
+        if (!table) return;
+
+        // Clone table so original DOM is unaffected
+        const clone = table.cloneNode(true);
+        const showExt = document.getElementById('chkShowAjuNettoGross') ? document.getElementById('chkShowAjuNettoGross').checked : true;
+        if (!showExt) {
+            clone.querySelectorAll('.col-ext').forEach(el => el.remove());
+        }
+
+        // Hapus seluruh icon sort dan simbol panah dari header tabel
+        clone.querySelectorAll('.sort-icon').forEach(el => el.remove());
+        clone.querySelectorAll('th, td').forEach(cell => {
+            if (cell.innerHTML) {
+                cell.innerText = cell.innerText.replace(/[\u2195\u25B2\u25BC↕▲▼]/g, '').trim();
+            }
+        });
+
+        // Sisipkan Judul Laporan & Periode Perusahaan di baris teratas Excel (Hanya tampil di Excel & PDF)
+        const thead = clone.querySelector('thead');
+        if (thead) {
+            let colCount = 16;
+            const firstRowCells = thead.querySelectorAll('tr:first-child > th');
+            if (firstRowCells.length > 0) {
+                let spanSum = 0;
+                firstRowCells.forEach(th => {
+                    if (th.style.display !== 'none') {
+                        spanSum += parseInt(th.getAttribute('colspan') || '1', 10);
+                    }
+                });
+                if (spanSum > 0) colCount = spanSum;
+            }
+
+            const trTitle = document.createElement('tr');
+            const thTitle = document.createElement('th');
+            thTitle.setAttribute('colspan', colCount);
+            thTitle.style.textAlign = 'center';
+            thTitle.style.fontWeight = 'bold';
+            thTitle.style.fontSize = '12pt';
+            thTitle.innerText = "<?= $reportBannerTitle ?>";
+            trTitle.appendChild(thTitle);
+
+            const trSub = document.createElement('tr');
+            const thSub = document.createElement('th');
+            thSub.setAttribute('colspan', colCount);
+            thSub.style.textAlign = 'center';
+            thSub.style.fontWeight = 'bold';
+            thSub.style.fontSize = '10pt';
+            thSub.innerText = "<?= htmlspecialchars($cmp_name, ENT_QUOTES) ?> - Periode : <?= htmlspecialchars($tgl1, ENT_QUOTES) ?> s/d <?= htmlspecialchars($tgl2, ENT_QUOTES) ?>";
+            trSub.appendChild(thSub);
+
+            const trBlank = document.createElement('tr');
+            const thBlank = document.createElement('th');
+            thBlank.setAttribute('colspan', colCount);
+            thBlank.innerText = "";
+            trBlank.appendChild(thBlank);
+
+            thead.insertBefore(trBlank, thead.firstChild);
+            thead.insertBefore(trSub, thead.firstChild);
+            thead.insertBefore(trTitle, thead.firstChild);
+        }
+
+        const sheetCode = (tabName || "1A").toUpperCase();
+        const ws = XLSX.utils.table_to_sheet(clone);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Laporan_" + sheetCode);
+
+        const dateStr = new Date().toISOString().slice(0, 10);
+        let tabWord = 'Pemasukan';
+        if (sheetCode === '1B') tabWord = 'Pengeluaran';
+        else if (sheetCode === '1D') tabWord = 'Pertanggungjawaban_Mutasi';
+        const fileName = "Laporan_" + sheetCode + "_" + tabWord + "_Barang_" + dateStr + ".xlsx";
+        XLSX.writeFile(wb, fileName);
+    }
     function copyTableClipboard() {
         const table = document.getElementById("mainDataTable");
         let csv = [];
         for (let row of table.rows) {
             let cols = [];
             for (let cell of row.cells) {
-                cols.push('"' + cell.innerText.replace(/"/g, '""').trim() + '"');
+                const text = cell.innerText.replace(/[\u2195\u25B2\u25BC↕▲▼]/g, '').replace(/"/g, '""').trim();
+                cols.push('"' + text + '"');
             }
             csv.push(cols.join("\t"));
         }
@@ -1862,6 +2444,11 @@ $stats['total_rows'] = count($dataRows);
         // Clone table so we can remove sort icons and hidden rows cleanly
         const clonedTable = table.cloneNode(true);
         clonedTable.querySelectorAll(".sort-icon").forEach(icon => icon.remove());
+        clonedTable.querySelectorAll('th, td').forEach(cell => {
+            if (cell.innerHTML) {
+                cell.innerText = cell.innerText.replace(/[\u2195\u25B2\u25BC↕▲▼]/g, '').trim();
+            }
+        });
         clonedTable.querySelectorAll("tbody tr").forEach(row => {
             if (row.style.display === 'none') row.remove();
         });
@@ -1989,18 +2576,17 @@ $stats['total_rows'] = count($dataRows);
     function initSortableTable() {
         const table = document.getElementById("mainDataTable");
         if (!table) return;
+        const activeTab = '<?= $activeTab ?>';
+        // Tab 1A (Pemasukan) & 1B (Pengeluaran) menggunakan urutan terstruktur dari SQL (ORDER BY Dokumen & Tanggal)
+        // Header 2-tingkat dibiarkan bersih tanpa panah sort (bebas simbol ↕).
+        if (activeTab === '1a' || activeTab === '1b') {
+            return;
+        }
         const ths = table.querySelectorAll("thead tr:last-child th");
         ths.forEach((th, idx) => {
             if (idx === 0) return; // Skip "No" column
             th.classList.add("sortable-th");
             th.title = "Klik untuk mengurutkan (Sort)";
-            if (!th.querySelector(".sort-icon")) {
-                const icon = document.createElement("span");
-                icon.className = "sort-icon";
-                icon.style.opacity = "0.35";
-                icon.textContent = " ↕";
-                th.appendChild(icon);
-            }
             th.addEventListener("click", () => sortTable(idx));
         });
     }
@@ -2016,7 +2602,8 @@ $stats['total_rows'] = count($dataRows);
         for (let row of table.rows) {
             let cols = [];
             for (let cell of row.cells) {
-                cols.push('"' + cell.innerText.replace(/"/g, '""').trim() + '"');
+                const text = cell.innerText.replace(/[\u2195\u25B2\u25BC↕▲▼]/g, '').replace(/"/g, '""').trim();
+                cols.push('"' + text + '"');
             }
             csv.push(cols.join(","));
         }
@@ -2025,6 +2612,147 @@ $stats['total_rows'] = count($dataRows);
         link.href = URL.createObjectURL(blob);
         link.download = "IT_Inventory_" + tabName.toUpperCase() + "_" + new Date().toISOString().slice(0,10) + ".csv";
         link.click();
+    }
+
+    // Detail Breakdown Mutasi (MASUK / KELUAR) Modal & Pop-out
+    let currentMutasiParams = {};
+
+    function openMutasiDetail(kode, ab, tgl1, tgl2, klas) {
+        if (!kode) return;
+        currentMutasiParams = { kode, ab, tgl1, tgl2, klas };
+        
+        const mask = document.getElementById('mutasiModalMask');
+        const title = document.getElementById('mutasiModalTitle');
+        const sub = document.getElementById('mutasiModalSub');
+        const icon = document.getElementById('mutasiModalIcon');
+        const body = document.getElementById('mutasiModalBody');
+        const countBadge = document.getElementById('mutasiModalCount');
+
+        const abLabel = (ab === 'A') ? 'MASUK' : 'KELUAR';
+        const abColor = (ab === 'A') ? '#52c41a' : '#f5222d';
+        const iconClass = (ab === 'A') ? 'fa-arrow-down-long' : 'fa-arrow-up-long';
+
+        if (icon) {
+            icon.className = `fa-solid ${iconClass}`;
+            icon.style.color = abColor;
+        }
+        if (title) title.innerText = `Detail Mutasi ${abLabel} - ${kode}`;
+        if (sub) sub.innerText = `Memuat rincian transaksi periode ${tgl1} s/d ${tgl2}...`;
+        if (countBadge) countBadge.innerText = '';
+        if (body) {
+            body.innerHTML = `
+                <div style="text-align:center; padding:30px; color:var(--text-muted);">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size:20px; color:var(--primary);"></i>
+                    <div style="margin-top:8px;">Memuat rincian breakdown transaksi mutasi...</div>
+                </div>`;
+        }
+        if (mask) mask.style.display = 'flex';
+
+        fetch(`it_inventory.php?action=get_mutasi_detail&kode=${encodeURIComponent(kode)}&ab=${encodeURIComponent(ab)}&awal=${encodeURIComponent(tgl1)}&akhir=${encodeURIComponent(tgl2)}&klas=${encodeURIComponent(klas)}&cmp_id=<?= urlencode($cmp_id) ?>`)
+            .then(res => res.json())
+            .then(res => {
+                if (res.status !== 'success') {
+                    body.innerHTML = `<p style="color:red; text-align:center;">Gagal memuat rincian: ${res.message || 'Error'}</p>`;
+                    return;
+                }
+                if (title) title.innerText = `Detail Mutasi ${res.label_ab} - ${res.kode} ${res.uraian ? ' - ' + res.uraian : ''}`;
+                if (sub) sub.innerText = `Periode: ${res.awal} s/d ${res.akhir} • Total Qty: ${Number(res.total_qty).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} • ${res.count} Transaksi`;
+                if (countBadge) countBadge.innerText = `Total Transaksi: ${res.count}`;
+
+                let html = `
+                <table class="ant-table" id="mutasiDetailTable" style="width:100%; border:1px solid var(--border-table); font-size:9.5px;">
+                    <thead>
+                        <tr>
+                            <th style="width:30px; text-align:center;">No.</th>
+                            <th style="text-align:center;">Kode Brg</th>
+                            <th style="text-align:center;">Sat</th>
+                            <th style="text-align:right;">Jumlah</th>
+                            <th style="text-align:center;">Tgl Bukti</th>
+                            <th>No. Bukti</th>
+                            <th>${res.label_bs}</th>
+                            <th style="text-align:center;">BC</th>
+                            <th style="text-align:center;">Nomor Daftar</th>
+                            <th style="text-align:center;">Tgl Daftar</th>
+                            <th style="text-align:center;">Nomor AJU</th>
+                            <th style="text-align:center;">Tgl Proses</th>
+                        </tr>
+                        <tr style="background:#ffe58f; color:#000; font-weight:700;">
+                            <th colspan="3" style="text-align:center; background:#ffe58f !important; color:#000 !important;">${res.label_ab}</th>
+                            <td style="text-align:right; font-weight:700; background:#ffe58f !important; color:#000 !important;">${Number(res.total_qty).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+                            <th colspan="8" style="background:#ffe58f !important;"></th>
+                        </tr>
+                    </thead>
+                    <tbody>`;
+
+                if (res.data.length === 0) {
+                    html += `<tr><td colspan="12" style="text-align:center; padding:16px; color:var(--text-muted);">Tidak ada transaksi rincian mutasi untuk barang ini.</td></tr>`;
+                } else {
+                    res.data.forEach((r, idx) => {
+                        const no = idx + 1;
+                        const jml = Number(r.JUMLAH || 0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+                        html += `
+                        <tr>
+                            <td style="text-align:center; color:var(--text-muted);">${no}</td>
+                            <td style="font-family:monospace; font-weight:600; color:var(--primary);">${r.KODE_BARANG || '-'}</td>
+                            <td style="text-align:center;">${r.SATUAN || '-'}</td>
+                            <td style="text-align:right; font-weight:600;">${jml}</td>
+                            <td style="text-align:center;">${r.TGL_BUKTI || '-'}</td>
+                            <td>${r.NO_BUKTI || '-'}</td>
+                            <td>${r.NAMA_BS || '-'}</td>
+                            <td style="text-align:center;">${r.BC || '-'}</td>
+                            <td style="text-align:center;">${r.NOMOR_DOK || '-'}</td>
+                            <td style="text-align:center;">${r.TGL_DOK || '-'}</td>
+                            <td style="text-align:center; font-family:monospace;">${r.NOMOR_AJU || '-'}</td>
+                            <td style="text-align:center;">${r.TGL_PROSES || '-'}</td>
+                        </tr>`;
+                    });
+                }
+
+                html += `</tbody></table>`;
+                body.innerHTML = html;
+            })
+            .catch(err => {
+                body.innerHTML = `<p style="color:red; text-align:center;">Gagal menghubungi server: ${err}</p>`;
+            });
+    }
+
+    function closeMutasiModal() {
+        const mask = document.getElementById('mutasiModalMask');
+        if (mask) mask.style.display = 'none';
+    }
+
+    function openExternalMutasiWindow() {
+        if (!currentMutasiParams.kode) return;
+        const { kode, ab, tgl1, tgl2, klas } = currentMutasiParams;
+        const url = `mutasi.php?ab=${encodeURIComponent(ab)}&kode=${encodeURIComponent(kode)}&awal=${encodeURIComponent(tgl1)}&akhir=${encodeURIComponent(tgl2)}&klas=${encodeURIComponent(klas)}&cmp_id=<?= urlencode($cmp_id) ?>`;
+        window.open(url, "popup2", "width=1100,height=500,scrollbars=yes,resizable=yes");
+    }
+
+    function exportMutasiModalToExcel() {
+        const table = document.getElementById('mutasiDetailTable');
+        if (!table) return;
+        if (typeof XLSX === 'undefined') {
+            alert('Library Excel belum siap.');
+            return;
+        }
+        const ws = XLSX.utils.table_to_sheet(table);
+        const wb = XLSX.utils.book_new();
+        const sheetName = `Mutasi_${currentMutasiParams.ab === 'A' ? 'MASUK' : 'KELUAR'}`;
+        XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        XLSX.writeFile(wb, `Detail_Mutasi_${currentMutasiParams.kode}_${currentMutasiParams.ab}.xlsx`);
+    }
+
+    // Toggle Sub-Klasifikasi Capital Goods
+    function handleKlasChange(val) {
+        const subContainer = document.getElementById('subKlasContainer');
+        const subSelect = document.getElementById('subKlasSelect');
+        if (val === 'Capital Goods') {
+            if (subContainer) subContainer.style.display = 'inline-flex';
+        } else {
+            if (subContainer) subContainer.style.display = 'none';
+            if (subSelect) subSelect.value = '%';
+        }
+        document.getElementById('filterForm1D').submit();
     }
 
     // Detail Revisi Modal

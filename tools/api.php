@@ -396,6 +396,14 @@ if ($action === 'convert') {
         }
     }
 
+    // Housekeeping memori: jalankan garbage collection & release page cache di Linux
+    if (function_exists('gc_collect_cycles')) {
+        gc_collect_cycles();
+    }
+    if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+        @shell_exec('(sync && echo 3 | sudo tee /proc/sys/vm/drop_caches) >/dev/null 2>&1 &');
+    }
+
     echo json_encode([
         'status'         => ($successCount > 0) ? 'SUCCESS' : 'ERROR',
         'batch_id'       => $batchId,

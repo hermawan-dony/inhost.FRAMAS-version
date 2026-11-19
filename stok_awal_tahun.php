@@ -9,6 +9,8 @@ require_once __DIR__ . '/koneksi.php';
 
 $isAdmin = !empty($_SESSION['is_admin']) || (isset($_GET['is_admin']) && $_GET['is_admin'] === '1');
 $sessionUser = $_SESSION['user_name'] ?? ($_SESSION['user'] ?? 'ADMIN');
+$sessionCmpId = !empty($_REQUEST['cmp_id']) ? trim($_REQUEST['cmp_id']) : (!empty($_SESSION['company_cmp_id']) ? trim($_SESSION['company_cmp_id']) : (!empty($_SESSION['cmp_id']) ? trim($_SESSION['cmp_id']) : ''));
+$escSessionCmp = $koneksi->real_escape_string($sessionCmpId);
 $action = $_REQUEST['action'] ?? '';
 $themeParam = $_GET['theme'] ?? 'light';
 if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
@@ -45,6 +47,9 @@ if ($action === 'list') {
         $s = $koneksi->real_escape_string($search);
         $where[] = "(m.KODE_BARANG LIKE '%$s%' OR m.URAIAN LIKE '%$s%' OR m.KLAS LIKE '%$s%')";
     }
+    if (!empty($sessionCmpId)) {
+        $where[] = "m.cmp_id = '$escSessionCmp'";
+    }
 
     $whereSql = !empty($where) ? ' AND ' . implode(' AND ', $where) : '';
 
@@ -60,7 +65,7 @@ if ($action === 'list') {
                 t.idx AS IDX
             FROM bc_material m
             LEFT JOIN bc_tipe t ON m.KLAS = t.tipe
-            LEFT JOIN bc_so0 s ON m.KODE_BARANG = s.kode_barang AND s.tahun = '$escTahun'
+            LEFT JOIN bc_so0 s ON m.KODE_BARANG = s.kode_barang AND s.tahun = '$escTahun' AND (s.cmp_id = m.cmp_id OR s.cmp_id = '' OR s.cmp_id IS NULL)
             WHERE (t.grp IS NULL OR NOT t.grp IN ('FA', 'Consumables')) $whereSql
             ORDER BY COALESCE(t.idx, 999) ASC, m.KODE_BARANG ASC
             LIMIT 1000";
@@ -113,11 +118,11 @@ if ($action === 'save_item') {
         $unit = ($qU && $rU = $qU->fetch_assoc()) ? $rU['KODE_SATUAN'] : 'PCE';
     }
 
-    $stmt = $koneksi->prepare("INSERT INTO bc_so0 (tahun, kode_barang, unit, stok_awal, set_by) 
-                               VALUES (?, ?, ?, ?, ?) 
+    $stmt = $koneksi->prepare("INSERT INTO bc_so0 (cmp_id, tahun, kode_barang, unit, stok_awal, set_by) 
+                               VALUES (?, ?, ?, ?, ?, ?) 
                                ON DUPLICATE KEY UPDATE unit = VALUES(unit), stok_awal = VALUES(stok_awal), set_by = VALUES(set_by)");
     if ($stmt) {
-        $stmt->bind_param("sssds", $tahun, $kodeBarang, $unit, $stokAwal, $sessionUser);
+        $stmt->bind_param("ssssds", $sessionCmpId, $tahun, $kodeBarang, $unit, $stokAwal, $sessionUser);
         if ($stmt->execute()) {
             echo json_encode(['status' => 'OK', 'message' => "Stok awal $kodeBarang tahun $tahun berhasil disimpan: $stokAwal $unit"]);
         } else {
@@ -219,8 +224,8 @@ if ($action === 'import_batch') {
     $koneksi->begin_transaction();
     $successCount = 0;
     try {
-        $stmt = $koneksi->prepare("INSERT INTO bc_so0 (tahun, kode_barang, unit, stok_awal, set_by) 
-                                   VALUES (?, ?, ?, ?, ?) 
+        $stmt = $koneksi->prepare("INSERT INTO bc_so0 (cmp_id, tahun, kode_barang, unit, stok_awal, set_by) 
+                                   VALUES (?, ?, ?, ?, ?, ?) 
                                    ON DUPLICATE KEY UPDATE unit = VALUES(unit), stok_awal = VALUES(stok_awal), set_by = VALUES(set_by)");
         
         foreach ($items as $it) {
@@ -235,7 +240,7 @@ if ($action === 'import_batch') {
                 $unit = ($qU && $rU = $qU->fetch_assoc()) ? $rU['KODE_SATUAN'] : 'PCE';
             }
 
-            $stmt->bind_param("sssds", $tahun, $kb, $unit, $stok, $sessionUser);
+            $stmt->bind_param("ssssds", $sessionCmpId, $tahun, $kb, $unit, $stok, $sessionUser);
             if ($stmt->execute()) {
                 $successCount++;
             }
@@ -258,9 +263,12 @@ if ($action === 'import_batch') {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Set Stok Awal Tahun - Admin IT Inventory</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/assets/ant_grid.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="/assets/ant_grid.js"></script>
     <style>
         :root, html[data-theme="light"], body[data-theme="light"] {
             --bg-body: #f0f2f5;
@@ -702,6 +710,25 @@ function renderTable(data) {
     });
 
     tbody.innerHTML = html;
+
+    if (window.mainGrid) {
+        window.mainGrid.refresh();
+    } else if (typeof AntEnterpriseGrid !== 'undefined') {
+        window.mainGrid = new AntEnterpriseGrid('#mainDataTable', {
+            gridId: 'stok_awal_tahun',
+            enableSort: true,
+            enableResize: true,
+            enableContextMenu: true,
+            enablePagination: true,
+            pageSize: 50,
+            skipCols: [0, 7],
+            exportTitle: 'Stok_Awal_Tahun_' + (document.getElementById('filterTahun') ? document.getElementById('filterTahun').value : '2026'),
+            onEdit: (tr) => {
+                const inp = tr.querySelector('.editable-input');
+                if (inp) { inp.focus(); inp.select(); }
+            }
+        });
+    }
 }
 
 function saveSingleItem(idx) {
@@ -1055,7 +1082,7 @@ function escapeHtml(str) {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-    initSortableTable();
+    if (typeof AntEnterpriseGrid === 'undefined') initSortableTable();
     loadData();
 });
 </script>

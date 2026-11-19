@@ -39,6 +39,10 @@ if (!empty($sessionCmpId)) {
     $activeCmpName  = $_SESSION['company_name'] ?? 'Perusahaan';
 }
 
+if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+}
+
 // Cek data bc_1ab2 yang KLAS-nya bermasalah (kosong, '-', atau tidak ada di bc_tipe)
 $cntInvalidKlas = 0;
 $cmpFilter1ab2 = !empty($sessionCmpId) ? " AND (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
@@ -53,11 +57,11 @@ try {
 
 // Cek data transaksi bc_1ab2 yang satuannya berbeda dari bc_material
 $cntDiffSatuan = 0;
-$cmpFilterDiffSat = !empty($sessionCmpId) ? " AND t.cmp_id = '$escSessionCmp' AND m.cmp_id = '$escSessionCmp'" : "";
+$cmpFilterDiffSat = !empty($sessionCmpId) ? " AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '') AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
 try {
     $qDiffSat = $koneksi->query("SELECT COUNT(DISTINCT m.KODE_BARANG) 
                                  FROM bc_material m
-                                 JOIN bc_1ab2 t ON m.cmp_id = t.cmp_id AND m.KODE_BARANG = t.KODE_BARANG
+                                 JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
                                  WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
                                  $cmpFilterDiffSat");
     if ($qDiffSat && $rD = $qDiffSat->fetch_row()) {
@@ -107,7 +111,7 @@ if ($action === 'list') {
     }
 
     if (!empty($sessionCmpId)) {
-        $where[] = "(m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')";
+        $where[] = "m.cmp_id = '$escSessionCmp'";
     }
 
     $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
@@ -129,8 +133,8 @@ if ($action === 'list') {
     }
 
     // Hitung KPI
-    $kpiCmpWhere = !empty($sessionCmpId) ? "WHERE (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
-    $kpiCmpAnd   = !empty($sessionCmpId) ? "AND (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
+    $kpiCmpWhere = !empty($sessionCmpId) ? "WHERE cmp_id = '$escSessionCmp'" : "";
+    $kpiCmpAnd   = !empty($sessionCmpId) ? "AND cmp_id = '$escSessionCmp'" : "";
     $kpiTotal = $koneksi->query("SELECT COUNT(1) FROM bc_material $kpiCmpWhere")->fetch_row()[0] ?? 0;
     $kpiBb    = $koneksi->query("SELECT COUNT(1) FROM bc_material WHERE (KLAS LIKE '%Raw%' OR KLAS LIKE '%Bahan Baku%') $kpiCmpAnd")->fetch_row()[0] ?? 0;
     $kpiFg    = $koneksi->query("SELECT COUNT(1) FROM bc_material WHERE (KLAS LIKE '%Finished%' OR KLAS LIKE '%Barang Jadi%') $kpiCmpAnd")->fetch_row()[0] ?? 0;
@@ -154,9 +158,9 @@ if ($action === 'list') {
 if ($action === 'save') {
     header('Content-Type: application/json; charset=utf-8');
     $is_edit = (trim($_POST['is_edit'] ?? '0') === '1');
-    $rawKode = trim($_POST['kode_barang'] ?? '');
+    $rawKode = trim(str_replace(['[', ']'], '', $_POST['kode_barang'] ?? ''));
     $kode    = $allowLowercase ? $rawKode : strtoupper($rawKode);
-    $kode2   = trim($_POST['kode_barang2'] ?? '');
+    $kode2   = trim(str_replace(['[', ']'], '', $_POST['kode_barang2'] ?? ''));
     $uraian  = trim($_POST['uraian'] ?? '');
     $model   = trim($_POST['model'] ?? '');
     $hs      = preg_replace('/[^0-9]/', '', $_POST['pos_tarif'] ?? '');
@@ -274,12 +278,12 @@ if ($action === 'import_excel') {
     $inserted = 0;
     $updated  = 0;
     foreach ($rows as $r) {
-        $rawKode = trim($r['kode_barang'] ?? ($r['KODE_BARANG'] ?? ($r['Kode Barang'] ?? '')));
+        $rawKode = trim(str_replace(['[', ']'], '', $r['kode_barang'] ?? ($r['KODE_BARANG'] ?? ($r['Kode Barang'] ?? ''))));
         $kode    = $allowLowercase ? $rawKode : strtoupper($rawKode);
         $uraian  = trim($r['uraian'] ?? ($r['URAIAN'] ?? ($r['Uraian'] ?? ($r['Nama Barang'] ?? ''))));
         if (empty($kode) || $kode === '-' || empty($uraian)) continue;
 
-        $kode2  = trim($r['kode_barang2'] ?? ($r['KODE_BARANG2'] ?? ($r['Part No'] ?? '')));
+        $kode2  = trim(str_replace(['[', ']'], '', $r['kode_barang2'] ?? ($r['KODE_BARANG2'] ?? ($r['Part No'] ?? ''))));
         $model  = trim($r['model'] ?? ($r['MODEL'] ?? ($r['Model'] ?? '')));
         $hs     = preg_replace('/[^0-9]/', '', $r['pos_tarif'] ?? ($r['POS_TARIF'] ?? ($r['HS Code'] ?? '')));
         $sat    = strtoupper(trim($r['kode_satuan'] ?? ($r['KODE_SATUAN'] ?? ($r['Satuan'] ?? 'PCE'))));
@@ -362,11 +366,26 @@ if ($action === 'get_import_candidates') {
 
     // List material yang sudah ada di bc_material
     $existingItems = [];
+    $existingDescMap = [];
     $cmpMatWhere = !empty($sessionCmpId) ? "WHERE (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
     $qMat = $koneksi->query("SELECT KODE_BARANG, URAIAN, POS_TARIF, KODE_SATUAN, KLAS FROM bc_material $cmpMatWhere");
     if ($qMat) {
         while ($m = $qMat->fetch_assoc()) {
-            $existingItems[strtoupper(trim($m['KODE_BARANG']))] = $m;
+            $normK = strtoupper(trim($m['KODE_BARANG']));
+            $existingItems[$normK] = $m;
+
+            $normUr  = strtoupper(trim($m['URAIAN'] ?? ''));
+            $cleanHs = preg_replace('/[^0-9]/', '', $m['POS_TARIF'] ?? '');
+            $normSat = strtoupper(trim($m['KODE_SATUAN'] ?? ''));
+
+            if (!empty($normUr) && !empty($normSat)) {
+                if (!empty($cleanHs)) {
+                    $existingDescMap[$normUr . '|' . $cleanHs . '|' . $normSat] = $m['KODE_BARANG'];
+                }
+                if (!isset($existingDescMap[$normUr . '||' . $normSat])) {
+                    $existingDescMap[$normUr . '||' . $normSat] = $m['KODE_BARANG'];
+                }
+            }
         }
     }
 
@@ -384,27 +403,83 @@ if ($action === 'get_import_candidates') {
         }
         $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
-        // DEDUP: GROUP BY IF(TRIM(KODE_BARANG) IN ('', '-'), CONCAT('__MINUS__', TRIM(URAIAN)), UPPER(TRIM(KODE_BARANG)))
-        // Menggunakan MAX(URAIAN), MAX(POS_TARIF), MAX(UNIT), MAX(KLAS)
+        // DEDUP: GROUP BY Uraian/Kode + Satuan agar tidak ada barang dobel, tapi jika beda satuan tetap dipisahkan
         $sql = "SELECT 
             MAX(TRIM(KODE_BARANG)) AS raw_kode,
             MAX(TRIM(URAIAN)) AS uraian,
             MAX(TRIM(POS_TARIF)) AS pos_tarif,
-            MAX(TRIM(UNIT)) AS kode_satuan,
+            UPPER(TRIM(UNIT)) AS kode_satuan,
             MAX(TRIM(KLAS)) AS raw_klas,
             COUNT(1) AS jml_transaksi
         FROM bc_1ab2
         $whereSql
-        GROUP BY IF(TRIM(KODE_BARANG) IN ('', '-'), CONCAT('__MINUS__', TRIM(URAIAN)), UPPER(TRIM(KODE_BARANG)))
+        GROUP BY 
+            IF(TRIM(KODE_BARANG) IN ('', '-'), CONCAT('__MINUS__', UPPER(TRIM(URAIAN))), UPPER(TRIM(KODE_BARANG))),
+            UPPER(TRIM(UNIT))
         ORDER BY (MAX(TRIM(KODE_BARANG)) IN ('', '-')) DESC, raw_kode ASC
         LIMIT 2500";
 
         $res = $koneksi->query($sql);
         if ($res) {
             while ($row = $res->fetch_assoc()) {
-                $rawKode = trim($row['raw_kode'] ?? '');
+                $rawKode = trim(str_replace(['[', ']'], '', $row['raw_kode'] ?? ''));
                 $isMinus = ($rawKode === '-' || $rawKode === '');
-                $kode    = $isMinus ? '-' : ($allowLowercase ? $rawKode : strtoupper($rawKode));
+                $satuan  = strtoupper(trim($row['kode_satuan'] ?: 'PCE'));
+                $rawUraian = trim($row['uraian'] ?? '');
+                $rawHs = preg_replace('/[^0-9]/', '', $row['pos_tarif'] ?? ($row['hs'] ?? ''));
+                $normUr = strtoupper($rawUraian);
+
+                // Jika kode minus (-), cek apakah (Nama Barang, HS Code, Satuan) sudah pernah terdaftar di Master Barang
+                if ($isMinus && !empty($normUr)) {
+                    $matchedCode = null;
+                    if (!empty($rawHs) && isset($existingDescMap[$normUr . '|' . $rawHs . '|' . $satuan])) {
+                        $matchedCode = $existingDescMap[$normUr . '|' . $rawHs . '|' . $satuan];
+                    } elseif (isset($existingDescMap[$normUr . '||' . $satuan])) {
+                        $matchedCode = $existingDescMap[$normUr . '||' . $satuan];
+                    }
+
+                    if ($matchedCode) {
+                        $kode = $matchedCode;
+                        $isMinus = false;
+                    } else {
+                        $kode = '-';
+                    }
+                } else {
+                    $kode = $isMinus ? '-' : ($allowLowercase ? $rawKode : strtoupper($rawKode));
+                }
+
+                // Jika kode tidak minus, periksa apakah ada kode yang sama tapi beda satuan
+                if (!$isMinus) {
+                    $normK = strtoupper($kode);
+                    // 1. Cek terhadap Master Barang yang sudah ada di database (existingItems)
+                    if (isset($existingItems[$normK])) {
+                        $existSat = strtoupper(trim($existingItems[$normK]['KODE_SATUAN'] ?? ''));
+                        if ($existSat !== '' && $existSat !== $satuan) {
+                            $newKode = "{$kode}({$satuan})";
+                            $seq = 1;
+                            while (isset($seenCodes[strtoupper($newKode)]) || isset($existingItems[strtoupper($newKode)])) {
+                                $newKode = "{$kode}({$satuan})-{$seq}";
+                                $seq++;
+                            }
+                            $kode = $newKode;
+                        }
+                    }
+                    // 2. Cek terhadap seenCodes dalam batch kandidat saat ini
+                    if (isset($seenCodes[$normK])) {
+                        $prevUnit = $seenCodes[$normK];
+                        if ($prevUnit !== '' && $prevUnit !== $satuan) {
+                            $newKode = "{$kode}({$satuan})";
+                            $seq = 1;
+                            while (isset($seenCodes[strtoupper($newKode)]) || isset($existingItems[strtoupper($newKode)])) {
+                                $newKode = "{$kode}({$satuan})-{$seq}";
+                                $seq++;
+                            }
+                            $kode = $newKode;
+                        }
+                    }
+                    $seenCodes[strtoupper($kode)] = $satuan;
+                }
+
                 $klas    = trim($row['raw_klas'] ?? '');
                 $isKlasValid = (!empty($klas) && $klas !== '-' && in_array($klas, $validKlasList));
                 $exists  = (!$isMinus && isset($existingItems[strtoupper($kode)]));
@@ -416,7 +491,7 @@ if ($action === 'get_import_candidates') {
                     'is_minus'       => $isMinus,
                     'uraian'         => $row['uraian'] ?? '',
                     'pos_tarif'      => preg_replace('/[^0-9]/', '', $row['pos_tarif'] ?? ''),
-                    'kode_satuan'    => strtoupper(trim($row['kode_satuan'] ?: 'PCE')),
+                    'kode_satuan'    => $satuan,
                     'unit_price'     => 0,
                     'klas'           => $isKlasValid ? $klas : '',
                     'is_klas_valid'  => $isKlasValid,
@@ -439,27 +514,83 @@ if ($action === 'get_import_candidates') {
         }
         $whereSql = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
 
-        // DEDUP: GROUP BY IF(TRIM(kode_barang) IN ('', '-'), CONCAT('__MINUS__', TRIM(uraian)), UPPER(TRIM(kode_barang)))
-        // Menggunakan MAX(uraian), MAX(hs), MAX(kode_satuan), MAX(harga_satuan)
+        // DEDUP: GROUP BY Uraian/Kode + Satuan
         $sql = "SELECT 
             MAX(TRIM(kode_barang)) AS raw_kode,
             MAX(TRIM(uraian)) AS uraian,
             MAX(TRIM(hs)) AS pos_tarif,
-            MAX(TRIM(kode_satuan)) AS kode_satuan,
+            UPPER(TRIM(kode_satuan)) AS kode_satuan,
             MAX(harga_satuan) AS unit_price,
             COUNT(1) AS jml_transaksi
         FROM bc_ceisa_barang
         $whereSql
-        GROUP BY IF(TRIM(kode_barang) IN ('', '-'), CONCAT('__MINUS__', TRIM(uraian)), UPPER(TRIM(kode_barang)))
+        GROUP BY 
+            IF(TRIM(kode_barang) IN ('', '-'), CONCAT('__MINUS__', UPPER(TRIM(uraian))), UPPER(TRIM(kode_barang))),
+            UPPER(TRIM(kode_satuan))
         ORDER BY (MAX(TRIM(kode_barang)) IN ('', '-')) DESC, raw_kode ASC
         LIMIT 2500";
 
         $res = $koneksi->query($sql);
         if ($res) {
             while ($row = $res->fetch_assoc()) {
-                $rawKode = trim($row['raw_kode'] ?? '');
+                $rawKode = trim(str_replace(['[', ']'], '', $row['raw_kode'] ?? ''));
                 $isMinus = ($rawKode === '-' || $rawKode === '');
-                $kode    = $isMinus ? '-' : ($allowLowercase ? $rawKode : strtoupper($rawKode));
+                $satuan  = strtoupper(trim($row['kode_satuan'] ?: 'PCE'));
+                $rawUraian = trim($row['uraian'] ?? '');
+                $rawHs = preg_replace('/[^0-9]/', '', $row['pos_tarif'] ?? ($row['hs'] ?? ''));
+                $normUr = strtoupper($rawUraian);
+
+                // Jika kode minus (-), cek apakah (Nama Barang, HS Code, Satuan) sudah pernah terdaftar di Master Barang
+                if ($isMinus && !empty($normUr)) {
+                    $matchedCode = null;
+                    if (!empty($rawHs) && isset($existingDescMap[$normUr . '|' . $rawHs . '|' . $satuan])) {
+                        $matchedCode = $existingDescMap[$normUr . '|' . $rawHs . '|' . $satuan];
+                    } elseif (isset($existingDescMap[$normUr . '||' . $satuan])) {
+                        $matchedCode = $existingDescMap[$normUr . '||' . $satuan];
+                    }
+
+                    if ($matchedCode) {
+                        $kode = $matchedCode;
+                        $isMinus = false;
+                    } else {
+                        $kode = '-';
+                    }
+                } else {
+                    $kode = $isMinus ? '-' : ($allowLowercase ? $rawKode : strtoupper($rawKode));
+                }
+
+                // Jika kode tidak minus, periksa apakah ada kode yang sama tapi beda satuan
+                if (!$isMinus) {
+                    $normK = strtoupper($kode);
+                    // 1. Cek terhadap Master Barang yang sudah ada di database (existingItems)
+                    if (isset($existingItems[$normK])) {
+                        $existSat = strtoupper(trim($existingItems[$normK]['KODE_SATUAN'] ?? ''));
+                        if ($existSat !== '' && $existSat !== $satuan) {
+                            $newKode = "{$kode}({$satuan})";
+                            $seq = 1;
+                            while (isset($seenCodes[strtoupper($newKode)]) || isset($existingItems[strtoupper($newKode)])) {
+                                $newKode = "{$kode}({$satuan})-{$seq}";
+                                $seq++;
+                            }
+                            $kode = $newKode;
+                        }
+                    }
+                    // 2. Cek terhadap seenCodes dalam batch kandidat saat ini
+                    if (isset($seenCodes[$normK])) {
+                        $prevUnit = $seenCodes[$normK];
+                        if ($prevUnit !== '' && $prevUnit !== $satuan) {
+                            $newKode = "{$kode}({$satuan})";
+                            $seq = 1;
+                            while (isset($seenCodes[strtoupper($newKode)]) || isset($existingItems[strtoupper($newKode)])) {
+                                $newKode = "{$kode}({$satuan})-{$seq}";
+                                $seq++;
+                            }
+                            $kode = $newKode;
+                        }
+                    }
+                    $seenCodes[strtoupper($kode)] = $satuan;
+                }
+
                 $exists  = (!$isMinus && isset($existingItems[strtoupper($kode)]));
 
                 $candidates[] = [
@@ -469,9 +600,9 @@ if ($action === 'get_import_candidates') {
                     'is_minus'       => $isMinus,
                     'uraian'         => $row['uraian'] ?? '',
                     'pos_tarif'      => preg_replace('/[^0-9]/', '', $row['pos_tarif'] ?? ''),
-                    'kode_satuan'    => strtoupper(trim($row['kode_satuan'] ?: 'PCE')),
+                    'kode_satuan'    => $satuan,
                     'unit_price'     => floatval($row['unit_price'] ?? 0),
-                    'klas'           => 'Raw Materials', // default awal untuk staging (dapat diubah per baris atau massal)
+                    'klas'           => 'Raw Materials',
                     'is_klas_valid'  => true,
                     'jml_transaksi'  => (int)$row['jml_transaksi'],
                     'exists'         => $exists,
@@ -481,14 +612,21 @@ if ($action === 'get_import_candidates') {
         }
     }
 
+    $masterExistingUnits = [];
+    foreach ($existingItems as $k => $item) {
+        $masterExistingUnits[$k] = strtoupper(trim($item['KODE_SATUAN'] ?? ''));
+    }
+
     echo json_encode([
-        'status'          => 'OK',
-        'source'          => $source,
-        'allow_lowercase' => $allowLowercase,
-        'active_cmp_name' => $activeCmpName,
-        'total'           => count($candidates),
-        'data'            => $candidates,
-        'klas_options'    => $klasList
+        'status'             => 'OK',
+        'source'             => $source,
+        'allow_lowercase'    => $allowLowercase,
+        'active_cmp_name'    => $activeCmpName,
+        'total'              => count($candidates),
+        'data'               => $candidates,
+        'klas_options'       => $klasList,
+        'existing_units'     => $masterExistingUnits,
+        'existing_desc_map'  => $existingDescMap
     ]);
     exit;
 }
@@ -522,7 +660,7 @@ if ($action === 'save_imported_materials') {
 
     try {
         foreach ($items as $idx => $it) {
-            $rawKode = trim($it['kode_barang'] ?? '');
+            $rawKode = trim(str_replace(['[', ']'], '', $it['kode_barang'] ?? ''));
             $uraian  = trim($it['uraian'] ?? '');
             $hs      = preg_replace('/[^0-9]/', '', $it['pos_tarif'] ?? '');
             $satuan  = strtoupper(trim($it['kode_satuan'] ?? 'PCE'));
@@ -536,15 +674,20 @@ if ($action === 'save_imported_materials') {
 
             // 2. FORMAT KODE: Huruf Kapital (Default) vs Allow Huruf Kecil
             $kode = $allowLowercase ? $rawKode : strtoupper($rawKode);
+            $kode = str_replace(['[', ']'], '', $kode);
             $kode = mb_substr($kode, 0, 100);
 
             // Validasi keunikan dalam batch
             $normKey = strtoupper($kode);
             if (isset($processedCodes[$normKey])) {
-                // Lewati duplikasi dalam batch pengiriman yang sama
+                $prevUnit = $processedCodes[$normKey];
+                if ($prevUnit !== $satuan) {
+                    throw new Exception("Baris #" . ($idx + 1) . " (Kode: $kode): DILARANG! Kode barang '$kode' digunakan untuk 2 satuan berbeda dalam batch ('$prevUnit' dan '$satuan'). Harap bedakan kodenya (misal: '{$kode}({$satuan})').");
+                }
+                // Lewati duplikasi identik dalam batch pengiriman yang sama
                 continue;
             }
-            $processedCodes[$normKey] = true;
+            $processedCodes[$normKey] = $satuan;
 
             // 3. VALIDASI & NORMALISASI URAIAN MULTI-BYTE / FULLWIDTH
             if (empty($uraian)) {
@@ -578,10 +721,37 @@ if ($action === 'save_imported_materials') {
             $escKlas   = $koneksi->real_escape_string($klas);
 
             // Cek apakah item sudah ada di bc_material
-            $chk = $koneksi->query("SELECT 1 FROM bc_material WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$escSessionCmp' OR cmp_id = '') LIMIT 1");
+            $chk = $koneksi->query("SELECT KODE_SATUAN FROM bc_material WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$escSessionCmp' OR cmp_id = '') LIMIT 1");
             $isExist = ($chk && $chk->num_rows > 0);
 
             if ($isExist) {
+                $rowMat = $chk->fetch_assoc();
+                $existingSat = strtoupper(trim($rowMat['KODE_SATUAN'] ?? ''));
+                if ($existingSat !== '' && $satuan !== '' && $existingSat !== $satuan) {
+                    if (!empty($_POST['auto_resolve_diff_unit']) || !empty($_REQUEST['auto_resolve_diff_unit'])) {
+                        // Otomatisasi: buat kode baru dengan pembeda satuan
+                        $baseKode = preg_replace('/\([^\)]+\)$/', '', $kode);
+                        $newKode  = "{$baseKode}({$satuan})";
+                        $seq = 1;
+                        while (isset($processedCodes[strtoupper($newKode)])) {
+                            $newKode = "{$baseKode}({$satuan})-{$seq}";
+                            $seq++;
+                        }
+                        $kode = $newKode;
+                        $escKode = $koneksi->real_escape_string($kode);
+                        $processedCodes[strtoupper($kode)] = $satuan;
+
+                        // Periksa lagi apakah kode dengan pembeda satuan ini sudah ada di database
+                        $chkNew = $koneksi->query("SELECT 1 FROM bc_material WHERE KODE_BARANG = '$escKode' AND (cmp_id = '$escSessionCmp' OR cmp_id = '') LIMIT 1");
+                        if ($chkNew && $chkNew->num_rows > 0) {
+                            $isExist = true;
+                        } else {
+                            $isExist = false;
+                        }
+                    } else {
+                        throw new Exception("Baris #" . ($idx + 1) . " (Kode: $kode): Kode barang '$kode' sudah terdaftar di Master Barang dengan satuan '$existingSat'. Dilarang mengubah satuan menjadi '$satuan'. Harap gunakan kode berbeda (misal: '{$kode}({$satuan})').");
+                    }
+                }
                 // Update item yang sudah ada (hanya update kolom relevan)
                 $sql = "UPDATE bc_material SET
                     URAIAN = '$escUraian',
@@ -748,11 +918,11 @@ if ($action === 'move_klas') {
 // 8. AJAX: SINKRONKAN SEMUA KLAS DARI bc_material KE bc_1ab2
 if ($action === 'sync_all_klas_to_1ab2') {
     header('Content-Type: application/json; charset=utf-8');
-    $cmpFilterMat  = !empty($sessionCmpId) ? "AND m.cmp_id = '$escSessionCmp'" : "";
-    $cmpFilter1ab2 = !empty($sessionCmpId) ? "AND t.cmp_id = '$escSessionCmp'" : "";
+    $cmpFilterMat  = !empty($sessionCmpId) ? "AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
+    $cmpFilter1ab2 = !empty($sessionCmpId) ? "AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '')" : "";
 
     $sqlSync = "UPDATE bc_1ab2 t
-                JOIN bc_material m ON t.cmp_id = m.cmp_id AND t.KODE_BARANG = m.KODE_BARANG
+                JOIN bc_material m ON t.KODE_BARANG = m.KODE_BARANG AND (t.cmp_id = m.cmp_id OR t.cmp_id = '' OR m.cmp_id = '')
                 SET t.KLAS = m.KLAS
                 WHERE 1=1 $cmpFilterMat $cmpFilter1ab2
                   AND (t.KLAS != m.KLAS OR t.KLAS IS NULL OR TRIM(t.KLAS) = '' OR TRIM(t.KLAS) = '-')";
@@ -787,7 +957,54 @@ if ($action === 'get_klas_summary') {
     exit;
 }
 
-// 10. AJAX: PREVIEW DAMPAK MERGE KODE BARANG
+// 10. AJAX: LIST DATA BARANG UNTUK MERGE (Sorted by Uraian, HS, Satuan)
+if ($action === 'get_merge_materials') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cmpFilter = !empty($sessionCmpId) ? "WHERE (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
+    $sql = "SELECT m.KODE_BARANG, m.URAIAN, m.POS_TARIF, m.KODE_SATUAN, m.KLAS,
+                   COALESCE(t.jml_transaksi, 0) AS jml_transaksi
+            FROM bc_material m
+            LEFT JOIN (
+                SELECT KODE_BARANG, COUNT(1) AS jml_transaksi 
+                FROM bc_1ab2 
+                " . (!empty($sessionCmpId) ? "WHERE (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "") . "
+                GROUP BY KODE_BARANG
+            ) t ON m.KODE_BARANG = t.KODE_BARANG
+            $cmpFilter
+            ORDER BY m.URAIAN ASC, m.POS_TARIF ASC, m.KODE_SATUAN ASC, m.KODE_BARANG ASC";
+    $res = $koneksi->query($sql);
+    $items = [];
+    $uraianCounts = [];
+    if ($res) {
+        while ($r = $res->fetch_assoc()) {
+            $normUraian = strtoupper(trim($r['URAIAN'] ?? ''));
+            $uraianCounts[$normUraian] = ($uraianCounts[$normUraian] ?? 0) + 1;
+            $items[] = [
+                'kode_barang'   => $r['KODE_BARANG'],
+                'uraian'        => $r['URAIAN'],
+                'pos_tarif'     => $r['POS_TARIF'] ?: '-',
+                'kode_satuan'   => strtoupper(trim($r['KODE_SATUAN'] ?: 'PCE')),
+                'klas'          => $r['KLAS'] ?: '-',
+                'jml_transaksi' => (int)$r['jml_transaksi'],
+            ];
+        }
+    }
+    // Tandai item yang memiliki nama/uraian duplikat (count > 1)
+    foreach ($items as &$it) {
+        $normU = strtoupper(trim($it['uraian'] ?? ''));
+        $it['has_dup_name'] = ($uraianCounts[$normU] ?? 0) > 1;
+    }
+    unset($it);
+
+    echo json_encode([
+        'status' => 'OK',
+        'total'  => count($items),
+        'data'   => $items
+    ]);
+    exit;
+}
+
+// 11. AJAX: PREVIEW DAMPAK MERGE KODE BARANG
 if ($action === 'preview_merge') {
     header('Content-Type: application/json; charset=utf-8');
     $targetCode   = trim($_REQUEST['target_code'] ?? '');
@@ -895,6 +1112,27 @@ if ($action === 'merge_kode') {
     }
     if (empty($cleanOldCodes)) {
         echo json_encode(['status' => 'ERROR', 'message' => 'Silakan tentukan minimal 1 kode lama yang akan digabungkan ke kode target.']);
+        exit;
+    }
+
+    // VALIDASI WAJIB: Satuan berbeda WAJIB menggunakan kode barang berbeda!
+    $cmpFilterMat = !empty($sessionCmpId) ? "AND (cmp_id = '$escSessionCmp' OR cmp_id = '')" : "";
+    $allMergeCodes = array_merge([$targetCode], $cleanOldCodes);
+    $allEscList = array_map(function($c) use ($koneksi) { return "'" . $koneksi->real_escape_string($c) . "'"; }, $allMergeCodes);
+    $qSatCheck = $koneksi->query("SELECT KODE_BARANG, KODE_SATUAN FROM bc_material WHERE KODE_BARANG IN (" . implode(',', $allEscList) . ") $cmpFilterMat");
+    $distinctUnits = [];
+    if ($qSatCheck) {
+        while ($rS = $qSatCheck->fetch_assoc()) {
+            $u = strtoupper(trim($rS['KODE_SATUAN'] ?? ''));
+            if ($u !== '') $distinctUnits[$u] = true;
+        }
+    }
+    if (count($distinctUnits) > 1) {
+        $unitNames = implode(', ', array_keys($distinctUnits));
+        echo json_encode([
+            'status' => 'ERROR',
+            'message' => "Dilarang Merge: Item yang dipilih memiliki satuan berbeda ($unitNames). Berdasarkan regulasi kepabeanan CEISA 4.0 dan IT Inventory, satuan berbeda WAJIB menggunakan kode barang berbeda!"
+        ]);
         exit;
     }
 
@@ -1019,9 +1257,9 @@ if ($action === 'merge_kode') {
 if ($action === 'get_diff_satuan_report') {
     header('Content-Type: application/json; charset=utf-8');
 
-    $cmpFilterMat   = !empty($sessionCmpId) ? "AND m.cmp_id = '$escSessionCmp'" : "";
-    $cmpFilter1ab2  = !empty($sessionCmpId) ? "AND t.cmp_id = '$escSessionCmp'" : "";
-    $cmpFilterSo    = !empty($sessionCmpId) ? "AND s.cmp_id = '$escSessionCmp'" : "";
+    $cmpFilterMat   = !empty($sessionCmpId) ? "AND (m.cmp_id = '$escSessionCmp' OR m.cmp_id = '')" : "";
+    $cmpFilter1ab2  = !empty($sessionCmpId) ? "AND (t.cmp_id = '$escSessionCmp' OR t.cmp_id = '')" : "";
+    $cmpFilterSo    = !empty($sessionCmpId) ? "AND (s.cmp_id = '$escSessionCmp' OR s.cmp_id = '')" : "";
 
     $report = [];
     $totalTrans1ab2 = 0;
@@ -1035,7 +1273,7 @@ if ($action === 'get_diff_satuan_report') {
         'bc_1ab2' AS TABEL,
         COUNT(1) AS JML_TRANSAKSI
     FROM bc_material m
-    JOIN bc_1ab2 t ON m.cmp_id = t.cmp_id AND m.KODE_BARANG = t.KODE_BARANG
+    JOIN bc_1ab2 t ON m.KODE_BARANG = t.KODE_BARANG AND (m.cmp_id = t.cmp_id OR m.cmp_id = '' OR t.cmp_id = '')
     WHERE (t.UNIT != m.KODE_SATUAN OR t.UNIT IS NULL OR TRIM(t.UNIT) = '' OR TRIM(t.UNIT) = '-')
       AND m.KODE_SATUAN IS NOT NULL AND TRIM(m.KODE_SATUAN) != '' AND TRIM(m.KODE_SATUAN) != '-'
     $cmpFilterMat $cmpFilter1ab2
@@ -1084,7 +1322,7 @@ if ($action === 'get_diff_satuan_report') {
         'bc_so' AS TABEL,
         COUNT(1) AS JML_TRANSAKSI
     FROM bc_material m
-    JOIN bc_so s ON m.cmp_id = s.cmp_id AND m.KODE_BARANG = s.kode_barang
+    JOIN bc_so s ON m.KODE_BARANG = s.kode_barang AND (m.cmp_id = s.cmp_id OR m.cmp_id = '' OR s.cmp_id = '')
     WHERE (s.unit != m.KODE_SATUAN OR s.unit IS NULL OR TRIM(s.unit) = '' OR TRIM(s.unit) = '-')
       AND m.KODE_SATUAN IS NOT NULL AND TRIM(m.KODE_SATUAN) != '' AND TRIM(m.KODE_SATUAN) != '-'
     $cmpFilterMat $cmpFilterSo
@@ -1168,7 +1406,7 @@ if ($action === 'sync_satuan') {
 
         // 1. UPDATE bc_1ab2 (IT Inventory)
         $q1 = $koneksi->query("UPDATE bc_1ab2 a
-                               JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.KODE_BARANG = b.KODE_BARANG
+                               JOIN bc_material b ON a.KODE_BARANG = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
                                SET a.UNIT = b.KODE_SATUAN
                                WHERE (a.UNIT != b.KODE_SATUAN OR a.UNIT IS NULL OR TRIM(a.UNIT) = '' OR TRIM(a.UNIT) = '-')
                                  AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1177,7 +1415,7 @@ if ($action === 'sync_satuan') {
 
         // 2. UPDATE bc_1ab2_revisi (Revisi IT Inventory)
         $q1Rev = $koneksi->query("UPDATE bc_1ab2_revisi a
-                                  JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.KODE_BARANG = b.KODE_BARANG
+                                  JOIN bc_material b ON a.KODE_BARANG = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
                                   SET a.UNIT = b.KODE_SATUAN
                                   WHERE (a.UNIT != b.KODE_SATUAN OR a.UNIT IS NULL OR TRIM(a.UNIT) = '' OR TRIM(a.UNIT) = '-')
                                     AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1195,7 +1433,7 @@ if ($action === 'sync_satuan') {
 
         // 4. UPDATE bc_so0 (Saldo Awal Stock Opname)
         $qSo0 = $koneksi->query("UPDATE bc_so0 a
-                                 JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_barang = b.KODE_BARANG
+                                 JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
                                  SET a.unit = b.KODE_SATUAN
                                  WHERE (a.unit != b.KODE_SATUAN OR a.unit IS NULL OR TRIM(a.unit) = '' OR TRIM(a.unit) = '-')
                                    AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1204,7 +1442,7 @@ if ($action === 'sync_satuan') {
 
         // 5. UPDATE bc_so (Stock Opname)
         $qSo = $koneksi->query("UPDATE bc_so a
-                                JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_barang = b.KODE_BARANG
+                                JOIN bc_material b ON a.kode_barang = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
                                 SET a.unit = b.KODE_SATUAN
                                 WHERE (a.unit != b.KODE_SATUAN OR a.unit IS NULL OR TRIM(a.unit) = '' OR TRIM(a.unit) = '-')
                                   AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1213,7 +1451,7 @@ if ($action === 'sync_satuan') {
 
         // 6. UPDATE bc_ceisa_tracebb (Traceability Bahan Baku)
         $qTr = $koneksi->query("UPDATE bc_ceisa_tracebb a
-                                JOIN bc_material b ON a.cmp_id = b.cmp_id AND a.kode_brg = b.KODE_BARANG
+                                JOIN bc_material b ON a.kode_brg = b.KODE_BARANG AND (a.cmp_id = b.cmp_id OR a.cmp_id = '' OR b.cmp_id = '')
                                 SET a.sat = b.KODE_SATUAN
                                 WHERE (a.sat != b.KODE_SATUAN OR a.sat IS NULL OR TRIM(a.sat) = '' OR TRIM(a.sat) = '-')
                                   AND b.KODE_SATUAN IS NOT NULL AND TRIM(b.KODE_SATUAN) != '' AND TRIM(b.KODE_SATUAN) != '-'
@@ -1361,7 +1599,7 @@ if ($action === 'approval_search_existing') {
 if ($action === 'approval_approve') {
     header('Content-Type: application/json; charset=utf-8');
     $id           = (int)($_POST['id'] ?? 0);
-    $kodeInternal = trim($_POST['kode_internal'] ?? '');
+    $kodeInternal = trim(str_replace(['[', ']'], '', $_POST['kode_internal'] ?? ''));
     $uraian       = trim($_POST['uraian'] ?? '');
     $klas         = trim($_POST['klas'] ?? '');
     $satuan       = trim($_POST['satuan'] ?? 'PCE');
@@ -1550,9 +1788,11 @@ if ($action === 'approval_reject') {
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/assets/ant_grid.css">
     <script src="/assets/sweetalert2.all.min.js"></script>
     <script src="/assets/sweetalert-theme.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="/assets/ant_grid.js"></script>
     <style>
         :root, html[data-theme='light'], body[data-theme='light'] {
             --bg-base: #f0f2f5;
@@ -2001,7 +2241,7 @@ if ($action === 'approval_reject') {
 
         <!-- Table -->
         <div class="table-responsive">
-            <table class="ant-table">
+            <table class="ant-table" id="tblMaterial">
                 <thead>
                     <tr>
                         <th style="width:30px; text-align:center;"><input type="checkbox" id="checkAllMat" onchange="toggleSelectAllMat(this)" title="Pilih Semua"></th>
@@ -2201,6 +2441,9 @@ if ($action === 'approval_reject') {
                         <button type="button" class="ant-btn ant-btn-sm" style="background:#fa8c16; color:#fff; border-color:#fa8c16;" onclick="autoGenerateCodesForMinus()">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> Auto-Kode untuk '-'
                         </button>
+                        <button type="button" class="ant-btn ant-btn-sm" style="background:#722ed1; color:#fff; border-color:#722ed1;" onclick="autoResolveDiffUnits(true)" title="Otomatiskan kode barang yang sama dengan Master tapi beda satuan">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Otomatisasi Beda Satuan
+                        </button>
                     </div>
                 </div>
 
@@ -2371,144 +2614,138 @@ if ($action === 'approval_reject') {
         </div>
     </div>
 
-    <!-- Modal Fix / Merge Kode Dobel -->
+    <!-- Modal Fix / Merge Kode Dobel (Redesigned) -->
     <div class="modal" id="modalMergeKode">
-        <div class="modal-content" style="max-width: 680px;">
-            <div class="modal-header" style="background:linear-gradient(135deg, #c41d7f, #eb2f96); color:#fff;">
-                <h3 style="font-size:12.5px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px;">
-                    <i class="fa-solid fa-code-merge"></i> Fix / Merge Kode Barang Dobel
+        <div class="modal-content" style="max-width: 1140px; width: 95vw; max-height: 94vh; display: flex; flex-direction: column;">
+            <div class="modal-header" style="background:linear-gradient(135deg, #c41d7f, #eb2f96); color:#fff; padding: 10px 16px; flex-shrink: 0;">
+                <h3 style="font-size:13px; font-weight:700; color:#fff; display:flex; align-items:center; gap:8px; margin: 0;">
+                    <i class="fa-solid fa-code-merge"></i> Fix / Merge Kode Barang Dobel (Penyatuan Kode Unik)
                 </h3>
-                <span style="cursor:pointer; font-size:16px; color:#fff;" onclick="closeModal('modalMergeKode')">&times;</span>
+                <span style="cursor:pointer; font-size:18px; color:#fff;" onclick="closeModal('modalMergeKode')">&times;</span>
             </div>
-            <div class="modal-body" style="padding:14px 16px; display:flex; flex-direction:column; gap:12px;">
+            <div class="modal-body" style="padding:12px 16px; display:flex; flex-direction:column; gap:10px; overflow-y: auto; flex: 1;">
                 <!-- Info Penjelasan -->
-                <div style="background:rgba(196,29,127,0.08); border:1px solid rgba(196,29,127,0.25); border-radius:4px; padding:10px 12px; font-size:11px; line-height:1.5;">
-                    <i class="fa-solid fa-circle-info" style="color:#c41d7f;"></i> 
-                    Fitur ini digunakan saat operator/exim memiliki kode barang ganda karena typo atau variasi penulisan 
-                    (contoh: <code>LEMARI1</code>, <code>LEMRI1</code>, <code>LEMARI 1</code>, <code>LEMARI-1</code>) yang sebenarnya adalah barang yang sama, 
-                    untuk digabungkan menjadi <b>1 Kode Utama</b> dan otomatis menyelaraskan seluruh transaksi mutasi.
-                </div>
-
-                <!-- Bagian 1: Daftar Kode Sumber (Yang akan di-replace/merge) -->
-                <div class="form-group" style="margin-bottom:0;">
-                    <label style="font-weight:600; font-size:11px; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                        <span>1. Kode Barang Lama yang Akan Digabungkan (Sumber):*</span>
-                        <span id="mergeCountBadge" style="font-size:10px; font-weight:normal; color:var(--text-muted);">0 kode</span>
-                    </label>
-
-                    <!-- Tags list -->
-                    <div id="mergeTagsContainer" style="min-height:42px; max-height:110px; overflow-y:auto; border:1px solid var(--border-color); border-radius:4px; padding:6px 8px; background:var(--bg-base); display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
-                        <span id="mergeTagsEmpty" style="font-size:10.5px; color:var(--text-muted); font-style:italic;">Belum ada kode lama yang dipilih. Centang item di tabel atau tambahkan manual di bawah.</span>
+                <div style="background:rgba(196,29,127,0.06); border:1px solid rgba(196,29,127,0.22); border-radius:4px; padding:8px 12px; font-size:10.5px; line-height:1.4; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                    <div>
+                        <i class="fa-solid fa-circle-info" style="color:#c41d7f;"></i> 
+                        Centang 2 atau lebih barang dengan nama/uraian sama atau mirip untuk digabungkan menjadi <b>1 Kode Barang Utama</b>. Riwayat mutasi (IT Inventory, Traceability, Pengeluaran) otomatis dialihkan.
                     </div>
-
-                    <!-- Input untuk tambah kode manual / paste -->
-                    <div style="display:flex; gap:6px; margin-top:6px;">
-                        <input type="text" id="mergeInputAddCode" class="form-control" placeholder="Ketik kode barang atau tempel (pisah koma/spasi/baris)..." style="flex:1; font-size:11px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addCodesToMergeList();}">
-                        <button type="button" class="ant-btn" style="border-color:#eb2f96; color:#c41d7f; font-weight:600;" onclick="addCodesToMergeList()">
-                            <i class="fa-solid fa-plus"></i> Tambah
-                        </button>
-                        <button type="button" class="ant-btn ant-btn-sm" style="color:var(--danger);" onclick="clearMergeList()" title="Bersihkan daftar">
-                            <i class="fa-solid fa-trash-can"></i>
-                        </button>
+                    <div style="font-weight: 700; color: #c41d7f; white-space: nowrap;">
+                        <span id="mergeSelectedBadge" class="badge" style="background:#c41d7f; color:#fff; font-size:10px; padding:3px 8px; border-radius:10px;">0 barang dipilih</span>
                     </div>
                 </div>
 
-                <!-- Bagian 2: Tentukan Kode Target Baru -->
-                <div class="form-group" style="margin-bottom:0;">
-                    <label style="font-weight:600; font-size:11px; display:block; margin-bottom:4px;">
-                        2. Tentukan Kode Barang Utama (Target Hasil Merge):*
-                    </label>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
-                        <div style="background:var(--bg-base); border:1px solid var(--border-color); border-radius:4px; padding:8px 10px;">
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:600; font-size:11px; margin-bottom:6px;">
-                                <input type="radio" name="mergeTargetMode" value="select" id="radioTargetSelect" checked onchange="toggleMergeTargetMode()">
-                                <span>Pilih dari Salah Satu Kode Sumber</span>
+                <!-- Toolbar Filter & Pencarian -->
+                <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:260px; position:relative;">
+                        <i class="fa-solid fa-magnifying-glass" style="position:absolute; left:8px; top:6px; color:var(--text-muted); font-size:11px;"></i>
+                        <input type="text" id="mergeSearchInput" class="form-control" placeholder="Cari Nama Barang / Uraian, Kode, HS Code..." style="width:100%; padding-left:26px; font-size:10.5px; height:26px;" oninput="filterMergeMaterialsTable()">
+                    </div>
+                    <button type="button" class="ant-btn ant-btn-sm" id="btnMergeFilterDupOnly" style="background:#fff0f6; color:#c41d7f; border-color:#ffadd2; font-weight:600;" onclick="toggleMergeDupOnly()">
+                        <i class="fa-solid fa-copy"></i> Hanya Tampilkan Uraian Dobel (<span id="mergeDupCount">0</span>)
+                    </button>
+                    <button type="button" class="ant-btn ant-btn-sm" onclick="clearMergeTableFilters()">
+                        <i class="fa-solid fa-arrows-rotate"></i> Tampilkan Semua (<span id="mergeTotalCount">0</span>)
+                    </button>
+                    <button type="button" class="ant-btn ant-btn-sm" style="color:var(--danger);" onclick="clearMergeSelection()" title="Batalkan semua pilihan centang">
+                        <i class="fa-solid fa-xmark"></i> Reset Centang
+                    </button>
+                </div>
+
+                <!-- Banner Validasi Satuan -->
+                <div id="mergeUnitValidationAlert" style="display:none; padding:7px 12px; border-radius:4px; font-size:11px; line-height:1.4;"></div>
+
+                <!-- Tabel Data Barang (Sorted by Uraian, HS, Satuan) -->
+                <div style="border:1px solid var(--border-color); border-radius:4px; overflow-y:auto; max-height:280px; background:var(--bg-card);">
+                    <table class="dw" style="width:100%; border-collapse:collapse; font-size:9.5px;" id="mergeMaterialsTable">
+                        <thead>
+                            <tr style="position:sticky; top:0; z-index:2; background:var(--table-head-bg);">
+                                <th style="width:32px; text-align:center;"><input type="checkbox" id="checkAllMergeVisible" onchange="toggleSelectAllMergeVisible(this.checked)"></th>
+                                <th style="width:36px; text-align:center;">#</th>
+                                <th style="cursor:pointer; min-width:140px;" onclick="sortMergeMaterials('kode_barang')">KODE BARANG <i class="fa-solid fa-sort" id="sortIcon_kode_barang"></i></th>
+                                <th style="cursor:pointer; min-width:240px;" onclick="sortMergeMaterials('uraian')">URAIAN / NAMA BARANG <i class="fa-solid fa-sort-up" id="sortIcon_uraian" style="color:#c41d7f;"></i></th>
+                                <th style="cursor:pointer; width:90px; text-align:center;" onclick="sortMergeMaterials('pos_tarif')">HS CODE <i class="fa-solid fa-sort" id="sortIcon_pos_tarif"></i></th>
+                                <th style="cursor:pointer; width:65px; text-align:center;" onclick="sortMergeMaterials('kode_satuan')">SATUAN <i class="fa-solid fa-sort" id="sortIcon_kode_satuan"></i></th>
+                                <th style="width:100px;">KLASIFIKASI</th>
+                                <th style="cursor:pointer; width:75px; text-align:right;" onclick="sortMergeMaterials('jml_transaksi')">TRANSAKSI <i class="fa-solid fa-sort" id="sortIcon_jml_transaksi"></i></th>
+                                <th style="width:105px; text-align:center;">AKSI CEPAT</th>
+                            </tr>
+                        </thead>
+                        <tbody id="mergeMaterialsTableBody">
+                            <tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data barang...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Panel Pemilihan Kode Utama & Opsi Sinkronisasi -->
+                <div style="background:var(--bg-base); border:1px solid var(--border-color); border-radius:4px; padding:10px 14px; display:flex; flex-direction:column; gap:8px;">
+                    <div style="display:flex; gap:14px; align-items:center; justify-content:space-between; flex-wrap:wrap;">
+                        <div style="flex:1; min-width:320px;">
+                            <label style="font-weight:700; font-size:11px; color:#c41d7f; margin-bottom:4px; display:block;">
+                                Tentukan 1 Kode Barang Utama (Target):*
                             </label>
-                            <select id="mergeTargetSelect" class="form-control" style="width:100%; font-size:11px; font-weight:600;" onchange="onMergeTargetChanged()">
-                                <option value="">-- Pilih Kode Utama --</option>
-                            </select>
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <select id="mergeTargetSelect" class="form-control" style="flex:1; font-weight:700; font-size:11px; height:28px;" onchange="onMergeTargetSelectChanged()">
+                                    <option value="">-- Centang item di tabel atas terlebih dahulu --</option>
+                                </select>
+                                <span style="font-size:10px; color:var(--text-muted);">atau</span>
+                                <input type="text" id="mergeTargetCustom" class="form-control" placeholder="Ketik kode baru..." style="width:160px; font-weight:700; font-size:11px; height:28px;" oninput="onMergeTargetCustomChanged()">
+                            </div>
                         </div>
-                        <div style="background:var(--bg-base); border:1px solid var(--border-color); border-radius:4px; padding:8px 10px;">
-                            <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:600; font-size:11px; margin-bottom:6px;">
-                                <input type="radio" name="mergeTargetMode" value="custom" id="radioTargetCustom" onchange="toggleMergeTargetMode()">
-                                <span>Atau Ketik Kode Utama Baru</span>
+                        <div style="display:flex; gap:10px; align-items:center; font-size:10px; flex-wrap:wrap;">
+                            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                <input type="checkbox" id="mergeSync1ab2" checked onchange="triggerMergePreview()"> IT Inventory
                             </label>
-                            <input type="text" id="mergeTargetCustom" class="form-control" placeholder="Contoh: LEMARI-01" style="width:100%; font-size:11px; font-weight:600;" disabled oninput="onMergeTargetChanged()">
-                        </div>
-                    </div>
-                    <div id="targetKodePreviewBadge" style="margin-top:4px; font-size:11px; color:#c41d7f; font-weight:600;">
-                        Target Kode Utama: <span id="lblTargetKode" style="font-family:monospace; background:rgba(196,29,127,0.1); padding:2px 6px; border-radius:3px;">-</span>
-                    </div>
-                </div>
-
-                <!-- Bagian 3: Opsi Sinkronisasi Tabel -->
-                <div style="background:var(--bg-base); border:1px solid var(--border-color); border-radius:4px; padding:10px 12px; font-size:11px;">
-                    <div style="font-weight:600; margin-bottom:6px; color:var(--text-heading);">
-                        3. Modul &amp; Transaksi yang Akan Diperbarui:
-                    </div>
-                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="mergeSync1ab2" checked onchange="triggerMergePreview()">
-                            <span>IT Inventory<?= $isAdmin ? ' (<code>bc_1ab2</code>)' : '' ?></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="mergeSyncTrace" checked onchange="triggerMergePreview()">
-                            <span>Traceability Bahan Baku<?= $isAdmin ? ' (<code>bc_ceisa_tracebb</code>)' : '' ?></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="mergeSyncIssue" checked onchange="triggerMergePreview()">
-                            <span>Pengeluaran Barang<?= $isAdmin ? ' (<code>bc_issue_dtl</code>)' : '' ?></span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
-                            <input type="checkbox" id="mergeSyncSo" checked onchange="triggerMergePreview()">
-                            <span>Revisi &amp; Stock Opname<?= $isAdmin ? ' (<code>bc_so</code>, <code>bc_1ab2_revisi</code>)' : '' ?></span>
-                        </label>
-                    </div>
-                    <div style="border-top:1px dashed var(--border-color); margin-top:8px; padding-top:6px;">
-                        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:600; color:var(--text-heading);">
-                            <input type="checkbox" id="mergeCleanMaster" checked onchange="triggerMergePreview()">
-                            <span>Hapus/gabungkan kode lama dari Master Barang<?= $isAdmin ? ' (<code>bc_material</code>)' : '' ?></span>
-                        </label>
-                        <div style="margin-left:20px; font-size:10px; color:var(--text-muted);">
-                            Kode-kode lama yang digabungkan akan dihapus dari Master Data sehingga hanya tersisa 1 kode utama.
+                            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                <input type="checkbox" id="mergeSyncTrace" checked onchange="triggerMergePreview()"> Traceability
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                <input type="checkbox" id="mergeSyncIssue" checked onchange="triggerMergePreview()"> Pengeluaran
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; cursor:pointer;">
+                                <input type="checkbox" id="mergeSyncSo" checked onchange="triggerMergePreview()"> SO / Revisi
+                            </label>
+                            <label style="display:flex; align-items:center; gap:4px; cursor:pointer; font-weight:600; color:#cf1322;">
+                                <input type="checkbox" id="mergeCleanMaster" checked onchange="triggerMergePreview()"> Hapus Kode Lama dari Master
+                            </label>
                         </div>
                     </div>
                 </div>
 
-                <!-- Bagian 4: Pratinjau Dampak Update -->
+                <!-- Bagian Pratinjau Dampak Update -->
                 <div id="mergeImpactBox" style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:4px; padding:8px 12px; font-size:11px; display:none;">
-                    <div style="font-weight:700; color:#52c41a; display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <div style="font-weight:700; color:#52c41a; display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                         <span><i class="fa-solid fa-magnifying-glass-chart"></i> Pratinjau Dampak Penggabungan Kode:</span>
                         <button type="button" class="ant-btn ant-btn-sm" style="font-size:10px; padding:1px 6px;" onclick="triggerMergePreview()"><i class="fa-solid fa-arrows-rotate"></i> Cek Ulang</button>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; text-align:center;">
-                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:6px;">
-                            <div style="font-size:10px; color:var(--text-muted);">IT Inventory</div>
-                            <div id="impactCnt1ab2" style="font-size:14px; font-weight:700; color:#1890ff;">0</div>
+                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:4px;">
+                            <div style="font-size:9.5px; color:var(--text-muted);">IT Inventory</div>
+                            <div id="impactCnt1ab2" style="font-size:13px; font-weight:700; color:#1890ff;">0</div>
                         </div>
-                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:6px;">
-                            <div style="font-size:10px; color:var(--text-muted);">Traceability</div>
-                            <div id="impactCntTrace" style="font-size:14px; font-weight:700; color:#722ed1;">0</div>
+                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:4px;">
+                            <div style="font-size:9.5px; color:var(--text-muted);">Traceability</div>
+                            <div id="impactCntTrace" style="font-size:13px; font-weight:700; color:#722ed1;">0</div>
                         </div>
-                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:6px;">
-                            <div style="font-size:10px; color:var(--text-muted);">Pengeluaran</div>
-                            <div id="impactCntIssue" style="font-size:14px; font-weight:700; color:#fa8c16;">0</div>
+                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:4px;">
+                            <div style="font-size:9.5px; color:var(--text-muted);">Pengeluaran</div>
+                            <div id="impactCntIssue" style="font-size:13px; font-weight:700; color:#fa8c16;">0</div>
                         </div>
-                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:6px;">
-                            <div style="font-size:10px; color:var(--text-muted);">Master Barang</div>
-                            <div id="impactCntMat" style="font-size:14px; font-weight:700; color:#eb2f96;">0</div>
+                        <div style="background:#fff; border:1px solid #d9d9d9; border-radius:4px; padding:4px;">
+                            <div style="font-size:9.5px; color:var(--text-muted);">Master Barang Dihapus</div>
+                            <div id="impactCntMat" style="font-size:13px; font-weight:700; color:#eb2f96;">0</div>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="modal-footer" style="padding:10px 16px; display:flex; justify-content:space-between; align-items:center;">
-                <button type="button" class="ant-btn" onclick="triggerMergePreview()" style="color:#c41d7f; border-color:#ffadd2;">
-                    <i class="fa-solid fa-magnifying-glass"></i> Cek Dampak Update
-                </button>
+            <div class="modal-footer" style="padding:10px 16px; display:flex; justify-content:space-between; align-items:center; flex-shrink: 0;">
+                <div id="mergeStatusSummary" style="font-size:11px; color:var(--text-muted);">
+                    Centang minimal 2 barang dengan nama sama untuk digabungkan.
+                </div>
                 <div style="display:flex; gap:8px;">
                     <button type="button" class="ant-btn" onclick="closeModal('modalMergeKode')">Batal</button>
-                    <button type="button" id="btnExecuteMerge" class="ant-btn" style="background:#c41d7f; color:#fff; border-color:#c41d7f; font-weight:600;" onclick="executeMergeKode()">
-                        <i class="fa-solid fa-code-merge"></i> Jalankan Merge Kode
+                    <button type="button" id="btnExecuteMerge" class="ant-btn" style="background:#c41d7f; color:#fff; border-color:#c41d7f; font-weight:700; height:28px; padding:0 14px;" disabled onclick="executeMergeKode()">
+                        <i class="fa-solid fa-code-merge"></i> Gabungkan Jadi 1 Kode Utama
                     </button>
                 </div>
             </div>
@@ -2977,6 +3214,24 @@ if ($action === 'approval_reject') {
                 </tr>
             `).join('');
             updateSelectedMatCount();
+
+            if (window.materialGrid) {
+                window.materialGrid.refresh();
+            } else if (typeof AntEnterpriseGrid !== 'undefined') {
+                window.materialGrid = new AntEnterpriseGrid('#tblMaterial', {
+                    gridId: 'master_material_grid',
+                    enableSort: true,
+                    enableResize: true,
+                    enableContextMenu: true,
+                    enablePagination: false,
+                    skipCols: [0, 1, 13],
+                    exportTitle: 'Master_Barang_Material',
+                    onEdit: (tr) => {
+                        const btn = tr.querySelector('button[onclick*="openEditModal"]');
+                        if (btn) btn.click();
+                    }
+                });
+            }
         }
 
         function toggleSelectAllMat(masterCb) {
@@ -3277,146 +3532,363 @@ if ($action === 'approval_reject') {
             }
         }
 
-        // ==================== FIX / MERGE KODE DOBEL ====================
-        let mergeCodesList = [];
+        // ==================== FIX / MERGE KODE DOBEL (REDESIGNED) ====================
+        let mergeMaterialsMaster = [];
+        let mergeMaterialsFiltered = [];
+        let selectedMergeCodes = new Set();
+        let mergeSortCol = 'uraian';
+        let mergeSortDir = 'asc';
+        let mergeFilterDupOnly = false;
         let mergePreviewTimeout = null;
 
-        function openMergeKodeModal(presetCodes = null) {
+        async function openMergeKodeModal(presetCodes = null) {
+            document.getElementById('modalMergeKode').style.display = 'flex';
+            selectedMergeCodes.clear();
+
             if (Array.isArray(presetCodes) && presetCodes.length > 0) {
-                mergeCodesList = [...new Set(presetCodes.map(c => String(c).trim()).filter(Boolean))];
+                presetCodes.forEach(c => {
+                    const tr = String(c).trim();
+                    if (tr) selectedMergeCodes.add(tr);
+                });
             } else {
                 const selected = getSelectedMatCodes();
                 if (selected.length > 0) {
-                    mergeCodesList = [...new Set(selected.map(c => String(c).trim()).filter(Boolean))];
-                } else {
-                    mergeCodesList = [];
+                    selected.forEach(c => {
+                        const tr = String(c).trim();
+                        if (tr) selectedMergeCodes.add(tr);
+                    });
                 }
             }
 
-            renderMergeTags();
-            updateMergeTargetOptions();
-            document.getElementById('radioTargetSelect').checked = true;
-            toggleMergeTargetMode();
-            document.getElementById('modalMergeKode').style.display = 'flex';
-
-            if (mergeCodesList.length > 0) {
-                triggerMergePreview();
-            } else {
-                document.getElementById('mergeImpactBox').style.display = 'none';
-            }
+            await loadMergeMaterials();
         }
 
         function quickMergeSingleKode(kodeBarang) {
-            mergeCodesList = [String(kodeBarang).trim()];
-            renderMergeTags();
-            updateMergeTargetOptions();
-            document.getElementById('radioTargetSelect').checked = true;
-            toggleMergeTargetMode();
-            document.getElementById('modalMergeKode').style.display = 'flex';
-            triggerMergePreview();
+            openMergeKodeModal([kodeBarang]);
         }
 
-        function renderMergeTags() {
-            const container = document.getElementById('mergeTagsContainer');
-            const badge = document.getElementById('mergeCountBadge');
-            if (badge) badge.innerText = `${mergeCodesList.length} kode`;
+        async function loadMergeMaterials() {
+            const tb = document.getElementById('mergeMaterialsTableBody');
+            tb.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Memuat data barang...</td></tr>';
 
-            if (mergeCodesList.length === 0) {
-                container.innerHTML = '<span id="mergeTagsEmpty" style="font-size:10.5px; color:var(--text-muted); font-style:italic;">Belum ada kode lama yang dipilih. Centang item di tabel atau tambahkan manual di bawah.</span>';
-                return;
+            try {
+                const res = await fetch('material.php?action=get_merge_materials');
+                const json = await res.json();
+                if (json.status === 'OK') {
+                    mergeMaterialsMaster = json.data || [];
+                    document.getElementById('mergeTotalCount').innerText = mergeMaterialsMaster.length.toLocaleString('id-ID');
+                    const dupCount = mergeMaterialsMaster.filter(it => it.has_dup_name).length;
+                    document.getElementById('mergeDupCount').innerText = dupCount.toLocaleString('id-ID');
+
+                    filterMergeMaterialsTable();
+                } else {
+                    tb.innerHTML = `<tr><td colspan="9" style="text-align:center; color:red; padding:20px;">Gagal memuat: ${json.message}</td></tr>`;
+                }
+            } catch (err) {
+                tb.innerHTML = `<tr><td colspan="9" style="text-align:center; color:red; padding:20px;">Error: ${err.message}</td></tr>`;
+            }
+        }
+
+        function filterMergeMaterialsTable() {
+            const q = (document.getElementById('mergeSearchInput').value || '').toLowerCase().trim();
+            mergeMaterialsFiltered = mergeMaterialsMaster.filter(it => {
+                if (mergeFilterDupOnly && !it.has_dup_name) {
+                    return false;
+                }
+                if (q) {
+                    const kode = (it.kode_barang || '').toLowerCase();
+                    const uraian = (it.uraian || '').toLowerCase();
+                    const hs = (it.pos_tarif || '').toLowerCase();
+                    const sat = (it.kode_satuan || '').toLowerCase();
+                    if (!kode.includes(q) && !uraian.includes(q) && !hs.includes(q) && !sat.includes(q)) {
+                        return false;
+                    }
+                }
+                return true;
+            });
+
+            sortMergeArray(mergeMaterialsFiltered, mergeSortCol, mergeSortDir);
+            renderMergeMaterialsTable();
+        }
+
+        function toggleMergeDupOnly() {
+            mergeFilterDupOnly = !mergeFilterDupOnly;
+            const btn = document.getElementById('btnMergeFilterDupOnly');
+            if (mergeFilterDupOnly) {
+                btn.style.background = '#c41d7f';
+                btn.style.color = '#fff';
+                btn.style.borderColor = '#c41d7f';
+            } else {
+                btn.style.background = '#fff0f6';
+                btn.style.color = '#c41d7f';
+                btn.style.borderColor = '#ffadd2';
+            }
+            filterMergeMaterialsTable();
+        }
+
+        function clearMergeTableFilters() {
+            document.getElementById('mergeSearchInput').value = '';
+            mergeFilterDupOnly = false;
+            const btn = document.getElementById('btnMergeFilterDupOnly');
+            btn.style.background = '#fff0f6';
+            btn.style.color = '#c41d7f';
+            btn.style.borderColor = '#ffadd2';
+            filterMergeMaterialsTable();
+        }
+
+        function sortMergeMaterials(col) {
+            if (mergeSortCol === col) {
+                mergeSortDir = (mergeSortDir === 'asc') ? 'desc' : 'asc';
+            } else {
+                mergeSortCol = col;
+                mergeSortDir = 'asc';
             }
 
-            container.innerHTML = mergeCodesList.map(c => `
-                <span class="merge-chip">
-                    ${escapeHtml(c)}
-                    <i class="fa-solid fa-xmark" title="Hapus dari daftar" onclick="removeCodeFromMergeList('${escapeJs(c)}')"></i>
-                </span>
-            `).join('');
-        }
-
-        function addCodesToMergeList() {
-            const input = document.getElementById('mergeInputAddCode');
-            const val = input.value.trim();
-            if (!val) return;
-
-            // Split by comma, semicolon, space, newline, tab
-            const parts = val.split(/[\s,;\n\r\t]+/).map(s => s.trim()).filter(Boolean);
-            let addedCount = 0;
-            parts.forEach(p => {
-                if (!mergeCodesList.includes(p)) {
-                    mergeCodesList.push(p);
-                    addedCount++;
+            ['kode_barang', 'uraian', 'pos_tarif', 'kode_satuan', 'jml_transaksi'].forEach(c => {
+                const el = document.getElementById(`sortIcon_${c}`);
+                if (el) {
+                    if (c === mergeSortCol) {
+                        el.className = `fa-solid fa-sort-${mergeSortDir === 'asc' ? 'up' : 'down'}`;
+                        el.style.color = '#c41d7f';
+                    } else {
+                        el.className = 'fa-solid fa-sort';
+                        el.style.color = '';
+                    }
                 }
             });
 
-            input.value = '';
-            renderMergeTags();
-            updateMergeTargetOptions();
+            filterMergeMaterialsTable();
+        }
+
+        function sortMergeArray(arr, col, dir) {
+            arr.sort((a, b) => {
+                let valA = a[col] || '';
+                let valB = b[col] || '';
+                if (col === 'jml_transaksi') {
+                    valA = Number(valA) || 0;
+                    valB = Number(valB) || 0;
+                    return dir === 'asc' ? valA - valB : valB - valA;
+                }
+                valA = String(valA).toLowerCase();
+                valB = String(valB).toLowerCase();
+                if (valA < valB) return dir === 'asc' ? -1 : 1;
+                if (valA > valB) return dir === 'asc' ? 1 : -1;
+                if (col !== 'uraian') {
+                    const uA = String(a.uraian || '').toLowerCase();
+                    const uB = String(b.uraian || '').toLowerCase();
+                    if (uA !== uB) return uA < uB ? -1 : 1;
+                }
+                const kA = String(a.kode_barang || '').toLowerCase();
+                const kB = String(b.kode_barang || '').toLowerCase();
+                return kA < kB ? -1 : 1;
+            });
+        }
+
+        function renderMergeMaterialsTable() {
+            const tb = document.getElementById('mergeMaterialsTableBody');
+            if (mergeMaterialsFiltered.length === 0) {
+                tb.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--text-muted);">Tidak ada data barang yang sesuai filter.</td></tr>';
+                updateMergeActionUI();
+                return;
+            }
+
+            let html = '';
+            mergeMaterialsFiltered.forEach((it, idx) => {
+                const isChecked = selectedMergeCodes.has(it.kode_barang);
+                const hasDup = it.has_dup_name;
+                const rowBg = isChecked ? 'background:#fff0f6;' : (hasDup ? 'background:#fcfaff;' : '');
+
+                html += `
+                    <tr style="${rowBg}">
+                        <td style="text-align:center;">
+                            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleMergeRow('${escapeJs(it.kode_barang)}', this.checked)">
+                        </td>
+                        <td style="text-align:center; color:var(--text-muted);">${idx + 1}</td>
+                        <td style="font-family:monospace; font-weight:700; color:#096dd9;">
+                            ${escapeHtml(it.kode_barang)}
+                        </td>
+                        <td>
+                            <div style="font-weight:${hasDup ? '600' : 'normal'}; display:flex; align-items:center; gap:6px;">
+                                ${escapeHtml(it.uraian)}
+                                ${hasDup ? '<span class="badge" style="background:rgba(196,29,127,0.1); color:#c41d7f; font-size:8.5px; padding:0 4px; border-radius:3px;" title="Uraian ini terdaftar pada lebih dari 1 kode barang">Dobel</span>' : ''}
+                            </div>
+                        </td>
+                        <td style="text-align:center; font-family:monospace; color:var(--text-muted);">${escapeHtml(it.pos_tarif)}</td>
+                        <td style="text-align:center;">
+                            <span class="badge" style="background:var(--bg-base); border:1px solid var(--border-color); font-weight:700; padding:1px 6px;">${escapeHtml(it.kode_satuan)}</span>
+                        </td>
+                        <td style="color:var(--text-muted); font-size:9px;">${escapeHtml(it.klas)}</td>
+                        <td style="text-align:right; font-family:monospace; font-weight:600; color:${it.jml_transaksi > 0 ? '#1890ff' : 'var(--text-muted)'};">
+                            ${it.jml_transaksi.toLocaleString('id-ID')}
+                        </td>
+                        <td style="text-align:center;">
+                            <button type="button" class="ant-btn ant-btn-sm" style="font-size:9px; padding:0 6px; height:20px; color:#c41d7f; border-color:#ffadd2;" onclick="quickSelectSameUraian('${escapeJs(it.uraian)}')" title="Centang seluruh barang yang memiliki uraian sama persis">
+                                <i class="fa-solid fa-check-double"></i> Pilih se-Nama
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            tb.innerHTML = html;
+            updateMergeActionUI();
+        }
+
+        function toggleMergeRow(kode, checked) {
+            if (checked) {
+                selectedMergeCodes.add(kode);
+            } else {
+                selectedMergeCodes.delete(kode);
+            }
+            renderMergeMaterialsTable();
+        }
+
+        function toggleSelectAllMergeVisible(checked) {
+            mergeMaterialsFiltered.forEach(it => {
+                if (checked) {
+                    selectedMergeCodes.add(it.kode_barang);
+                } else {
+                    selectedMergeCodes.delete(it.kode_barang);
+                }
+            });
+            renderMergeMaterialsTable();
+        }
+
+        function clearMergeSelection() {
+            selectedMergeCodes.clear();
+            renderMergeMaterialsTable();
+        }
+
+        function quickSelectSameUraian(uraian) {
+            const norm = (uraian || '').toLowerCase().trim();
+            if (!norm) return;
+            let count = 0;
+            mergeMaterialsMaster.forEach(it => {
+                if ((it.uraian || '').toLowerCase().trim() === norm) {
+                    selectedMergeCodes.add(it.kode_barang);
+                    count++;
+                }
+            });
+            renderMergeMaterialsTable();
+            Swal.fire({
+                icon: 'info',
+                title: 'Pilih se-Nama',
+                text: `${count} barang dengan nama '${uraian}' telah dicentang untuk digabungkan.`,
+                timer: 1600,
+                showConfirmButton: false
+            });
+        }
+
+        function checkMergeUnitValidity() {
+            const alertBox = document.getElementById('mergeUnitValidationAlert');
+            const btn = document.getElementById('btnExecuteMerge');
+            const summary = document.getElementById('mergeStatusSummary');
+
+            const selectedList = mergeMaterialsMaster.filter(it => selectedMergeCodes.has(it.kode_barang));
+            const count = selectedList.length;
+
+            document.getElementById('mergeSelectedBadge').innerText = `${count} barang dipilih`;
+
+            if (count === 0) {
+                alertBox.style.display = 'none';
+                btn.disabled = true;
+                summary.innerHTML = '<span style="color:var(--text-muted);">Centang minimal 2 barang dengan nama sama untuk digabungkan.</span>';
+                updateTargetDropdown([]);
+                return false;
+            }
+
+            if (count === 1) {
+                alertBox.style.display = 'none';
+                btn.disabled = true;
+                summary.innerHTML = `<span style="color:#fa8c16;"><i class="fa-solid fa-circle-exclamation"></i> Baru 1 barang dipilih ('${selectedList[0].kode_barang}'). Centang minimal 1 barang lagi yang ingin digabungkan ke barang ini.</span>`;
+                updateTargetDropdown(selectedList);
+                return false;
+            }
+
+            // Validasi: Cek perbedaan satuan di antara item yang dicentang
+            const units = [...new Set(selectedList.map(it => (it.kode_satuan || '').toUpperCase().trim()))];
+
+            if (units.length > 1) {
+                // BEDA SATUAN: BLOKIR DENGAN PESAN TEGAS
+                alertBox.style.display = 'block';
+                alertBox.style.background = '#fff2f0';
+                alertBox.style.border = '1px solid #ffccc7';
+                alertBox.style.color = '#cf1322';
+                alertBox.innerHTML = `
+                    <div style="font-weight:700; margin-bottom:3px;">
+                        <i class="fa-solid fa-ban"></i> DILARANG MERGE (BEDA SATUAN):
+                    </div>
+                    <div>
+                        Barang yang Anda centang memiliki satuan berbeda: <b>${units.join(' vs ')}</b>.<br>
+                        Berdasarkan regulasi kepabeanan CEISA 4.0 dan IT Inventory, <b>satuan berbeda WAJIB menggunakan kode barang berbeda</b>! Harap batalkan centang pada barang yang berbeda satuan.
+                    </div>
+                `;
+                btn.disabled = true;
+                summary.innerHTML = '<span style="color:#cf1322; font-weight:700;"><i class="fa-solid fa-ban"></i> Dilarang merge karena perbedaan satuan.</span>';
+                updateTargetDropdown(selectedList);
+                return false;
+            }
+
+            // SATUAN SAMA: VALID
+            const unitName = units[0] || 'PCE';
+            alertBox.style.display = 'block';
+            alertBox.style.background = '#f6ffed';
+            alertBox.style.border = '1px solid #b7eb8f';
+            alertBox.style.color = '#389e0d';
+            alertBox.innerHTML = `
+                <i class="fa-solid fa-circle-check"></i>
+                <b>Satuan Selaras: [ ${unitName} ]</b> &bull; ${count} kode barang siap disatukan menjadi 1 kode utama.
+            `;
+
+            btn.disabled = false;
+            summary.innerHTML = `<span style="color:#389e0d; font-weight:600;"><i class="fa-solid fa-check"></i> Siap merge ${count} kode menjadi 1 kode unik.</span>`;
+            updateTargetDropdown(selectedList);
             triggerMergePreview();
+            return true;
         }
 
-        function removeCodeFromMergeList(code) {
-            mergeCodesList = mergeCodesList.filter(c => c !== code);
-            renderMergeTags();
-            updateMergeTargetOptions();
-            triggerMergePreview();
-        }
-
-        function clearMergeList() {
-            mergeCodesList = [];
-            renderMergeTags();
-            updateMergeTargetOptions();
-            document.getElementById('mergeImpactBox').style.display = 'none';
-            onMergeTargetChanged();
-        }
-
-        function updateMergeTargetOptions() {
+        function updateTargetDropdown(selectedList) {
             const sel = document.getElementById('mergeTargetSelect');
             const prevVal = sel.value;
-            sel.innerHTML = '<option value="">-- Pilih Kode Utama --</option>';
+            sel.innerHTML = '';
 
-            mergeCodesList.forEach(c => {
+            if (selectedList.length === 0) {
+                sel.innerHTML = '<option value="">-- Centang item di tabel atas terlebih dahulu --</option>';
+                return;
+            }
+
+            selectedList.forEach(it => {
                 const opt = document.createElement('option');
-                opt.value = c;
-                opt.innerText = c;
-                if (c === prevVal || (mergeCodesList.length === 1 && c === mergeCodesList[0])) {
+                opt.value = it.kode_barang;
+                opt.innerText = `${it.kode_barang} (${it.uraian.substring(0, 35)} - ${it.kode_satuan})`;
+                if (it.kode_barang === prevVal) {
                     opt.selected = true;
                 }
                 sel.appendChild(opt);
             });
 
-            if (!sel.value && mergeCodesList.length > 0) {
-                sel.value = mergeCodesList[0];
-            }
-            onMergeTargetChanged();
-        }
-
-        function toggleMergeTargetMode() {
-            const isCustom = document.getElementById('radioTargetCustom').checked;
-            document.getElementById('mergeTargetSelect').disabled = isCustom;
-            document.getElementById('mergeTargetCustom').disabled = !isCustom;
-            if (isCustom) {
-                document.getElementById('mergeTargetCustom').focus();
-            }
-            onMergeTargetChanged();
-        }
-
-        function getSelectedTargetCode() {
-            const isCustom = document.getElementById('radioTargetCustom').checked;
-            if (isCustom) {
-                return document.getElementById('mergeTargetCustom').value.trim();
-            } else {
-                return document.getElementById('mergeTargetSelect').value.trim();
+            if (!sel.value && selectedList.length > 0) {
+                sel.value = selectedList[0].kode_barang;
             }
         }
 
-        function onMergeTargetChanged() {
-            const target = getSelectedTargetCode();
-            const lbl = document.getElementById('lblTargetKode');
-            if (lbl) {
-                lbl.innerText = target || '-';
-            }
+        function updateMergeActionUI() {
+            checkMergeUnitValidity();
+        }
+
+        function onMergeTargetSelectChanged() {
+            document.getElementById('mergeTargetCustom').value = '';
             triggerMergePreview();
+        }
+
+        function onMergeTargetCustomChanged() {
+            triggerMergePreview();
+        }
+
+        function getActiveTargetCode() {
+            const custom = document.getElementById('mergeTargetCustom').value.trim();
+            if (custom) return custom;
+            return document.getElementById('mergeTargetSelect').value.trim();
         }
 
         function triggerMergePreview() {
@@ -3425,8 +3897,9 @@ if ($action === 'approval_reject') {
         }
 
         async function fetchMergePreview() {
-            const targetCode = getSelectedTargetCode();
-            const oldCodes = mergeCodesList.filter(c => c.toUpperCase() !== targetCode.toUpperCase());
+            const targetCode = getActiveTargetCode();
+            const allSelected = Array.from(selectedMergeCodes);
+            const oldCodes = allSelected.filter(c => c.toUpperCase() !== targetCode.toUpperCase());
             const impactBox = document.getElementById('mergeImpactBox');
 
             if (oldCodes.length === 0 && !targetCode) {
@@ -3444,23 +3917,24 @@ if ($action === 'approval_reject') {
                     document.getElementById('impactCntIssue').innerText = Number(json.counts['issue_dtl'] || 0).toLocaleString('id-ID');
                     document.getElementById('impactCntMat').innerText = Number(json.counts['material'] || 0).toLocaleString('id-ID');
                 }
-            } catch (e) {
-                // Ignore silent preview errors
-            }
+            } catch (e) {}
         }
 
         async function executeMergeKode() {
-            const targetCode = getSelectedTargetCode();
+            if (!checkMergeUnitValidity()) return;
+
+            const targetCode = getActiveTargetCode();
             if (!targetCode) {
                 Swal.fire({
                     icon: 'warning',
                     title: 'Tentukan Kode Utama',
-                    text: 'Silakan tentukan Kode Barang Utama (Target) hasil merge, baik memilih dari daftar atau mengetik kode baru.'
+                    text: 'Pilih salah satu kode dari dropdown atau ketik kode utama baru.'
                 });
                 return;
             }
 
-            const oldCodes = mergeCodesList.filter(c => c.toUpperCase() !== targetCode.toUpperCase());
+            const allSelected = Array.from(selectedMergeCodes);
+            const oldCodes = allSelected.filter(c => c.toUpperCase() !== targetCode.toUpperCase());
             if (oldCodes.length === 0) {
                 Swal.fire({
                     icon: 'warning',
@@ -3478,16 +3952,18 @@ if ($action === 'approval_reject') {
 
             const confirm = await Swal.fire({
                 icon: 'warning',
-                title: 'Konfirmasi Merge Kode Dobel',
-                html: `Apakah Anda yakin ingin menggabungkan <b>${oldCodes.length} kode barang lama</b> berikut:<br><br>` +
-                      `<div style="max-height:80px; overflow-y:auto; background:#fff2f0; border:1px solid #ffccc7; border-radius:4px; padding:6px; font-family:monospace; font-size:11px; color:#cf1322;">` +
-                      oldCodes.map(c => `• ${escapeHtml(c)}`).join('<br>') +
-                      `</div><br>` +
-                      `Menjadi 1 Kode Barang Utama:<br>` +
-                      `<span style="font-family:monospace; font-size:14px; font-weight:700; color:#c41d7f; background:rgba(196,29,127,0.1); padding:3px 8px; border-radius:4px;">${escapeHtml(targetCode)}</span><br><br>` +
-                      `<small style="color:var(--text-muted);">Seluruh data transaksi di IT Inventory${isAdmin ? ' (bc_1ab2)' : ''}, Traceability${isAdmin ? ' (bc_ceisa_tracebb)' : ''}, dan Pengeluaran${isAdmin ? ' (bc_issue_dtl)' : ''} yang menggunakan kode-kode lama akan langsung diganti ke kode utama ini.</small>`,
+                title: 'Konfirmasi Penyatuan Kode Unik',
+                html: `<div style="text-align:left; font-size:12px;">` +
+                      `<p>Anda akan menggabungkan <b>${oldCodes.length} kode barang lama</b> berikut:</p>` +
+                      `<div style="max-height:80px; overflow-y:auto; background:#fff2f0; border:1px solid #ffccc7; border-radius:4px; padding:6px; font-family:monospace; font-size:11px; color:#cf1322; margin-bottom:10px;">` +
+                      oldCodes.map(c => `&bull; ${escapeHtml(c)}`).join('<br>') +
+                      `</div>` +
+                      `<p>Menjadi <b>1 Kode Barang Utama</b>:</p>` +
+                      `<div style="font-family:monospace; font-size:13px; font-weight:700; color:#c41d7f; background:rgba(196,29,127,0.1); padding:4px 8px; border-radius:4px; margin-bottom:10px;">${escapeHtml(targetCode)}</div>` +
+                      `<small style="color:var(--text-muted);">Seluruh transaksi mutasi (IT Inventory, Traceability, Pengeluaran) otomatis dialihkan ke kode utama ini, dan kode lama akan dibersihkan dari Master Barang.</small>` +
+                      `</div>`,
                 showCancelButton: true,
-                confirmButtonText: 'Ya, Jalankan Merge Kode',
+                confirmButtonText: '<i class="fa-solid fa-code-merge"></i> Ya, Jalankan Merge Kode',
                 cancelButtonText: 'Batal',
                 confirmButtonColor: '#c41d7f'
             });
@@ -3520,8 +3996,8 @@ if ($action === 'approval_reject') {
                         html: `<pre style="text-align:left; font-size:11px; background:#f6ffed; border:1px solid #b7eb8f; border-radius:4px; padding:10px; white-space:pre-wrap;">${escapeHtml(json.message)}</pre>`,
                         confirmButtonColor: '#c41d7f'
                     });
-                    closeModal('modalMergeKode');
-                    clearMergeList();
+                    selectedMergeCodes.clear();
+                    await loadMergeMaterials();
                     loadData();
                 } else {
                     Swal.fire({ icon: 'error', title: 'Gagal Merge Kode', text: json.message });
@@ -3769,8 +4245,8 @@ if ($action === 'approval_reject') {
 
         async function saveItem() {
             const isEdit = document.getElementById('modalIsEdit').value;
-            const kode = document.getElementById('modalKode').value.trim();
-            const kode2 = document.getElementById('modalKode2').value.trim();
+            const kode = document.getElementById('modalKode').value.replace(/[\[\]]/g, '').trim();
+            const kode2 = document.getElementById('modalKode2').value.replace(/[\[\]]/g, '').trim();
             const uraian = document.getElementById('modalUraian').value.trim();
             const model = document.getElementById('modalModel').value.trim();
             const hs = document.getElementById('modalHs').value.trim();
@@ -4038,6 +4514,8 @@ if ($action === 'approval_reject') {
                 const json = await res.json();
                 if (json.status === 'OK') {
                     dbImportCandidates = json.data;
+                    window.MASTER_EXISTING_UNITS = json.existing_units || {};
+                    window.MASTER_EXISTING_DESC_MAP = json.existing_desc_map || {};
                     renderDbImportTable();
                 } else {
                     tbody.innerHTML = `<tr><td colspan="9" style="text-align:center; color:red; padding:20px;">Gagal memuat kandidat: ${json.message}</td></tr>`;
@@ -4238,19 +4716,173 @@ if ($action === 'approval_reject') {
             });
         }
 
-        function autoGenerateCodesForMinus() {
-            const existingCodes = new Set();
-            dbImportCandidates.forEach(it => {
+        function checkDiffUnitConflicts() {
+            const conflicts = [];
+            const codeUnitMap = new Map();
+            const masterUnits = window.MASTER_EXISTING_UNITS || {};
+
+            dbImportCandidates.forEach((it, idx) => {
+                if (!it.selected) return;
                 const k = (it.kode_barang || '').trim().toUpperCase();
-                if (k && k !== '-') existingCodes.add(k);
+                const u = (it.kode_satuan || '').trim().toUpperCase();
+                if (!k || k === '-') return;
+
+                // 1. Cek bentrok dengan Master Barang yang sudah ada
+                if (masterUnits[k] && masterUnits[k] !== u) {
+                    conflicts.push({
+                        index: idx,
+                        kode: it.kode_barang,
+                        satuan: u,
+                        masterSatuan: masterUnits[k],
+                        reason: `Di Master Barang satuannya '${masterUnits[k]}', sedangkan di kandidat '${u}'`
+                    });
+                }
+
+                // 2. Cek bentrok antar kandidat terpilih
+                if (codeUnitMap.has(k) && codeUnitMap.get(k) !== u) {
+                    conflicts.push({
+                        index: idx,
+                        kode: it.kode_barang,
+                        satuan: u,
+                        masterSatuan: codeUnitMap.get(k),
+                        reason: `Baris lain menggunakan satuan '${codeUnitMap.get(k)}'`
+                    });
+                } else {
+                    codeUnitMap.set(k, u);
+                }
             });
 
-            let count = 0;
+            return conflicts;
+        }
+
+        function autoResolveDiffUnits(showToast = false) {
+            const existingCodeUnits = new Map();
+            if (window.MASTER_EXISTING_UNITS) {
+                for (const [k, u] of Object.entries(window.MASTER_EXISTING_UNITS)) {
+                    existingCodeUnits.set(k.toUpperCase(), (u || '').toUpperCase());
+                }
+            }
+
+            let resolvedCount = 0;
+            dbImportCandidates.forEach(it => {
+                const k = (it.kode_barang || '').trim();
+                const u = (it.kode_satuan || '').trim().toUpperCase();
+                if (!k || k === '-') return;
+
+                const normK = k.toUpperCase();
+                // Jika kodenya sudah terdaftar di Master Barang atau kandidat sebelumnya dengan satuan berbeda
+                if (existingCodeUnits.has(normK) && existingCodeUnits.get(normK) !== u) {
+                    // Otomatis tambahkan pembeda satuan
+                    const base = k.replace(/\([^\)]+\)$/, '').trim();
+                    let newCode = `${base}(${u})`;
+                    let seq = 1;
+                    while (existingCodeUnits.has(newCode.toUpperCase())) {
+                        newCode = `${base}(${u})-${seq}`;
+                        seq++;
+                    }
+                    it.kode_barang = newCode;
+                    existingCodeUnits.set(newCode.toUpperCase(), u);
+                    resolvedCount++;
+                } else if (!existingCodeUnits.has(normK)) {
+                    existingCodeUnits.set(normK, u);
+                }
+            });
+
+            renderDbImportTable();
+            validateDbImportState();
+
+            if (showToast) {
+                if (resolvedCount > 0) {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Otomatisasi Berhasil',
+                        text: `${resolvedCount} item yang berbeda satuan telah disesuaikan kode barangnya secara otomatis dengan akhiran satuan.`
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'info',
+                        title: 'Tidak Ada Konflik Satuan',
+                        text: 'Seluruh kode barang sudah memiliki satuan yang selaras dengan Master Data.'
+                    });
+                }
+            }
+            return resolvedCount;
+        }
+
+        function autoGenerateCodesForMinus() {
+            // Bangun peta Kode => Satuan dari Master & kandidat yang sudah berkode
+            const existingCodeUnits = new Map();
+            if (window.MASTER_EXISTING_UNITS) {
+                for (const [k, u] of Object.entries(window.MASTER_EXISTING_UNITS)) {
+                    existingCodeUnits.set(k.toUpperCase(), (u || '').toUpperCase());
+                }
+            }
+
+            // Bangun peta Uraian + HS + Satuan => Kode dari Master
+            const descMap = new Map();
+            if (window.MASTER_EXISTING_DESC_MAP) {
+                for (const [key, code] of Object.entries(window.MASTER_EXISTING_DESC_MAP)) {
+                    descMap.set(key, code);
+                }
+            }
+
+            // Daftarkan juga kandidat yang sudah berkode di batch saat ini
+            dbImportCandidates.forEach(it => {
+                const k = (it.kode_barang || '').trim().toUpperCase();
+                const u = (it.kode_satuan || '').trim().toUpperCase();
+                const hs = (it.pos_tarif || '').replace(/[^0-9]/g, '');
+                const ur = (it.uraian || '').trim().toUpperCase();
+
+                if (k && k !== '-') {
+                    if (!existingCodeUnits.has(k)) {
+                        existingCodeUnits.set(k, u);
+                    }
+                    if (ur && u) {
+                        if (hs && !descMap.has(`${ur}|${hs}|${u}`)) {
+                            descMap.set(`${ur}|${hs}|${u}`, it.kode_barang);
+                        }
+                        if (!descMap.has(`${ur}||${u}`)) {
+                            descMap.set(`${ur}||${u}`, it.kode_barang);
+                        }
+                    }
+                }
+            });
+
+            let countReused = 0;
+            let countGenerated = 0;
+
             dbImportCandidates.forEach(it => {
                 if (it.is_minus || it.kode_barang.trim() === '-' || it.kode_barang.trim() === '') {
-                    it.kode_barang = generateUniqueItemCode(it.uraian, existingCodes);
-                    it.is_minus = false;
-                    count++;
+                    const u = (it.kode_satuan || 'PCE').trim().toUpperCase();
+                    const hs = (it.pos_tarif || '').replace(/[^0-9]/g, '');
+                    const ur = (it.uraian || '').trim().toUpperCase();
+
+                    // 1. Cek apakah ada kecocokan nama barang + HS + satuan di Master/batch
+                    let matched = null;
+                    if (hs && descMap.has(`${ur}|${hs}|${u}`)) {
+                        matched = descMap.get(`${ur}|${hs}|${u}`);
+                    } else if (descMap.has(`${ur}||${u}`)) {
+                        matched = descMap.get(`${ur}||${u}`);
+                    }
+
+                    if (matched) {
+                        it.kode_barang = matched;
+                        it.is_minus = false;
+                        countReused++;
+                    } else {
+                        // 2. Jika tidak ada yang sama, buatkan kode baru unik
+                        const newCode = generateUniqueItemCode(it.uraian, it.kode_satuan, existingCodeUnits).replace(/[\[\]]/g, '');
+                        it.kode_barang = newCode;
+                        it.is_minus = false;
+
+                        if (ur && u) {
+                            if (hs) descMap.set(`${ur}|${hs}|${u}`, newCode);
+                            descMap.set(`${ur}||${u}`, newCode);
+                        }
+                        countGenerated++;
+                    }
+                } else {
+                    it.kode_barang = (it.kode_barang || '').replace(/[\[\]]/g, '').trim();
                 }
             });
 
@@ -4258,43 +4890,83 @@ if ($action === 'approval_reject') {
             Swal.fire({
                 icon: 'success',
                 title: 'Auto-Kode Berhasil',
-                text: `${count} item dengan kode '-' telah dibuatkan kode unik otomatis.`
+                html: `Penyesuaian kode barang selesai:<br>` +
+                      `â€¢ <b>${countReused} item</b> menggunakan kode yang sudah ada sebelumnya (berdasarkan Nama Barang, HS Code, & Satuan).<br>` +
+                      `â€¢ <b>${countGenerated} item</b> dibuatkan kode baru unik.`
             });
         }
 
         function autoGenerateSingleCode(idx) {
-            const existingCodes = new Set();
-            dbImportCandidates.forEach(it => {
-                const k = (it.kode_barang || '').trim().toUpperCase();
-                if (k && k !== '-') existingCodes.add(k);
+            const existingCodeUnits = new Map();
+            if (window.MASTER_EXISTING_UNITS) {
+                for (const [k, u] of Object.entries(window.MASTER_EXISTING_UNITS)) {
+                    existingCodeUnits.set(k.toUpperCase(), (u || '').toUpperCase());
+                }
+            }
+            dbImportCandidates.forEach((it, i) => {
+                if (i !== idx) {
+                    const k = (it.kode_barang || '').trim().toUpperCase();
+                    const u = (it.kode_satuan || '').trim().toUpperCase();
+                    if (k && k !== '-') {
+                        if (!existingCodeUnits.has(k)) {
+                            existingCodeUnits.set(k, u);
+                        }
+                    }
+                }
             });
 
             const it = dbImportCandidates[idx];
-            it.kode_barang = generateUniqueItemCode(it.uraian, existingCodes);
+            it.kode_barang = generateUniqueItemCode(it.uraian, it.kode_satuan, existingCodeUnits).replace(/[\[\]]/g, '');
             it.is_minus = false;
             renderDbImportTable();
         }
 
-        function generateUniqueItemCode(uraian, existingCodes) {
+        function generateUniqueItemCode(uraian, satuan, existingCodeUnits) {
+            const cleanSatuan = (satuan || '').toUpperCase().trim();
             let clean = (uraian || 'BARANG')
                 .toUpperCase()
+                .replace(/[\[\]]/g, '')
                 .replace(/[^A-Z0-9]/g, ' ')
                 .trim()
                 .split(/\s+/)
                 .slice(0, 3)
                 .join('-');
             if (!clean) clean = 'ITEM';
-            let base = 'BRG-' + clean;
-            if (base.length > 25) base = base.substring(0, 25);
+            if (clean.length > 25) clean = clean.substring(0, 25);
 
-            let code = base;
-            let seq = 1;
-            while (existingCodes.has(code.toUpperCase())) {
-                code = `${base}-${seq}`;
-                seq++;
+            let code = clean;
+
+            // Jika kode dasar belum pernah terdaftar sama sekali
+            if (!existingCodeUnits.has(code)) {
+                existingCodeUnits.set(code, cleanSatuan);
+                return code;
             }
-            existingCodes.add(code.toUpperCase());
-            return code;
+
+            // Kode dasar sudah terdaftar, cek apakah satuannya berbeda
+            const registeredUnit = existingCodeUnits.get(code);
+
+            if (registeredUnit !== cleanSatuan) {
+                // KODE SAMA TAPI BEDA SATUAN: Tambahkan unit satuan ke kodenya, contoh: BICYCLE-PARTS-HANGER(KGM)
+                let unitCode = cleanSatuan ? `${clean}(${cleanSatuan})` : `${clean}-1`;
+                let finalCode = unitCode;
+                let seq = 1;
+                while (existingCodeUnits.has(finalCode)) {
+                    finalCode = cleanSatuan ? `${clean}(${cleanSatuan})-${seq}` : `${clean}-${seq}`;
+                    seq++;
+                }
+                existingCodeUnits.set(finalCode, cleanSatuan);
+                return finalCode;
+            } else {
+                // KODE SAMA DENGAN SATUAN SAMA: Beri nomor urut biasa (-1, -2, ...)
+                let seq = 1;
+                let finalCode = `${clean}-${seq}`;
+                while (existingCodeUnits.has(finalCode)) {
+                    seq++;
+                    finalCode = `${clean}-${seq}`;
+                }
+                existingCodeUnits.set(finalCode, cleanSatuan);
+                return finalCode;
+            }
         }
 
         function validateDbImportState() {
@@ -4326,13 +4998,52 @@ if ($action === 'approval_reject') {
                 return false;
             }
 
+            // Validasi: Cek perbedaan satuan dengan Master atau antar item terpilih
+            const conflicts = checkDiffUnitConflicts();
+            if (conflicts.length > 0) {
+                alertBox.style.display = 'block';
+                alertMsg.innerHTML = `<strong>PERHATIAN - BEDA SATUAN (${conflicts.length} ITEM):</strong> Terdapat kode barang yang sama dengan Master tetapi satuannya berbeda (misal: <code>${conflicts[0].kode}</code>). Anda dapat mengklik tombol <button type="button" class="ant-btn ant-btn-sm" style="background:#722ed1; color:#fff; border-color:#722ed1; padding:0 6px;" onclick="autoResolveDiffUnits(true)"><i class="fa-solid fa-wand-magic-sparkles"></i> Otomatisasi Beda Satuan</button> atau sistem akan menawarkan konfirmasi otomatisasi saat tombol Simpan ditekan.`;
+                // Biarkan tombol aktif agar memicu dialog konfirmasi otomatisasi saat diklik
+                btn.disabled = false;
+                return true;
+            }
+
             alertBox.style.display = 'none';
             btn.disabled = false;
             return true;
         }
 
-        async function executeDbImport() {
+        async function executeDbImport(isAutoRetry = false) {
             if (!validateDbImportState()) return;
+
+            // Periksa apakah masih ada item dengan bentrok satuan
+            const conflicts = checkDiffUnitConflicts();
+            if (conflicts.length > 0 && !isAutoRetry) {
+                const sampleList = conflicts.slice(0, 3).map(c => `<li><b>${c.kode}</b>: ${c.reason} &rarr; Diusulkan: <code>${c.kode}(${c.satuan})</code></li>`).join('');
+                const extraNote = conflicts.length > 3 ? `<li>...dan ${conflicts.length - 3} item lainnya.</li>` : '';
+
+                const confirmAuto = await Swal.fire({
+                    title: 'Tawaran Otomatisasi Kode Barang',
+                    html: `<div style="text-align:left; font-size:12px;">` +
+                          `<p>Ditemukan <b>${conflicts.length} item</b> yang kodenya sama dengan Master Barang tetapi memiliki <b>satuan yang berbeda</b>:</p>` +
+                          `<ul style="padding-left:18px; margin-bottom:12px; color:var(--text-muted);">${sampleList}${extraNote}</ul>` +
+                          `<p>Di Master Data CEISA, satu kode barang wajib memiliki 1 satuan unik. Apakah Anda ingin sistem <b>mengotomatiskan penamaan kode barang</b> (menambahkan pembeda satuan) dan langsung melanjutkan import?</p>` +
+                          `</div>`,
+                    icon: 'question',
+                    showCancelButton: true,
+                    confirmButtonColor: '#722ed1',
+                    cancelButtonColor: '#6c757d',
+                    confirmButtonText: '<i class="fa-solid fa-wand-magic-sparkles"></i> Ya, Otomatiskan &amp; Simpan',
+                    cancelButtonText: 'Batal (Edit Manual)'
+                });
+
+                if (confirmAuto.isConfirmed) {
+                    autoResolveDiffUnits(false);
+                    return executeDbImport(true);
+                } else {
+                    return;
+                }
+            }
 
             const selectedItems = dbImportCandidates.filter(it => it.selected);
             const btn = document.getElementById('btnExecuteDbImport');
@@ -4342,6 +5053,7 @@ if ($action === 'approval_reject') {
             const fd = new FormData();
             fd.append('action', 'save_imported_materials');
             fd.append('items', JSON.stringify(selectedItems));
+            fd.append('auto_resolve_diff_unit', '1');
 
             try {
                 const res = await fetch('material.php', { method: 'POST', body: fd });
@@ -4356,7 +5068,24 @@ if ($action === 'approval_reject') {
                     closeModal('modalDbImport');
                     loadData();
                 } else {
-                    Swal.fire('Gagal Import', json.message, 'error');
+                    // Jika gagal karena bentrok satuan yang belum tercover
+                    if (json.message && json.message.toLowerCase().includes('dilarang mengubah satuan')) {
+                        const offerRetry = await Swal.fire({
+                            title: 'Tawaran Otomatisasi Kode Barang',
+                            html: `<div style="text-align:left; font-size:12px;">${json.message}<br><br>Apakah Anda ingin sistem <b>mengotomatiskan kode barang dengan menambahkan akhiran satuan</b> dan langsung mencoba menyimpan kembali?</div>`,
+                            icon: 'warning',
+                            showCancelButton: true,
+                            confirmButtonColor: '#722ed1',
+                            confirmButtonText: '<i class="fa-solid fa-wand-magic-sparkles"></i> Ya, Otomatiskan &amp; Simpan',
+                            cancelButtonText: 'Batal'
+                        });
+                        if (offerRetry.isConfirmed) {
+                            autoResolveDiffUnits(false);
+                            return executeDbImport(true);
+                        }
+                    } else {
+                        Swal.fire('Gagal Import', json.message, 'error');
+                    }
                 }
             } catch (err) {
                 Swal.fire('Error Server', err.message, 'error');
@@ -4702,6 +5431,19 @@ if ($action === 'approval_reject') {
         });
 
         window.onload = function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const initKlas = urlParams.get('klas');
+            if (initKlas) {
+                const sel = document.getElementById('filterKlas');
+                if (sel) {
+                    for (let i = 0; i < sel.options.length; i++) {
+                        if (isMatchingKlas(sel.options[i].value, initKlas)) {
+                            sel.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
             loadData();
             updateApprovalBadge();
         };

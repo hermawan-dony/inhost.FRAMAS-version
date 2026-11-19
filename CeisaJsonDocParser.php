@@ -37,12 +37,9 @@ class CeisaJsonDocParser {
         global $koneksi;
         if (empty($cmpId) && $koneksi) {
             $escId = $koneksi->real_escape_string($cleanIdHeader);
-            $q = $koneksi->query("SELECT idPerusahaan FROM bc_ceisa_data WHERE idHeader = '{$escId}' LIMIT 1");
+            $q = $koneksi->query("SELECT cmp_id FROM bc_ceisa_data WHERE idHeader = '{$escId}' LIMIT 1");
             if ($q && $r = $q->fetch_assoc()) {
-                $comp = ceisa_get_company($r['idPerusahaan']);
-                if ($comp && !empty($comp['cmp_id'])) {
-                    $cmpId = $comp['cmp_id'];
-                }
+                $cmpId = $r['cmp_id'];
             }
         }
         if (empty($cmpId) && !empty($_SESSION['company_cmp_id'])) {
@@ -252,12 +249,27 @@ class CeisaJsonDocParser {
         // 2. ENTITAS (bc_ceisa_entitas)
         if (!empty($d['entitas']) && is_array($d['entitas'])) {
             foreach ($d['entitas'] as $idx => $e) {
+                $rawNomorId = $e['nomorIdentitas'] ?? null;
+                $cleanId = preg_replace('/[^0-9]/', '', $rawNomorId ?? '');
+                $jenisId = $e['kodeJenisIdentitas'] ?? null;
+                if (empty($jenisId) || $jenisId === '5') {
+                    if (strlen($cleanId) === 16) {
+                        $jenisId = '6';
+                    } elseif (strlen($cleanId) === 15) {
+                        $rawNomorId = '0' . $cleanId;
+                        $jenisId = '6';
+                    } elseif (strlen($cleanId) > 0 && strlen($cleanId) <= 12) {
+                        $jenisId = '0'; // KTP / NIK
+                    } else {
+                        $jenisId = '6'; // Default NPWP 16 DIGIT
+                    }
+                }
                 $ajuData['ENTITAS'][] = [
                     'nomor_aju'            => $nomorAju,
                     'seri'                 => $e['seriEntitas'] ?? ($idx + 1),
                     'kode_entitas'         => $e['kodeEntitas'] ?? null,
-                    'kode_jenis_identitas' => $e['kodeJenisIdentitas'] ?? (strlen($e['nomorIdentitas'] ?? '') > 12 ? '5' : '0'),
-                    'nomor_identitas'      => $e['nomorIdentitas'] ?? null,
+                    'kode_jenis_identitas' => $jenisId,
+                    'nomor_identitas'      => $rawNomorId,
                     'nama_entitas'         => $e['namaEntitas'] ?? null,
                     'alamat_entitas'       => $e['alamatEntitas'] ?? null,
                     'nib_entitas'          => $e['nibEntitas'] ?? null,
@@ -335,7 +347,7 @@ class CeisaJsonDocParser {
                     'nomor_aju'            => $nomorAju,
                     'seri_barang'          => $seriBarang,
                     'hs'                   => $b['posTarif'] ?? ($b['hs'] ?? ''),
-                    'kode_barang'          => $b['kodeBarang'] ?? null,
+                    'kode_barang'          => !empty($b['kodeBarang']) ? str_replace(['[', ']'], '', trim($b['kodeBarang'])) : null,
                     'uraian'               => $b['uraian'] ?? null,
                     'merek'                => $b['merk'] ?? ($b['merek'] ?? null),
                     'tipe'                 => $b['tipe'] ?? null,
@@ -397,7 +409,7 @@ class CeisaJsonDocParser {
                             'seri_bahan_baku' => $bb['seriBahanBaku'] ?? ($bbIdx + 1),
                             'kode_asal_bahan' => $bb['kodeAsalBahan'] ?? null,
                             'hs'              => $bb['hs'] ?? null,
-                            'kode_barang'     => $bb['kodeBarang'] ?? null,
+                            'kode_barang'     => !empty($bb['kodeBarang']) ? str_replace(['[', ']'], '', trim($bb['kodeBarang'])) : null,
                             'uraian'          => $bb['uraian'] ?? null,
                             'jumlah_satuan'   => $bb['jumlahSatuan'] ?? 0,
                             'kode_satuan'     => $bb['kodeSatuan'] ?? null,

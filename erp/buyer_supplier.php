@@ -168,7 +168,7 @@ if ($action === 'list') {
 
         $whereClauses = [];
         if (!empty($sessionCmpId)) {
-            $whereClauses[] = "(cmp_id = '$escCmp' OR cmp_id = '' OR cmp_id IS NULL)";
+            $whereClauses[] = "cmp_id = '$escCmp'";
         }
 
         if (!empty($tipe) && in_array($tipe, ['B', 'S'])) {

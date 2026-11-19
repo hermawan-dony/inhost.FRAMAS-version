@@ -7,12 +7,14 @@
 session_start();
 require_once __DIR__ . '/koneksi.php';
 
-// Validasi Akses: Khusus Super Administrator (DP)
-$isSuperAdmin = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
-$isAdmin = $isSuperAdmin;
-if (!$isAdmin) {
+// Validasi Akses: Khusus User 'dp' Non-Demo
+$sessionUid = strtolower(trim($_SESSION['user_id'] ?? ''));
+$sessionCmp = strtolower(trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
+$isAuthorizedDp = ($sessionUid === 'dp' && $sessionCmp !== 'demo');
+
+if (!$isAuthorizedDp) {
     http_response_code(403);
-    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>403 Forbidden</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f0f2f5;color:#262626;} .box{text-align:center;background:#fff;padding:40px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.06);max-width:400px;} h2{color:#ff4d4f;margin-bottom:12px;} p{color:#8c8c8c;font-size:12px;line-height:1.6;}</style></head><body><div class="box"><h2>403 - Akses Ditolak</h2><p>Halaman Database Browser hanya dapat diakses oleh Super Administrator (DP).</p></div></body></html>';
+    echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>403 Forbidden</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0b0f19;color:#f87171;} .box{text-align:center;background:#1e293b;border:1px solid #334155;padding:40px;border-radius:12px;max-width:420px;box-shadow:0 10px 25px rgba(0,0,0,0.5);} h2{color:#ef4444;margin-bottom:12px;} p{color:#94a3b8;font-size:12px;line-height:1.6;}</style></head><body><div class="box"><h2>403 - Akses Ditolak</h2><p>Halaman Database Browser hanya dapat diakses oleh akun dp di luar sesi demo.</p></div></body></html>';
     exit;
 }
 

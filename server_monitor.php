@@ -7,12 +7,11 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// 1. Verifikasi Ketat: Hanya user 'dp' / Super Administrator yang diizinkan
+// 1. Verifikasi Ketat: Hanya user 'dp' Non-Demo yang diizinkan
 $uid = strtolower(trim($_SESSION['user_id'] ?? ''));
-$uname = strtolower(trim($_SESSION['user_name'] ?? ''));
-$isSuper = !empty($_SESSION['is_super_admin']);
+$sessionCmp = strtolower(trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
 
-if (!$isSuper && $uid !== 'dp' && $uname !== 'dp') {
+if ($uid !== 'dp' || $sessionCmp === 'demo') {
     http_response_code(403);
     die("
     <!DOCTYPE html>
@@ -290,6 +289,24 @@ function getAiCreditBalance($forceRefresh = false) {
 
 // 3. Endpoint AJAX untuk Pembaruan Realtime
 if (isset($_GET['action'])) {
+    if ($_GET['action'] === 'clear_ram_cache') {
+        header('Content-Type: application/json; charset=utf-8');
+        // Bersihkan PageCache, Dentries, dan Inodes di kernel Linux
+        if (strtoupper(substr(PHP_OS, 0, 3)) !== 'WIN') {
+            @shell_exec('sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches');
+            @shell_exec('(sleep 1 && sudo systemctl reload php8.2-fpm) >/dev/null 2>&1 &');
+        }
+        if (function_exists('gc_collect_cycles')) {
+            gc_collect_cycles();
+        }
+        $metrics = getServerMetrics();
+        echo json_encode([
+            'status'  => 'SUCCESS',
+            'message' => 'Cache RAM Linux (PageCache, Dentries, & Inodes) berhasil dibersihkan!',
+            'metrics' => $metrics
+        ]);
+        exit;
+    }
     if ($_GET['action'] === 'get_metrics') {
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(getServerMetrics());
@@ -316,6 +333,8 @@ $initialData = getServerMetrics();
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Cek Kondisi Server - inhost.web.id</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/assets/sweetalert2.all.min.js"></script>
+    <script src="/assets/sweetalert-theme.js"></script>
     <style>
         :root {
             --bg-body: #0b0f19;
@@ -662,6 +681,9 @@ $initialData = getServerMetrics();
             <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text-muted);cursor:pointer;">
                 <input type="checkbox" id="chkAutoRefresh" onchange="toggleAutoRefresh(this.checked)"> Auto-Refresh (10s)
             </label>
+            <button class="btn btn-secondary" id="btnClearRam" onclick="clearRamCache()" style="background:#334155;color:#e2e8f0;border:1px solid #475569;" title="Bersihkan file cache & buffer RAM kernel Linux">
+                <i class="fa-solid fa-broom" id="iconClearRam"></i> Bersihkan Cache RAM
+            </button>
             <button class="btn btn-primary" id="btnRefresh" onclick="refreshMetrics()">
                 <i class="fa-solid fa-arrows-rotate" id="iconRefresh"></i> Segarkan Data
             </button>
@@ -720,14 +742,18 @@ $initialData = getServerMetrics();
         <div class="card">
             <div class="card-header">
                 <span class="card-label"><i class="fa-solid fa-memory" style="color:var(--purple);"></i> Memori RAM</span>
-                <span id="ramPercentBadge" style="font-weight:700;color:var(--purple);font-size:13px;"><?= $initialData['ram']['percent'] ?>%</span>
+                <span id="ramPercentBadge" style="font-weight:700;color:var(--purple);font-size:13px;"><?= $initialData['ram']['percent'] ?>% Terpakai</span>
             </div>
-            <div class="card-value" id="ramFreeVal"><?= $initialData['ram']['free_gb'] ?> GB</div>
+            <div class="card-value" id="ramFreeVal"><?= $initialData['ram']['free_gb'] ?> GB Bebas</div>
             <div class="card-desc" id="ramDesc">
-                Tersedia dari total <?= $initialData['ram']['total_gb'] ?> GB RAM
+                Tersedia dari total <?= $initialData['ram']['total_gb'] ?> GB (Buffer MariaDB: 3.7 GB)
             </div>
-            <div class="progress-bar-wrap">
+            <div class="progress-bar-wrap" style="margin-bottom:6px;">
                 <div class="progress-bar-fill" id="ramBar" style="width: <?= $initialData['ram']['percent'] ?>%; background: <?= ($initialData['ram']['percent'] > 85 ? 'var(--danger)' : ($initialData['ram']['percent'] > 70 ? 'var(--warning)' : 'var(--purple)')) ?>;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-muted);">
+                <span>Termasuk InnoDB: ~3.7 GB</span>
+                <a href="javascript:void(0)" onclick="clearRamCache()" style="color:#c084fc; text-decoration:none; font-weight:600;"><i class="fa-solid fa-broom"></i> Bersihkan Cache</a>
             </div>
         </div>
 
@@ -868,6 +894,41 @@ $initialData = getServerMetrics();
     <script>
         let autoRefreshTimer = null;
 
+        function clearRamCache() {
+            const btn = document.getElementById('btnClearRam');
+            const icon = document.getElementById('iconClearRam');
+            if (icon) icon.classList.add('fa-spin');
+            if (btn) btn.disabled = true;
+
+            fetch('server_monitor.php?action=clear_ram_cache')
+                .then(r => r.json())
+                .then(res => {
+                    if (icon) icon.classList.remove('fa-spin');
+                    if (btn) btn.disabled = false;
+                    if (res.metrics) {
+                        updateUI(res.metrics);
+                    }
+                    if (window.Swal) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Cache RAM Dibersihkan',
+                            text: res.message || 'Cache RAM kernel Linux berhasil dibersihkan dan memori disegarkan kembali!',
+                            timer: 2500,
+                            showConfirmButton: false,
+                            background: '#1e293b',
+                            color: '#f8fafc'
+                        });
+                    } else {
+                        alert(res.message || 'Cache RAM berhasil dibersihkan!');
+                    }
+                })
+                .catch(err => {
+                    if (icon) icon.classList.remove('fa-spin');
+                    if (btn) btn.disabled = false;
+                    console.error('Clear RAM error:', err);
+                });
+        }
+
         function refreshMetrics() {
             const btn = document.getElementById('btnRefresh');
             const icon = document.getElementById('iconRefresh');
@@ -898,9 +959,9 @@ $initialData = getServerMetrics();
             diskBar.style.background = d.disk.percent > 85 ? 'var(--danger)' : (d.disk.percent > 70 ? 'var(--warning)' : 'var(--cyan)');
 
             // RAM
-            document.getElementById('ramFreeVal').innerText = d.ram.free_gb + ' GB';
-            document.getElementById('ramPercentBadge').innerText = d.ram.percent + '%';
-            document.getElementById('ramDesc').innerText = `Tersedia dari total ${d.ram.total_gb} GB RAM`;
+            document.getElementById('ramFreeVal').innerText = d.ram.free_gb + ' GB Bebas';
+            document.getElementById('ramPercentBadge').innerText = d.ram.percent + '% Terpakai';
+            document.getElementById('ramDesc').innerText = `Tersedia dari total ${d.ram.total_gb} GB (Terpakai: ${d.ram.used_gb} GB)`;
             const ramBar = document.getElementById('ramBar');
             ramBar.style.width = d.ram.percent + '%';
             ramBar.style.background = d.ram.percent > 85 ? 'var(--danger)' : (d.ram.percent > 70 ? 'var(--warning)' : 'var(--purple)');

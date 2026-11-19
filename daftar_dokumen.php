@@ -967,24 +967,46 @@ if ($action === 'hapus_dokumen') {
     $cleanAju = preg_replace('/[^a-zA-Z0-9_-]/', '', $nomor_aju);
     $escAju   = $koneksi->real_escape_string($cleanAju);
 
-    // Hapus dari tabel rekap lokal bc_ceisa_data
-    $deleted = false;
-    $koneksi->query("DELETE FROM bc_ceisa_data WHERE nomorAju = '{$escAju}'");
-    if ($koneksi->affected_rows > 0) {
-        $deleted = true;
+    try {
+        // Hapus dari tabel rekap lokal bc_ceisa_data
+        $deleted = false;
+        $koneksi->query("DELETE FROM bc_ceisa_data WHERE nomorAju = '{$escAju}'");
+        if ($koneksi->affected_rows > 0) {
+            $deleted = true;
+        }
+
+        // Bersihkan cache status/respon/aju_posted/sppb/pdf jika ada (aman dalam try-catch)
+        $cleanQueries = [
+            "DELETE FROM bc_ceisa_status WHERE nomor_aju = '{$escAju}'",
+            "DELETE FROM bc_ceisa_respons WHERE nomor_aju = '{$escAju}'",
+            "DELETE FROM bc_ceisa_aju_posted WHERE nomor_aju = '{$escAju}'",
+            "DELETE FROM bc_ceisa_sppb WHERE nomorAju = '{$escAju}'",
+            "DELETE FROM bc_ceisa_get_pdf WHERE nomor_aju = '{$escAju}'",
+            "DELETE FROM bc_ceisa_json WHERE json LIKE '%\"nomorAju\":\"{$escAju}\"%'"
+        ];
+
+        foreach ($cleanQueries as $q) {
+            try {
+                $koneksi->query($q);
+            } catch (\Throwable $ignored) {
+                // Abaikan jika tabel atau kolom cache sekunder tidak tersedia
+            }
+        }
+
+        echo json_encode([
+            'status'    => 'OK',
+            'nomor_aju' => $cleanAju,
+            'message'   => "Data dokumen pengajuan {$cleanAju} telah berhasil dihapus dari tabel rekap lokal."
+        ]);
+        exit;
+    } catch (\Throwable $e) {
+        echo json_encode([
+            'status'    => 'ERROR',
+            'nomor_aju' => $cleanAju,
+            'message'   => "Gagal menghapus data: " . $e->getMessage()
+        ]);
+        exit;
     }
-
-    // Bersihkan cache status/respon/json jika ada
-    $koneksi->query("DELETE FROM bc_ceisa_json WHERE nomor_aju = '{$escAju}'");
-    $koneksi->query("DELETE FROM bc_ceisa_status WHERE nomor_aju = '{$escAju}'");
-    $koneksi->query("DELETE FROM bc_ceisa_respons WHERE nomor_aju = '{$escAju}'");
-
-    echo json_encode([
-        'status'    => 'OK',
-        'nomor_aju' => $cleanAju,
-        'message'   => "Data dokumen pengajuan {$cleanAju} telah berhasil dihapus dari tabel rekap lokal."
-    ]);
-    exit;
 }
 
 $themeParam = $_GET['theme'] ?? 'light';
@@ -4950,6 +4972,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 if (!confirm(`Hapus dokumen ${aju} dari tabel rekap ini?\n\nPerhatian: Ini hanya menghapus data dari tabel rekap, bukan dari portal CEISA 4.0. Untuk menghapus resmi, silakan lakukan langsung dari portal CEISA.`)) return;
             }
 
+            let result;
+
             try {
                 const formData = new FormData();
                 formData.append('nomor_aju', aju);
@@ -4959,58 +4983,66 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     method: 'POST',
                     body: formData
                 });
-                const result = await response.json();
-
-                if (result.status === 'OK') {
-                    if (typeof Swal !== 'undefined') {
-                        await Swal.fire({
-                            title: 'Berhasil Dihapus dari Rekap',
-                            html: `
-                                <div style="text-align:left; font-size:12.5px; line-height:1.5;">
-                                    <p>Data dokumen <strong>${escapeHtml(aju)}</strong> berhasil dihapus dari tabel rekap lokal.</p>
-                                    <div style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:6px; padding:8px 12px; font-size:11.5px; color:#389e0d;">
-                                        Dokumen di portal CEISA 4.0 tidak terpengaruh. Untuk menghapus secara resmi, silakan lakukan langsung melalui portal CEISA.
-                                    </div>
-                                </div>
-                            `,
-                            icon: 'success',
-                            confirmButtonColor: '#52c41a'
-                        });
-                    } else {
-                        alert(result.message || 'Dokumen berhasil dihapus dari rekap.');
-                    }
-
-                    // Hapus baris dari array lokal dan update tampilan tabel
-                    ajuData = ajuData.filter(item => item.nomor_aju !== aju);
-                    filteredData = filteredData.filter(item => item.nomor_aju !== aju);
-                    selectedAju.delete(aju);
-                    
-                    const rowElem = document.getElementById(`row-${aju}`);
-                    if (rowElem) {
-                        rowElem.remove();
-                    }
-                    applyFilterAndSort();
-                } else {
-                    if (typeof Swal !== 'undefined') {
-                        Swal.fire({
-                            title: 'Gagal Menghapus Data Rekap',
-                            html: `<div style="text-align:left; font-size:12px; color:#cf1322;">${escapeHtml(result.message || 'Gagal menghapus data dari tabel rekap.')}</div>`,
-                            icon: 'error',
-                            confirmButtonColor: '#1890ff'
-                        });
-                    } else {
-                        alert('Gagal: ' + (result.message || 'Gagal menghapus'));
-                    }
+                const rawText = await response.text();
+                try {
+                    result = JSON.parse(rawText);
+                } catch (e) {
+                    throw new Error(rawText ? (rawText.length > 200 ? rawText.substring(0, 200) + '...' : rawText) : 'Respons backend kosong');
                 }
             } catch (err) {
                 if (typeof Swal !== 'undefined') {
                     Swal.fire({
                         title: 'Koneksi Gagal',
-                        text: 'Terjadi kegagalan jaringan saat menghubungi backend: ' + err.message,
+                        text: 'Terjadi kegagalan saat menghubungi backend: ' + err.message,
                         icon: 'error'
                     });
                 } else {
                     alert('Koneksi Gagal: ' + err.message);
+                }
+                return;
+            }
+
+            if (result && result.status === 'OK') {
+                if (typeof Swal !== 'undefined') {
+                    await Swal.fire({
+                        title: 'Berhasil Dihapus dari Rekap',
+                        html: `
+                            <div style="text-align:left; font-size:12.5px; line-height:1.5;">
+                                <p>Data dokumen <strong>${escapeHtml(aju)}</strong> berhasil dihapus dari tabel rekap lokal.</p>
+                                <div style="background:#f6ffed; border:1px solid #b7eb8f; border-radius:6px; padding:8px 12px; font-size:11.5px; color:#389e0d;">
+                                    Dokumen di portal CEISA 4.0 tidak terpengaruh. Untuk menghapus secara resmi, silakan lakukan langsung melalui portal CEISA.
+                                </div>
+                            </div>
+                        `,
+                        icon: 'success',
+                        confirmButtonColor: '#52c41a'
+                    });
+                } else {
+                    alert(result.message || 'Dokumen berhasil dihapus dari rekap.');
+                }
+
+                // Hapus baris dari array lokal dan update tampilan tabel
+                ajuData = ajuData.filter(item => item.nomor_aju !== aju);
+                filteredData = filteredData.filter(item => item.nomor_aju !== aju);
+                selectedAju.delete(aju);
+                
+                const rowElem = document.getElementById(`row-${aju}`);
+                if (rowElem) {
+                    rowElem.remove();
+                }
+                if (typeof filterClientTable === 'function') {
+                    filterClientTable();
+                }
+            } else {
+                if (typeof Swal !== 'undefined') {
+                    Swal.fire({
+                        title: 'Gagal Menghapus Data Rekap',
+                        html: `<div style="text-align:left; font-size:12px; color:#cf1322;">${escapeHtml(result?.message || 'Gagal menghapus data dari tabel rekap.')}</div>`,
+                        icon: 'error',
+                        confirmButtonColor: '#1890ff'
+                    });
+                } else {
+                    alert('Gagal: ' + (result?.message || 'Gagal menghapus'));
                 }
             }
         }

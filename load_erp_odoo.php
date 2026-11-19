@@ -80,8 +80,8 @@ if ($action === 'load_invoices') {
     }
 
     $sql = "SELECT h.*, 
-            (SELECT COUNT(1) FROM bc_ceisa_odoo_detail d WHERE d.invoice_id = h.invoice_id) as total_items,
-            (SELECT COUNT(1) FROM bc_ceisa_odoo_bom b WHERE b.invoice_id = h.invoice_id) as total_bom
+            COALESCE(h.total_items, (SELECT COUNT(1) FROM bc_ceisa_odoo_detail d WHERE d.invoice_id = h.invoice_id)) as total_items,
+            COALESCE(h.total_bom, (SELECT COUNT(1) FROM bc_ceisa_odoo_bom b WHERE b.invoice_id = h.invoice_id)) as total_bom
             FROM bc_ceisa_odoo_header h $where 
             ORDER BY h.tanggal_invoice DESC, h.invoice_id DESC LIMIT 300";
 
@@ -251,7 +251,7 @@ if ($action === 'transfer_data') {
             while ($d = $qD->fetch_assoc()) {
                 $itemCount++;
                 $seriBarang = (int)$d['seri_barang'];
-                $kodeBrg    = $koneksi->real_escape_string($d['kode_barang']);
+                $kodeBrg    = $koneksi->real_escape_string(str_replace(['[', ']'], '', trim($d['kode_barang'])));
                 $uraian     = $koneksi->real_escape_string($d['nama_barang']);
                 $hsCode     = preg_replace('/[^0-9]/', '', $d['hs_code']);
                 $satuan     = $koneksi->real_escape_string($d['satuan'] ?: 'PCE');
@@ -277,6 +277,7 @@ if ($action === 'transfer_data') {
                 )");
             }
         }
+        $koneksi->query("UPDATE bc_ceisa_header SET jumlah_barang = $itemCount WHERE nomor_aju = '$escAju'");
 
         // 3. INSERT DOKUMEN PELENGKAP (380 Invoice, 217 Surat Jalan, BL)
         $koneksi->query("DELETE FROM bc_ceisa_dokumen WHERE nomor_aju = '$escAju' AND kode_dokumen IN ('380', '217', '705')");
@@ -1040,6 +1041,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
     }
 
     async function loadInvoiceDetails(invId) {
+        const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '<?= htmlspecialchars($cmpId) ?>';
         const tbodyGoods = document.getElementById('tbodyDetailGoods');
         const tbodyBom = document.getElementById('tbodyDetailBom');
         const tbodyBomSum = document.getElementById('tbodyDetailBomSum');
@@ -1047,7 +1049,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
         tbodyGoods.innerHTML = '<tr><td colspan="12" style="text-align:center; padding:15px;"><i class="fa-solid fa-spinner fa-spin"></i> Memuat detail barang...</td></tr>';
 
         try {
-            const res = await fetch(`load_erp_odoo.php?action=load_invoice_details&invoice_id=${invId}`);
+            const res = await fetch(`load_erp_odoo.php?action=load_invoice_details&invoice_id=${invId}&cmp_id=${encodeURIComponent(cmpId)}`);
             const text = await res.text();
             let json;
             try {
@@ -1225,10 +1227,12 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             didOpen: () => {}
         });
 
+        const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '<?= htmlspecialchars($cmpId) ?>';
         let totalInvoices = 0;
         let totalDetails = 0;
         let totalBoms = 0;
         let syncCancelled = false;
+        let syncErrors = [];
 
         const cancelBtn = Swal.getCancelButton();
         if (cancelBtn) {
@@ -1255,7 +1259,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 fd.append('date_to', targetDay);
                 fd.append('kode_dokumen', bc);
 
-                const res = await fetch('load_erp_odoo.php?action=sync_odoo', {
+                const res = await fetch(`load_erp_odoo.php?action=sync_odoo&cmp_id=${encodeURIComponent(cmpId)}`, {
                     method: 'POST',
                     body: fd
                 });
@@ -1264,7 +1268,7 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                 try {
                     json = JSON.parse(text);
                 } catch(pe) {
-                    throw new Error(`HTTP ${res.status} pada tanggal ${targetDay}`);
+                    throw new Error(`HTTP ${res.status}: ${text.substring(0, 150)}`);
                 }
 
                 if (json.status === 'OK') {
@@ -1272,28 +1276,46 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
                     totalInvoices += (d.synced_invoices || 0);
                     totalDetails  += (d.synced_details || 0);
                     totalBoms     += (d.synced_bom_items || 0);
+                } else {
+                    syncErrors.push(`${targetDay}: ${json.message || 'Error tidak diketahui'}`);
                 }
             } catch(e) {
-                console.warn(`Error pada tanggal ${targetDay}:`, e);
+                console.error(`Error pada tanggal ${targetDay}:`, e);
+                syncErrors.push(`${targetDay}: ${e.message}`);
             }
         }
 
         const pBar = document.getElementById('syncProgressBar');
         if (pBar) pBar.style.width = '100%';
 
-        Swal.fire({
-            icon: 'success',
-            title: syncCancelled ? 'Sinkronisasi Dihentikan' : 'Sync Odoo Berhasil! 🎉',
-            html: `
-                <div style="text-align:left; font-size:11.5px; padding:10px; background:rgba(82, 196, 26, 0.08); border-radius:6px;">
-                    <div>📄 <strong>${totalInvoices.toLocaleString('id-ID')}</strong> Invoice Berhasil Diupdate</div>
-                    <div>📦 <strong>${totalDetails.toLocaleString('id-ID')}</strong> Baris Barang Jadi</div>
-                    <div>🧩 <strong>${totalBoms.toLocaleString('id-ID')}</strong> Baris Bahan Baku (BOM)</div>
-                    <div style="margin-top:6px; color:#8c8c8c; font-size:10px;">Periode: ${start} s/d ${end} (${totalDays} hari)</div>
-                </div>
-            `,
-            confirmButtonText: 'Tampilkan Data'
-        });
+        if (syncErrors.length > 0 && totalInvoices === 0) {
+            Swal.fire({
+                icon: 'error',
+                title: 'Sinkronisasi Mengalami Kendala',
+                html: `
+                    <div style="text-align:left; font-size:11.5px; padding:10px; background:rgba(255, 77, 79, 0.08); border-radius:6px; color:#cf1322;">
+                        <div style="font-weight:600; margin-bottom:6px;">Detail Galat Odoo:</div>
+                        ${syncErrors.map(err => `<div>• ${escapeHtml(err)}</div>`).join('')}
+                    </div>
+                `,
+                confirmButtonText: 'Tutup'
+            });
+        } else {
+            Swal.fire({
+                icon: syncErrors.length > 0 ? 'warning' : 'success',
+                title: syncCancelled ? 'Sinkronisasi Dihentikan' : (syncErrors.length > 0 ? 'Sync Sebagian Berhasil' : 'Sync Odoo Berhasil! 🎉'),
+                html: `
+                    <div style="text-align:left; font-size:11.5px; padding:10px; background:rgba(82, 196, 26, 0.08); border-radius:6px;">
+                        <div>📄 <strong>${totalInvoices.toLocaleString('id-ID')}</strong> Invoice Berhasil Diupdate</div>
+                        <div>📦 <strong>${totalDetails.toLocaleString('id-ID')}</strong> Baris Barang Jadi</div>
+                        <div>🧩 <strong>${totalBoms.toLocaleString('id-ID')}</strong> Baris Bahan Baku (BOM)</div>
+                        <div style="margin-top:6px; color:#8c8c8c; font-size:10px;">Periode: ${start} s/d ${end} (${totalDays} hari)</div>
+                        ${syncErrors.length > 0 ? `<div style="margin-top:6px; color:#cf1322; font-size:10.5px;">Terdapat kendala pada ${syncErrors.length} tanggal.</div>` : ''}
+                    </div>
+                `,
+                confirmButtonText: 'Tampilkan Data'
+            });
+        }
 
         loadInvoices();
     }
@@ -1361,7 +1383,8 @@ if ($themeParam !== 'dark' && $themeParam !== 'light') $themeParam = 'light';
             fd.append('kode_dokumen', formValues.kode_dokumen);
             fd.append('nomor_aju', formValues.nomor_aju);
 
-            const res = await fetch('load_erp_odoo.php?action=transfer_data', {
+            const cmpId = new URLSearchParams(window.location.search).get('cmp_id') || '<?= htmlspecialchars($cmpId) ?>';
+            const res = await fetch(`load_erp_odoo.php?action=transfer_data&cmp_id=${encodeURIComponent(cmpId)}`, {
                 method: 'POST',
                 body: fd
             });

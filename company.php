@@ -13,10 +13,10 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once __DIR__ . '/koneksi.php';
 
-// Validasi Keamanan: Khusus Super Administrator (DP)
-$isSuperAdmin = !empty($_SESSION['is_super_admin']) || (!empty($_SESSION['is_admin']) && empty($_SESSION['is_company_admin']));
-$isAdmin = $isSuperAdmin;
-
+// Validasi Keamanan: Khusus User 'dp' Non-Demo
+$sessionUid = strtolower(trim($_SESSION['user_id'] ?? ''));
+$sessionCmp = strtolower(trim($_SESSION['company_cmp_id'] ?? ($_SESSION['cmp_id'] ?? '')));
+$isAdmin = ($sessionUid === 'dp' && $sessionCmp !== 'demo');
 if (!$isAdmin) {
     if (!empty($_REQUEST['action'])) {
         header('Content-Type: application/json; charset=utf-8');
@@ -62,8 +62,20 @@ if ($isAdmin && empty($_SESSION['is_admin'])) {
     $_SESSION['is_admin'] = true;
 }
 
-// Auto-heal: pastikan seluruh NPWP di bc_ceisa_company wajib 15 digit jika terdapat 16 digit yang berawalan 0
+// Auto-heal: pastikan kolom npwp16 dan nitku tersedia di bc_ceisa_company dan terisi
+$chkColNpwp16 = @$koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'npwp16'");
+if ($chkColNpwp16 && $chkColNpwp16->num_rows === 0) {
+    @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN npwp16 VARCHAR(30) NULL DEFAULT NULL AFTER npwp");
+}
+$chkColNitku = @$koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'nitku'");
+if ($chkColNitku && $chkColNitku->num_rows === 0) {
+    @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN nitku VARCHAR(30) NULL DEFAULT NULL AFTER npwp16");
+}
+@$koneksi->query("UPDATE bc_ceisa_company SET npwp16 = LPAD(TRIM(npwp), 16, '0') WHERE (npwp16 IS NULL OR npwp16 = '') AND npwp IS NOT NULL AND npwp != ''");
+@$koneksi->query("UPDATE bc_ceisa_company SET nitku = CONCAT(IF(LENGTH(TRIM(npwp16))=16, TRIM(npwp16), LPAD(TRIM(npwp), 16, '0')), '000000') WHERE (nitku IS NULL OR nitku = '' OR LENGTH(nitku) != 22) AND (npwp IS NOT NULL OR npwp16 IS NOT NULL)");
+// Auto-heal: pastikan seluruh NPWP 15 digit di bc_ceisa_company wajib 15 digit jika terdapat 16 digit yang berawalan 0
 @$koneksi->query("UPDATE bc_ceisa_company SET npwp = SUBSTRING(npwp, 2) WHERE LENGTH(npwp) = 16 AND npwp LIKE '0%'");
+
 
 $action = $_REQUEST['action'] ?? '';
 
@@ -128,6 +140,28 @@ if ($action === 'get') {
         $stmt->execute();
         $res = $stmt->get_result();
         if ($res && $data = $res->fetch_assoc()) {
+            // Lampirkan Pengaturan KEK LNSW jika ada
+            $kekStmt = $koneksi->prepare("SELECT * FROM bc_kek_setting WHERE cmp_id = ? LIMIT 1");
+            if ($kekStmt) {
+                $kekStmt->bind_param("s", $cmp_id);
+                $kekStmt->execute();
+                $kekRes = $kekStmt->get_result();
+                if ($kekRes && $kRow = $kekRes->fetch_assoc()) {
+                    $data['kek_setting'] = $kRow;
+                } else {
+                    $data['kek_setting'] = [
+                        'is_kek_active' => 0,
+                        'kek_mode' => 'dummy',
+                        'insw_key' => 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo',
+                        'unique_key' => '',
+                        'unique_key_real' => '',
+                        'unique_key_dummy' => 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7',
+                        'business_type' => $data['business_type'] ?? 'manufaktur',
+                        'auto_push_active' => 0
+                    ];
+                }
+                $kekStmt->close();
+            }
             echo json_encode(['status' => 'OK', 'data' => $data]);
         } else {
             echo json_encode(['status' => 'ERROR', 'message' => "Perusahaan dengan ID '$cmp_id' tidak ditemukan."]);
@@ -136,6 +170,54 @@ if ($action === 'get') {
     } else {
         echo json_encode(['status' => 'ERROR', 'message' => 'Database error: ' . $koneksi->error]);
     }
+    exit;
+}
+
+// -------------------------------------------------------------
+// 2B. AJAX API: UJI GATEWAY KEK LNSW & CLEANSING DUMMY
+// -------------------------------------------------------------
+if ($action === 'test_kek_gateway') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/kek_service.php';
+    $cmp_id = trim($_REQUEST['cmp_id'] ?? '');
+    if (empty($cmp_id)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID Perusahaan tidak boleh kosong.']);
+        exit;
+    }
+    $kekService = new KekSyncService($koneksi, $cmp_id);
+    $res = $kekService->sendRequest('saldoAwal', 'GET');
+    echo json_encode($res);
+    exit;
+}
+
+if ($action === 'cleansing_kek_dummy') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/kek_service.php';
+    $cmp_id = trim($_REQUEST['cmp_id'] ?? '');
+    if (empty($cmp_id)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID Perusahaan tidak boleh kosong.']);
+        exit;
+    }
+    $kekService = new KekSyncService($koneksi, $cmp_id);
+    $res = $kekService->cleansingDataPercobaan();
+    echo json_encode($res);
+    exit;
+}
+
+// -------------------------------------------------------------
+// 2b. AJAX API: TEST KONEKSI ODOO ERP
+// -------------------------------------------------------------
+if ($action === 'test_odoo_connection') {
+    header('Content-Type: application/json; charset=utf-8');
+    require_once __DIR__ . '/erp/odoo/OdooSyncService.php';
+
+    $url  = trim($_POST['url'] ?? '');
+    $db   = trim($_POST['db'] ?? '');
+    $user = trim($_POST['user'] ?? '');
+    $pass = trim($_POST['password'] ?? '');
+
+    $res = OdooSyncService::testOdooConnection($url, $db, $user, $pass);
+    echo json_encode($res);
     exit;
 }
 
@@ -150,6 +232,7 @@ if ($action === 'save') {
     $cmp_name       = trim($_POST['cmp_name'] ?? '');
     $app_password   = trim($_POST['app_password'] ?? '1234');
     $npwp           = trim($_POST['npwp'] ?? '');
+    $npwp16         = trim($_POST['npwp16'] ?? '');
     $nib            = trim($_POST['nib'] ?? '');
     $alamat         = trim($_POST['alamat'] ?? '');
     $kode_kantor    = trim($_POST['kode_kantor'] ?? '');
@@ -165,9 +248,9 @@ if ($action === 'save') {
     $username_ceisa = trim($_POST['username_ceisa'] ?? '');
     $password_ceisa = trim($_POST['password_ceisa'] ?? '');
     $secret_mfa     = trim(str_replace(' ', '', strtoupper($_POST['secret_mfa'] ?? '')));
+    $secret_mfa_insw= trim(str_replace(' ', '', strtoupper($_POST['secret_mfa_insw'] ?? '')));
     $id_user_ceisa  = trim($_POST['id_user_ceisa'] ?? '');
-    // Kolom is_final di MySQL 8 = TINYINT(1); form mengirim "true"/"false"
-    $is_final       = (isset($_POST['is_final']) && in_array(strtolower((string)$_POST['is_final']), ['true', '1', 'yes'], true)) ? 1 : 0;
+    $is_final       = (isset($_POST['is_final']) && strtolower($_POST['is_final']) === 'true') ? 'true' : 'false';
     $token_ceisa    = trim($_POST['token_ceisa'] ?? '');
     $api_key_ceisa  = trim($_POST['api_key_ceisa'] ?? 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83');
     $insw_client_id     = trim($_POST['insw_client_id'] ?? '');
@@ -178,12 +261,37 @@ if ($action === 'save') {
     $erp_user       = trim($_POST['ERP_User'] ?? '');
     $erp_password   = trim($_POST['ERP_Password'] ?? '');
     $erp_constring  = trim($_POST['ERP_Constring'] ?? '');
+
+    // Khusus ODOO: Otomatis sinkronkan dari field Odoo jika disubmit
+    if ($erp_name === 'ODOO') {
+        $odooUrl  = trim($_POST['odoo_url'] ?? '');
+        $odooDb   = trim($_POST['odoo_db'] ?? '');
+        $odooUser = trim($_POST['odoo_user'] ?? '');
+        $odooPass = trim($_POST['odoo_password'] ?? '');
+
+        if (!empty($odooUrl)) {
+            $cleanUrl = rtrim($odooUrl, '/');
+            $erp_constring = "url=" . $cleanUrl . (!empty($odooDb) ? ";db=" . $odooDb : "");
+        }
+        if (!empty($odooUser)) {
+            $erp_user = $odooUser;
+        }
+        if (!empty($odooPass)) {
+            $erp_password = $odooPass;
+        }
+    }
     $ai_name        = trim($_POST['AI_Name'] ?? '');
     $ai_api_key     = trim($_POST['AI_API_Key'] ?? '');
     $is_active      = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
     $is_inv         = isset($_POST['IS_INV']) ? (int)$_POST['IS_INV'] : 1;
     $allow_lowercase_code = isset($_POST['allow_lowercase_code']) ? (int)$_POST['allow_lowercase_code'] : 0;
     $alert_it_inv_unposted = isset($_POST['alert_it_inv_unposted']) ? (int)$_POST['alert_it_inv_unposted'] : 0;
+    $show_unimported_h2h   = isset($_POST['show_unimported_h2h']) ? (int)$_POST['show_unimported_h2h'] : 0;
+    $db_mode        = in_array($_POST['db_mode'] ?? '', ['global', 'dedicated']) ? $_POST['db_mode'] : 'global';
+    $db_name        = trim($_POST['db_name'] ?? '');
+    $app_mode       = in_array($_POST['app_mode'] ?? '', ['standar', 'enterprise']) ? $_POST['app_mode'] : 'standar';
+    $use_tabs       = isset($_POST['use_tabs']) ? (int)$_POST['use_tabs'] : 1;
+    $business_type  = in_array($_POST['business_type'] ?? '', ['manufaktur', 'logistik']) ? $_POST['business_type'] : 'manufaktur';
     $subdomain      = strtolower(preg_replace('/[^a-zA-Z0-9_-]/', '', trim($_POST['subdomain'] ?? '')));
     $logo           = trim($_POST['logo'] ?? '');
     $card_color     = trim($_POST['card_color'] ?? '');
@@ -220,9 +328,12 @@ if ($action === 'save') {
         exit;
     }
 
-    // Normalisasi & Validasi Wajib NPWP Perusahaan (Wajib 15 Digit Angka)
+    // Normalisasi & Validasi Wajib NPWP Perusahaan (Wajib 15 Digit Angka untuk NPWP Lama)
     $clean_npwp = preg_replace('/[^0-9]/', '', $npwp);
     if (strlen($clean_npwp) === 16 && substr($clean_npwp, 0, 1) === '0') {
+        if (empty($npwp16)) {
+            $npwp16 = $clean_npwp;
+        }
         $clean_npwp = substr($clean_npwp, 1);
     }
     if (strlen($clean_npwp) > 15) {
@@ -236,6 +347,31 @@ if ($action === 'save') {
             'message' => 'NPWP Perusahaan wajib diisi 15 digit angka (saat ini: ' . strlen($npwp) . ' digit).'
         ]);
         exit;
+    }
+
+    // Normalisasi & Validasi NPWP 16 Digit / NIK (Standar CEISA 4.0)
+    $clean_npwp16 = preg_replace('/[^0-9]/', '', $npwp16);
+    if (empty($clean_npwp16)) {
+        $clean_npwp16 = str_pad($npwp, 16, '0', STR_PAD_LEFT);
+    }
+    if (strlen($clean_npwp16) === 22 && substr($clean_npwp16, -6) === '000000') {
+        $clean_npwp16 = substr($clean_npwp16, 0, 16);
+    }
+    if (strlen($clean_npwp16) > 16) {
+        $clean_npwp16 = substr($clean_npwp16, 0, 16);
+    }
+    if (strlen($clean_npwp16) < 16) {
+        $clean_npwp16 = str_pad($clean_npwp16, 16, '0', STR_PAD_LEFT);
+    }
+    $npwp16 = $clean_npwp16;
+
+    // Normalisasi NITKU 22 Digit (CEISA 4.0 NITKU = NPWP 16 + 6 digit cabang '000000')
+    $nitkuInput = trim($_POST['nitku'] ?? '');
+    $clean_nitku = preg_replace('/[^0-9]/', '', $nitkuInput);
+    if (strlen($clean_nitku) === 22) {
+        $nitku = $clean_nitku;
+    } else {
+        $nitku = $npwp16 . '000000';
     }
 
     // Validasi Keunikan Subdomain
@@ -254,7 +390,11 @@ if ($action === 'save') {
         }
     }
     
-    // Auto check / add INSW columns if not exists
+    // Auto check / add INSW columns & secret_mfa_insw if not exists
+    $chkColMfaInsw = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'secret_mfa_insw'");
+    if ($chkColMfaInsw && $chkColMfaInsw->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN secret_mfa_insw VARCHAR(64) NULL AFTER secret_mfa");
+    }
     $chkCol = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'insw_client_id'");
     if ($chkCol && $chkCol->num_rows === 0) {
         @$koneksi->query("ALTER TABLE bc_ceisa_company 
@@ -268,6 +408,22 @@ if ($action === 'save') {
     $chkColRole = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'company_roles'");
     if ($chkColRole && $chkColRole->num_rows === 0) {
         @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN company_roles VARCHAR(150) NOT NULL DEFAULT 'tpb' AFTER IS_INV");
+    }
+
+    // Auto check / add show_unimported_h2h column if not exists
+    $chkColH2h = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'show_unimported_h2h'");
+    if ($chkColH2h && $chkColH2h->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company ADD COLUMN show_unimported_h2h TINYINT(1) NOT NULL DEFAULT 0 AFTER alert_it_inv_unposted");
+    }
+
+    // Auto check / add db_mode, db_name, app_mode, use_tabs columns if not exists
+    $chkColDbMode = $koneksi->query("SHOW COLUMNS FROM bc_ceisa_company LIKE 'db_mode'");
+    if ($chkColDbMode && $chkColDbMode->num_rows === 0) {
+        @$koneksi->query("ALTER TABLE bc_ceisa_company 
+            ADD COLUMN db_mode VARCHAR(20) NOT NULL DEFAULT 'global' AFTER show_unimported_h2h,
+            ADD COLUMN db_name VARCHAR(64) NULL AFTER db_mode,
+            ADD COLUMN app_mode VARCHAR(20) NOT NULL DEFAULT 'standar' AFTER db_name,
+            ADD COLUMN use_tabs TINYINT(1) NOT NULL DEFAULT 1 AFTER app_mode");
     }
 
     // Ambil input roles perusahaan (array dari form checkbox atau string)
@@ -332,13 +488,14 @@ if ($action === 'save') {
         $checkStmt->close();
         
         $sql = "INSERT INTO bc_ceisa_company (
-            cmp_id, cmp_name, logo, card_color, subdomain, app_password, npwp, nib, alamat,
+            cmp_id, cmp_name, logo, card_color, subdomain, app_password, npwp, npwp16, nitku, nib, alamat,
             kode_kantor, kode_jenis_tpb, nomor_skep, tanggal_skep,
-            username_ceisa, password_ceisa, secret_mfa, id_user_ceisa, is_final,
+            username_ceisa, password_ceisa, secret_mfa, secret_mfa_insw, id_user_ceisa, is_final,
             token_ceisa, api_key_ceisa, insw_client_id, insw_client_secret, insw_token, insw_api_url,
             ERP_Name, ERP_User, ERP_Password, ERP_Constring,
-            AI_Name, AI_API_Key, is_active, IS_INV, company_roles, allowed_docs, allow_lowercase_code, alert_it_inv_unposted
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            AI_Name, AI_API_Key, is_active, IS_INV, company_roles, business_type, allowed_docs, allow_lowercase_code, alert_it_inv_unposted, show_unimported_h2h,
+            db_mode, db_name, app_mode, use_tabs
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         
         $stmt = $koneksi->prepare($sql);
         if (!$stmt) {
@@ -347,35 +504,57 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "sssssssssssssssssissssssssssssiissii",
-            $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
+            "sssssssssssssssssssssssssssssssssiisssiiisssi",
+            $cmp_id, $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $npwp16, $nitku, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
-            $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
+            $username_ceisa, $password_ceisa, $secret_mfa, $secret_mfa_insw, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $business_type, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted, $show_unimported_h2h,
+            $db_mode, $db_name, $app_mode, $use_tabs
         );
         
-        try {
-            if ($stmt->execute()) {
-                echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_name' berhasil ditambahkan!"]);
-            } else {
-                echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $stmt->error]);
+        if ($stmt->execute()) {
+            // Simpan Pengaturan KEK LNSW ke bc_kek_setting
+            $is_kek_active        = isset($_POST['is_kek_active']) ? (int)$_POST['is_kek_active'] : 0;
+            $kek_mode             = in_array($_POST['kek_mode'] ?? '', ['dummy', 'real']) ? $_POST['kek_mode'] : 'dummy';
+            $kek_insw_key         = trim($_POST['kek_insw_key'] ?? 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo');
+            $kek_unique_key_real  = trim($_POST['kek_unique_key_real'] ?? $_POST['kek_unique_key'] ?? '');
+            $kek_unique_key_dummy = trim($_POST['kek_unique_key_dummy'] ?? 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7');
+            $kek_unique_key       = ($kek_mode === 'real') ? $kek_unique_key_real : $kek_unique_key_dummy;
+
+            $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE 
+                is_kek_active = VALUES(is_kek_active),
+                kek_mode = VALUES(kek_mode),
+                insw_key = VALUES(insw_key),
+                unique_key = VALUES(unique_key),
+                unique_key_real = VALUES(unique_key_real),
+                unique_key_dummy = VALUES(unique_key_dummy),
+                business_type = VALUES(business_type)");
+            if ($kStmt) {
+                $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
+                $kStmt->execute();
+                $kStmt->close();
             }
-        } catch (Throwable $e) {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $e->getMessage()]);
+
+            echo json_encode(['status' => 'OK', 'message' => "Perusahaan '$cmp_name' berhasil ditambahkan!"]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal menyimpan perusahaan: ' . $stmt->error]);
         }
         $stmt->close();
         exit;
     } else {
         // MODE EDIT (UPDATE)
         $sql = "UPDATE bc_ceisa_company SET 
-            cmp_name = ?, logo = ?, card_color = ?, subdomain = ?, app_password = ?, npwp = ?, nib = ?, alamat = ?,
+            cmp_name = ?, logo = ?, card_color = ?, subdomain = ?, app_password = ?, npwp = ?, npwp16 = ?, nitku = ?, nib = ?, alamat = ?,
             kode_kantor = ?, kode_jenis_tpb = ?, nomor_skep = ?, tanggal_skep = ?,
-            username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, id_user_ceisa = ?, is_final = ?,
+            username_ceisa = ?, password_ceisa = ?, secret_mfa = ?, secret_mfa_insw = ?, id_user_ceisa = ?, is_final = ?,
             token_ceisa = ?, api_key_ceisa = ?, insw_client_id = ?, insw_client_secret = ?, insw_token = ?, insw_api_url = ?,
             ERP_Name = ?, ERP_User = ?, ERP_Password = ?, ERP_Constring = ?,
-            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, company_roles = ?, allowed_docs = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?
+            AI_Name = ?, AI_API_Key = ?, is_active = ?, IS_INV = ?, company_roles = ?, business_type = ?, allowed_docs = ?, allow_lowercase_code = ?, alert_it_inv_unposted = ?, show_unimported_h2h = ?,
+            db_mode = ?, db_name = ?, app_mode = ?, use_tabs = ?
             WHERE cmp_id = ?";
             
         $stmt = $koneksi->prepare($sql);
@@ -385,39 +564,67 @@ if ($action === 'save') {
         }
         
         $stmt->bind_param(
-            "ssssssssssssssssissssssssssssiissiis",
-            $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $nib, $alamat,
+            "ssssssssssssssssssssssssssssssssiisssiiisssis",
+            $cmp_name, $logo, $card_color, $subdomain, $app_password, $npwp, $npwp16, $nitku, $nib, $alamat,
             $kode_kantor, $kode_jenis_tpb, $nomor_skep, $tanggal_skep,
-            $username_ceisa, $password_ceisa, $secret_mfa, $id_user_ceisa, $is_final,
+            $username_ceisa, $password_ceisa, $secret_mfa, $secret_mfa_insw, $id_user_ceisa, $is_final,
             $token_ceisa, $api_key_ceisa, $insw_client_id, $insw_client_secret, $insw_token, $insw_api_url,
             $erp_name, $erp_user, $erp_password, $erp_constring,
-            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted, $cmp_id
+            $ai_name, $ai_api_key, $is_active, $is_inv, $company_roles, $business_type, $allowed_docs, $allow_lowercase_code, $alert_it_inv_unposted, $show_unimported_h2h,
+            $db_mode, $db_name, $app_mode, $use_tabs, $cmp_id
         );
         
-        try {
-            if ($stmt->execute()) {
-                // Update session jika perusahaan yang diedit sedang aktif
-                if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
-                    $_SESSION['company_name']            = $cmp_name;
-                    $_SESSION['company_npwp']            = $npwp;
-                    $_SESSION['is_inv']                  = $is_inv;
-                    $_SESSION['company_roles']           = $company_roles;
-                    $_SESSION['allowed_docs']            = ceisa_resolve_allowed_docs($company_roles, $allowed_docs);
-                    $_SESSION['company_erp_name']        = $erp_name;
-                    $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
-                    $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
-                    $_SESSION['company_alert_it_inv_unposted'] = $alert_it_inv_unposted;
-                    $_SESSION['alert_it_inv_unposted']   = $alert_it_inv_unposted;
-                    $_SESSION['company_logo']            = $logo;
-                    $_SESSION['company_subdomain']       = $subdomain;
-                    $_SESSION['company_card_color']      = $card_color;
-                }
-                echo json_encode(['status' => 'OK', 'message' => "Data perusahaan '$cmp_name' berhasil diperbarui!"]);
-            } else {
-                echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $stmt->error]);
+        if ($stmt->execute()) {
+            // Simpan Pengaturan KEK LNSW ke bc_kek_setting
+            $is_kek_active        = isset($_POST['is_kek_active']) ? (int)$_POST['is_kek_active'] : 0;
+            $kek_mode             = in_array($_POST['kek_mode'] ?? '', ['dummy', 'real']) ? $_POST['kek_mode'] : 'dummy';
+            $kek_insw_key         = trim($_POST['kek_insw_key'] ?? 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo');
+            $kek_unique_key_real  = trim($_POST['kek_unique_key_real'] ?? $_POST['kek_unique_key'] ?? '');
+            $kek_unique_key_dummy = trim($_POST['kek_unique_key_dummy'] ?? 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7');
+            $kek_unique_key       = ($kek_mode === 'real') ? $kek_unique_key_real : $kek_unique_key_dummy;
+
+            $kStmt = $koneksi->prepare("INSERT INTO bc_kek_setting (cmp_id, is_kek_active, kek_mode, insw_key, unique_key, unique_key_real, unique_key_dummy, business_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON DUPLICATE KEY UPDATE 
+                is_kek_active = VALUES(is_kek_active),
+                kek_mode = VALUES(kek_mode),
+                insw_key = VALUES(insw_key),
+                unique_key = VALUES(unique_key),
+                unique_key_real = VALUES(unique_key_real),
+                unique_key_dummy = VALUES(unique_key_dummy),
+                business_type = VALUES(business_type)");
+            if ($kStmt) {
+                $kStmt->bind_param("sissssss", $cmp_id, $is_kek_active, $kek_mode, $kek_insw_key, $kek_unique_key, $kek_unique_key_real, $kek_unique_key_dummy, $business_type);
+                $kStmt->execute();
+                $kStmt->close();
             }
-        } catch (Throwable $e) {
-            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $e->getMessage()]);
+            // Update session jika perusahaan yang diedit sedang aktif
+            if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
+                $_SESSION['company_name']            = $cmp_name;
+                $_SESSION['company_npwp']            = $npwp;
+                $_SESSION['company_npwp16']          = $npwp16;
+                $_SESSION['company_nitku']           = $nitku;
+                $_SESSION['is_inv']                  = $is_inv;
+                $_SESSION['company_roles']           = $company_roles;
+                $_SESSION['allowed_docs']            = ceisa_resolve_allowed_docs($company_roles, $allowed_docs);
+                $_SESSION['company_erp_name']        = $erp_name;
+                $_SESSION['company_allow_lowercase'] = $allow_lowercase_code;
+                $_SESSION['allow_lowercase_code']    = $allow_lowercase_code;
+                $_SESSION['company_alert_it_inv_unposted'] = $alert_it_inv_unposted;
+                $_SESSION['alert_it_inv_unposted']   = $alert_it_inv_unposted;
+                $_SESSION['company_show_unimported_h2h'] = $show_unimported_h2h;
+                $_SESSION['show_unimported_h2h']     = $show_unimported_h2h;
+                $_SESSION['company_logo']            = $logo;
+                $_SESSION['company_subdomain']       = $subdomain;
+                $_SESSION['company_card_color']      = $card_color;
+                $_SESSION['db_mode']                 = $db_mode;
+                $_SESSION['db_name']                 = $db_name;
+                $_SESSION['app_mode']                = $app_mode;
+                $_SESSION['use_tabs']                = $use_tabs;
+            }
+            echo json_encode(['status' => 'OK', 'message' => "Data perusahaan '$cmp_name' berhasil diperbarui!"]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal memperbarui perusahaan: ' . $stmt->error]);
         }
         $stmt->close();
         exit;
@@ -530,6 +737,46 @@ if ($action === 'toggle_alert_it_inv') {
             ]);
         } else {
             echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mengubah pengaturan peringatan IT Inventory: ' . $stmt->error]);
+        }
+        $stmt->close();
+    }
+    exit;
+}
+
+// -------------------------------------------------------------
+// 5c. AJAX API: TOGGLE SHOW UNIMPORTED H2H (show_unimported_h2h: 1 <-> 0)
+// -------------------------------------------------------------
+if ($action === 'toggle_show_unimported_h2h') {
+    header('Content-Type: application/json; charset=utf-8');
+    $cmp_id = trim($_POST['cmp_id'] ?? '');
+    
+    if (empty($cmp_id)) {
+        echo json_encode(['status' => 'ERROR', 'message' => 'ID Perusahaan tidak boleh kosong.']);
+        exit;
+    }
+    
+    $stmt = $koneksi->prepare("UPDATE bc_ceisa_company SET show_unimported_h2h = IF(show_unimported_h2h = 1, 0, 1) WHERE cmp_id = ?");
+    if ($stmt) {
+        $stmt->bind_param("s", $cmp_id);
+        if ($stmt->execute()) {
+            $q = $koneksi->query("SELECT show_unimported_h2h, cmp_name FROM bc_ceisa_company WHERE cmp_id = '" . $koneksi->real_escape_string($cmp_id) . "' LIMIT 1");
+            $r = $q ? $q->fetch_assoc() : null;
+            $newShow = $r ? (int)$r['show_unimported_h2h'] : 0;
+            $cmpName = $r ? $r['cmp_name'] : $cmp_id;
+            
+            // Sinkronkan ke session jika perusahaan ini sedang aktif
+            if (!empty($_SESSION['company_cmp_id']) && $_SESSION['company_cmp_id'] === $cmp_id) {
+                $_SESSION['company_show_unimported_h2h'] = $newShow;
+                $_SESSION['show_unimported_h2h']         = $newShow;
+            }
+            
+            echo json_encode([
+                'status' => 'OK',
+                'new_show_unimported_h2h' => $newShow,
+                'message' => "Tampilan Dokumen Belum Import H2H untuk '$cmpName' kini " . ($newShow === 1 ? 'AKTIF (Tampil di Dashboard Ceisa 4.0)' : 'NON-AKTIF (Disembunyikan)') . "."
+            ]);
+        } else {
+            echo json_encode(['status' => 'ERROR', 'message' => 'Gagal mengubah pengaturan tampilan H2H: ' . $stmt->error]);
         }
         $stmt->close();
     }
@@ -714,12 +961,23 @@ if ($action === 'clear_data') {
             }
         } catch (\Throwable $e) {}
 
+        try {
+            $qAju2 = $koneksi->query("SELECT DISTINCT nomorAju FROM bc_ceisa_data WHERE cmp_id = '$escCmp'");
+            if ($qAju2) {
+                while ($ra = $qAju2->fetch_assoc()) {
+                    $na = trim($ra['nomorAju'] ?? '');
+                    if (!empty($na)) $nomorAjuMap[$na] = true;
+                }
+            }
+        } catch (\Throwable $e) {}
+
         $nomorAjuList = array_keys($nomorAjuMap);
         $totalAju = count($nomorAjuList);
         
         // 2. Daftar seluruh tabel transaksi kepabeanan & log yang memiliki kolom cmp_id
         $tablesWithCmp = [
             'bc_ceisa_header',
+            'bc_ceisa_data',
             'bc_ceisa_sppb',
             'bc_ceisa_pengangkut',
             'bc_ceisa_kemasan',
@@ -1994,6 +2252,7 @@ $theme = $_GET['theme'] ?? 'light';
 
             <div class="toolbar-right">
                 <span id="filteredCountLabel" style="font-size:10px; color:var(--text-muted);">Memuat data...</span>
+                <span style="font-size:10px; color:#1890ff; background:rgba(24,144,255,0.08); padding:2px 8px; border-radius:4px; border:1px solid rgba(24,144,255,0.2); font-weight:500;">💡 Dobel klik baris untuk Edit</span>
                 <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="loadCompanyList()">
                     <span>🔄</span> Refresh
                 </button>
@@ -2242,10 +2501,26 @@ $theme = $_GET['theme'] ?? 'light';
 
                             <div class="form-group">
                                 <label class="form-label">
-                                    <span>NPWP Perusahaan<span class="req">*</span></span>
+                                    <span>NPWP Perusahaan (15 Digit)<span class="req">*</span></span>
                                     <span class="form-hint" style="color:var(--primary); font-weight:600;">Wajib 15 digit angka</span>
                                 </label>
-                                <input type="text" id="f_npwp" name="npwp" class="form-control" placeholder="Contoh: 010816064431000" maxlength="15" oninput="this.value = cleanTo15DigitNpwp(this.value);" required style="font-family:monospace; font-weight:600;">
+                                <input type="text" id="f_npwp" name="npwp" class="form-control" placeholder="Contoh: 010816064431000" maxlength="15" oninput="handleNpwp15Input(this);" required style="font-family:monospace; font-weight:600;">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>NPWP 16 Digit / NIK (CEISA 4.0)<span class="req">*</span></span>
+                                    <span class="form-hint" style="color:var(--primary); font-weight:600;">Standar Resmi CEISA 4.0 (16 Digit)</span>
+                                </label>
+                                <input type="text" id="f_npwp16" name="npwp16" class="form-control" placeholder="Contoh: 0010816064431000 atau NIK 16 digit" maxlength="16" oninput="handleNpwp16Input(this);" required style="font-family:monospace; font-weight:600;">
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">
+                                    <span>NITKU (Nomor Identitas Tempat Kegiatan Usaha - 22 Digit)<span class="req">*</span></span>
+                                    <span class="form-hint" style="color:var(--success); font-weight:600;">Format 22 digit resmi DJBC</span>
+                                </label>
+                                <input type="text" id="f_nitku" name="nitku" class="form-control" placeholder="Contoh: 0010816064431000000000" maxlength="22" oninput="handleNitkuInput(this);" required style="font-family:monospace; font-weight:700; color:var(--primary);">
                             </div>
 
                             <div class="form-group">
@@ -2274,6 +2549,84 @@ $theme = $_GET['theme'] ?? 'light';
                                     <option value="1">Aktif (Dapat Login & Digunakan)</option>
                                     <option value="0">Non-Aktif (Akses Ditutup)</option>
                                 </select>
+                            </div>
+
+                            <!-- PENGATURAN ARSITEKTUR DATABASE & ANTARMUKA APLIKASI -->
+                            <div class="form-group full-width" style="margin:4px 0 8px; padding:10px 12px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:6px;">
+                                <label class="form-label" style="margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
+                                    <div>
+                                        <span><strong>⚙️ Mode Arsitektur Database & Antarmuka Aplikasi</strong></span>
+                                        <span class="form-hint">Isolasi Database Perusahaan (1 Company = 1 DB), Edisi ERP, dan Tampilan Tab</span>
+                                    </div>
+                                </label>
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px; margin-bottom:2px;">
+                                            <span>Arsitektur Database</span>
+                                        </label>
+                                        <select id="f_db_mode" name="db_mode" class="form-control" onchange="toggleDbModeFields()" style="font-weight:600; font-size:10px;">
+                                            <option value="global">Global Shared DB (Multi-Tenant: bc2faktur_inhost)</option>
+                                            <option value="dedicated">Dedicated Client DB (1 Perusahaan = 1 Database Mandiri)</option>
+                                        </select>
+                                    </div>
+                                    <div id="boxDbName" style="display:none;">
+                                        <label class="form-label" style="font-size:9.5px; margin-bottom:2px;">
+                                            <span>Nama Database Dedicated</span>
+                                            <span class="form-hint">Contoh: SNUDB</span>
+                                        </label>
+                                        <input type="text" id="f_db_name" name="db_name" class="form-control" placeholder="Contoh: SNUDB" style="font-family:monospace; font-weight:700; font-size:10px; color:var(--primary);">
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px; margin-bottom:2px;">
+                                            <span>Edisi / Modul Aplikasi</span>
+                                        </label>
+                                        <select id="f_app_mode" name="app_mode" class="form-control" style="font-weight:600; font-size:10px;">
+                                            <option value="standar">Mode Standar (Kepabeanan CEISA 4.0 & IT Inventory)</option>
+                                            <option value="enterprise">Mode Enterprise (CEISA 4.0 + ERP Purchasing, Sales, Finance, BOM)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px; margin-bottom:2px;">
+                                            <span>Navigasi Multi-Tab Bar</span>
+                                        </label>
+                                        <select id="f_use_tabs" name="use_tabs" class="form-control" style="font-weight:600; font-size:10px;">
+                                            <option value="1">Aktifkan Workspace Tab Bar (Multi-Tab)</option>
+                                            <option value="0">Mode Klasik Non-Tab (Navigasi Halaman Langsung)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- TIPE KEGIATAN USAHA (KEK KATEGORI) -->
+                            <div class="form-group full-width" style="margin:2px 0 4px; padding:6px 10px; background:var(--table-head-bg); border:1px solid var(--border-card); border-radius:4px;">
+                                <label class="form-label" style="margin-bottom:6px;">
+                                    <span><strong>🏭 Tipe Kegiatan Usaha Perusahaan (Kategori KEK)</strong> <span class="req">*</span></span>
+                                    <span class="form-hint">Menentukan kategori barang dan perlakuan mutasi IT Inventory KEK</span>
+                                </label>
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <label style="display:flex; align-items:flex-start; gap:8px; padding:6px 10px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer;">
+                                        <input type="radio" name="business_type" value="manufaktur" id="biz_manufaktur" checked style="margin-top:2px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:10.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🏭</span> Manufaktur (Pengolahan / Pabrikasi)
+                                            </div>
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                Aktif untuk Bahan Baku, Bahan Penolong, Mesin, WIP, Barang Jadi & Scrap. Mendukung mutasi internal ke/dari produksi (WIP).
+                                            </div>
+                                        </div>
+                                    </label>
+                                    <label style="display:flex; align-items:flex-start; gap:8px; padding:6px 10px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer;">
+                                        <input type="radio" name="business_type" value="logistik" id="biz_logistik" style="margin-top:2px; cursor:pointer;">
+                                        <div>
+                                            <div style="font-weight:700; font-size:10.5px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
+                                                <span>🏬</span> Logistik / Distribusi (Gudang)
+                                            </div>
+                                            <div style="font-size:8.5px; color:var(--text-muted); line-height:1.3; margin-top:2px;">
+                                                HANYA kategori Barang Dagangan (Kode 4) dan Mesin (Kode 5). Tanpa proses produksi / WIP.
+                                            </div>
+                                        </div>
+                                    </label>
+                                </div>
                             </div>
 
                             <!-- ROLE & RUANG LINGKUP DOKUMEN PERUSAHAAN -->
@@ -2328,7 +2681,7 @@ $theme = $_GET['theme'] ?? 'light';
                                         </div>
                                     </label>
                                     <label class="role-checkbox-card" style="display:flex; align-items:flex-start; gap:6px; padding:5px 8px; border:1px solid var(--border-card); border-radius:4px; background:var(--bg-card); cursor:pointer; transition:all 0.2s;">
-                                        <input type="checkbox" name="company_roles[]" value="ppkek" id="role_ppkek" onchange="applyPresetDocsFromRoles()" style="margin-top:2px; cursor:pointer;">
+                                        <input type="checkbox" name="company_roles[]" value="ppkek" id="role_ppkek" onchange="applyPresetDocsFromRoles(); toggleInswCredentialsVisibility();" style="margin-top:2px; cursor:pointer;">
                                         <div>
                                             <div style="font-weight:700; font-size:10px; color:var(--text-heading); display:flex; align-items:center; gap:4px;">
                                                 <span>⚡</span> KEK / PPKEK
@@ -2526,49 +2879,72 @@ $theme = $_GET['theme'] ?? 'light';
                                 <input type="text" id="f_token_ceisa" name="token_ceisa" class="form-control" placeholder="Token auth CEISA (opsional/auto)">
                             </div>
 
-                            <div class="form-group full-width" style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--border-card);">
-                                <div style="font-weight:700; color:#722ed1; font-size:10px; display:flex; align-items:center; gap:5px;">
-                                    <span>🌐</span> Kredensial Host-to-Host (H2H) INSW / PPKEK (LNSW)
+                            <!-- KREDENSIAL HOST-TO-HOST (H2H) INSW / PPKEK & TOTP MFA (KHUSUS PERUSAHAAN KEK) -->
+                            <div class="form-group full-width" id="box_insw_credentials" style="display:none; margin-top:10px; padding:10px 12px; background:rgba(114, 46, 209, 0.04); border:1px solid rgba(114, 46, 209, 0.2); border-radius:4px;">
+                                <div style="font-weight:700; color:#722ed1; font-size:10px; display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+                                    <i class="fa-solid fa-globe" style="color:#722ed1;"></i> KREDENSIAL PORTAL INSW / LNSW &amp; TOTP MFA (KHUSUS KEK)
+                                    <span class="ant-badge ant-badge-purple" style="font-size:8.5px; padding:1px 5px; margin-left:auto;">Khusus Role KEK / PPKEK</span>
                                 </div>
-                                <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
-                                    Diperlukan untuk pengiriman otomatis Dokumen KEK (PPKEK 613, 611, 612) ke Gateway LNSW (kek.insw.go.id)
+                                <div style="font-size:8.5px; color:var(--text-muted); margin-bottom:8px; line-height:1.4;">
+                                    Diperlukan untuk integrasi dan pengiriman otomatis Dokumen KEK (PPKEK 613, 611, 612) ke Gateway LNSW (kek.insw.go.id / api.insw.go.id).
+                                </div>
+
+                                <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap:8px;">
+                                    <div class="form-group full-width" style="grid-column: 1 / -1;">
+                                        <label class="form-label" style="font-size:9px;">
+                                            <span>Secret Key TOTP MFA INSW (Google Authenticator)</span>
+                                            <span class="form-hint">Kunci Base32 16/32 Karakter Akun INSW</span>
+                                        </label>
+                                        <div style="display:flex; gap:6px;">
+                                            <input type="text" id="f_secret_mfa_insw" name="secret_mfa_insw" class="form-control" placeholder="Contoh: JBSWY3DPEHPK3PXP" style="font-family:monospace; text-transform:uppercase; font-size:9.5px;">
+                                            <button type="button" class="ant-btn ant-btn-default" onclick="testMfaSecretInsw()" style="flex-shrink:0;">
+                                                <i class="fa-solid fa-key" style="color:#722ed1; margin-right:4px;"></i> Uji TOTP INSW
+                                            </button>
+                                        </div>
+                                        <div class="totp-preview-box" id="totpPreviewBoxInsw" style="display:none; margin-top:4px;">
+                                            <span style="font-size:10px; color:var(--text-muted);">Hasil Live TOTP INSW:</span>
+                                            <span style="font-size:13px; font-weight:700; color:#722ed1; font-family:monospace; letter-spacing:2px;" id="totpLiveCodeInsw">------</span>
+                                            <span class="ant-badge ant-badge-purple" id="totpLiveCountdownInsw">30s</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" style="font-size:9px;">
+                                            <span>Client ID INSW</span>
+                                            <span class="form-hint">Diberikan oleh LNSW via Portal INSW</span>
+                                        </label>
+                                        <input type="text" id="f_insw_client_id" name="insw_client_id" class="form-control" placeholder="Contoh: CLIENT_ID_LNSW" style="font-size:9.5px;">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" style="font-size:9px;">
+                                            <span>Client Secret INSW</span>
+                                            <span class="form-hint">Kunci rahasia API H2H INSW</span>
+                                        </label>
+                                        <div class="input-group">
+                                            <input type="password" id="f_insw_client_secret" name="insw_client_secret" class="form-control" placeholder="Client secret LNSW" style="font-size:9.5px;">
+                                            <button type="button" class="input-group-btn" onclick="togglePass('f_insw_client_secret')" title="Tampilkan / Sembunyikan"><i class="fa-solid fa-eye"></i></button>
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" style="font-size:9px;">
+                                            <span>Endpoint Gateway INSW</span>
+                                            <span class="form-hint">URL API LNSW Dokumen KEK</span>
+                                        </label>
+                                        <input type="text" id="f_insw_api_url" name="insw_api_url" class="form-control" value="https://api.insw.go.id/document" style="font-size:9.5px;">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label class="form-label" style="font-size:9px;">
+                                            <span>Bearer Token INSW (Opsional)</span>
+                                            <span class="form-hint">Access token aktif INSW</span>
+                                        </label>
+                                        <input type="text" id="f_insw_token" name="insw_token" class="form-control" placeholder="Bearer token INSW jika sudah ada" style="font-size:9.5px;">
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label class="form-label">
-                                    <span>Client ID INSW</span>
-                                    <span class="form-hint">Diberikan oleh LNSW via Portal INSW</span>
-                                </label>
-                                <input type="text" id="f_insw_client_id" name="insw_client_id" class="form-control" placeholder="Contoh: CLIENT_ID_LNSW">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
-                                    <span>Client Secret INSW</span>
-                                    <span class="form-hint">Kunci rahasia API H2H INSW</span>
-                                </label>
-                                <div class="input-group">
-                                    <input type="password" id="f_insw_client_secret" name="insw_client_secret" class="form-control" placeholder="Client secret LNSW">
-                                    <button type="button" class="input-group-btn" onclick="togglePass('f_insw_client_secret')">👁️</button>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
-                                    <span>Endpoint Gateway INSW</span>
-                                    <span class="form-hint">URL API LNSW Dokumen KEK</span>
-                                </label>
-                                <input type="text" id="f_insw_api_url" name="insw_api_url" class="form-control" value="https://api.insw.go.id/document">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
-                                    <span>Bearer Token INSW (Opsional)</span>
-                                    <span class="form-hint">Access token aktif INSW</span>
-                                </label>
-                                <input type="text" id="f_insw_token" name="insw_token" class="form-control" placeholder="Bearer token INSW jika sudah ada">
-                            </div>
                         </div>
                     </div>
 
@@ -2632,11 +3008,29 @@ $theme = $_GET['theme'] ?? 'light';
                                 </div>
                             </div>
 
+                            <div class="form-group full-width">
+                                <div style="background:var(--tag-bg); border:1px solid var(--border-card); border-radius:4px; padding:6px 10px; display:flex; align-items:center; justify-content:space-between;">
+                                    <div>
+                                        <div style="font-weight:600; color:var(--text-heading); font-size:10px;">
+                                            ⚡ Tampilkan Dokumen Belum Import H2H / Staging (Dashboard Ceisa 4.0)
+                                        </div>
+                                        <div style="font-size:8.5px; color:var(--text-muted); margin-top:2px;">
+                                            • Jika <b>Aktif</b>, kartu ringkasan <b>Belum Import H2H</b> akan tampil di atas tabel Dokumen Ceisa 4.0.<br>
+                                            • Klik kartu tersebut akan memfilter dokumen yang belum ada di tabel <code>bc_ceisa_header</code> dan mengaktifkan opsi <b>Select All</b> untuk import massal.
+                                        </div>
+                                    </div>
+                                    <select id="f_show_unimported_h2h" name="show_unimported_h2h" class="form-control" style="width:160px; font-weight:600;">
+                                        <option value="0" style="color:#8c8c8c;">Nonaktif (Sembunyikan)</option>
+                                        <option value="1" style="color:#fa8c16;">Aktifkan (Tampilkan Card)</option>
+                                    </select>
+                                </div>
+                            </div>
+
                             <div class="form-group">
                                 <label class="form-label">
                                     <span>Sistem ERP</span>
                                 </label>
-                                <select id="f_ERP_Name" name="ERP_Name" class="form-control">
+                                <select id="f_ERP_Name" name="ERP_Name" class="form-control" onchange="toggleErpFields()">
                                     <option value="-">- (Tidak Terhubung)</option>
                                     <option value="FRAMAS">FRAMAS</option>
                                     <option value="SAP">SAP</option>
@@ -2651,23 +3045,6 @@ $theme = $_GET['theme'] ?? 'light';
 
                             <div class="form-group">
                                 <label class="form-label">
-                                    <span>User ERP</span>
-                                </label>
-                                <input type="text" id="f_ERP_User" name="ERP_User" class="form-control" placeholder="Username ERP">
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
-                                    <span>Password ERP</span>
-                                </label>
-                                <div class="input-group">
-                                    <input type="password" id="f_ERP_Password" name="ERP_Password" class="form-control" placeholder="Password ERP">
-                                    <button type="button" class="input-group-btn" onclick="togglePass('f_ERP_Password')">👁️</button>
-                                </div>
-                            </div>
-
-                            <div class="form-group">
-                                <label class="form-label">
                                     <span>Engine AI</span>
                                 </label>
                                 <select id="f_AI_Name" name="AI_Name" class="form-control">
@@ -2678,12 +3055,68 @@ $theme = $_GET['theme'] ?? 'light';
                                 </select>
                             </div>
 
-                            <div class="form-group full-width">
-                                <label class="form-label">
-                                    <span>ERP Connection String</span>
-                                    <span class="form-hint">Host, DB, atau API Endpoint ERP</span>
-                                </label>
-                                <textarea id="f_ERP_Constring" name="ERP_Constring" class="form-control" rows="2" placeholder="Driver={ODBC Driver};Server=192.168.1.100;Database=erp_db;Uid=...;Pwd=...;"></textarea>
+                            <!-- ODOO DEDICATED CONFIG CARD -->
+                            <div id="boxOdooConfig" class="form-group full-width" style="display:none; background:var(--table-head-bg); border:1px solid #714b67; border-radius:6px; padding:12px; margin-top:4px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; border-bottom:1px solid rgba(113,75,103,0.25); padding-bottom:6px; flex-wrap:wrap; gap:6px;">
+                                    <div style="font-weight:700; font-size:12px; color:#714b67; display:flex; align-items:center; gap:6px;">
+                                        <i class="fa-solid fa-cloud"></i> Parameter Koneksi Odoo ERP (JSON-RPC)
+                                    </div>
+                                    <button type="button" class="ant-btn ant-btn-sm" onclick="testOdooConnection()" style="border-color:#714b67; color:#714b67; font-weight:600;">
+                                        <i class="fa-solid fa-bolt"></i> Test Koneksi Odoo
+                                    </button>
+                                </div>
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <div>
+                                        <label class="form-label" style="font-size:11px;">URL Server Odoo</label>
+                                        <input type="text" id="f_Odoo_Url" name="odoo_url" class="form-control" placeholder="https://rmb.uduu.io">
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:11px;">Nama Database Odoo</label>
+                                        <input type="text" id="f_Odoo_Db" name="odoo_db" class="form-control" placeholder="rmb">
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:11px;">Username / Email API</label>
+                                        <input type="text" id="f_Odoo_User" name="odoo_user" class="form-control" placeholder="bc_api@rmb.uduu.io">
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:11px;">API Key / Password Odoo</label>
+                                        <div class="input-group">
+                                            <input type="password" id="f_Odoo_Password" name="odoo_password" class="form-control" placeholder="API Key / Token Odoo">
+                                            <button type="button" class="input-group-btn" onclick="togglePass('f_Odoo_Password')">👁️</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="font-size:10.5px; color:var(--text-muted); margin-top:8px;">
+                                    <i class="fa-solid fa-circle-info"></i> Masukkan URL server Odoo dan kredensial API. Data ini disimpan khusus per perusahaan sehingga multi-tenant Odoo berjalan aman dan independen.
+                                </div>
+                            </div>
+
+                            <!-- GENERIC ERP FIELDS -->
+                            <div id="boxGenericErp" style="display:contents;">
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <span>User ERP</span>
+                                    </label>
+                                    <input type="text" id="f_ERP_User" name="ERP_User" class="form-control" placeholder="Username ERP">
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label">
+                                        <span>Password ERP</span>
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="password" id="f_ERP_Password" name="ERP_Password" class="form-control" placeholder="Password ERP">
+                                        <button type="button" class="input-group-btn" onclick="togglePass('f_ERP_Password')">👁️</button>
+                                    </div>
+                                </div>
+
+                                <div class="form-group full-width">
+                                    <label class="form-label">
+                                        <span>ERP Connection String</span>
+                                        <span class="form-hint">Host, DB, atau API Endpoint ERP</span>
+                                    </label>
+                                    <textarea id="f_ERP_Constring" name="ERP_Constring" class="form-control" rows="2" placeholder="Driver={ODBC Driver};Server=192.168.1.100;Database=erp_db;Uid=...;Pwd=...;"></textarea>
+                                </div>
                             </div>
 
                             <div class="form-group full-width">
@@ -2691,6 +3124,82 @@ $theme = $_GET['theme'] ?? 'light';
                                     <span>AI API Key</span>
                                 </label>
                                 <input type="text" id="f_AI_API_Key" name="AI_API_Key" class="form-control" placeholder="AI API Key (AIzaSy...)">
+                            </div>
+
+                            <!-- PENGATURAN INTEGRASI IT INVENTORY KEK (LNSW GEN2) -->
+                            <div class="form-group full-width" style="margin-top:10px; background:var(--table-head-bg); border:1px solid #722ed1; border-radius:6px; padding:10px 12px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+                                    <div style="display:flex; align-items:center; gap:8px;">
+                                        <span style="font-size:18px;">⚡</span>
+                                        <div>
+                                            <div style="font-weight:700; font-size:11px; color:#722ed1;">
+                                                Integrasi IT Inventory KEK - LNSW Gen2 (API Gateway)
+                                            </div>
+                                            <div style="font-size:8.5px; color:var(--text-muted); margin-top:1px;">
+                                                Sinkronisasi data transaksi kepabeanan KEK (30, 31, 32, 33) dan saldo awal ke Portal INSW.
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex; gap:6px; align-items:center;">
+                                        <button type="button" class="ant-btn ant-btn-default ant-btn-sm" onclick="testKekGateway()" style="font-size:9.5px;" title="Uji koneksi ke Gateway LNSW">
+                                            <span>⚡</span> Test Gateway
+                                        </button>
+                                        <button type="button" class="ant-btn ant-btn-warning ant-btn-sm" onclick="cleanKekDummy()" style="font-size:9.5px;" title="Cleansing / Reset Data Percobaan pada Server LNSW">
+                                            <span>🧹</span> Cleansing Dummy
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:8px;">
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px;">Status Sinkronisasi KEK</label>
+                                        <select id="f_is_kek_active" name="is_kek_active" class="form-control" style="font-weight:600;">
+                                            <option value="0" style="color:#8c8c8c;">Nonaktif</option>
+                                            <option value="1" style="color:#52c41a;">Aktif (Kirim ke LNSW)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px;">Mode Lingkungan LNSW</label>
+                                        <select id="f_kek_mode" name="kek_mode" class="form-control" style="font-weight:600;" onchange="updateKekKeyBadges()">
+                                            <option value="dummy" style="color:#fa8c16;">Mode Uji Coba (Dummy / Percobaan)</option>
+                                            <option value="real" style="color:#52c41a;">Mode Produksi (Real Production)</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div style="display:grid; grid-template-columns: 1fr; gap:10px; margin-bottom:8px;">
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px;">
+                                            <span>Header x-insw-key</span>
+                                            <span class="form-hint">Default Gateway INSW: RqT40...</span>
+                                        </label>
+                                        <input type="text" id="f_kek_insw_key" name="kek_insw_key" class="form-control" placeholder="pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo" style="font-family:monospace; font-size:9.5px;">
+                                    </div>
+                                </div>
+
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px;">
+                                            <span>Header x-unique-key (Mode Produksi / Live)</span>
+                                            <span class="form-hint" style="color:#52c41a; font-weight:600;" id="badge_key_real">Live Portal INSW</span>
+                                        </label>
+                                        <div class="input-group">
+                                            <input type="password" id="f_kek_unique_key_real" name="kek_unique_key_real" class="form-control" placeholder="Unique Key dari Portal Live INSW (e655...)" style="font-family:monospace; font-size:9.5px;">
+                                            <button type="button" class="input-group-btn" onclick="togglePass('f_kek_unique_key_real')">👁️</button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="form-label" style="font-size:9.5px;">
+                                            <span>Header x-unique-key (Mode Uji Coba / Percobaan)</span>
+                                            <span class="form-hint" style="color:#fa8c16; font-weight:600;" id="badge_key_dummy">Sandbox Dummy</span>
+                                        </label>
+                                        <div class="input-group">
+                                            <input type="password" id="f_kek_unique_key_dummy" name="kek_unique_key_dummy" class="form-control" placeholder="e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7" style="font-family:monospace; font-size:9.5px;">
+                                            <button type="button" class="input-group-btn" onclick="togglePass('f_kek_unique_key_dummy')">👁️</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                <input type="hidden" id="f_kek_unique_key" name="kek_unique_key" value="">
                             </div>
                         </div>
                     </div>
@@ -2992,11 +3501,19 @@ $theme = $_GET['theme'] ?? 'light';
 
             list.forEach((row, idx) => {
                 const tr = document.createElement('tr');
+                tr.title = `Klik ganda (dobel klik) untuk langsung mengedit: [${row.cmp_id}] ${row.cmp_name || ''}`;
                 tr.onclick = function(e) {
-                    if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SPAN' && e.target.tagName !== 'SELECT') {
+                    if (e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SPAN' && e.target.tagName !== 'SELECT' && e.target.tagName !== 'A') {
                         document.querySelectorAll('#companyTbody tr').forEach(r => r.classList.remove('selected-row'));
                         tr.classList.add('selected-row');
                     }
+                };
+                tr.ondblclick = function(e) {
+                    // Jangan trigger jika klik ganda mengenai tombol aksi, tautan subdomain, atau badge toggle
+                    if (e.target.closest('button') || e.target.closest('a') || e.target.closest('.clickable-badge') || e.target.closest('select')) {
+                        return;
+                    }
+                    openEditModal(row.cmp_id);
                 };
 
                 const isCurrentSession = (row.cmp_id === sessionActiveCmp);
@@ -3048,6 +3565,20 @@ $theme = $_GET['theme'] ?? 'light';
                                         if (roles.includes('tpb')) html += '<span class="ant-badge ant-badge-purple" style="font-size:8.5px; padding:1px 5px;" title="Role: Semua TPB kecuali PPKEK">🏭 TPB</span>';
                                         if (roles.includes('ppkek')) html += '<span class="ant-badge ant-badge-gold" style="font-size:8.5px; padding:1px 5px;" title="Role: PPKEK saja">⚡ PPKEK</span>';
                                         if (roles.includes('plb')) html += '<span class="ant-badge ant-badge-green" style="font-size:8.5px; padding:1px 5px; background:#f6ffed; color:#389e0d; border-color:#b7eb8f;" title="Role: Pusat Logistik Berikat (BC 1.6, 2.8, 3.3, 3.3.1, 2.7)">🏬 PLB</span>';
+                                        if (row.business_type === 'logistik') {
+                                            html += '<span class="ant-badge" style="font-size:8.5px; padding:1px 5px; background:#f0f5ff; color:#1d39c4; border:1px solid #adc6ff;" title="Tipe: Logistik (Gudang)">🏬 LOGISTIK</span>';
+                                        } else {
+                                            html += '<span class="ant-badge" style="font-size:8.5px; padding:1px 5px; background:#f9f0ff; color:#531dab; border:1px solid #d3adf7;" title="Tipe: Manufaktur (Pabrikasi)">🏭 MANUFAKTUR</span>';
+                                        }
+                                        if (row.db_mode === 'dedicated') {
+                                            html += `<span class="ant-badge" style="font-size:8.5px; padding:1px 5px; background:#fff0f6; color:#c41d7f; border:1px solid #ffadd2;" title="Database Mandiri: ${escapeHtml(row.db_name || 'Dedicated')}">🗄️ ${escapeHtml(row.db_name || 'DEDICATED')}</span>`;
+                                        }
+                                        if (row.app_mode === 'enterprise') {
+                                            html += '<span class="ant-badge" style="font-size:8.5px; padding:1px 5px; background:#e6f4ff; color:#0958d9; border:1px solid #91caff;" title="Modul Lengkap: Enterprise ERP">🚀 ENTERPRISE</span>';
+                                        }
+                                        if (row.use_tabs !== null && parseInt(row.use_tabs) === 0) {
+                                            html += '<span class="ant-badge" style="font-size:8.5px; padding:1px 4px; background:#fff1f0; color:#cf1322; border:1px solid #ffa39e;" title="Navigasi Klasik Non-Tab">📌 NON-TAB</span>';
+                                        }
                                         return html;
                                     })()}
                                 </div>
@@ -3083,6 +3614,8 @@ $theme = $_GET['theme'] ?? 'light';
                     </td>
                     <td>
                         <div style="font-family:monospace; font-size:10px;">NPWP: <strong>${escapeHtml(row.npwp || '-')}</strong></div>
+                        <div style="font-family:monospace; font-size:9px; color:var(--text-muted); margin-top:1px;" title="NPWP 16 Digit / NIK">16: <strong>${escapeHtml(row.npwp16 || (row.npwp ? ('0' + row.npwp).slice(-16) : '-'))}</strong></div>
+                        <div style="font-family:monospace; font-size:9.5px; color:var(--primary); margin-top:1px;" title="NITKU 22 Digit CEISA 4.0">NITKU: <strong>${escapeHtml(row.nitku || (row.npwp16 ? row.npwp16 + '000000' : (row.npwp ? ('0' + row.npwp).slice(-16) + '000000' : '-')))}</strong></div>
                         <div style="font-size:9.5px; color:var(--text-muted); margin-top:1px;">NIB: ${escapeHtml(row.nib || '-')}</div>
                     </td>
                     <td>
@@ -3114,6 +3647,13 @@ $theme = $_GET['theme'] ?? 'light';
                                   onclick="toggleAlertItInv('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" 
                                   title="Klik untuk mengubah pengaturan Peringatan Dokumen Belum Masuk IT Inventory" style="font-size:8px; padding:1px 4px;">
                                 ${(parseInt(row.alert_it_inv_unposted) || 0) === 1 ? '⚠️ Alert: ON' : '⚠️ Alert: OFF'}
+                            </span>
+                        </div>
+                        <div style="margin-top:2px;">
+                            <span class="ant-badge ${(parseInt(row.show_unimported_h2h) || 0) === 1 ? 'ant-badge-orange' : 'ant-badge-gray'} clickable-badge" 
+                                  onclick="toggleShowUnimportedH2h('${escapeJs(row.cmp_id)}', '${escapeJs(row.cmp_name)}')" 
+                                  title="Klik untuk mengubah pengaturan Tampilan Dokumen Belum Import H2H di Dashboard" style="font-size:8px; padding:1px 4px;">
+                                ${(parseInt(row.show_unimported_h2h) || 0) === 1 ? '⚡ H2H Card: ON' : '⚡ H2H Card: OFF'}
                             </span>
                         </div>
                     </td>
@@ -3492,12 +4032,10 @@ $theme = $_GET['theme'] ?? 'light';
             document.getElementById('f_IS_INV').value = '1';
             document.getElementById('f_allow_lowercase_code').value = '0';
             document.getElementById('f_alert_it_inv_unposted').value = '0';
+            if (document.getElementById('f_show_unimported_h2h')) document.getElementById('f_show_unimported_h2h').value = '0';
             document.getElementById('f_is_final').value = 'false';
             document.getElementById('f_api_key_ceisa').value = 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83';
-            document.getElementById('f_insw_client_id').value = '';
-            document.getElementById('f_insw_client_secret').value = '';
-            document.getElementById('f_insw_token').value = '';
-            document.getElementById('f_insw_api_url').value = 'https://api.insw.go.id/document';
+
             document.getElementById('f_ERP_Name').value = '-';
             document.getElementById('f_kode_jenis_tpb').value = '1';
             document.getElementById('f_tanggal_skep').value = '';
@@ -3520,7 +4058,38 @@ $theme = $_GET['theme'] ?? 'light';
             document.getElementById('f_subdomain').value = '';
             document.getElementById('f_logo_file').value = '';
             document.getElementById('f_card_color').value = '';
-            updateCardColorPreview('');
+            // Reset INSW & MFA INSW Defaults
+            if (document.getElementById('f_secret_mfa_insw')) document.getElementById('f_secret_mfa_insw').value = '';
+            if (document.getElementById('f_insw_client_id')) document.getElementById('f_insw_client_id').value = '';
+            if (document.getElementById('f_insw_client_secret')) document.getElementById('f_insw_client_secret').value = '';
+            if (document.getElementById('f_insw_token')) document.getElementById('f_insw_token').value = '';
+            if (document.getElementById('f_insw_api_url')) document.getElementById('f_insw_api_url').value = 'https://api.insw.go.id/document';
+            if (document.getElementById('totpPreviewBoxInsw')) document.getElementById('totpPreviewBoxInsw').style.display = 'none';
+            toggleInswCredentialsVisibility();
+
+            // Tipe Usaha & KEK Defaults
+            if (document.getElementById('biz_manufaktur')) document.getElementById('biz_manufaktur').checked = true;
+            if (document.getElementById('f_is_kek_active')) document.getElementById('f_is_kek_active').value = '0';
+            if (document.getElementById('f_kek_mode')) document.getElementById('f_kek_mode').value = 'dummy';
+            if (document.getElementById('f_kek_insw_key')) document.getElementById('f_kek_insw_key').value = 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo';
+            if (document.getElementById('f_kek_unique_key')) document.getElementById('f_kek_unique_key').value = '';
+            if (document.getElementById('f_kek_unique_key_real')) document.getElementById('f_kek_unique_key_real').value = '';
+            if (document.getElementById('f_kek_unique_key_dummy')) document.getElementById('f_kek_unique_key_dummy').value = 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7';
+            updateKekKeyBadges();
+
+            // Odoo Defaults
+            if (document.getElementById('f_Odoo_Url')) document.getElementById('f_Odoo_Url').value = '';
+            if (document.getElementById('f_Odoo_Db')) document.getElementById('f_Odoo_Db').value = '';
+            if (document.getElementById('f_Odoo_User')) document.getElementById('f_Odoo_User').value = '';
+            if (document.getElementById('f_Odoo_Password')) document.getElementById('f_Odoo_Password').value = '';
+            toggleErpFields();
+
+            // Arsitektur Database & Mode Aplikasi Defaults
+            if (document.getElementById('f_db_mode')) document.getElementById('f_db_mode').value = 'global';
+            if (document.getElementById('f_db_name')) document.getElementById('f_db_name').value = '';
+            if (document.getElementById('f_app_mode')) document.getElementById('f_app_mode').value = 'standar';
+            if (document.getElementById('f_use_tabs')) document.getElementById('f_use_tabs').value = '1';
+            toggleDbModeFields();
 
             switchModalTab('tab-profil');
             document.getElementById('companyModal').classList.add('active');
@@ -3601,6 +4170,9 @@ $theme = $_GET['theme'] ?? 'light';
 
                         document.getElementById('f_cmp_name').value = d.cmp_name || '';
                         document.getElementById('f_npwp').value = cleanTo15DigitNpwp(d.npwp || '');
+                        const val16 = d.npwp16 ? String(d.npwp16).trim() : cleanTo16DigitNpwp(d.npwp || '');
+                        document.getElementById('f_npwp16').value = val16;
+                        document.getElementById('f_nitku').value = d.nitku ? String(d.nitku).trim() : (val16 ? val16 + '000000' : '');
                         document.getElementById('f_nib').value = d.nib || '';
                         document.getElementById('f_alamat').value = d.alamat || '';
                         document.getElementById('f_app_password').value = d.app_password || '1234';
@@ -3644,20 +4216,89 @@ $theme = $_GET['theme'] ?? 'light';
                         document.getElementById('f_id_user_ceisa').value = d.id_user_ceisa || '';
                         document.getElementById('f_token_ceisa').value = d.token_ceisa || '';
                         document.getElementById('f_api_key_ceisa').value = d.api_key_ceisa || 'f662de2e-1d35-4b11-b2fd-ee164a5c9d83';
-                        document.getElementById('f_insw_client_id').value = d.insw_client_id || '';
-                        document.getElementById('f_insw_client_secret').value = d.insw_client_secret || '';
-                        document.getElementById('f_insw_token').value = d.insw_token || '';
-                        document.getElementById('f_insw_api_url').value = d.insw_api_url || 'https://api.insw.go.id/document';
+
+                        // Kredensial & TOTP MFA INSW (Khusus KEK)
+                        if (document.getElementById('f_secret_mfa_insw')) document.getElementById('f_secret_mfa_insw').value = d.secret_mfa_insw || '';
+                        if (document.getElementById('f_insw_client_id')) document.getElementById('f_insw_client_id').value = d.insw_client_id || '';
+                        if (document.getElementById('f_insw_client_secret')) document.getElementById('f_insw_client_secret').value = d.insw_client_secret || '';
+                        if (document.getElementById('f_insw_token')) document.getElementById('f_insw_token').value = d.insw_token || '';
+                        if (document.getElementById('f_insw_api_url')) document.getElementById('f_insw_api_url').value = d.insw_api_url || 'https://api.insw.go.id/document';
+                        toggleInswCredentialsVisibility();
+
 
                         document.getElementById('f_IS_INV').value = (d.IS_INV !== null && d.IS_INV !== undefined) ? d.IS_INV : '1';
                         document.getElementById('f_allow_lowercase_code').value = (d.allow_lowercase_code !== null && d.allow_lowercase_code !== undefined) ? d.allow_lowercase_code : '0';
                         document.getElementById('f_alert_it_inv_unposted').value = (d.alert_it_inv_unposted !== null && d.alert_it_inv_unposted !== undefined) ? d.alert_it_inv_unposted : '0';
+                        if (document.getElementById('f_show_unimported_h2h')) {
+                            document.getElementById('f_show_unimported_h2h').value = (d.show_unimported_h2h !== null && d.show_unimported_h2h !== undefined) ? d.show_unimported_h2h : '0';
+                        }
                         document.getElementById('f_ERP_Name').value = d.ERP_Name || '-';
                         document.getElementById('f_ERP_User').value = d.ERP_User || '';
                         document.getElementById('f_ERP_Password').value = d.ERP_Password || '';
                         document.getElementById('f_ERP_Constring').value = d.ERP_Constring || '';
+
+                        // Odoo Config Populate
+                        if ((d.ERP_Name || '').toUpperCase() === 'ODOO') {
+                            let odooUrl = '';
+                            let odooDb  = '';
+                            const cs = d.ERP_Constring || '';
+                            const mUrl = cs.match(/url=([^;]+)/i);
+                            const mDb  = cs.match(/db=([^;]+)/i);
+                            if (mUrl) odooUrl = mUrl[1];
+                            else if (cs.startsWith('http')) odooUrl = cs;
+                            if (mDb) odooDb = mDb[1];
+
+                            if (document.getElementById('f_Odoo_Url')) document.getElementById('f_Odoo_Url').value = odooUrl;
+                            if (document.getElementById('f_Odoo_Db')) document.getElementById('f_Odoo_Db').value = odooDb;
+                            if (document.getElementById('f_Odoo_User')) document.getElementById('f_Odoo_User').value = d.ERP_User || '';
+                            if (document.getElementById('f_Odoo_Password')) document.getElementById('f_Odoo_Password').value = d.ERP_Password || '';
+                        } else {
+                            if (document.getElementById('f_Odoo_Url')) document.getElementById('f_Odoo_Url').value = '';
+                            if (document.getElementById('f_Odoo_Db')) document.getElementById('f_Odoo_Db').value = '';
+                            if (document.getElementById('f_Odoo_User')) document.getElementById('f_Odoo_User').value = '';
+                            if (document.getElementById('f_Odoo_Password')) document.getElementById('f_Odoo_Password').value = '';
+                        }
+                        toggleErpFields();
+
                         document.getElementById('f_AI_Name').value = d.AI_Name || '';
                         document.getElementById('f_AI_API_Key').value = d.AI_API_Key || '';
+
+                        // Tipe Usaha (Manufaktur vs Logistik)
+                        const bType = d.business_type || 'manufaktur';
+                        if (document.getElementById('biz_' + bType)) {
+                            document.getElementById('biz_' + bType).checked = true;
+                        } else if (document.getElementById('biz_manufaktur')) {
+                            document.getElementById('biz_manufaktur').checked = true;
+                        }
+
+                        // Pengaturan KEK LNSW
+                        const kek = d.kek_setting || {};
+                        if (document.getElementById('f_is_kek_active')) {
+                            document.getElementById('f_is_kek_active').value = (kek.is_kek_active !== undefined) ? kek.is_kek_active : '0';
+                        }
+                        if (document.getElementById('f_kek_mode')) {
+                            document.getElementById('f_kek_mode').value = kek.kek_mode || 'dummy';
+                        }
+                        if (document.getElementById('f_kek_insw_key')) {
+                            document.getElementById('f_kek_insw_key').value = kek.insw_key || 'pZ66hobzPpXBn2bMHVPTz0wG1pxuWQdo';
+                        }
+                        if (document.getElementById('f_kek_unique_key')) {
+                            document.getElementById('f_kek_unique_key').value = kek.unique_key || '';
+                        }
+                        if (document.getElementById('f_kek_unique_key_real')) {
+                            document.getElementById('f_kek_unique_key_real').value = kek.unique_key_real || (kek.kek_mode === 'real' ? kek.unique_key : '') || '';
+                        }
+                        if (document.getElementById('f_kek_unique_key_dummy')) {
+                            document.getElementById('f_kek_unique_key_dummy').value = kek.unique_key_dummy || (kek.kek_mode === 'dummy' ? kek.unique_key : '') || 'e655669b83fe553f0bd756966311ecb694df907991293e5f0961d7e8157641e7';
+                        }
+                        updateKekKeyBadges();
+
+                        // Arsitektur Database & Mode Aplikasi
+                        if (document.getElementById('f_db_mode')) document.getElementById('f_db_mode').value = d.db_mode || 'global';
+                        if (document.getElementById('f_db_name')) document.getElementById('f_db_name').value = d.db_name || '';
+                        if (document.getElementById('f_app_mode')) document.getElementById('f_app_mode').value = d.app_mode || 'standar';
+                        if (document.getElementById('f_use_tabs')) document.getElementById('f_use_tabs').value = (d.use_tabs !== null && d.use_tabs !== undefined) ? d.use_tabs : '1';
+                        toggleDbModeFields();
 
                         document.getElementById('totpPreviewBox').style.display = 'none';
 
@@ -3678,6 +4319,34 @@ $theme = $_GET['theme'] ?? 'light';
                         text: err.message
                     });
                 });
+        }
+
+        function updateKekKeyBadges() {
+            const mode = document.getElementById('f_kek_mode') ? document.getElementById('f_kek_mode').value : 'dummy';
+            const badgeReal = document.getElementById('badge_key_real');
+            const badgeDummy = document.getElementById('badge_key_dummy');
+            const inputReal = document.getElementById('f_kek_unique_key_real');
+            const inputDummy = document.getElementById('f_kek_unique_key_dummy');
+
+            if (mode === 'real') {
+                if (badgeReal) { badgeReal.innerHTML = '🟢 Sedang Digunakan (Live)'; badgeReal.style.color = '#52c41a'; }
+                if (badgeDummy) { badgeDummy.innerHTML = '⚪ Tersimpan (Tidak Aktif)'; badgeDummy.style.color = '#8c8c8c'; }
+                if (inputReal) inputReal.style.borderColor = '#52c41a';
+                if (inputDummy) inputDummy.style.borderColor = '';
+            } else {
+                if (badgeDummy) { badgeDummy.innerHTML = '🟠 Sedang Digunakan (Sandbox)'; badgeDummy.style.color = '#fa8c16'; }
+                if (badgeReal) { badgeReal.innerHTML = '⚪ Tersimpan (Tidak Aktif)'; badgeReal.style.color = '#8c8c8c'; }
+                if (inputDummy) inputDummy.style.borderColor = '#fa8c16';
+                if (inputReal) inputReal.style.borderColor = '';
+            }
+        }
+
+        function toggleDbModeFields() {
+            const elMode = document.getElementById('f_db_mode');
+            const box = document.getElementById('boxDbName');
+            if (elMode && box) {
+                box.style.display = (elMode.value === 'dedicated') ? 'block' : 'none';
+            }
         }
 
         function closeModal() {
@@ -3763,15 +4432,53 @@ $theme = $_GET['theme'] ?? 'light';
                 Swal.fire({
                     icon: 'warning',
                     title: 'NPWP Wajib 15 Digit',
-                    text: 'NPWP Perusahaan wajib diisi 15 digit angka (saat ini: ' + cleanNpwp.length + ' digit).'
+                    text: 'NPWP Perusahaan (15 digit) wajib diisi 15 digit angka (saat ini: ' + cleanNpwp.length + ' digit).'
                 });
                 switchModalTab('tab-profil');
                 npwpInput.focus();
                 return;
             }
 
+            // Validasi NPWP 16 Digit / NIK (Standar CEISA 4.0)
+            const npwp16Input = document.getElementById('f_npwp16');
+            let cleanNpwp16 = cleanTo16DigitNpwp(npwp16Input.value);
+            if (!cleanNpwp16 && cleanNpwp) {
+                cleanNpwp16 = cleanTo16DigitNpwp(cleanNpwp);
+            }
+            npwp16Input.value = cleanNpwp16;
+            if (!cleanNpwp16 || cleanNpwp16.length !== 16) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'NPWP 16 Digit / NIK Wajib 16 Digit',
+                    text: 'NPWP 16 Digit / NIK wajib diisi 16 digit angka sesuai standar CEISA 4.0 (saat ini: ' + cleanNpwp16.length + ' digit).'
+                });
+                switchModalTab('tab-profil');
+                npwp16Input.focus();
+                return;
+            }
+
+            // Validasi & Normalisasi NITKU 22 Digit
+            const nitkuInput = document.getElementById('f_nitku');
+            let cleanNitku = cleanToNitku(nitkuInput ? nitkuInput.value : '');
+            if (!cleanNitku && cleanNpwp16) {
+                cleanNitku = cleanNpwp16 + '000000';
+            }
+            if (nitkuInput) nitkuInput.value = cleanNitku;
+            if (!cleanNitku || cleanNitku.length !== 22) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'NITKU Wajib 22 Digit',
+                    text: 'NITKU Perusahaan wajib 22 digit angka (NPWP 16 digit + 6 digit cabang). Saat ini: ' + cleanNitku.length + ' digit.'
+                });
+                switchModalTab('tab-profil');
+                if (nitkuInput) nitkuInput.focus();
+                return;
+            }
+
             const formData = new FormData(form);
             formData.set('npwp', cleanNpwp);
+            formData.set('npwp16', cleanNpwp16);
+            formData.set('nitku', cleanNitku);
 
             const btnSave = document.getElementById('btnSaveSubmit');
             btnSave.disabled = true;
@@ -3781,7 +4488,14 @@ $theme = $_GET['theme'] ?? 'light';
                 method: 'POST',
                 body: formData
             })
-            .then(r => r.json())
+            .then(async r => {
+                const text = await r.text();
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    throw new Error(text.replace(/<[^>]*>/g, '').trim() || 'Respon server tidak valid');
+                }
+            })
             .then(res => {
                 btnSave.disabled = false;
                 btnSave.innerHTML = `<span>💾</span> Simpan Konfigurasi Perusahaan`;
@@ -3944,6 +4658,49 @@ $theme = $_GET['theme'] ?? 'light';
                     fd.append('cmp_id', cmpId);
 
                     fetch(getCompanyApiUrl('toggle_alert_it_inv'), {
+                        method: 'POST',
+                        body: fd
+                    })
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.status === 'OK') {
+                            Swal.fire({
+                                icon: 'success',
+                                title: 'Pengaturan Diperbarui',
+                                text: res.message,
+                                timer: 2500,
+                                showConfirmButton: false
+                            });
+                            loadCompanyList();
+                        } else {
+                            Swal.fire({ icon: 'error', title: 'Gagal', text: res.message });
+                        }
+                    })
+                    .catch(err => {
+                        Swal.fire({ icon: 'error', title: 'Error', text: 'Koneksi gagal: ' + err.message });
+                    });
+                }
+            });
+        }
+
+        // 7c. TOGGLE SHOW UNIMPORTED H2H (Tampilan Card Belum Import H2H di Dashboard)
+        function toggleShowUnimportedH2h(cmpId, cmpName) {
+            Swal.fire({
+                title: 'Tampilkan Belum Import H2H?',
+                html: `Apakah Anda ingin mengubah pengaturan <strong>Kartu Dokumen Belum Import H2H</strong> untuk <b>${escapeHtml(cmpName)}</b>?<br><br>` +
+                      `<span style="font-size:11px; color:#8c8c8c;">Jika Aktif, kartu ringkasan <b>Belum Import H2H</b> akan tampil di Dashboard Ceisa 4.0.<br>Kartu ini mempermudah operator memfilter dan memilih semua dokumen yang belum masuk staging untuk diimpor sekaligus.</span>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: '#fa8c16',
+                cancelButtonColor: '#8c8c8c',
+                confirmButtonText: 'Ya, Ubah Pengaturan',
+                cancelButtonText: 'Batal'
+            }).then((result) => {
+                if (result.isConfirmed) {
+                    const fd = new FormData();
+                    fd.append('cmp_id', cmpId);
+
+                    fetch(getCompanyApiUrl('toggle_show_unimported_h2h'), {
                         method: 'POST',
                         body: fd
                     })
@@ -4178,6 +4935,56 @@ $theme = $_GET['theme'] ?? 'light';
             });
         }
 
+        // Helper: Tampilkan atau Sembunyikan Kredensial INSW Hanya Jika Perusahaan adalah KEK
+        function toggleInswCredentialsVisibility() {
+            const isPpkek = document.getElementById('role_ppkek')?.checked;
+            let hasKekDoc = false;
+            document.querySelectorAll('.chk-doc-allowed:checked').forEach(cb => {
+                if (['611', '613', '631'].includes(cb.value)) {
+                    hasKekDoc = true;
+                }
+            });
+
+            const box = document.getElementById('box_insw_credentials');
+            if (box) {
+                box.style.display = (isPpkek || hasKekDoc) ? 'block' : 'none';
+            }
+        }
+
+        // Test TOTP MFA INSW Live
+        function testMfaSecretInsw() {
+            const secret = document.getElementById('f_secret_mfa_insw').value.trim();
+            if (!secret) {
+                Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Silakan isi Secret Key MFA INSW terlebih dahulu.' });
+                return;
+            }
+
+            fetch(getCompanyApiUrl('test_totp', 'secret=' + encodeURIComponent(secret)))
+                .then(r => r.json())
+                .then(res => {
+                    const box = document.getElementById('totpPreviewBoxInsw');
+                    if (res.status === 'OK') {
+                        box.style.display = 'flex';
+                        box.style.alignItems = 'center';
+                        box.style.gap = '8px';
+                        document.getElementById('totpLiveCodeInsw').innerText = res.code;
+                        document.getElementById('totpLiveCountdownInsw').innerText = `${res.remaining}s`;
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Secret Key INSW Valid!',
+                            html: `Kode OTP INSW Live saat ini: <strong style="font-size:18px; color:#722ed1; font-family:monospace;">${res.code}</strong><br><span style="font-size:11px; color:#8c8c8c;">Berganti dalam ${res.remaining} detik.</span>`,
+                            timer: 3000
+                        });
+                    } else {
+                        box.style.display = 'none';
+                        Swal.fire({ icon: 'error', title: 'Kunci Tidak Valid', text: res.message || 'Secret Key MFA INSW tidak valid.' });
+                    }
+                })
+                .catch(err => {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
+                });
+        }
+
         // 10. TEST TOTP LIVE
         function testMfaSecret() {
             const secret = document.getElementById('f_secret_mfa').value.trim();
@@ -4208,6 +5015,88 @@ $theme = $_GET['theme'] ?? 'light';
                 .catch(err => {
                     Swal.fire({ icon: 'error', title: 'Gagal', text: err.message });
                 });
+        }
+
+        // 10B. TEST KEK LNSW GATEWAY & CLEANSING DUMMY
+        function testKekGateway() {
+            const cmpId = document.getElementById('f_cmp_id').value.trim();
+            if (!cmpId) {
+                Swal.fire('Perhatian', 'ID Perusahaan belum terisi.', 'warning');
+                return;
+            }
+            Swal.fire({
+                title: 'Menguji Gateway KEK LNSW...',
+                text: 'Mengirim ping cek saldo awal ke LNSW...',
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+            fetch(`company.php?action=test_kek_gateway&cmp_id=${encodeURIComponent(cmpId)}`)
+                .then(r => r.json())
+                .then(res => {
+                    Swal.close();
+                    if (res.status === 'OK' || res.http_code === 200 || res.http_code === 201) {
+                        Swal.fire({
+                            icon: 'success',
+                            title: 'Gateway LNSW Terhubung!',
+                            html: `<div style="text-align:left; font-size:11px;">
+                                <b>HTTP Code:</b> ${res.http_code}<br>
+                                <b>URL:</b> ${escapeHtml(res.url)}<br>
+                                <b>Response:</b> <pre style="background:#f5f5f5; padding:6px; max-height:150px; overflow:auto;">${escapeHtml(JSON.stringify(res.response, null, 2))}</pre>
+                            </div>`
+                        });
+                    } else {
+                        Swal.fire({
+                            icon: 'warning',
+                            title: `Gateway Merespon (HTTP ${res.http_code || 0})`,
+                            html: `<div style="text-align:left; font-size:11px;">
+                                <b>URL:</b> ${escapeHtml(res.url || '-')}<br>
+                                <b>Response:</b> <pre style="background:#f5f5f5; padding:6px; max-height:150px; overflow:auto;">${escapeHtml(JSON.stringify(res.response || res, null, 2))}</pre>
+                            </div>`
+                        });
+                    }
+                })
+                .catch(err => {
+                    Swal.fire('Error Koneksi', err.message, 'error');
+                });
+        }
+
+        function cleanKekDummy() {
+            const cmpId = document.getElementById('f_cmp_id').value.trim();
+            if (!cmpId) {
+                Swal.fire('Perhatian', 'ID Perusahaan belum terisi.', 'warning');
+                return;
+            }
+            Swal.fire({
+                title: 'Konfirmasi Cleansing Data Dummy?',
+                text: 'Semua data transaksi percobaan di server LNSW akan dibersihkan / di-reset.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonColor: '#fa8c16',
+                confirmButtonText: 'Ya, Jalankan Cleansing',
+                cancelButtonText: 'Batal'
+            }).then(result => {
+                if (result.isConfirmed) {
+                    Swal.fire({
+                        title: 'Menghubungi LNSW...',
+                        text: 'Memproses cleansing data dummy...',
+                        allowOutsideClick: false,
+                        didOpen: () => Swal.showLoading()
+                    });
+                    fetch(`company.php?action=cleansing_kek_dummy&cmp_id=${encodeURIComponent(cmpId)}`)
+                        .then(r => r.json())
+                        .then(res => {
+                            Swal.close();
+                            if (res.status === 'OK' || res.http_code === 200) {
+                                Swal.fire('Cleansing Berhasil', 'Data percobaan di LNSW telah dibersihkan.', 'success');
+                            } else {
+                                Swal.fire('Respon LNSW', `<pre style="font-size:10px; text-align:left;">${escapeHtml(JSON.stringify(res, null, 2))}</pre>`, 'info');
+                            }
+                        })
+                        .catch(err => {
+                            Swal.fire('Error Koneksi', err.message, 'error');
+                        });
+                }
+            });
         }
 
         // -------------------------------------------------------------
@@ -4575,7 +5464,8 @@ $theme = $_GET['theme'] ?? 'light';
 
             // 2. Isi Tab 1: Identitas Perusahaan
             document.getElementById('f_cmp_name').value = companyName;
-            document.getElementById('f_npwp').value = npwpVal;
+            document.getElementById('f_npwp').value = cleanTo15DigitNpwp(npwpVal);
+            document.getElementById('f_npwp16').value = cleanTo16DigitNpwp(npwpVal);
             document.getElementById('f_nib').value = entity.nib_entitas || '';
             document.getElementById('f_alamat').value = entity.alamat_entitas || '';
 
@@ -4735,6 +5625,78 @@ $theme = $_GET['theme'] ?? 'light';
             return digits;
         }
 
+        function cleanTo16DigitNpwp(raw) {
+            if (!raw) return '';
+            let digits = String(raw).replace(/\D/g, '');
+            // Identitas 22 digit CEISA dengan akhiran 000000
+            if (digits.length === 22 && digits.endsWith('000000')) {
+                digits = digits.slice(0, 16);
+            }
+            // Jika 15 digit, tambahkan 0 di depan
+            if (digits.length === 15) {
+                digits = '0' + digits;
+            }
+            if (digits.length > 16) {
+                digits = digits.slice(0, 16);
+            }
+            return digits;
+        }
+
+        function cleanToNitku(raw) {
+            if (!raw) return '';
+            let digits = String(raw).replace(/\D/g, '');
+            if (digits.length === 15) {
+                digits = '0' + digits + '000000';
+            } else if (digits.length === 16) {
+                digits = digits + '000000';
+            } else if (digits.length > 22) {
+                digits = digits.slice(0, 22);
+            }
+            return digits;
+        }
+
+        function handleNpwp15Input(inp) {
+            inp.value = cleanTo15DigitNpwp(inp.value);
+            const npwp16Input = document.getElementById('f_npwp16');
+            const nitkuInput = document.getElementById('f_nitku');
+            if (inp.value.length === 15) {
+                if (npwp16Input && (!npwp16Input.value || npwp16Input.value.length !== 16 || npwp16Input.value.startsWith('0'))) {
+                    npwp16Input.value = '0' + inp.value;
+                }
+                if (nitkuInput) {
+                    nitkuInput.value = '0' + inp.value + '000000';
+                }
+            }
+        }
+
+        function handleNpwp16Input(inp) {
+            let clean = cleanTo16DigitNpwp(inp.value);
+            inp.value = clean;
+            const npwp15Input = document.getElementById('f_npwp');
+            const nitkuInput = document.getElementById('f_nitku');
+            if (clean.length === 16) {
+                if (clean.startsWith('0') && npwp15Input) {
+                    npwp15Input.value = clean.slice(1);
+                }
+                if (nitkuInput) {
+                    nitkuInput.value = clean + '000000';
+                }
+            }
+        }
+
+        function handleNitkuInput(inp) {
+            let digits = String(inp.value).replace(/\D/g, '');
+            if (digits.length > 22) digits = digits.slice(0, 22);
+            inp.value = digits;
+            const npwp16Input = document.getElementById('f_npwp16');
+            const npwp15Input = document.getElementById('f_npwp');
+            if (digits.length === 22 && digits.endsWith('000000')) {
+                const p16 = digits.slice(0, 16);
+                if (npwp16Input) npwp16Input.value = p16;
+                if (npwp15Input && p16.startsWith('0')) npwp15Input.value = p16.slice(1);
+            }
+        }
+
         function formatCeisaNpwp(raw) {
             return cleanTo15DigitNpwp(raw);
         }
@@ -4858,6 +5820,76 @@ $theme = $_GET['theme'] ?? 'light';
         }
 
         // HELPER FUNCTIONS
+        function toggleErpFields() {
+            const erp = (document.getElementById('f_ERP_Name')?.value || '-').toUpperCase();
+            const boxOdoo = document.getElementById('boxOdooConfig');
+            const boxGeneric = document.getElementById('boxGenericErp');
+            if (!boxOdoo || !boxGeneric) return;
+
+            if (erp === 'ODOO') {
+                boxOdoo.style.display = 'block';
+                boxGeneric.style.display = 'none';
+            } else {
+                boxOdoo.style.display = 'none';
+                boxGeneric.style.display = 'contents';
+            }
+        }
+
+        async function testOdooConnection() {
+            const url  = document.getElementById('f_Odoo_Url')?.value.trim() || '';
+            const db   = document.getElementById('f_Odoo_Db')?.value.trim() || '';
+            const user = document.getElementById('f_Odoo_User')?.value.trim() || '';
+            const pass = document.getElementById('f_Odoo_Password')?.value.trim() || '';
+
+            if (!url || !db || !user || !pass) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Parameter Belum Lengkap',
+                    text: 'Silakan lengkapi URL Server, Nama Database, Username/Email, dan Password/API Key Odoo terlebih dahulu.'
+                });
+                return;
+            }
+
+            Swal.fire({
+                title: 'Menguji Koneksi Odoo...',
+                text: `Menghubungkan ke ${url} via JSON-RPC...`,
+                allowOutsideClick: false,
+                didOpen: () => Swal.showLoading()
+            });
+
+            try {
+                const fd = new FormData();
+                fd.append('action', 'test_odoo_connection');
+                fd.append('url', url);
+                fd.append('db', db);
+                fd.append('user', user);
+                fd.append('password', pass);
+
+                const res = await fetch('company.php', { method: 'POST', body: fd });
+                const json = await res.json();
+
+                if (json.status === 'OK') {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Koneksi Berhasil!',
+                        text: json.message || 'Server Odoo merespon dengan sukses.'
+                    });
+                } else {
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Koneksi Gagal',
+                        text: json.message || 'Gagal terhubung ke server Odoo.'
+                    });
+                }
+            } catch (err) {
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Kesalahan Sistem',
+                    text: err.message
+                });
+            }
+        }
+
         function togglePass(id) {
             const el = document.getElementById(id);
             if (el) {

@@ -142,3 +142,17 @@ Jika sesi Antigravity dimulai kembali di mesin atau profil baru:
 4. Selalu periksa sintaks PHP (`php -l`) sebelum dan sesudah menyalin berkas ke server remote.
 5. Gunakan `pscp.exe` untuk sinkronisasi berkas lokal ke `/var/www/inhost/`.
 6. Selalu pertahankan integritas hak akses berjenjang (dokumen efektif = irisan user dan perusahaan; Super Admin = `*`).
+
+
+---
+
+## 6. PEMBARUAN ARSITEKTUR & MODUL BARU (NOVEMBER 2026)
+
+11. **[`wa_helper.php`](file:///d:/xampp/htdocs/inhost-web-id/wa_helper.php)**:
+    - WhatsApp Gateway client library untuk pengiriman notifikasi transaksi & alert otomatis.
+12. **[`kek_integration.php`](file:///d:/xampp/htdocs/inhost-web-id/kek_integration.php) & [`kek_service.php`](file:///d:/xampp/htdocs/inhost-web-id/kek_service.php)**:
+    - Service integrasi CEISA 4.0 KEK (Kawasan Ekonomi Khusus) Generasi 2 dengan otentikasi signature HMAC-SHA256 & API MFA INSW token (`secret_mfa_insw`).
+13. **[`mutasi.php`](file:///d:/xampp/htdocs/inhost-web-id/mutasi.php)**:
+    - Dialog / drawer interaktif penelusuran histori mutasi barang dan dokumen pabean terkait.
+14. **[`server_monitor.php`](file:///d:/xampp/htdocs/inhost-web-id/server_monitor.php)**:
+    - Utilitas pemantau utilisasi server lokal / RAM cleaner terintegrasi.
